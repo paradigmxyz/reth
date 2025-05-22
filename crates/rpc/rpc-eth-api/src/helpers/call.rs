@@ -22,7 +22,6 @@ use reth_evm::{
 };
 use reth_node_api::{BlockBody, NodePrimitives};
 use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
-use reth_provider::{BlockIdReader, ProviderHeader, ProviderTx};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -35,6 +34,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
+use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
 use revm::{
     context_interface::{
         result::{ExecutionResult, ResultAndState},
@@ -109,7 +109,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     evm_env.cfg_env.disable_eip3607 = true;
 
                     if !validation {
-                        evm_env.cfg_env.disable_base_fee = !validation;
+                        // If not explicitly required, we disable nonce check <https://github.com/paradigmxyz/reth/issues/16108>
+                        evm_env.cfg_env.disable_nonce_check = true;
+                        evm_env.cfg_env.disable_base_fee = true;
                         evm_env.block_env.basefee = 0;
                     }
 

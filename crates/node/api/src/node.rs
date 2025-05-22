@@ -98,7 +98,10 @@ pub trait FullNodeComponents: FullNodeTypes + Clone + 'static {
     /// Returns the provider of the node.
     fn provider(&self) -> &Self::Provider;
 
-    /// Returns handle to runtime.
+    /// Returns an executor handle to spawn tasks.
+    ///
+    /// This can be used to spawn critical, blocking tasks or register tasks that should be
+    /// terminated gracefully. See also [`TaskSpawner`](reth_tasks::TaskSpawner).
     fn task_executor(&self) -> &TaskExecutor;
 }
 

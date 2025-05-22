@@ -17,8 +17,8 @@ use reth_provider::{
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, HashedPostState,
-    HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets, TrieInput,
+    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState,
+    HashedPostStateSorted, HashedStorage, MultiProofTargets, TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
@@ -42,7 +42,7 @@ pub struct SparseTrieUpdate {
     /// The state update that was used to calculate the proof
     pub(crate) state: HashedPostState,
     /// The calculated multiproof
-    pub(crate) multiproof: MultiProof,
+    pub(crate) multiproof: DecodedMultiProof,
 }
 
 impl SparseTrieUpdate {
@@ -53,8 +53,8 @@ impl SparseTrieUpdate {
 
     /// Construct update from multiproof.
     #[cfg(test)]
-    pub(super) fn from_multiproof(multiproof: MultiProof) -> Self {
-        Self { multiproof, ..Default::default() }
+    pub(super) fn from_multiproof(multiproof: reth_trie::MultiProof) -> alloy_rlp::Result<Self> {
+        Ok(Self { multiproof: multiproof.try_into()?, ..Default::default() })
     }
 
     /// Extend update with contents of the other.
@@ -455,7 +455,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
-            .storage_proof(hashed_address, proof_targets);
+            .decoded_storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -473,7 +473,10 @@ where
                             sequence_number: proof_sequence_number,
                             update: SparseTrieUpdate {
                                 state: hashed_state_update,
-                                multiproof: MultiProof::from_storage_proof(hashed_address, proof),
+                                multiproof: DecodedMultiProof::from_storage_proof(
+                                    hashed_address,
+                                    proof,
+                                ),
                             },
                             elapsed,
                         }),
@@ -523,7 +526,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
-            .multiproof(proof_targets);
+            .decoded_multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -973,7 +976,7 @@ where
 
                         if let Some(combined_update) = self.on_proof(
                             sequence_number,
-                            SparseTrieUpdate { state, multiproof: MultiProof::default() },
+                            SparseTrieUpdate { state, multiproof: Default::default() },
                         ) {
                             let _ = self.to_sparse_trie.send(combined_update);
                         }
@@ -1117,7 +1120,7 @@ mod tests {
     use super::*;
     use alloy_primitives::map::B256Set;
     use reth_provider::{providers::ConsistentDbView, test_utils::create_test_provider_factory};
-    use reth_trie::TrieInput;
+    use reth_trie::{MultiProof, TrieInput};
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofTaskManager};
     use revm_primitives::{B256, U256};
     use std::sync::Arc;
@@ -1169,11 +1172,11 @@ mod tests {
         let proof2 = MultiProof::default();
         sequencer.next_sequence = 2;
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
 
-        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2));
+        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
         assert_eq!(ready.len(), 1);
         assert!(!sequencer.has_pending());
     }
@@ -1186,15 +1189,15 @@ mod tests {
         let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
 
-        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3));
+        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3).unwrap());
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
         assert!(sequencer.has_pending());
 
-        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2));
+        let ready = sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proof2).unwrap());
         assert_eq!(ready.len(), 2);
         assert!(!sequencer.has_pending());
     }
@@ -1206,10 +1209,10 @@ mod tests {
         let proof3 = MultiProof::default();
         sequencer.next_sequence = 3;
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
 
-        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3));
+        let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3).unwrap());
         assert_eq!(ready.len(), 0);
         assert!(sequencer.has_pending());
     }
@@ -1220,10 +1223,10 @@ mod tests {
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof2));
+        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof2).unwrap());
         assert_eq!(ready.len(), 0);
         assert!(!sequencer.has_pending());
     }
@@ -1234,12 +1237,13 @@ mod tests {
         let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
         sequencer.next_sequence = 5;
 
-        sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()));
-        sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()));
-        sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()));
-        sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()));
+        sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()).unwrap());
+        sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()).unwrap());
+        sequencer.add_proof(1, SparseTrieUpdate::from_multiproof(proofs[1].clone()).unwrap());
+        sequencer.add_proof(3, SparseTrieUpdate::from_multiproof(proofs[3].clone()).unwrap());
 
-        let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()));
+        let ready =
+            sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proofs[0].clone()).unwrap());
         assert_eq!(ready.len(), 5);
         assert!(!sequencer.has_pending());
     }

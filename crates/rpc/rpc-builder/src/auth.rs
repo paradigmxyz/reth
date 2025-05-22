@@ -1,22 +1,22 @@
 use crate::error::{RpcError, ServerKind};
 use http::header::AUTHORIZATION;
 use jsonrpsee::{
-    core::RegisterMethodError,
-    http_client::{transport::HttpBackend, HeaderMap},
+    core::{client::SubscriptionClientT, RegisterMethodError},
+    http_client::HeaderMap,
     server::{AlreadyStoppedError, RpcModule},
     Methods,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_types::EthSubscriptionIdProvider;
 use reth_rpc_layer::{
-    secret_to_bearer_header, AuthClientLayer, AuthClientService, AuthLayer, JwtAuthValidator,
-    JwtSecret,
+    secret_to_bearer_header, AuthClientLayer, AuthLayer, JwtAuthValidator, JwtSecret,
 };
 use reth_rpc_server_types::constants;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tower::layer::util::Identity;
 
 pub use jsonrpsee::server::ServerBuilder;
+use jsonrpsee::server::{ServerConfig, ServerConfigBuilder};
 pub use reth_ipc::server::Builder as IpcServerBuilder;
 
 /// Server configuration for the auth server.
@@ -27,7 +27,7 @@ pub struct AuthServerConfig {
     /// The secret for the auth layer of the server.
     pub(crate) secret: JwtSecret,
     /// Configs for JSON-RPC Http.
-    pub(crate) server_config: ServerBuilder<Identity, Identity>,
+    pub(crate) server_config: ServerConfigBuilder,
     /// Configs for IPC server
     pub(crate) ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     /// IPC endpoint
@@ -56,7 +56,8 @@ impl AuthServerConfig {
             tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
         // By default, both http and ws are enabled.
-        let server = server_config
+        let server = ServerBuilder::new()
+            .set_config(server_config.build())
             .set_http_middleware(middleware)
             .build(socket_addr)
             .await
@@ -78,7 +79,7 @@ impl AuthServerConfig {
             ipc_handle = Some(res);
         }
 
-        Ok(AuthServerHandle { handle, local_addr, secret, ipc_endpoint, ipc_handle })
+        Ok(AuthServerHandle { handle: Some(handle), local_addr, secret, ipc_endpoint, ipc_handle })
     }
 }
 
@@ -87,7 +88,7 @@ impl AuthServerConfig {
 pub struct AuthServerConfigBuilder {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
-    server_config: Option<ServerBuilder<Identity, Identity>>,
+    server_config: Option<ServerConfigBuilder>,
     ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     ipc_endpoint: Option<String>,
 }
@@ -128,7 +129,7 @@ impl AuthServerConfigBuilder {
     ///
     /// Note: this always configures an [`EthSubscriptionIdProvider`]
     /// [`IdProvider`](jsonrpsee::server::IdProvider) for convenience.
-    pub fn with_server_config(mut self, config: ServerBuilder<Identity, Identity>) -> Self {
+    pub fn with_server_config(mut self, config: ServerConfigBuilder) -> Self {
         self.server_config = Some(config.set_id_provider(EthSubscriptionIdProvider::default()));
         self
     }
@@ -155,18 +156,20 @@ impl AuthServerConfigBuilder {
             }),
             secret: self.secret,
             server_config: self.server_config.unwrap_or_else(|| {
-                ServerBuilder::new()
-                    // This needs to large enough to handle large eth_getLogs responses and maximum
-                    // payload bodies limit for `engine_getPayloadBodiesByRangeV`
-                    // ~750MB per response should be enough
+                ServerConfig::builder()
+                    // This needs to large enough to handle large eth_getLogs responses and
+                    // maximum payload bodies limit for
+                    // `engine_getPayloadBodiesByRangeV` ~750MB per
+                    // response should be enough
                     .max_response_body_size(750 * 1024 * 1024)
-                    // Connections to this server are always authenticated, hence this only affects
-                    // connections from the CL or any other client that uses JWT, this should be
-                    // more than enough so that the CL (or multiple CL nodes) will never get rate
-                    // limited
+                    // Connections to this server are always authenticated, hence this only
+                    // affects connections from the CL or any other
+                    // client that uses JWT, this should be
+                    // more than enough so that the CL (or multiple CL nodes) will never get
+                    // rate limited
                     .max_connections(500)
-                    // bump the default request size slightly, there aren't any methods exposed with
-                    // dynamic request params that can exceed this
+                    // bump the default request size slightly, there aren't any methods exposed
+                    // with dynamic request params that can exceed this
                     .max_request_body_size(128 * 1024 * 1024)
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
@@ -250,7 +253,7 @@ impl AuthRpcModule {
 #[must_use = "Server stops if dropped"]
 pub struct AuthServerHandle {
     local_addr: SocketAddr,
-    handle: jsonrpsee::server::ServerHandle,
+    handle: Option<jsonrpsee::server::ServerHandle>,
     secret: JwtSecret,
     ipc_endpoint: Option<String>,
     ipc_handle: Option<jsonrpsee::server::ServerHandle>,
@@ -259,6 +262,22 @@ pub struct AuthServerHandle {
 // === impl AuthServerHandle ===
 
 impl AuthServerHandle {
+    /// Creates a new handle that isn't connected to any server.
+    ///
+    /// This can be used to satisfy types that require an engine API.
+    pub fn noop() -> Self {
+        Self {
+            local_addr: SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                constants::DEFAULT_AUTH_PORT,
+            ),
+            handle: None,
+            secret: JwtSecret::random(),
+            ipc_endpoint: None,
+            ipc_handle: None,
+        }
+    }
+
     /// Returns the [`SocketAddr`] of the http server if started.
     pub const fn local_addr(&self) -> SocketAddr {
         self.local_addr
@@ -266,7 +285,8 @@ impl AuthServerHandle {
 
     /// Tell the server to stop without waiting for the server to stop.
     pub fn stop(self) -> Result<(), AlreadyStoppedError> {
-        self.handle.stop()
+        let Some(handle) = self.handle else { return Ok(()) };
+        handle.stop()
     }
 
     /// Returns the url to the http server
@@ -280,9 +300,9 @@ impl AuthServerHandle {
     }
 
     /// Returns a http client connected to the server.
-    pub fn http_client(
-        &self,
-    ) -> jsonrpsee::http_client::HttpClient<AuthClientService<HttpBackend>> {
+    ///
+    /// This client uses the JWT token to authenticate requests.
+    pub fn http_client(&self) -> impl SubscriptionClientT + Clone + Send + Sync + Unpin + 'static {
         // Create a middleware that adds a new JWT token to every request.
         let secret_layer = AuthClientLayer::new(self.secret);
         let middleware = tower::ServiceBuilder::default().layer(secret_layer);

@@ -393,7 +393,9 @@ mod tests {
             base_fee_per_gas: Some(1337),
             withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
             blob_gas_used: Some(1),
-            transactions_root: proofs::calculate_transaction_root(&[transaction.clone()]),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
             ..Default::default()
         };
         let body = BlockBody {

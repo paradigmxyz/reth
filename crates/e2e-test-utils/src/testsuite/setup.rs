@@ -161,9 +161,9 @@ impl<I> Setup<I> {
                     let rpc = node
                         .rpc_client()
                         .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
-                    let engine = node.engine_api_client();
+                    let auth = node.auth_server_handle();
 
-                    node_clients.push(crate::testsuite::NodeClient { rpc, engine });
+                    node_clients.push(crate::testsuite::NodeClient::new(rpc, auth));
                 }
 
                 // spawn a separate task just to handle the shutdown

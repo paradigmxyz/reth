@@ -9,7 +9,10 @@ use crate::{
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
+use reth_network::{
+    primitives::NetPrimitivesFor, NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
+    PeersInfo,
+};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
 };
@@ -41,8 +44,6 @@ use reth_optimism_rpc::{
     OpEthApi, OpEthApiError, SequencerClient,
 };
 use reth_optimism_txpool::{
-    conditional::MaybeConditionalTransaction,
-    interop::MaybeInteropTransaction,
     supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
     OpPooledTx,
 };
@@ -58,7 +59,7 @@ use reth_transaction_pool::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// Marker trait for Optimism node types with standard engine, chain spec, and primitives.
 pub trait OpNodeTypes:
@@ -130,10 +131,7 @@ impl OpNode {
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             ))
-            .network(OpNetworkBuilder {
-                disable_txpool_gossip,
-                disable_discovery_v4: !discovery_v4,
-            })
+            .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
             .consensus(OpConsensusBuilder::default())
     }
 
@@ -192,8 +190,10 @@ where
         OpConsensusBuilder,
     >;
 
-    type AddOns =
-        OpAddOns<NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>>;
+    type AddOns = OpAddOns<
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        OpEthApiBuilder,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         Self::components(self)
@@ -236,19 +236,15 @@ impl NodeTypes for OpNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug)]
-pub struct OpAddOns<N>
-where
+pub struct OpAddOns<
     N: FullNodeComponents,
-    OpEthApiBuilder: EthApiBuilder<N>,
-{
+    EthB: EthApiBuilder<N>,
+    EV = OpEngineValidatorBuilder,
+    EB = OpEngineApiBuilder<OpEngineValidatorBuilder>,
+> {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
-    pub rpc_add_ons: RpcAddOns<
-        N,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-    >,
+    pub rpc_add_ons: RpcAddOns<N, EthB, EV, EB>,
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -258,7 +254,7 @@ where
     enable_tx_conditional: bool,
 }
 
-impl<N> Default for OpAddOns<N>
+impl<N> Default for OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     OpEthApiBuilder: EthApiBuilder<N>,
@@ -268,7 +264,7 @@ where
     }
 }
 
-impl<N> OpAddOns<N>
+impl<N> OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     OpEthApiBuilder: EthApiBuilder<N>,
@@ -279,7 +275,7 @@ where
     }
 }
 
-impl<N> NodeAddOns<N> for OpAddOns<N>
+impl<N> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -364,7 +360,7 @@ where
     }
 }
 
-impl<N> RethRpcAddOns<N> for OpAddOns<N>
+impl<N> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -386,7 +382,7 @@ where
     }
 }
 
-impl<N> EngineValidatorAddOn<N> for OpAddOns<N>
+impl<N> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -439,7 +435,7 @@ impl OpAddOnsBuilder {
 
 impl OpAddOnsBuilder {
     /// Builds an instance of [`OpAddOns`].
-    pub fn build<N>(self) -> OpAddOns<N>
+    pub fn build<N>(self) -> OpAddOns<N, OpEthApiBuilder>
     where
         N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
         OpEthApiBuilder: EthApiBuilder<N>,
@@ -449,8 +445,8 @@ impl OpAddOnsBuilder {
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
                 OpEthApiBuilder::default().with_sequencer(sequencer_url.clone()),
-                Default::default(),
-                Default::default(),
+                OpEngineValidatorBuilder::default(),
+                OpEngineApiBuilder::default(),
             ),
             da_config: da_config.unwrap_or_default(),
             sequencer_url,
@@ -481,7 +477,7 @@ where
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
@@ -503,6 +499,18 @@ impl<T> Default for OpPoolBuilder<T> {
             supervisor_http: DEFAULT_SUPERVISOR_URL.to_string(),
             supervisor_safety_level: SafetyLevel::CrossUnsafe,
             _pd: Default::default(),
+        }
+    }
+}
+
+impl<T> Clone for OpPoolBuilder<T> {
+    fn clone(&self) -> Self {
+        Self {
+            pool_config_overrides: self.pool_config_overrides.clone(),
+            enable_tx_conditional: self.enable_tx_conditional,
+            supervisor_http: self.supervisor_http.clone(),
+            supervisor_safety_level: self.supervisor_safety_level,
+            _pd: core::marker::PhantomData,
         }
     }
 }
@@ -538,9 +546,7 @@ impl<T> OpPoolBuilder<T> {
 impl<Node, T> PoolBuilder<Node> for OpPoolBuilder<T>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks>>,
-    T: EthPoolTransaction<Consensus = TxTy<Node::Types>>
-        + MaybeConditionalTransaction
-        + MaybeInteropTransaction,
+    T: EthPoolTransaction<Consensus = TxTy<Node::Types>> + OpPooledTx,
 {
     type Pool = OpTransactionPool<Node::Provider, DiskFileBlobStore, T>;
 
@@ -752,26 +758,43 @@ where
 }
 
 /// A basic optimism network builder.
-#[derive(Debug, Default, Clone)]
-pub struct OpNetworkBuilder {
+#[derive(Debug, Default)]
+pub struct OpNetworkBuilder<NetworkP = OpNetworkPrimitives, PooledTx = OpPooledTransaction> {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
     /// Disable discovery v4
     pub disable_discovery_v4: bool,
+    /// Marker for the network primitives type
+    _np: PhantomData<NetworkP>,
+    /// Marker for the pooled transaction type
+    _pt: PhantomData<PooledTx>,
 }
 
-impl OpNetworkBuilder {
+impl<NetworkP, PooledTx> Clone for OpNetworkBuilder<NetworkP, PooledTx> {
+    fn clone(&self) -> Self {
+        Self::new(self.disable_txpool_gossip, self.disable_discovery_v4)
+    }
+}
+
+impl<NetworkP, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
+    /// Creates a new `OpNetworkBuilder`.
+    pub const fn new(disable_txpool_gossip: bool, disable_discovery_v4: bool) -> Self {
+        Self { disable_txpool_gossip, disable_discovery_v4, _np: PhantomData, _pt: PhantomData }
+    }
+}
+
+impl<NetworkP: NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
     /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
     ///
     /// This applies the configured [`OpNetworkBuilder`] settings.
     pub fn network_config<Node>(
         &self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, OpNetworkPrimitives>>
+    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, NetworkP>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4 } = self.clone();
+        let Self { disable_txpool_gossip, disable_discovery_v4, .. } = self.clone();
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?
@@ -808,18 +831,22 @@ impl OpNetworkBuilder {
     }
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
+impl<Node, Pool, NetworkP, PooledTx> NetworkBuilder<Node, Pool>
+    for OpNetworkBuilder<NetworkP, PooledTx>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-                Pooled = OpPooledTransaction,
-            >,
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTx>,
         > + Unpin
         + 'static,
+    NetworkP: NetworkPrimitives<
+            PooledTransaction = PooledTx,
+            BroadcastedTransaction = <<Node::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx
+        >
+        + NetPrimitivesFor<PrimitivesTy<Node::Types>>,
+    PooledTx: Send,
 {
-    type Network = NetworkHandle<OpNetworkPrimitives>;
+    type Network = NetworkHandle<NetworkP>;
 
     async fn build_network(
         self,
