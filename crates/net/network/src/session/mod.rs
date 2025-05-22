@@ -651,7 +651,10 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
     }
 
-    pub(crate) const fn update_advertised_block_range(&mut self, block_range_update: BlockRangeUpdate) {
+    pub(crate) const fn update_advertised_block_range(
+        &mut self,
+        block_range_update: BlockRangeUpdate,
+    ) {
         self.status.earliest_block = Some(block_range_update.earliest);
         self.status.latest_block = Some(block_range_update.latest);
         self.status.blockhash = block_range_update.latest_hash;
