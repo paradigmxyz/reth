@@ -11,8 +11,6 @@ use alloy_genesis::Genesis;
 use alloy_primitives::Bytes;
 use parking_lot::RwLock;
 use reth::{
-    builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
-    revm::precompile::PrecompileResult,
     tasks::TaskManager,
 };
 use reth_ethereum::{
@@ -26,15 +24,12 @@ use reth_ethereum::{
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
             primitives::hardfork::SpecId,
+            precompile::PrecompileResult,
             MainBuilder, MainContext,
         },
     },
     node::{
-        api::{FullNodeTypes, NodeTypes},
-        core::{args::RpcServerArgs, node_config::NodeConfig},
-        evm::EthEvm,
-        node::EthereumAddOns,
-        EthEvmConfig, EthereumNode,
+        api::{FullNodeTypes, NodeTypes}, builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder}, core::{args::RpcServerArgs, node_config::NodeConfig}, evm::EthEvm, node::EthereumAddOns, EthEvmConfig, EthereumNode
     },
     EthPrimitives,
 };

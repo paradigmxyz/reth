@@ -3253,7 +3253,6 @@ dependencies = [
  "eyre",
  "futures-util",
  "reqwest",
- "reth",
  "reth-ethereum",
  "serde",
  "serde_json",
@@ -3316,7 +3315,6 @@ dependencies = [
  "alloy-sol-macro",
  "alloy-sol-types",
  "eyre",
- "reth",
  "reth-ethereum",
 ]
 
@@ -3364,7 +3362,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
- "reth",
  "reth-ethereum",
  "reth-tracing",
  "tokio",
@@ -3380,7 +3377,6 @@ dependencies = [
  "alloy-rpc-types-eth",
  "clap",
  "futures-util",
- "reth",
  "reth-ethereum",
 ]
 
@@ -3596,7 +3592,6 @@ dependencies = [
  "eyre",
  "futures",
  "jsonrpsee",
- "reth",
  "reth-ethereum",
  "tokio",
 ]
@@ -3609,7 +3604,6 @@ dependencies = [
  "alloy-rpc-types-trace",
  "clap",
  "futures-util",
- "reth",
  "reth-ethereum",
 ]
 
