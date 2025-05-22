@@ -153,31 +153,27 @@ fn bench_slice(c: &mut Criterion) {
 
 fn bench_starts_with(c: &mut Criterion) {
     let mut rng = rand::rng();
+    let total_len = 64;
 
-    let prefix_len = 16;
-    let (full_nybbles, full_packed) = generate_nibbles(&mut rng, 64);
-    let nybbles_prefix = full_nybbles.slice(0..prefix_len);
-    let packed_prefix = full_packed.slice(0..prefix_len);
+    let mut group = c.benchmark_group("starts_with");
+    for prefix_percent in [25, 50, 75] {
+        let prefix_len = (total_len * prefix_percent) / 100;
 
-    let mut group = c.benchmark_group("starts_with_true");
-    group.bench_function("Nibbles", |b| {
-        b.iter(|| black_box(&full_nybbles).starts_with(black_box(&nybbles_prefix)))
-    });
-    group.bench_function("PackedNibbles", |b| {
-        b.iter(|| black_box(&full_packed).starts_with(black_box(&packed_prefix)))
-    });
-    group.finish();
+        // Generate completely different nibbles that will return `false` for the prefix
+        let (nybbles, packed) = generate_nibbles(&mut rng, total_len);
+        let (nybbles_prefix, packed_prefix) = generate_nibbles(&mut rng, prefix_len);
 
-    let (nybbles, packed) = generate_nibbles(&mut rng, 64);
-    let (nybbles_prefix, packed_prefix) = generate_nibbles(&mut rng, 16);
-
-    let mut group = c.benchmark_group("starts_with_false");
-    group.bench_function("Nibbles", |b| {
-        b.iter(|| black_box(&nybbles).starts_with(black_box(&nybbles_prefix)))
-    });
-    group.bench_function("PackedNibbles", |b| {
-        b.iter(|| black_box(&packed).starts_with(black_box(&packed_prefix)))
-    });
+        group.bench_with_input(
+            BenchmarkId::new("Nibbles", prefix_percent),
+            &prefix_percent,
+            |b, _| b.iter(|| black_box(&nybbles).starts_with(black_box(&nybbles_prefix))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("PackedNibbles", prefix_percent),
+            &prefix_percent,
+            |b, _| b.iter(|| black_box(&packed).starts_with(black_box(&packed_prefix))),
+        );
+    }
     group.finish();
 }
 
