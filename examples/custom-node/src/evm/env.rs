@@ -1,9 +1,5 @@
 use crate::primitives::{CustomTransaction, CustomTransactionEnvelope, TxPayment};
-use alloy_eips::{
-    eip2718::{EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
-    eip2930::AccessList,
-    Typed2718,
-};
+use alloy_eips::{eip2930::AccessList, Typed2718};
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use op_revm::OpTransaction;
@@ -100,14 +96,10 @@ impl revm::context::Transaction for CustomEvmTransaction {
     }
 
     fn access_list(&self) -> Option<impl Iterator<Item = Self::AccessListItem<'_>>> {
-        match self {
-            CustomEvmTransaction::Op(tx) => tx
-                .access_list()
-                .map(|v| Box::new(v) as Box<dyn Iterator<Item = Self::AccessListItem<'_>>>),
-            CustomEvmTransaction::Payment(tx) => tx
-                .access_list()
-                .map(|v| Box::new(v) as Box<dyn Iterator<Item = Self::AccessListItem<'_>>>),
-        }
+        Some(match self {
+            CustomEvmTransaction::Op(tx) => tx.base.access_list.iter(),
+            CustomEvmTransaction::Payment(tx) => tx.0.access_list.iter(),
+        })
     }
 
     fn blob_versioned_hashes(&self) -> &[B256] {
@@ -219,25 +211,19 @@ impl revm::context::Transaction for CustomTxEnv {
 
 impl TransactionEnv for CustomTxEnv {
     fn set_gas_limit(&mut self, gas_limit: u64) {
-        self.0.gas_limit = gas_limit;
+        self.0.set_gas_limit(gas_limit);
     }
 
     fn nonce(&self) -> u64 {
-        self.0.nonce
+        self.0.nonce()
     }
 
     fn set_nonce(&mut self, nonce: u64) {
-        self.0.nonce = nonce;
+        self.0.set_nonce(nonce);
     }
 
     fn set_access_list(&mut self, access_list: AccessList) {
-        self.0.access_list = access_list;
-
-        if self.0.tx_type == LEGACY_TX_TYPE_ID {
-            // if this was previously marked as legacy tx, this must be upgraded to eip2930 with an
-            // accesslist
-            self.0.tx_type = EIP2930_TX_TYPE_ID;
-        }
+        self.0.set_access_list(access_list);
     }
 }
 

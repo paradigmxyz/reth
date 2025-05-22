@@ -1,10 +1,10 @@
 use crate::evm::{CustomEvmTransaction, CustomTxEnv};
 use alloy_evm::{precompiles::PrecompilesMap, Database, Evm, EvmEnv, EvmFactory};
-use alloy_op_evm::OpEvm;
+use alloy_op_evm::{OpEvm, OpEvmFactory};
 use alloy_primitives::{Address, Bytes};
 use op_revm::{
-    precompiles::OpPrecompiles, DefaultOp, L1BlockInfo, OpBuilder, OpContext, OpHaltReason,
-    OpSpecId, OpTransaction, OpTransactionError,
+    precompiles::OpPrecompiles, L1BlockInfo, OpContext, OpHaltReason, OpSpecId, OpTransaction,
+    OpTransactionError,
 };
 use reth_ethereum::evm::revm::{
     context::{result::ResultAndState, BlockEnv, CfgEnv},
@@ -23,6 +23,12 @@ pub struct CustomEvm<DB: Database, I, P = OpPrecompiles> {
     inner: OpEvm<DB, I, P>,
 }
 
+impl<DB: Database, I, P> CustomEvm<DB, I, P> {
+    pub fn new(op: OpEvm<DB, I, P>) -> Self {
+        Self { inner: op }
+    }
+}
+
 impl<DB, I, P> Evm for CustomEvm<DB, I, P>
 where
     DB: Database,
@@ -38,11 +44,11 @@ where
     type Inspector = I;
 
     fn block(&self) -> &BlockEnv {
-        Evm::block(&self.inner)
+        self.inner.block()
     }
 
     fn chain_id(&self) -> u64 {
-        Evm::chain_id(&self.inner)
+        self.inner.chain_id()
     }
 
     fn transact_raw(
@@ -50,7 +56,7 @@ where
         tx: Self::Tx,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
         match tx {
-            CustomEvmTransaction::Op(tx) => Evm::transact_raw(&mut self.inner, tx),
+            CustomEvmTransaction::Op(tx) => self.inner.transact_raw(tx),
             CustomEvmTransaction::Payment(..) => todo!(),
         }
     }
@@ -61,39 +67,39 @@ where
         contract: Address,
         data: Bytes,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        Evm::transact_system_call(&mut self.inner, caller, contract, data)
+        self.inner.transact_system_call(caller, contract, data)
     }
 
     fn db_mut(&mut self) -> &mut Self::DB {
-        Evm::db_mut(&mut self.inner)
+        self.inner.db_mut()
     }
 
     fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>) {
-        Evm::finish(self.inner)
+        self.inner.finish()
     }
 
     fn set_inspector_enabled(&mut self, enabled: bool) {
-        Evm::set_inspector_enabled(&mut self.inner, enabled)
+        self.inner.set_inspector_enabled(enabled)
     }
 
     fn precompiles(&self) -> &Self::Precompiles {
-        Evm::precompiles(&self.inner)
+        self.inner.precompiles()
     }
 
     fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
-        Evm::precompiles_mut(&mut self.inner)
+        self.inner.precompiles_mut()
     }
 
     fn inspector(&self) -> &Self::Inspector {
-        Evm::inspector(&self.inner)
+        self.inner.inspector()
     }
 
     fn inspector_mut(&mut self) -> &mut Self::Inspector {
-        Evm::inspector_mut(&mut self.inner)
+        self.inner.inspector_mut()
     }
 }
 
-pub struct CustomEvmFactory;
+pub struct CustomEvmFactory(OpEvmFactory);
 
 impl EvmFactory for CustomEvmFactory {
     type Evm<DB: Database, I: Inspector<OpContext<DB>>> = CustomEvm<DB, I, Self::Precompiles>;
@@ -109,21 +115,7 @@ impl EvmFactory for CustomEvmFactory {
         db: DB,
         input: EvmEnv<Self::Spec>,
     ) -> Self::Evm<DB, NoOpInspector> {
-        let spec_id = input.cfg_env.spec;
-        CustomEvm {
-            inner: OpEvm::new(
-                Context::op()
-                    .with_tx(OpTransaction::default())
-                    .with_db(db)
-                    .with_block(input.block_env)
-                    .with_cfg(input.cfg_env)
-                    .build_op_with_inspector(NoOpInspector {})
-                    .with_precompiles(PrecompilesMap::from_static(
-                        OpPrecompiles::new_with_spec(spec_id).precompiles(),
-                    )),
-                false,
-            ),
-        }
+        CustomEvm::new(self.0.create_evm(db, input))
     }
 
     fn create_evm_with_inspector<DB: Database, I: Inspector<Self::Context<DB>>>(
@@ -132,21 +124,6 @@ impl EvmFactory for CustomEvmFactory {
         input: EvmEnv<Self::Spec>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        let spec_id = input.cfg_env.spec;
-
-        CustomEvm {
-            inner: OpEvm::new(
-                Context::op()
-                    .with_tx(OpTransaction::default())
-                    .with_db(db)
-                    .with_block(input.block_env)
-                    .with_cfg(input.cfg_env)
-                    .build_op_with_inspector(inspector)
-                    .with_precompiles(PrecompilesMap::from_static(
-                        OpPrecompiles::new_with_spec(spec_id).precompiles(),
-                    )),
-                true,
-            ),
-        }
+        CustomEvm::new(self.0.create_evm_with_inspector(db, input, inspector))
     }
 }
