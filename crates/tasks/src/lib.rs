@@ -616,7 +616,7 @@ impl TaskExecutor {
     ///
     /// The [`TaskManager`] upon receiving this event, will terminate and initiate the shutdown that
     /// can be handled via the returned [`GracefulShutdown`].
-    pub fn request_graceful_shutdown(
+    pub fn initiate_graceful_shutdown(
         &self,
     ) -> Result<GracefulShutdown, tokio::sync::mpsc::error::SendError<()>> {
         self.task_events_tx
@@ -884,7 +884,7 @@ mod tests {
 
         let manager_future_handle = runtime.spawn(task_manager);
 
-        let send_result = executor.request_graceful_shutdown();
+        let send_result = executor.initiate_graceful_shutdown();
         assert!(send_result.is_ok(), "Sending the graceful shutdown signal should succeed and return a GracefulShutdown future");
 
         let manager_final_result = runtime.block_on(manager_future_handle);
