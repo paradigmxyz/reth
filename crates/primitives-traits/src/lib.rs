@@ -94,7 +94,7 @@ pub use alloy_consensus::{
 pub use transaction::{
     execute::FillTxEnv,
     signed::{FullSignedTx, SignedTransaction},
-    FullTransaction, Transaction,
+    FullTransaction, SignerRecoverable, Transaction,
 };
 
 pub mod block;
@@ -122,6 +122,8 @@ pub use storage::StorageEntry;
 
 pub mod sync;
 
+mod extended;
+pub use extended::Extended;
 /// Common header types
 pub mod header;
 pub use header::{Header, HeaderError, SealedHeader, SealedHeaderFor};

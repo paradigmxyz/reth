@@ -12,7 +12,7 @@ use crate::{
 use alloy_consensus::{
     constants::EIP7702_TX_TYPE_ID, Signed, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
 };
-use alloy_primitives::{Address, Bytes, Signature, Sealed, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, Sealed, Signature, TxKind, B256, U256};
 use bytes::BufMut;
 use op_alloy_consensus::{OpTxEnvelope, OpTxType, OpTypedTransaction, TxDeposit as AlloyTxDeposit};
 use reth_codecs_derive::add_arbitrary_tests;
@@ -183,11 +183,7 @@ impl ToTxCompact for OpTxEnvelope {
 impl FromTxCompact for OpTxEnvelope {
     type TxType = OpTxType;
 
-    fn from_tx_compact(
-        buf: &[u8],
-        tx_type: OpTxType,
-        signature: Signature,
-    ) -> (Self, &[u8]) {
+    fn from_tx_compact(buf: &[u8], tx_type: OpTxType, signature: Signature) -> (Self, &[u8]) {
         match tx_type {
             OpTxType::Legacy => {
                 let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
@@ -218,8 +214,7 @@ impl FromTxCompact for OpTxEnvelope {
     }
 }
 
-const DEPOSIT_SIGNATURE: Signature =
-    Signature::new(U256::ZERO, U256::ZERO, false);
+const DEPOSIT_SIGNATURE: Signature = Signature::new(U256::ZERO, U256::ZERO, false);
 
 impl Envelope for OpTxEnvelope {
     fn signature(&self) -> &Signature {

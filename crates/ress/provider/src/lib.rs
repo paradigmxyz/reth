@@ -1,14 +1,21 @@
 //! Reth implementation of [`reth_ress_protocol::RessProtocolProvider`].
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
 use parking_lot::Mutex;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
+use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
 use reth_provider::{
     BlockReader, BlockSource, ProviderError, ProviderResult, StateProviderFactory,
@@ -27,12 +34,14 @@ use recorder::StateWitnessRecorderDatabase;
 
 mod pending_state;
 pub use pending_state::*;
+use reth_storage_api::{BlockReader, BlockSource, StateProviderFactory};
 
 /// Reth provider implementing [`RessProtocolProvider`].
 #[expect(missing_debug_implementations)]
+#[derive(Clone)]
 pub struct RethRessProtocolProvider<P, E> {
     provider: P,
-    block_executor: E,
+    evm_config: E,
     task_spawner: Box<dyn TaskSpawner>,
     max_witness_window: u64,
     witness_semaphore: Arc<Semaphore>,
@@ -40,29 +49,15 @@ pub struct RethRessProtocolProvider<P, E> {
     pending_state: PendingState<EthPrimitives>,
 }
 
-impl<P: Clone, E: Clone> Clone for RethRessProtocolProvider<P, E> {
-    fn clone(&self) -> Self {
-        Self {
-            provider: self.provider.clone(),
-            block_executor: self.block_executor.clone(),
-            task_spawner: self.task_spawner.clone(),
-            max_witness_window: self.max_witness_window,
-            witness_semaphore: self.witness_semaphore.clone(),
-            witness_cache: self.witness_cache.clone(),
-            pending_state: self.pending_state.clone(),
-        }
-    }
-}
-
 impl<P, E> RethRessProtocolProvider<P, E>
 where
     P: BlockReader<Block = Block> + StateProviderFactory,
-    E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
+    E: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
     /// Create new ress protocol provider.
     pub fn new(
         provider: P,
-        block_executor: E,
+        evm_config: E,
         task_spawner: Box<dyn TaskSpawner>,
         // TODO: Add a config to save X amounts of proofs, where X is related to the
         // TODO: reorg depth
@@ -73,7 +68,7 @@ where
     ) -> eyre::Result<Self> {
         Ok(Self {
             provider,
-            block_executor,
+            evm_config,
             task_spawner,
             max_witness_window,
             witness_semaphore: Arc::new(Semaphore::new(witness_max_parallel)),
@@ -161,7 +156,7 @@ where
 
         // We allow block execution to fail, since we still want to record all accessed state by
         // invalid blocks.
-        if let Err(error) = self.block_executor.executor(&mut db).execute_with_state_closure(
+        if let Err(error) = self.evm_config.batch_executor(&mut db).execute_with_state_closure(
             &block,
             |state: &State<_>| {
                 record.record_executed_state(state);
@@ -234,7 +229,7 @@ where
 impl<P, E> RessProtocolProvider for RethRessProtocolProvider<P, E>
 where
     P: BlockReader<Block = Block> + StateProviderFactory + Clone + 'static,
-    E: BlockExecutorProvider<Primitives = EthPrimitives> + Clone,
+    E: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving header");

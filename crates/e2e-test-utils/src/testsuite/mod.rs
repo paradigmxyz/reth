@@ -6,16 +6,16 @@ use crate::{
 };
 use alloy_primitives::B256;
 use eyre::Result;
-use jsonrpsee::http_client::{transport::HttpBackend, HttpClient};
+use jsonrpsee::http_client::HttpClient;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_api::{NodeTypes, PayloadTypes};
 use reth_payload_builder::PayloadId;
-use reth_rpc_layer::AuthClientService;
-use setup::Setup;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
+use crate::testsuite::setup::Setup;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
+use reth_rpc_builder::auth::AuthServerHandle;
 
 #[cfg(test)]
 mod examples;
@@ -26,7 +26,14 @@ pub struct NodeClient {
     /// Regular JSON-RPC client
     pub rpc: HttpClient,
     /// Engine API client
-    pub engine: HttpClient<AuthClientService<HttpBackend>>,
+    pub engine: AuthServerHandle,
+}
+
+impl NodeClient {
+    /// Instantiates a new [`NodeClient`] with the given handles
+    pub const fn new(rpc: HttpClient, engine: AuthServerHandle) -> Self {
+        Self { rpc, engine }
+    }
 }
 
 /// Represents the latest block information.
@@ -64,6 +71,10 @@ pub struct Environment<I> {
     pub latest_payload_built: Option<PayloadAttributes>,
     /// Stores the most recent executed payload
     pub latest_payload_executed: Option<PayloadAttributes>,
+    /// Number of slots until a block is considered safe
+    pub slots_to_safe: u64,
+    /// Number of slots until a block is considered finalized
+    pub slots_to_finalized: u64,
 }
 
 impl<I> Default for Environment<I> {
@@ -81,6 +92,8 @@ impl<I> Default for Environment<I> {
             latest_fork_choice_state: ForkchoiceState::default(),
             latest_payload_built: None,
             latest_payload_executed: None,
+            slots_to_safe: 0,
+            slots_to_finalized: 0,
         }
     }
 }

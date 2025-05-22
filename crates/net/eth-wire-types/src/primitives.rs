@@ -7,9 +7,7 @@ use reth_primitives_traits::{Block, BlockBody, BlockHeader, NodePrimitives, Sign
 
 /// Abstraction over primitive types which might appear in network messages. See
 /// [`crate::EthMessage`] for more context.
-pub trait NetworkPrimitives:
-    Send + Sync + Unpin + Clone + Debug + PartialEq + Eq + 'static
-{
+pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     /// The block header type.
     type BlockHeader: BlockHeader + 'static;
 
@@ -31,7 +29,13 @@ pub trait NetworkPrimitives:
     type PooledTransaction: SignedTransaction + TryFrom<Self::BroadcastedTransaction> + 'static;
 
     /// The transaction type which peers return in `GetReceipts` messages.
-    type Receipt: TxReceipt + RlpEncodableReceipt + RlpDecodableReceipt + Unpin + 'static;
+    type Receipt: TxReceipt
+        + RlpEncodableReceipt
+        + RlpDecodableReceipt
+        + Encodable
+        + Decodable
+        + Unpin
+        + 'static;
 }
 
 /// This is a helper trait for use in bounds, where some of the [`NetworkPrimitives`] associated
@@ -68,6 +72,6 @@ impl NetworkPrimitives for EthNetworkPrimitives {
     type BlockBody = reth_ethereum_primitives::BlockBody;
     type Block = reth_ethereum_primitives::Block;
     type BroadcastedTransaction = reth_ethereum_primitives::TransactionSigned;
-    type PooledTransaction = reth_ethereum_primitives::PooledTransaction;
+    type PooledTransaction = reth_ethereum_primitives::PooledTransactionVariant;
     type Receipt = reth_ethereum_primitives::Receipt;
 }

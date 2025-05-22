@@ -243,7 +243,7 @@ fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
 
 This design pattern is very powerful and allows Reth to use the methods available to the `DbTx` and `DbTxMut` traits without having to define implementation blocks for each table within the database.
 
-Let's take a look at a couple examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
+Let's take a look at a couple of examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
 
 [File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/provider/src/providers/database/provider.rs#L2606-L2745)
 
@@ -254,7 +254,7 @@ self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
 ```
 
 Let's take a look at the `DatabaseProviderRW<DB: Database>` struct, which is used to create a mutable transaction to interact with the database.
-The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` trait, which returns a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
+The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` traits, which return a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
 This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
 

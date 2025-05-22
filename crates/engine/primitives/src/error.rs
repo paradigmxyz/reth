@@ -3,7 +3,7 @@ use alloy_rpc_types_engine::ForkchoiceUpdateError;
 
 /// Represents all error cases when handling a new payload.
 ///
-/// This represents all possible error cases that must be returned as JSON RCP errors back to the
+/// This represents all possible error cases that must be returned as JSON RPC errors back to the
 /// beacon node.
 #[derive(Debug, thiserror::Error)]
 pub enum BeaconOnNewPayloadError {

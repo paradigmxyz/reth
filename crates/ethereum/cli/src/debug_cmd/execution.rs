@@ -70,7 +70,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     ) -> eyre::Result<Pipeline<N>>
     where
-        N: ProviderNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives> + CliNodeTypes,
+        N: ProviderNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>,
         Client: EthBlockClient + 'static,
     {
         // building network downloaders using the fetch client
@@ -242,6 +242,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         Ok(())
     }
+}
+
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)

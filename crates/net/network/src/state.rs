@@ -13,7 +13,7 @@ use alloy_primitives::B256;
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
     BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
-    NewBlockHashes, Status,
+    NewBlockHashes, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
@@ -82,7 +82,7 @@ pub struct NetworkState<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
-    /// [Status] block hash.
+    /// [`UnifiedStatus`] block hash.
     client: BlockNumReader,
     /// Network discovery.
     discovery: Discovery,
@@ -146,7 +146,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         &mut self,
         peer: PeerId,
         capabilities: Arc<Capabilities>,
-        status: Arc<Status>,
+        status: Arc<UnifiedStatus>,
         request_tx: PeerRequestSender<PeerRequest<N>>,
         timeout: Arc<AtomicU64>,
     ) {

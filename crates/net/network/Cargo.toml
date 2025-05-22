@@ -89,13 +89,10 @@ reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
-alloy-node-bindings.workspace = true
-alloy-provider = { workspace = true, features = ["admin-api"] }
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 
 # misc
-serial_test.workspace = true
 tempfile.workspace = true
 url.workspace = true
 secp256k1 = { workspace = true, features = ["rand"] }
@@ -104,7 +101,6 @@ secp256k1 = { workspace = true, features = ["rand"] }
 criterion = { workspace = true, features = ["async_tokio", "html_reports"] }
 
 [features]
-geth-tests = []
 serde = [
     "dep:serde",
     "secp256k1/serde",

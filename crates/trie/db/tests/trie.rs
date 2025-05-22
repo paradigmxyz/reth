@@ -131,7 +131,7 @@ fn arbitrary_storage_root() {
 }
 
 #[test]
-// This ensures we dont add empty accounts to the trie
+// This ensures we don't add empty accounts to the trie
 fn test_empty_account() {
     let state: State = BTreeMap::from([
         (

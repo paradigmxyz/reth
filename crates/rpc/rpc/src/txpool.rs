@@ -58,7 +58,7 @@ where
 
         let AllPoolTransactions { pending, queued } = self.pool.all_transactions();
 
-        let mut content = TxpoolContent { pending: BTreeMap::new(), queued: BTreeMap::new() };
+        let mut content = TxpoolContent::default();
         for pending in pending {
             insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder)?;
         }

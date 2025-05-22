@@ -1,6 +1,4 @@
-use crate::{
-    any::AnyError, db::DatabaseError, lockfile::StorageLockError, writer::UnifiedStorageWriterError,
-};
+use crate::{any::AnyError, db::DatabaseError, writer::UnifiedStorageWriterError};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -81,9 +79,6 @@ pub enum ProviderError {
     /// Unable to find the safe block.
     #[error("safe block does not exist")]
     SafeBlockNotFound,
-    /// Thrown when the cache service task dropped.
-    #[error("cache service task stopped")]
-    CacheServiceUnavailable,
     /// Thrown when we failed to lookup a block for the pending state.
     #[error("unknown block {_0}")]
     UnknownBlockHash(B256),
@@ -133,9 +128,6 @@ pub enum ProviderError {
     /// Consistent view error.
     #[error("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
-    /// Storage lock error.
-    #[error(transparent)]
-    StorageLockError(#[from] StorageLockError),
     /// Storage writer error.
     #[error(transparent)]
     UnifiedStorageWriterError(#[from] UnifiedStorageWriterError),
@@ -220,7 +212,6 @@ impl StaticFileWriterError {
         Self { message: message.into() }
     }
 }
-
 /// Consistent database view error.
 #[derive(Clone, Debug, PartialEq, Eq, Display)]
 pub enum ConsistentViewError {

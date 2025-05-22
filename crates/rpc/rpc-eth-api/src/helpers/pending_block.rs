@@ -7,8 +7,8 @@ use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, SpecFor,
@@ -17,12 +17,12 @@ use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
 };
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, ProviderBlock, ProviderError, ProviderHeader,
-    ProviderReceipt, ProviderTx, ReceiptProvider, StateProviderFactory,
-};
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
+    ReceiptProvider, StateProviderFactory,
+};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
     TransactionPool,
@@ -45,7 +45,6 @@ pub trait LoadPendingBlock:
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
         Evm: ConfigureEvm<
             Primitives: NodePrimitives<
                 BlockHeader = ProviderHeader<Self::Provider>,
@@ -136,6 +135,8 @@ pub trait LoadPendingBlock:
     > + Send
     where
         Self: SpawnBlocking,
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
             let pending = self.pending_block_env_and_cfg()?;
@@ -203,6 +204,8 @@ pub trait LoadPendingBlock:
         Self::Error,
     >
     where
+        Self::Pool:
+            TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
         EthApiError: From<ProviderError>,
     {
         let state_provider = self

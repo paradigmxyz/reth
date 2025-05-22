@@ -12,7 +12,8 @@ use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
 use reth_eth_wire::{
     handshake::{EthHandshake, EthRlpxHandshake},
-    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives, Status,
+    EthNetworkPrimitives, HelloMessage, HelloMessageWithProtocols, NetworkPrimitives,
+    UnifiedStatus,
 };
 use reth_ethereum_forks::{ForkFilter, Head};
 use reth_network_peers::{mainnet_nodes, pk2id, sepolia_nodes, PeerId, TrustedPeer};
@@ -37,7 +38,7 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
     ///
     /// This type is used to fetch the block number after we established a session and received the
-    /// [Status] block hash.
+    /// [`UnifiedStatus`] block hash.
     pub client: C,
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
@@ -73,7 +74,7 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The executor to use for spawning tasks.
     pub executor: Box<dyn TaskSpawner>,
     /// The `Status` message to send to peers at the beginning.
-    pub status: Status,
+    pub status: UnifiedStatus,
     /// Sets the hello message for the p2p handshake in `RLPx`
     pub hello_message: HelloMessageWithProtocols,
     /// Additional protocols to announce and handle in `RLPx`
@@ -296,7 +297,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
     /// Sets the highest synced block.
     ///
-    /// This is used to construct the appropriate [`ForkFilter`] and [`Status`] message.
+    /// This is used to construct the appropriate [`ForkFilter`] and [`UnifiedStatus`] message.
     ///
     /// If not set, this defaults to the genesis specified by the current chain specification.
     pub const fn set_head(mut self, head: Head) -> Self {
@@ -622,7 +623,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         hello_message.port = listener_addr.port();
 
         // set the status
-        let status = Status::spec_builder(&chain_spec, &head).build();
+        let status = UnifiedStatus::spec_builder(&chain_spec, &head);
 
         // set a fork filter based on the chain spec and head
         let fork_filter = chain_spec.fork_filter(head);

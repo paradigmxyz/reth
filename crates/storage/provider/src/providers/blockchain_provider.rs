@@ -792,7 +792,9 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives_traits::{BlockBody, RecoveredBlock, SealedBlock, SignedTransaction};
+    use reth_primitives_traits::{
+        BlockBody, RecoveredBlock, SealedBlock, SignedTransaction, SignerRecoverable,
+    };
     use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
