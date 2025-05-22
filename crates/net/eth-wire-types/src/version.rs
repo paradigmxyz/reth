@@ -41,8 +41,8 @@ impl EthVersion {
                 // eth/67,68 are eth/66 minus GetNodeData and NodeData messages
                 13
             }
-            // eth69 is both eth67 and eth68 minus NewBlockHashes and NewBlock
-            Self::Eth69 => 11,
+            // eth69 is both eth67 and eth68 minus NewBlockHashes and NewBlock + BlockRangeUpdate
+            Self::Eth69 => 12,
         }
     }
 
