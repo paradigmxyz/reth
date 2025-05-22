@@ -4,7 +4,7 @@ use alloy_primitives::{Address, Bytes, TxKind, U256};
 use op_alloy_consensus::OpTxType;
 use op_revm::{
     precompiles::OpPrecompiles, transaction::deposit::DepositTransactionParts, DefaultOp,
-    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransactionError,
+    L1BlockInfo, OpBuilder, OpHaltReason, OpSpecId, OpTransaction, OpTransactionError,
 };
 use reth_ethereum::evm::revm::{
     context::{result::ResultAndState, BlockEnv, CfgEnv, TxEnv},
@@ -20,7 +20,7 @@ use std::error::Error;
 
 /// EVM context contains data that EVM needs for execution of [`CustomEvmTransaction`].
 pub type CustomContext<DB> =
-    Context<BlockEnv, CustomEvmTransaction, CfgEnv<OpSpecId>, DB, Journal<DB>, L1BlockInfo>;
+    Context<BlockEnv, OpTransaction<CustomTxEnv>, CfgEnv<OpSpecId>, DB, Journal<DB>, L1BlockInfo>;
 
 pub struct CustomEvm<DB: Database, I, P = OpPrecompiles> {
     inner:
@@ -55,10 +55,10 @@ where
         tx: Self::Tx,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
         if self.inspect {
-            self.inner.set_tx(tx);
+            self.inner.set_tx(tx.0);
             self.inner.inspect_replay()
         } else {
-            self.inner.transact(tx)
+            self.inner.transact(tx.0)
         }
     }
 
@@ -68,7 +68,7 @@ where
         contract: Address,
         data: Bytes,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
-        let tx = CustomEvmTransaction {
+        let tx = CustomEvmTransaction(OpTransaction {
             base: CustomTxEnv(TxEnv {
                 caller,
                 kind: TxKind::Call(contract),
@@ -97,9 +97,9 @@ where
             // enveloped tx size.
             enveloped_tx: Some(Bytes::default()),
             deposit: Default::default(),
-        };
+        });
 
-        let mut gas_limit = tx.base.0.gas_limit;
+        let mut gas_limit = tx.0.base.0.gas_limit;
         let mut basefee = 0;
         let mut disable_nonce_check = true;
 
@@ -165,6 +165,16 @@ where
 
 pub struct CustomEvmFactory;
 
+impl CustomEvmFactory {
+    fn default_tx() -> CustomEvmTransaction {
+        CustomEvmTransaction(OpTransaction {
+            base: CustomTxEnv::default(),
+            enveloped_tx: Some(vec![0x00].into()),
+            deposit: DepositTransactionParts::default(),
+        })
+    }
+}
+
 impl EvmFactory for CustomEvmFactory {
     type Evm<DB: Database, I: Inspector<CustomContext<DB>>> = CustomEvm<DB, I, Self::Precompiles>;
     type Context<DB: Database> = CustomContext<DB>;
@@ -182,11 +192,7 @@ impl EvmFactory for CustomEvmFactory {
         let spec_id = input.cfg_env.spec;
         CustomEvm {
             inner: Context::op()
-                .with_tx(CustomEvmTransaction {
-                    base: CustomTxEnv::default(),
-                    enveloped_tx: Some(vec![0x00].into()),
-                    deposit: DepositTransactionParts::default(),
-                })
+                .with_tx(Self::default_tx().0)
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
@@ -207,11 +213,7 @@ impl EvmFactory for CustomEvmFactory {
         let spec_id = input.cfg_env.spec;
         CustomEvm {
             inner: Context::op()
-                .with_tx(CustomEvmTransaction {
-                    base: CustomTxEnv::default(),
-                    enveloped_tx: Some(vec![0x00].into()),
-                    deposit: DepositTransactionParts::default(),
-                })
+                .with_tx(Self::default_tx().0)
                 .with_db(db)
                 .with_block(input.block_env)
                 .with_cfg(input.cfg_env)
