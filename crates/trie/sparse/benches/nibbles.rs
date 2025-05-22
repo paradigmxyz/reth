@@ -49,14 +49,14 @@ fn bench_push_unchecked(c: &mut Criterion) {
     group.bench_function("Nibbles", |b| {
         b.iter_batched(
             || (Nibbles::from_nibbles_unchecked(nibbles(&mut rng)), rng.random_range(0..16)),
-            |(mut nibbles, nibble)| nibbles.push_unchecked(nibble),
+            |(nibbles, nibble)| black_box(nibbles).push_unchecked(nibble),
             BatchSize::SmallInput,
         )
     });
     group.bench_function("PackedNibbles", |b| {
         b.iter_batched(
             || (PackedNibbles::from_nibbles_unchecked(nibbles(&mut rng)), rng.random_range(0..16)),
-            |(mut nibbles, nibble)| nibbles.push_unchecked(nibble),
+            |(nibbles, nibble)| black_box(nibbles).push_unchecked(nibble),
             BatchSize::SmallInput,
         )
     });
@@ -72,8 +72,12 @@ fn bench_eq(c: &mut Criterion) {
     let packed1_clone = packed1;
 
     let mut group = c.benchmark_group("eq");
-    group.bench_function("Nibbles", |b| b.iter(|| nybbles1.eq(&nybbles1_clone)));
-    group.bench_function("PackedNibbles", |b| b.iter(|| packed1.eq(&packed1_clone)));
+    group.bench_function("Nibbles", |b| {
+        b.iter(|| black_box(&nybbles1).eq(black_box(&nybbles1_clone)))
+    });
+    group.bench_function("PackedNibbles", |b| {
+        b.iter(|| black_box(&packed1).eq(black_box(&packed1_clone)))
+    });
     group.finish();
 }
 
@@ -95,12 +99,12 @@ fn bench_common_prefix_length(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("Nibbles", prefix_percent),
             &prefix_percent,
-            |b, _| b.iter(|| nybbles1.common_prefix_length(&nybbles2)),
+            |b, _| b.iter(|| black_box(&nybbles1).common_prefix_length(black_box(&nybbles2))),
         );
         group.bench_with_input(
             BenchmarkId::new("PackedNibbles", prefix_percent),
             &prefix_percent,
-            |b, _| b.iter(|| packed1.common_prefix_length(&packed2)),
+            |b, _| b.iter(|| black_box(&packed1).common_prefix_length(black_box(&packed2))),
         );
     }
     group.finish();
@@ -126,8 +130,11 @@ fn bench_slice(c: &mut Criterion) {
     let end = start + (64 / 2);
 
     let mut group = c.benchmark_group("slice_even");
-    group.bench_function("Nibbles", |b| b.iter(|| nybbles.slice(start..end)));
-    group.bench_function("PackedNibbles", |b| b.iter(|| packed_nibbles.slice(start..end)));
+    group
+        .bench_function("Nibbles", |b| b.iter(|| black_box(&nybbles).slice(black_box(start..end))));
+    group.bench_function("PackedNibbles", |b| {
+        b.iter(|| black_box(&packed_nibbles).slice(black_box(start..end)))
+    });
     group.finish();
 
     let (nybbles, packed_nibbles) = generate_nibbles(&mut rng, 64);
@@ -136,8 +143,11 @@ fn bench_slice(c: &mut Criterion) {
     let end = start + (64 / 2) + 1;
 
     let mut group = c.benchmark_group("slice_odd");
-    group.bench_function("Nibbles", |b| b.iter(|| nybbles.slice(start..end)));
-    group.bench_function("PackedNibbles", |b| b.iter(|| packed_nibbles.slice(start..end)));
+    group
+        .bench_function("Nibbles", |b| b.iter(|| black_box(&nybbles).slice(black_box(start..end))));
+    group.bench_function("PackedNibbles", |b| {
+        b.iter(|| black_box(&packed_nibbles).slice(black_box(start..end)))
+    });
     group.finish();
 }
 
@@ -150,16 +160,24 @@ fn bench_starts_with(c: &mut Criterion) {
     let packed_prefix = full_packed.slice(0..prefix_len);
 
     let mut group = c.benchmark_group("starts_with_true");
-    group.bench_function("Nibbles", |b| b.iter(|| full_nybbles.starts_with(&nybbles_prefix)));
-    group.bench_function("PackedNibbles", |b| b.iter(|| full_packed.starts_with(&packed_prefix)));
+    group.bench_function("Nibbles", |b| {
+        b.iter(|| black_box(&full_nybbles).starts_with(black_box(&nybbles_prefix)))
+    });
+    group.bench_function("PackedNibbles", |b| {
+        b.iter(|| black_box(&full_packed).starts_with(black_box(&packed_prefix)))
+    });
     group.finish();
 
     let (nybbles, packed) = generate_nibbles(&mut rng, 64);
     let (nybbles_prefix, packed_prefix) = generate_nibbles(&mut rng, 16);
 
     let mut group = c.benchmark_group("starts_with_false");
-    group.bench_function("Nibbles", |b| b.iter(|| nybbles.starts_with(&nybbles_prefix)));
-    group.bench_function("PackedNibbles", |b| b.iter(|| packed.starts_with(&packed_prefix)));
+    group.bench_function("Nibbles", |b| {
+        b.iter(|| black_box(&nybbles).starts_with(black_box(&nybbles_prefix)))
+    });
+    group.bench_function("PackedNibbles", |b| {
+        b.iter(|| black_box(&packed).starts_with(black_box(&packed_prefix)))
+    });
     group.finish();
 }
 
@@ -181,12 +199,12 @@ fn bench_ord(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("Nibbles", prefix_percent),
             &prefix_percent,
-            |b, _| b.iter(|| nybbles1.partial_cmp(&nybbles2)),
+            |b, _| b.iter(|| black_box(&nybbles1).partial_cmp(black_box(&nybbles2))),
         );
         group.bench_with_input(
             BenchmarkId::new("PackedNibbles", prefix_percent),
             &prefix_percent,
-            |b, _| b.iter(|| packed1.partial_cmp(&packed2)),
+            |b, _| b.iter(|| black_box(&packed1).partial_cmp(black_box(&packed2))),
         );
     }
     group.finish();
