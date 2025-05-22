@@ -41,7 +41,7 @@ We also use our Ethereum libraries (including [Alloy](https://github.com/alloy-r
 
 **3. Free for anyone to use any way they want**
 
-Reth is free open source software, built for the community, by the community.
+Reth is free open-source software, built for the community, by the community.
 
 By licensing the software under the Apache/MIT license, we want developers to use it without being bound by business licenses, or having to think about the implications of GPL-like licenses.
 
@@ -71,8 +71,8 @@ Reth implements the specification of Ethereum as defined in the [ethereum/execut
 
 1. EVM state tests are run on every [Revm Pull Request](https://github.com/bluealloy/revm/blob/main/.github/workflows/ethereum-tests.yml)
 1. Hive tests are [run every 24 hours](https://github.com/paradigmxyz/reth/blob/main/.github/workflows/hive.yml) in the main Reth repository.
-1. We regularly re-sync multiple nodes from scratch.
-1. We operate multiple nodes at the tip of Ethereum mainnet and various testnets.
+1. We regularly resync multiple nodes from scratch.
+1. We operate multiple nodes at the tip of the Ethereum mainnet and various testnets.
 1. We extensively unit test, fuzz test and document all our code, while also restricting PRs with aggressive lint rules.
 
 We have completed an audit of the [Reth v1.0.0-rc.2](https://github.com/paradigmxyz/reth/releases/tag/v1.0.0-rc.2) with [Sigma Prime](https://sigmaprime.io/), the developers of [Lighthouse](https://github.com/sigp/lighthouse), the Rust Consensus Layer implementation. Find it [here](https://github.com/paradigmxyz/reth/blob/main/audit/sigma_prime_audit_v2.pdf).
