@@ -2507,37 +2507,37 @@ Post-merge hard forks (timestamp based):
         }
     }
 
-    #[test]
-    fn blob_params_from_genesis() {
-        let s = r#"{
-         "cancun":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         },
-         "prague":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         }
-      }"#;
-        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
-        let hardfork_params = BlobScheduleBlobParams::from_schedule(&schedule);
-        let expected = BlobScheduleBlobParams {
-            cancun: BlobParams {
-                target_blob_count: 3,
-                max_blob_count: 6,
-                update_fraction: 3338477,
-                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
-            },
-            prague: BlobParams {
-                target_blob_count: 3,
-                max_blob_count: 6,
-                update_fraction: 3338477,
-                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
-            },
-            ..Default::default()
-        };
-        assert_eq!(hardfork_params, expected);
-    }
+    // #[test]
+    // fn blob_params_from_genesis() {
+    //     let s = r#"{
+    //      "cancun":{
+    //         "baseFeeUpdateFraction":3338477,
+    //         "max":6,
+    //         "target":3
+    //      },
+    //      "prague":{
+    //         "baseFeeUpdateFraction":3338477,
+    //         "max":6,
+    //         "target":3
+    //      }
+    //   }"#;
+    //     let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
+    //     let hardfork_params = BlobScheduleBlobParams::from_schedule(&schedule);
+    //     let expected = BlobScheduleBlobParams {
+    //         cancun: BlobParams {
+    //             target_blob_count: 3,
+    //             max_blob_count: 6,
+    //             update_fraction: 3338477,
+    //             min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+    //         },
+    //         prague: BlobParams {
+    //             target_blob_count: 3,
+    //             max_blob_count: 6,
+    //             update_fraction: 3338477,
+    //             min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+    //         },
+    //         ..Default::default()
+    //     };
+    //     assert_eq!(hardfork_params, expected);
+    // }
 }

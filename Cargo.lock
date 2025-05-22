@@ -235,9 +235,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-eips"
-version = "1.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90fc566136b705991072f8f79762525e14f0ca39c38d45b034944770cb6c6b67"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -277,9 +276,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-genesis"
-version = "1.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "765c0124a3174f136171df8498e4700266774c9de1008a0b987766cf215d08f6"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -701,9 +699,8 @@ dependencies = [
 
 [[package]]
 name = "alloy-serde"
-version = "1.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8c34ffc38f543bfdceed8c1fa5253fa5131455bb3654976be4cc3a4ae6d61f4"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -3142,7 +3139,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4380,7 +4377,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.61.1",
+ "windows-core 0.57.0",
 ]
 
 [[package]]
@@ -4825,7 +4822,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi 0.5.1",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6718,7 +6715,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10883,7 +10880,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10896,7 +10893,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10963,7 +10960,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11711,7 +11708,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13718,3 +13715,123 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "alloy-consensus"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-contract"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-json-rpc"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-network"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-network-primitives"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-provider"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-pubsub"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-client"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-admin"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-anvil"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-beacon"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-debug"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-engine"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-eth"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-mev"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-trace"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-rpc-types-txpool"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-signer"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-signer-local"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-transport"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-transport-http"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-transport-ipc"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
+
+[[patch.unused]]
+name = "alloy-transport-ws"
+version = "1.0.6"
+source = "git+https://github.com/alloy-rs/alloy?branch=rkrasiuk%2Fbpo-parsing#2084094e8896528ef392b1d89d0753ac7105513c"
