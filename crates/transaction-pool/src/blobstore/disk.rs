@@ -50,6 +50,61 @@ impl DiskFileBlobStore {
     fn clear_cache(&self) {
         self.inner.blob_cache.lock().clear()
     }
+
+    fn get_by_versioned_hashes_common<T, S>(
+        &self,
+        versioned_hashes: &[B256],
+        extract_sidecar: impl Fn(&BlobTransactionSidecarVariant) -> Option<&S>,
+        matcher: impl Fn(&S, &[B256]) -> Vec<(usize, T)>,
+    ) -> Result<Vec<Option<T>>, BlobStoreError>
+    where
+        T: Clone,
+    {
+        // the response must always be the same len as the request, misses must be None
+        let mut result = vec![None; versioned_hashes.len()];
+
+        // first scan all cached full sidecars
+        for (_tx_hash, sidecar_variant) in self.inner.blob_cache.lock().iter() {
+            if let Some(sidecar) = extract_sidecar(sidecar_variant) {
+                for (idx, matched) in matcher(sidecar, versioned_hashes) {
+                    result[idx] = Some(matched);
+                }
+            }
+            // return early if all blobs are found
+            if result.iter().all(|r| r.is_some()) {
+                break;
+            }
+        }
+
+        // not all versioned hashes were found, try to look up a matching tx
+        let mut missing_tx_hashes = Vec::new();
+
+        {
+            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
+            for (idx, _) in result.iter().enumerate().filter(|(_, b)| b.is_none()) {
+                let versioned_hash = versioned_hashes[idx];
+                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
+                    missing_tx_hashes.push(tx_hash);
+                }
+            }
+        }
+
+        if !missing_tx_hashes.is_empty() {
+            // if we have missing blobs, try to read them from disk and try again
+            let from_disk = self.inner.read_many_decoded(missing_tx_hashes);
+            for (_, sidecar_variant) in from_disk {
+                if let Some(sidecar) = extract_sidecar(&sidecar_variant) {
+                    for (idx, matched) in matcher(sidecar, versioned_hashes) {
+                        if result[idx].is_none() {
+                            result[idx] = Some(matched);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 impl BlobStore for DiskFileBlobStore {
@@ -137,108 +192,24 @@ impl BlobStore for DiskFileBlobStore {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        // the response must always be the same len as the request, misses must be None
-        let mut result = vec![None; versioned_hashes.len()];
-
-        // first scan all cached full sidecars
-        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
-            if let Some(blob_sidecar) = blob_sidecar.as_eip4844() {
-                for (hash_idx, match_result) in
-                    blob_sidecar.match_versioned_hashes(versioned_hashes)
-                {
-                    result[hash_idx] = Some(match_result);
-                }
-            }
-
-            // return early if all blobs are found.
-            if result.iter().all(|blob| blob.is_some()) {
-                return Ok(result);
-            }
-        }
-
-        // not all versioned hashes were be found, try to look up a matching tx
-        let mut missing_tx_hashes = Vec::new();
-
-        {
-            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
-            for (idx, _) in
-                result.iter().enumerate().filter(|(_, blob_and_proof)| blob_and_proof.is_none())
-            {
-                // this is safe because the result vec has the same len
-                let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
-                    missing_tx_hashes.push(tx_hash);
-                }
-            }
-        }
-
-        if !missing_tx_hashes.is_empty() {
-            // if we have missing blobs, try to read them from disk and try again
-            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
-            for (_, blob_sidecar) in blobs_from_disk {
-                if let Some(blob_sidecar) = blob_sidecar.as_eip4844() {
-                    for (hash_idx, match_result) in
-                        blob_sidecar.match_versioned_hashes(versioned_hashes)
-                    {
-                        if result[hash_idx].is_none() {
-                            result[hash_idx] = Some(match_result);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(result)
+        self.get_by_versioned_hashes_common(
+            versioned_hashes,
+            |v| v.as_eip4844(),
+            |s, hashes| s.match_versioned_hashes(hashes).collect(),
+        )
     }
 
     fn get_by_versioned_hashes_v2(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
-        let mut result = vec![None; versioned_hashes.len()];
+        let result = self.get_by_versioned_hashes_common(
+            versioned_hashes,
+            |v| v.as_eip7594(),
+            |s, hashes| s.match_versioned_hashes(hashes).collect(),
+        )?;
 
-        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
-            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                for (hash_idx, match_result) in
-                    blob_sidecar.match_versioned_hashes(versioned_hashes)
-                {
-                    result[hash_idx] = Some(match_result);
-                }
-            }
-
-            if result.iter().all(|blob| blob.is_some()) {
-                return Ok(Some(result.into_iter().map(Option::unwrap).collect()));
-            }
-        }
-
-        let mut missing_tx_hashes = Vec::new();
-
-        {
-            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
-            for (idx, _) in result.iter().enumerate().filter(|(_, blob)| blob.is_none()) {
-                let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
-                    missing_tx_hashes.push(tx_hash);
-                }
-            }
-        }
-
-        if !missing_tx_hashes.is_empty() {
-            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
-            for (_, blob_sidecar) in blobs_from_disk {
-                if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                    for (hash_idx, match_result) in
-                        blob_sidecar.match_versioned_hashes(versioned_hashes)
-                    {
-                        if result[hash_idx].is_none() {
-                            result[hash_idx] = Some(match_result);
-                        }
-                    }
-                }
-            }
-        }
-
-        if result.iter().all(|blob| blob.is_some()) {
+        if result.iter().all(|b| b.is_some()) {
             Ok(Some(result.into_iter().map(Option::unwrap).collect()))
         } else {
             Ok(None)
