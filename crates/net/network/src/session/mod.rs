@@ -1064,17 +1064,14 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         // Before trying status handshake, set up the version to negotiated shared version
         status.set_eth_version(eth_version);
 
-        let outbound = status;
-
         // perform the eth protocol handshake
         match handshake
-            .handshake(&mut p2p_stream, outbound, fork_filter.clone(), HANDSHAKE_TIMEOUT)
+            .handshake(&mut p2p_stream, status, fork_filter.clone(), HANDSHAKE_TIMEOUT)
             .await
         {
             Ok(their_status) => {
-                let their_unified_status: UnifiedStatus = their_status;
-                let eth_stream = EthStream::new(outbound.version, p2p_stream);
-                (eth_stream.into(), their_unified_status)
+                let eth_stream = EthStream::new(eth_version, p2p_stream);
+                (eth_stream.into(), their_status)
             }
             Err(err) => {
                 return PendingSessionEvent::Disconnected {
