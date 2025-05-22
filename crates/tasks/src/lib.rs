@@ -162,10 +162,10 @@ pub struct TaskManager {
     ///
     /// See [`Handle`] docs.
     handle: Handle,
-    /// Sender half for sending panic signals to this type
-    panicked_tasks_tx: UnboundedSender<TaskEvent>,
-    /// Listens for panicked tasks
-    panicked_tasks_rx: UnboundedReceiver<TaskEvent>,
+    /// Sender half for sending task events to this type
+    task_events_tx: UnboundedSender<TaskEvent>,
+    /// Receiver for task events
+    task_events_rx: UnboundedReceiver<TaskEvent>,
     /// The [Signal] to fire when all tasks should be shutdown.
     ///
     /// This is fired when dropped.
@@ -197,12 +197,12 @@ impl TaskManager {
     ///
     /// This also sets the global [`TaskExecutor`].
     pub fn new(handle: Handle) -> Self {
-        let (panicked_tasks_tx, panicked_tasks_rx) = unbounded_channel();
+        let (task_events_tx, task_events_rx) = unbounded_channel();
         let (signal, on_shutdown) = signal();
         let manager = Self {
             handle,
-            panicked_tasks_tx,
-            panicked_tasks_rx,
+            task_events_tx,
+            task_events_rx,
             signal: Some(signal),
             on_shutdown,
             graceful_tasks: Arc::new(AtomicUsize::new(0)),
@@ -221,7 +221,7 @@ impl TaskManager {
         TaskExecutor {
             handle: self.handle.clone(),
             on_shutdown: self.on_shutdown.clone(),
-            panicked_tasks_tx: self.panicked_tasks_tx.clone(),
+            task_events_tx: self.task_events_tx.clone(),
             metrics: Default::default(),
             graceful_tasks: Arc::clone(&self.graceful_tasks),
         }
@@ -262,7 +262,7 @@ impl Future for TaskManager {
     type Output = Result<(), PanickedTaskError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match ready!(self.as_mut().get_mut().panicked_tasks_rx.poll_recv(cx)) {
+        match ready!(self.as_mut().get_mut().task_events_rx.poll_recv(cx)) {
             Some(TaskEvent::Panic(err)) => Poll::Ready(Err(err)),
             Some(TaskEvent::GracefulShutdown) | None => {
                 if let Some(signal) = self.get_mut().signal.take() {
@@ -324,8 +324,8 @@ pub struct TaskExecutor {
     handle: Handle,
     /// Receiver of the shutdown signal.
     on_shutdown: Shutdown,
-    /// Sender half for sending panic signals to this type
-    panicked_tasks_tx: UnboundedSender<TaskEvent>,
+    /// Sender half for sending task events to this type
+    task_events_tx: UnboundedSender<TaskEvent>,
     /// Task Executor Metrics
     metrics: TaskExecutorMetrics,
     /// How many [`GracefulShutdown`] tasks are currently active
@@ -449,7 +449,7 @@ impl TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let panicked_tasks_tx = self.panicked_tasks_tx.clone();
+        let panicked_tasks_tx = self.task_events_tx.clone();
         let on_shutdown = self.on_shutdown.clone();
 
         // wrap the task in catch unwind
@@ -508,7 +508,7 @@ impl TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let panicked_tasks_tx = self.panicked_tasks_tx.clone();
+        let panicked_tasks_tx = self.task_events_tx.clone();
         let on_shutdown = self.on_shutdown.clone();
         let fut = f(on_shutdown);
 
@@ -554,7 +554,7 @@ impl TaskExecutor {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let panicked_tasks_tx = self.panicked_tasks_tx.clone();
+        let panicked_tasks_tx = self.task_events_tx.clone();
         let on_shutdown = GracefulShutdown::new(
             self.on_shutdown.clone(),
             GracefulShutdownGuard::new(Arc::clone(&self.graceful_tasks)),
@@ -612,12 +612,14 @@ impl TaskExecutor {
 
     /// Sends a request to the `TaskManager` to initiate a graceful shutdown.
     ///
-    /// The `TaskManager` upon receiving this event, will terminate its own future
-    /// with `Ok(())` and also propogate its internal shutdown signal to all managed tasks.
+    /// Caution: This will terminate the entire program.
+    ///
+    /// The [`TaskManager`] upon receiving this event, will terminate and initiate the shutdown that
+    /// can be handled via the returned [`GracefulShutdown`].
     pub fn request_graceful_shutdown(
         &self,
     ) -> Result<GracefulShutdown, tokio::sync::mpsc::error::SendError<()>> {
-        self.panicked_tasks_tx
+        self.task_events_tx
             .send(TaskEvent::GracefulShutdown)
             .map_err(|_send_error_with_task_event| tokio::sync::mpsc::error::SendError(()))?;
 
