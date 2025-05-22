@@ -13,6 +13,10 @@
 #[doc(inline)]
 pub use reth_ethereum_primitives::*;
 
+/// Re-exported builder types
+#[cfg(feature = "node")]
+pub use reth_node_builder as builder;
+
 /// Re-exported reth primitives
 pub mod primitives {
     #[doc(inline)]
@@ -92,8 +96,6 @@ pub mod storage {
 pub mod node {
     #[doc(inline)]
     pub use reth_node_api as api;
-    #[cfg(feature = "node")]
-    pub use reth_node_builder as builder;
     #[doc(inline)]
     pub use reth_node_core as core;
     #[cfg(feature = "node")]

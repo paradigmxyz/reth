@@ -3381,7 +3381,6 @@ dependencies = [
  "alloy-rpc-types-eth",
  "clap",
  "futures-util",
- "reth",
  "reth-ethereum",
 ]
 
