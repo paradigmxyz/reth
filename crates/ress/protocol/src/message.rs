@@ -305,7 +305,7 @@ mod tests {
     #[test]
     fn protocol_message_count() {
         let protocol = RessProtocolMessage::protocol();
-        assert_eq!(protocol.messages(), RessMessageID::COUNT as u8);
+        assert_eq!(protocol.messages().unwrap(), RessMessageID::COUNT as u8);
     }
 
     proptest! {
