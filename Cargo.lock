@@ -9172,6 +9172,7 @@ dependencies = [
  "eyre",
  "futures",
  "op-alloy-consensus",
+ "op-alloy-network",
  "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chainspec",
