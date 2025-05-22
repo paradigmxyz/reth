@@ -105,8 +105,8 @@ pub enum StatelessValidationError {
 ///    the pre state reads.
 ///
 /// 2. **Pre-State Verification:** Retrieves the expected `pre_state_root` from the parent header
-///    from `ancestor_headers`. Verifies the provided [`ExecutionWitness`] against this root using
-///    [`verify_execution_witness`].
+///    from `ancestor_headers`. Verifies the provided [`ExecutionWitness`] against the
+///    `pre_state_root`.
 ///
 /// 3. **Chain Verification:** The code currently does not verify the [`EthChainSpec`] and expects a
 ///    higher level function to assert that this is correct by, for example, asserting that it is

@@ -13,20 +13,29 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 
+/// `StatelessTrie` structure for usage during stateless validation
 #[derive(Debug)]
 pub struct StatelessTrie {
     inner: SparseStateTrie,
 }
 
 impl StatelessTrie {
+    /// Initialize the stateless trie using the `ExecutionWitness`
+    ///
+    /// Note: Currently this method does not check that the `ExecutionWitness`
+    /// is complete for all of the preimage keys.
     pub fn new(
         witness: &ExecutionWitness,
         pre_state_root: B256,
-    ) -> Result<(StatelessTrie, B256Map<Bytecode>), StatelessValidationError> {
+    ) -> Result<(Self, B256Map<Bytecode>), StatelessValidationError> {
         verify_execution_witness(witness, pre_state_root)
-            .map(|(inner, bytecode)| (StatelessTrie { inner }, bytecode))
+            .map(|(inner, bytecode)| (Self { inner }, bytecode))
     }
 
+    /// Returns the `TrieAccount` that corresponds to the `Address`
+    ///
+    /// This method will error if the `ExecutionWitness` is not able to guarantee
+    /// that the account is missing from the Trie _and_ the witness was complete.
     pub fn account(&self, address: Address) -> Result<Option<TrieAccount>, ProviderError> {
         let hashed_address = keccak256(address);
 
@@ -44,6 +53,10 @@ impl StatelessTrie {
         Ok(None)
     }
 
+    /// Returns the storage slot value that corresponds to the given (address, slot) tuple.
+    ///
+    /// This method will error if the `ExecutionWitness` is not able to guarantee
+    /// that the storage was missing from the Trie _and_ the witness was complete.
     pub fn storage(&self, address: Address, slot: U256) -> Result<U256, ProviderError> {
         let hashed_address = keccak256(address);
         let hashed_slot = keccak256(B256::from(slot));
@@ -76,6 +89,7 @@ impl StatelessTrie {
         Ok(U256::ZERO)
     }
 
+    /// Computes the new state root from the `HashedPostState`.
     pub fn calculate_state_root(
         &mut self,
         state: HashedPostState,

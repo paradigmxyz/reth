@@ -11,7 +11,7 @@ use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 ///
 /// This struct implements the [`reth_revm::Database`] trait, allowing the EVM to execute
 /// transactions using:
-///  - Account and storage slot data provided by a [`reth_trie_sparse::SparseStateTrie`].
+///  - Account and storage slot data provided by a [`StatelessTrie`].
 ///  - Bytecode and ancestor block hashes provided by in-memory maps.
 ///
 /// This is designed for stateless execution scenarios where direct access to a full node's
@@ -63,7 +63,7 @@ impl Database for WitnessDatabase<'_> {
     type Error = ProviderError;
 
     /// Get basic account information by hashing the address and looking up the account RLP
-    /// in the underlying [`SparseStateTrie`].
+    /// in the underlying [`StatelessTrie`].
     ///
     /// Returns `Ok(None)` if the account is not found in the trie.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
