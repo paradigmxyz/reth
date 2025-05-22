@@ -90,7 +90,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// This differs from [`BlobStore::get_by_versioned_hashes_v1`] in that it also returns all the
     /// cell proofs in [`BlobAndProofV2`] supported by the EIP-7594 blob sidecar variant.
     ///
-    /// The responde also differs from [`BlobStore::get_by_versioned_hashes_v1`] in that this
+    /// The response also differs from [`BlobStore::get_by_versioned_hashes_v1`] in that this
     /// returns `None` if any of the requested versioned hashes are not present in the blob store:
     /// e.g. where v1 would return `[A, None, C]` v2 would return `None`. See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getblobsv2>
     fn get_by_versioned_hashes_v2(
