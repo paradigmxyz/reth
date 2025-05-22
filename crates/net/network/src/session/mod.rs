@@ -35,7 +35,7 @@ use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
     Capabilities, DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols,
-    NetworkPrimitives, Status, UnauthedP2PStream, HANDSHAKE_TIMEOUT,
+    NetworkPrimitives, UnauthedP2PStream, UnifiedStatus, HANDSHAKE_TIMEOUT,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -77,7 +77,7 @@ pub struct SessionManager<N: NetworkPrimitives> {
     /// The secret key used for authenticating sessions.
     secret_key: SecretKey,
     /// The `Status` message to send to peers.
-    status: Status,
+    status: UnifiedStatus,
     /// The `HelloMessage` message to send to peers.
     hello_message: HelloMessageWithProtocols,
     /// The [`ForkFilter`] used to validate the peer's `Status` message.
@@ -126,7 +126,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         secret_key: SecretKey,
         config: SessionsConfig,
         executor: Box<dyn TaskSpawner>,
-        status: Status,
+        status: UnifiedStatus,
         hello_message: HelloMessageWithProtocols,
         fork_filter: ForkFilter,
         extra_protocols: RlpxSubProtocols,
@@ -175,7 +175,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     }
 
     /// Returns the current status of the session.
-    pub const fn status(&self) -> Status {
+    pub const fn status(&self) -> UnifiedStatus {
         self.status
     }
 
@@ -220,9 +220,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// active [`ForkId`]. See also [`ForkFilter::set_head`].
     pub(crate) fn on_status_update(&mut self, head: Head) -> Option<ForkTransition> {
         self.status.blockhash = head.hash;
-        self.status.total_difficulty = head.total_difficulty;
+        self.status.total_difficulty = Some(head.total_difficulty);
         let transition = self.fork_filter.set_head(head);
         self.status.forkid = self.fork_filter.current();
+        self.status.latest_block = Some(head.number);
+
         transition
     }
 
@@ -681,7 +683,7 @@ pub enum SessionEvent<N: NetworkPrimitives> {
         /// negotiated eth version
         version: EthVersion,
         /// The Status message the peer sent during the `eth` handshake
-        status: Arc<Status>,
+        status: Arc<UnifiedStatus>,
         /// The channel for sending messages to the peer with the session
         messages: PeerRequestSender<PeerRequest<N>>,
         /// The direction of the session, either `Inbound` or `Outgoing`
@@ -828,7 +830,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
     remote_addr: SocketAddr,
     secret_key: SecretKey,
     hello: HelloMessageWithProtocols,
-    status: Status,
+    status: UnifiedStatus,
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
@@ -861,7 +863,7 @@ async fn start_pending_outbound_session<N: NetworkPrimitives>(
     remote_peer_id: PeerId,
     secret_key: SecretKey,
     hello: HelloMessageWithProtocols,
-    status: Status,
+    status: UnifiedStatus,
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
@@ -913,7 +915,7 @@ async fn authenticate<N: NetworkPrimitives>(
     secret_key: SecretKey,
     direction: Direction,
     hello: HelloMessageWithProtocols,
-    status: Status,
+    status: UnifiedStatus,
     fork_filter: ForkFilter,
     extra_handlers: RlpxSubProtocolHandlers,
 ) {
@@ -996,7 +998,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
     local_addr: Option<SocketAddr>,
     direction: Direction,
     mut hello: HelloMessageWithProtocols,
-    mut status: Status,
+    mut status: UnifiedStatus,
     fork_filter: ForkFilter,
     mut extra_handlers: RlpxSubProtocolHandlers,
 ) -> PendingSessionEvent<N> {
@@ -1068,7 +1070,7 @@ async fn authenticate_stream<N: NetworkPrimitives>(
             .await
         {
             Ok(their_status) => {
-                let eth_stream = EthStream::new(status.version, p2p_stream);
+                let eth_stream = EthStream::new(eth_version, p2p_stream);
                 (eth_stream.into(), their_status)
             }
             Err(err) => {
