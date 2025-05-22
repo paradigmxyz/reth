@@ -17,16 +17,14 @@ use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
 use futures_util::StreamExt;
 use reth_ethereum::{
-    builder::{NodeHandle,ConfigureEvm},
+    builder::{ConfigureEvm, NodeHandle},
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    evm::
-        revm::revm::{
-            bytecode::opcode::OpCode,
-            context_interface::ContextTr,
-            inspector::Inspector,
-            interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
-        }
-    ,
+    evm::revm::revm::{
+        bytecode::opcode::OpCode,
+        context_interface::ContextTr,
+        inspector::Inspector,
+        interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
+    }, 
     node::EthereumNode,
     pool::TransactionPool,
     rpc::api::eth::helpers::Call,
