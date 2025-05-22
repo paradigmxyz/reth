@@ -1,4 +1,4 @@
-use crate::{witness_db::WitnessDatabase, ExecutionWitness};
+use crate::{trie::StatelessTrie, witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
@@ -169,10 +169,10 @@ where
     };
 
     // First verify that the pre-state reads are correct
-    let (mut sparse_trie, bytecode) = crate::trie::StatelessTrie::new(&witness, pre_state_root)?;
+    let (mut trie, bytecode) = StatelessTrie::new(&witness, pre_state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
-    let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
+    let db = WitnessDatabase::new(&trie, bytecode, ancestor_hashes);
 
     // Execute the block
     let executor = evm_config.executor(db);
@@ -186,7 +186,7 @@ where
 
     // Compute and check the post state root
     let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
-    let state_root = sparse_trie.calculate_state_root(hashed_state)?;
+    let state_root = trie.calculate_state_root(hashed_state)?;
     if state_root != current_block.state_root {
         return Err(StatelessValidationError::PostStateRootMismatch {
             got: state_root,
