@@ -1,33 +1,19 @@
 #![allow(missing_docs)]
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use nybbles::Nibbles;
-use rand::Rng;
+use rand::{distr::Uniform, rngs::ThreadRng, Rng};
 use reth_trie_sparse::PackedNibbles;
 
 fn generate_nibbles(rng: &mut impl Rng, length: usize) -> (Nibbles, PackedNibbles) {
     // Generate random nibbles
-    let nibbles: Vec<u8> = (0..length).map(|_| rng.random_range(0..16)).collect();
+    let nibbles: Vec<u8> = rng.sample_iter(Uniform::new(0, 16).unwrap()).take(length).collect();
 
     // Create instances of both types with same values
     let nybbles_nibbles = Nibbles::from_nibbles_unchecked(nibbles.clone());
     let packed_nibbles = PackedNibbles::from_nibbles(nibbles);
 
     (nybbles_nibbles, packed_nibbles)
-}
-
-fn bench_eq(c: &mut Criterion) {
-    let mut rng = rand::rng();
-
-    let (nybbles1, packed1) = generate_nibbles(&mut rng, 64);
-
-    let nybbles1_clone = nybbles1.clone();
-    let packed1_clone = packed1;
-
-    let mut group = c.benchmark_group("eq");
-    group.bench_function("Nibbles", |b| b.iter(|| nybbles1.eq(&nybbles1_clone)));
-    group.bench_function("PackedNibbles", |b| b.iter(|| packed1.eq(&packed1_clone)));
-    group.finish();
 }
 
 fn generate_prefixed_nibbles(
@@ -47,6 +33,48 @@ fn generate_prefixed_nibbles(
     nibbles2.extend((0..(length - prefix_len)).map(|_| rng.random_range(0..16)));
 
     (nibbles1, nibbles2)
+}
+
+fn bench_push_unchecked(c: &mut Criterion) {
+    let mut rng = rand::rng();
+    let nibble_range = Uniform::new(0, 16).unwrap();
+
+    let nibbles = |rng: &mut ThreadRng| {
+        // Always leave space for at least one more nibble to be pushed
+        let length = rng.random_range(0..63);
+        rng.sample_iter(nibble_range).take(length).collect::<Vec<_>>()
+    };
+
+    let mut group = c.benchmark_group("push_unchecked");
+    group.bench_function("Nibbles", |b| {
+        b.iter_batched(
+            || (Nibbles::from_nibbles_unchecked(nibbles(&mut rng)), rng.random_range(0..16)),
+            |(mut nibbles, nibble)| nibbles.push_unchecked(nibble),
+            BatchSize::SmallInput,
+        )
+    });
+    group.bench_function("PackedNibbles", |b| {
+        b.iter_batched(
+            || (PackedNibbles::from_nibbles_unchecked(nibbles(&mut rng)), rng.random_range(0..16)),
+            |(mut nibbles, nibble)| nibbles.push_unchecked(nibble),
+            BatchSize::SmallInput,
+        )
+    });
+    group.finish();
+}
+
+fn bench_eq(c: &mut Criterion) {
+    let mut rng = rand::rng();
+
+    let (nybbles1, packed1) = generate_nibbles(&mut rng, 64);
+
+    let nybbles1_clone = nybbles1.clone();
+    let packed1_clone = packed1;
+
+    let mut group = c.benchmark_group("eq");
+    group.bench_function("Nibbles", |b| b.iter(|| nybbles1.eq(&nybbles1_clone)));
+    group.bench_function("PackedNibbles", |b| b.iter(|| packed1.eq(&packed1_clone)));
+    group.finish();
 }
 
 fn bench_common_prefix_length(c: &mut Criterion) {
@@ -166,6 +194,7 @@ fn bench_ord(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    bench_push_unchecked,
     bench_eq,
     bench_common_prefix_length,
     bench_clone,
