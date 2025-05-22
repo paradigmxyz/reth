@@ -24,7 +24,7 @@ use reth_ethereum::{
         context_interface::ContextTr,
         inspector::Inspector,
         interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
-    }, 
+    },
     node::EthereumNode,
     pool::TransactionPool,
     rpc::api::eth::helpers::Call,
