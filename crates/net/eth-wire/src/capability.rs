@@ -522,7 +522,7 @@ mod tests {
         assert_eq!(shared_eth.name(), proto.cap.name);
 
         // the 6th shared message is the first message of the eth capability
-        let shared_eth = shared.find_by_relative_offset(1 + proto.messages().unwrap()).unwrap();
+        let shared_eth = shared.find_by_relative_offset(1 + proto.messages()).unwrap();
         assert_eq!(shared_eth.name(), "eth");
     }
 

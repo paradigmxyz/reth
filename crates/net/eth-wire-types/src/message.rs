@@ -494,7 +494,7 @@ impl EthMessageID {
         }
     }
 
-    /// Returns the max value.
+    /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
         if version.is_eth69() {
             Self::BlockRangeUpdate.to_u8()

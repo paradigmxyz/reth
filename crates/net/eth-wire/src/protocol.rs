@@ -1,6 +1,6 @@
 //! A Protocol defines a P2P subprotocol in an `RLPx` connection
 
-use crate::{version::ParseVersionError, Capability, EthMessageID, EthVersion};
+use crate::{Capability, EthVersion};
 
 /// Type that represents a [Capability] and the number of messages it uses.
 ///
@@ -52,12 +52,8 @@ impl Protocol {
     }
 
     /// The number of values needed to represent all message IDs of capability.
-    pub fn messages(&self) -> Result<u8, ParseVersionError> {
-        if self.cap.is_eth() {
-            let version = EthVersion::try_from(self.cap.version as u8)?;
-            return Ok(EthMessageID::max(version) + 1)
-        }
-        Ok(self.messages)
+    pub const fn messages(&self) -> u8 {
+        self.messages
     }
 }
 
