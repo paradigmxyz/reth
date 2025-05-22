@@ -172,8 +172,13 @@ impl PackedNibbles {
             return false;
         }
 
-        let shift_right_bits = self.bit_len() - other.bit_len();
-        (self.nibbles >> shift_right_bits) == other.nibbles
+        for i in 0..other.len() {
+            if self.get_nibble(i) != other.get_nibble(i) {
+                return false;
+            }
+        }
+
+        true
     }
 
     /// Returns the length of the common prefix between this [`PackedNibbles`] and `other`.
