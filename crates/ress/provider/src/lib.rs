@@ -17,11 +17,9 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
-use reth_provider::{
-    BlockReader, BlockSource, ProviderError, ProviderResult, StateProviderFactory,
-};
 use reth_ress_protocol::{RLPExecutionWitness, RessProtocolProvider};
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
+use reth_storage_api::{BlockReader, BlockSource, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
 use schnellru::{ByLength, LruMap};
@@ -34,7 +32,6 @@ use recorder::StateWitnessRecorderDatabase;
 
 mod pending_state;
 pub use pending_state::*;
-use reth_storage_api::{BlockReader, BlockSource, StateProviderFactory};
 
 /// Reth provider implementing [`RessProtocolProvider`].
 #[expect(missing_debug_implementations)]
