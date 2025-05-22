@@ -127,9 +127,27 @@ impl BlobStore for InMemoryBlobStore {
 
     fn get_by_versioned_hashes_v2(
         &self,
-        _versioned_hashes: &[B256],
+        versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
-        Ok(None)
+        let mut result = vec![None; versioned_hashes.len()];
+        for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
+            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
+                for (hash_idx, match_result) in
+                    blob_sidecar.match_versioned_hashes(versioned_hashes)
+                {
+                    result[hash_idx] = Some(match_result);
+                }
+            }
+
+            if result.iter().all(|blob| blob.is_some()) {
+                break;
+            }
+        }
+        if result.iter().all(|blob| blob.is_some()) {
+            Ok(Some(result.into_iter().map(Option::unwrap).collect()))
+        } else {
+            Ok(None)
+        }
     }
 
     fn data_size_hint(&self) -> Option<usize> {
