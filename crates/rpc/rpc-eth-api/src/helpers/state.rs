@@ -325,7 +325,7 @@ pub trait LoadState:
             if block_id == Some(BlockId::pending()) {
                 // for pending tag we need to find the highest nonce in the pool
                 if let Some(highest_pool_tx) =
-                    this.pool().get_highest_transaction_by_sender(address)
+                    this.pool().get_highest_consecutive_transaction_by_sender(address, on_chain_account_nonce)
                 {
                     {
                         // and the corresponding txcount is nonce + 1 of the highest tx in the pool
