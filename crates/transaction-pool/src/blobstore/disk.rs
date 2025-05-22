@@ -250,7 +250,6 @@ impl BlobStore for DiskFileBlobStore {
         }
 
         // only return the blobs if we found all requested versioned hashes
-        // See:
         if result.iter().all(|blob| blob.is_some()) {
             Ok(Some(result.into_iter().map(Option::unwrap).collect()))
         } else {
