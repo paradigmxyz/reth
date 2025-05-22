@@ -216,7 +216,7 @@ pub trait EstimateCall: Call {
 
         // Binary search narrows the range to find the minimum gas limit needed for the transaction
         // to succeed.
-        while (highest_gas_limit - lowest_gas_limit) > 1 {
+        while lowest_gas_limit + 1 < highest_gas_limit {
             // An estimation error is allowed once the current gas limit range used in the binary
             // search is small enough (less than 1.5% of the highest gas limit)
             // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/eth/gasestimator/gasestimator.go#L152
