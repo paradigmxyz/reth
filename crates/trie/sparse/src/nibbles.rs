@@ -161,7 +161,7 @@ impl PackedNibbles {
     }
 
     /// Returns `true` if this [`PackedNibbles`] starts with the nibbles in `other`.
-    pub fn starts_with(&self, other: &Self) -> bool {
+    pub const fn starts_with(&self, other: &Self) -> bool {
         // If other is empty, it's a prefix of any sequence
         if other.is_empty() {
             return true;
@@ -172,10 +172,12 @@ impl PackedNibbles {
             return false;
         }
 
-        for i in 0..other.len() {
+        let mut i = 0;
+        while i < other.len() {
             if self.get_nibble(i) != other.get_nibble(i) {
                 return false;
             }
+            i += 1;
         }
 
         true
@@ -210,7 +212,7 @@ impl PackedNibbles {
 
         let min_bit_len = if self_bit_len < other_bit_len { self_bit_len } else { other_bit_len };
 
-        // How many whole limbs of the shorter key are there?
+        // Number of whole limbs
         let full_limbs = min_bit_len / 64;
 
         let self_limbs = self.nibbles.as_limbs();
