@@ -10,9 +10,7 @@ use alloy_evm::{
 use alloy_genesis::Genesis;
 use alloy_primitives::Bytes;
 use parking_lot::RwLock;
-use reth::{
-    tasks::TaskManager,
-};
+use reth::tasks::TaskManager;
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec},
     evm::{
@@ -23,13 +21,18 @@ use reth_ethereum::{
             handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
-            primitives::hardfork::SpecId,
             precompile::PrecompileResult,
+            primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
     },
     node::{
-        api::{FullNodeTypes, NodeTypes}, builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder}, core::{args::RpcServerArgs, node_config::NodeConfig}, evm::EthEvm, node::EthereumAddOns, EthEvmConfig, EthereumNode
+        api::{FullNodeTypes, NodeTypes},
+        builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
+        core::{args::RpcServerArgs, node_config::NodeConfig},
+        evm::EthEvm,
+        node::EthereumAddOns,
+        EthEvmConfig, EthereumNode,
     },
     EthPrimitives,
 };

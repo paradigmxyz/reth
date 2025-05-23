@@ -7,7 +7,6 @@ license.workspace = true
 
 [dependencies]
 # reth
-reth.workspace = true
 reth-ethereum = { workspace = true, features = ["full"] }
 reth-tracing.workspace = true
 

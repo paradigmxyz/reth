@@ -12,10 +12,6 @@ use alloy_evm::{
 };
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
-use reth::{
-    builder::{components::ExecutorBuilder, BuilderContext},
-    primitives::SealedBlock,
-};
 use reth_ethereum::{
     chainspec::ChainSpec,
     cli::interface::Cli,
@@ -34,10 +30,11 @@ use reth_ethereum::{
     },
     node::{
         api::{ConfigureEvm, FullNodeTypes, NodeTypes},
+        builder::{components::ExecutorBuilder, BuilderContext},
         node::EthereumAddOns,
         EthereumNode,
     },
-    primitives::{Header, SealedHeader},
+    primitives::{Header, SealedBlock, SealedHeader},
     provider::BlockExecutionResult,
     EthPrimitives, Receipt, TransactionSigned,
 };

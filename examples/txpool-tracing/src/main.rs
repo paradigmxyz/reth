@@ -17,7 +17,8 @@ use futures_util::StreamExt;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     node::{builder::NodeHandle, EthereumNode},
-    pool::TransactionPool, rpc::eth::primitives::TransactionRequest,
+    pool::TransactionPool,
+    rpc::eth::primitives::TransactionRequest,
 };
 
 fn main() {

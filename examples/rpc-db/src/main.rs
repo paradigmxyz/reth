@@ -17,14 +17,20 @@
 use std::{path::Path, sync::Arc};
 
 use reth_ethereum::{
-    chainspec::ChainSpecBuilder, consensus::EthBeaconConsensus, network::api::noop::NoopNetwork, node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode}, pool::noop::NoopTransactionPool, provider::{
+    chainspec::ChainSpecBuilder,
+    consensus::EthBeaconConsensus,
+    network::api::noop::NoopNetwork,
+    node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
+    pool::noop::NoopTransactionPool,
+    provider::{
         db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
         providers::{BlockchainProvider, StaticFileProvider},
         ProviderFactory,
-    }, rpc::{
+    },
+    rpc::{
         builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
         EthApiBuilder,
-    }
+    },
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};

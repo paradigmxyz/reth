@@ -9,7 +9,6 @@ license.workspace = true
 tokio = { workspace = true, features = ["full"] }
 futures.workspace = true
 reth-ethereum = { workspace = true, features = ["node", "network"] }
-reth.workspace = true
 tokio-stream.workspace = true
 eyre.workspace = true
 tracing.workspace = true

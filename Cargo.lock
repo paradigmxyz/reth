@@ -3341,7 +3341,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "eyre",
- "reth",
  "reth-basic-payload-builder",
  "reth-engine-local",
  "reth-ethereum",
@@ -3423,7 +3422,6 @@ name = "example-custom-node-components"
 version = "0.0.0"
 dependencies = [
  "eyre",
- "reth",
  "reth-ethereum",
  "reth-tracing",
 ]
@@ -3435,7 +3433,6 @@ dependencies = [
  "alloy-eips 1.0.5",
  "eyre",
  "futures-util",
- "reth",
  "reth-basic-payload-builder",
  "reth-ethereum",
  "reth-ethereum-payload-builder",
@@ -3450,7 +3447,6 @@ dependencies = [
  "alloy-primitives",
  "eyre",
  "futures",
- "reth",
  "reth-ethereum",
  "tokio",
  "tokio-stream",
@@ -3473,7 +3469,6 @@ dependencies = [
  "clap",
  "eyre",
  "futures",
- "reth",
  "reth-ethereum",
  "reth-op",
  "reth-tracing",

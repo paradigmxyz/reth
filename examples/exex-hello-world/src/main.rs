@@ -12,6 +12,7 @@ use reth::rpc::eth::core::EthApiFor;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, EthereumNode},
+    rpc::eth::core::EthApiFor,
 };
 use reth_tracing::tracing::info;
 use tokio::sync::oneshot;

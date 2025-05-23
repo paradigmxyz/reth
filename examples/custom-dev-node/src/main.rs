@@ -8,13 +8,11 @@ use std::sync::Arc;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures_util::StreamExt;
-use reth::{
-    builder::{NodeBuilder, NodeHandle},
-    tasks::TaskManager,
-};
+use reth::tasks::TaskManager;
 use reth_ethereum::{
     chainspec::ChainSpec,
     node::{
+        builder::{NodeBuilder, NodeHandle},
         core::{args::RpcServerArgs, node_config::NodeConfig},
         EthereumNode,
     },
