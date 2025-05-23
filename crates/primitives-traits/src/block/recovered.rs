@@ -284,7 +284,7 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Returns the `Recovered<&T>` transaction at the given index.
-    pub fn get_recovered_transaction(
+    pub fn recovered_transaction(
         &self,
         idx: usize,
     ) -> Option<Recovered<&<B::Body as BlockBody>::Transaction>> {
