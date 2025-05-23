@@ -59,228 +59,6 @@ where
 /// Threshold for deciding between cached and range mode processing
 const CACHED_MODE_BLOCK_THRESHOLD: u64 = 100;
 
-/// Represents different modes for processing block ranges when filtering logs
-enum RangeMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-> {
-    /// Use cache-based processing for recent blocks
-    Cached(CachedMode<Eth>),
-    /// Use range-based processing for older blocks
-    Range(RangeBlockMode<Eth>),
-}
-
-/// Mode for processing blocks using cache optimization for recent blocks
-struct CachedMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-> {
-    filter_inner: Arc<EthFilterInner<Eth>>,
-    headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
-    current_idx: usize,
-}
-
-/// Mode for processing blocks using range queries for older blocks
-struct RangeBlockMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-> {
-    filter_inner: Arc<EthFilterInner<Eth>>,
-    block_range_iter: BlockRangeInclusiveIter,
-    current_headers: Option<Vec<<Eth::Provider as HeaderProvider>::Header>>,
-    current_header_idx: usize,
-}
-
-impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > RangeMode<Eth>
-{
-    /// Creates a new `RangeMode`.
-    fn new(
-        filter_inner: Arc<EthFilterInner<Eth>>,
-        headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
-        from_block: u64,
-        to_block: u64,
-        max_headers_range: u64,
-        chain_tip: u64,
-    ) -> Self {
-        let block_count = to_block - from_block + 1;
-        let distance_from_tip = chain_tip.saturating_sub(to_block);
-
-        // use cached mode for recent blocks (close to chain tip) and small ranges
-        if block_count <= CACHED_MODE_BLOCK_THRESHOLD &&
-            distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
-            !headers.is_empty()
-        {
-            Self::Cached(CachedMode { filter_inner, headers, current_idx: 0 })
-        } else {
-            Self::Range(RangeBlockMode {
-                filter_inner,
-                block_range_iter: BlockRangeInclusiveIter::new(
-                    from_block..=to_block,
-                    max_headers_range,
-                ),
-                current_headers: None,
-                current_header_idx: 0,
-            })
-        }
-    }
-
-    /// Gets the next (receipts, `maybe_block`, header, `block_hash`) tuple.
-    async fn next(
-        &mut self,
-    ) -> Result<
-        Option<(
-            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
-            <Eth::Provider as HeaderProvider>::Header,
-            B256,
-        )>,
-        EthFilterError,
-    > {
-        match self {
-            Self::Cached(cached) => cached.next().await,
-            Self::Range(range) => range.next().await,
-        }
-    }
-}
-
-impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > CachedMode<Eth>
-{
-    async fn next(
-        &mut self,
-    ) -> Result<
-        Option<(
-            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
-            <Eth::Provider as HeaderProvider>::Header,
-            B256,
-        )>,
-        EthFilterError,
-    > {
-        loop {
-            if self.current_idx >= self.headers.len() {
-                return Ok(None);
-            }
-
-            let (_idx, header) = &self.headers[self.current_idx];
-            let header_idx = self.current_idx; // save index before incrementing
-            self.current_idx += 1;
-
-            // calculate block hash
-            let block_hash = if header_idx + 1 < self.headers.len() {
-                // use parent hash of next header to get current header's hash
-                self.headers[header_idx + 1].1.parent_hash()
-            } else {
-                // last header, need to fetch hash from provider
-                self.filter_inner
-                    .provider()
-                    .block_hash(header.number())?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?
-            };
-
-            // try cache first for performance
-            if let Some((receipts, maybe_block)) =
-                self.filter_inner.eth_cache().get_receipts_and_maybe_block(block_hash).await?
-            {
-                return Ok(Some((receipts, maybe_block, header.clone(), block_hash)));
-            }
-
-            // cache miss - fallback to storage to ensure correctness
-            if let Some(receipts) =
-                self.filter_inner.provider().receipts_by_block(block_hash.into())?
-            {
-                let maybe_block = self
-                    .filter_inner
-                    .provider()
-                    .block(block_hash.into())?
-                    .and_then(|block| block.try_into_recovered().ok())
-                    .map(Arc::new);
-
-                return Ok(Some((Arc::new(receipts), maybe_block, header.clone(), block_hash)));
-            }
-        }
-    }
-}
-
-impl<
-        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > RangeBlockMode<Eth>
-{
-    async fn next(
-        &mut self,
-    ) -> Result<
-        Option<(
-            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
-            <Eth::Provider as HeaderProvider>::Header,
-            B256,
-        )>,
-        EthFilterError,
-    > {
-        loop {
-            // if we have current headers to process
-            if let Some(ref headers) = self.current_headers {
-                while self.current_header_idx < headers.len() {
-                    let header = &headers[self.current_header_idx];
-                    self.current_header_idx += 1;
-
-                    // calculate block hash
-                    let block_hash = if self.current_header_idx < headers.len() {
-                        headers[self.current_header_idx].parent_hash()
-                    } else {
-                        self.filter_inner
-                            .provider()
-                            .block_hash(header.number())?
-                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?
-                    };
-
-                    // try cache first for performance
-                    if let Some((receipts, maybe_block)) = self
-                        .filter_inner
-                        .eth_cache()
-                        .get_receipts_and_maybe_block(block_hash)
-                        .await?
-                    {
-                        return Ok(Some((receipts, maybe_block, header.clone(), block_hash)));
-                    }
-
-                    // cache miss - fallback to storage to ensure correctness
-                    if let Some(receipts) =
-                        self.filter_inner.provider().receipts_by_block(block_hash.into())?
-                    {
-                        let maybe_block = self
-                            .filter_inner
-                            .provider()
-                            .block(block_hash.into())?
-                            .and_then(|block| block.try_into_recovered().ok())
-                            .map(Arc::new);
-
-                        return Ok(Some((
-                            Arc::new(receipts),
-                            maybe_block,
-                            header.clone(),
-                            block_hash,
-                        )));
-                    }
-                }
-
-                // finished current batch, reset for next range
-                self.current_headers = None;
-                self.current_header_idx = 0;
-            }
-
-            // get next range
-            if let Some((from, to)) = self.block_range_iter.next() {
-                let headers = self.filter_inner.provider().headers_range(from..=to)?;
-                self.current_headers = Some(headers);
-                self.current_header_idx = 0;
-            } else {
-                return Ok(None);
-            }
-        }
-    }
-}
-
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
@@ -1059,6 +837,228 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
 impl From<ProviderError> for EthFilterError {
     fn from(err: ProviderError) -> Self {
         Self::EthAPIError(err.into())
+    }
+}
+
+/// Represents different modes for processing block ranges when filtering logs
+enum RangeMode<
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+> {
+    /// Use cache-based processing for recent blocks
+    Cached(CachedMode<Eth>),
+    /// Use range-based processing for older blocks
+    Range(RangeBlockMode<Eth>),
+}
+
+/// Mode for processing blocks using cache optimization for recent blocks
+struct CachedMode<
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+> {
+    filter_inner: Arc<EthFilterInner<Eth>>,
+    headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
+    current_idx: usize,
+}
+
+/// Mode for processing blocks using range queries for older blocks
+struct RangeBlockMode<
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+> {
+    filter_inner: Arc<EthFilterInner<Eth>>,
+    block_range_iter: BlockRangeInclusiveIter,
+    current_headers: Option<Vec<<Eth::Provider as HeaderProvider>::Header>>,
+    current_header_idx: usize,
+}
+
+impl<
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    > RangeMode<Eth>
+{
+    /// Creates a new `RangeMode`.
+    fn new(
+        filter_inner: Arc<EthFilterInner<Eth>>,
+        headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
+        from_block: u64,
+        to_block: u64,
+        max_headers_range: u64,
+        chain_tip: u64,
+    ) -> Self {
+        let block_count = to_block - from_block + 1;
+        let distance_from_tip = chain_tip.saturating_sub(to_block);
+
+        // use cached mode for recent blocks (close to chain tip) and small ranges
+        if block_count <= CACHED_MODE_BLOCK_THRESHOLD &&
+            distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
+            !headers.is_empty()
+        {
+            Self::Cached(CachedMode { filter_inner, headers, current_idx: 0 })
+        } else {
+            Self::Range(RangeBlockMode {
+                filter_inner,
+                block_range_iter: BlockRangeInclusiveIter::new(
+                    from_block..=to_block,
+                    max_headers_range,
+                ),
+                current_headers: None,
+                current_header_idx: 0,
+            })
+        }
+    }
+
+    /// Gets the next (receipts, `maybe_block`, header, `block_hash`) tuple.
+    async fn next(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
+            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
+            <Eth::Provider as HeaderProvider>::Header,
+            B256,
+        )>,
+        EthFilterError,
+    > {
+        match self {
+            Self::Cached(cached) => cached.next().await,
+            Self::Range(range) => range.next().await,
+        }
+    }
+}
+
+impl<
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    > CachedMode<Eth>
+{
+    async fn next(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
+            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
+            <Eth::Provider as HeaderProvider>::Header,
+            B256,
+        )>,
+        EthFilterError,
+    > {
+        loop {
+            if self.current_idx >= self.headers.len() {
+                return Ok(None);
+            }
+
+            let (_idx, header) = &self.headers[self.current_idx];
+            let header_idx = self.current_idx; // save index before incrementing
+            self.current_idx += 1;
+
+            // calculate block hash
+            let block_hash = if header_idx + 1 < self.headers.len() {
+                // use parent hash of next header to get current header's hash
+                self.headers[header_idx + 1].1.parent_hash()
+            } else {
+                // last header, need to fetch hash from provider
+                self.filter_inner
+                    .provider()
+                    .block_hash(header.number())?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?
+            };
+
+            // try cache first for performance
+            if let Some((receipts, maybe_block)) =
+                self.filter_inner.eth_cache().get_receipts_and_maybe_block(block_hash).await?
+            {
+                return Ok(Some((receipts, maybe_block, header.clone(), block_hash)));
+            }
+
+            // cache miss - fallback to storage to ensure correctness
+            if let Some(receipts) =
+                self.filter_inner.provider().receipts_by_block(block_hash.into())?
+            {
+                let maybe_block = self
+                    .filter_inner
+                    .provider()
+                    .block(block_hash.into())?
+                    .and_then(|block| block.try_into_recovered().ok())
+                    .map(Arc::new);
+
+                return Ok(Some((Arc::new(receipts), maybe_block, header.clone(), block_hash)));
+            }
+        }
+    }
+}
+
+impl<
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    > RangeBlockMode<Eth>
+{
+    async fn next(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
+            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
+            <Eth::Provider as HeaderProvider>::Header,
+            B256,
+        )>,
+        EthFilterError,
+    > {
+        loop {
+            // if we have current headers to process
+            if let Some(ref headers) = self.current_headers {
+                while self.current_header_idx < headers.len() {
+                    let header = &headers[self.current_header_idx];
+                    self.current_header_idx += 1;
+
+                    // calculate block hash
+                    let block_hash = if self.current_header_idx < headers.len() {
+                        headers[self.current_header_idx].parent_hash()
+                    } else {
+                        self.filter_inner
+                            .provider()
+                            .block_hash(header.number())?
+                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?
+                    };
+
+                    // try cache first for performance
+                    if let Some((receipts, maybe_block)) = self
+                        .filter_inner
+                        .eth_cache()
+                        .get_receipts_and_maybe_block(block_hash)
+                        .await?
+                    {
+                        return Ok(Some((receipts, maybe_block, header.clone(), block_hash)));
+                    }
+
+                    // cache miss - fallback to storage to ensure correctness
+                    if let Some(receipts) =
+                        self.filter_inner.provider().receipts_by_block(block_hash.into())?
+                    {
+                        let maybe_block = self
+                            .filter_inner
+                            .provider()
+                            .block(block_hash.into())?
+                            .and_then(|block| block.try_into_recovered().ok())
+                            .map(Arc::new);
+
+                        return Ok(Some((
+                            Arc::new(receipts),
+                            maybe_block,
+                            header.clone(),
+                            block_hash,
+                        )));
+                    }
+                }
+
+                // finished current batch, reset for next range
+                self.current_headers = None;
+                self.current_header_idx = 0;
+            }
+
+            // get next range
+            if let Some((from, to)) = self.block_range_iter.next() {
+                let headers = self.filter_inner.provider().headers_range(from..=to)?;
+                self.current_headers = Some(headers);
+                self.current_header_idx = 0;
+            } else {
+                return Ok(None);
+            }
+        }
     }
 }
 
