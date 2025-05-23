@@ -263,6 +263,36 @@ impl NewPooledTransactionHashes {
             Self::Eth68(_) => None,
         }
     }
+
+    /// Deduplicates transaction hashes and their associated metadata (for Eth68) by converting them
+    /// into a [`PartiallyValidData`] structure.
+    pub fn dedup(self) -> PartiallyValidData<Option<(u8, usize)>> {
+        match self {
+            Self::Eth66(NewPooledTransactionHashes66(hashes)) => {
+                let mut deduped_data =
+                    HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+                let noop_value: Eth68TxMetadata = None;
+
+                for hash in hashes.into_iter().rev() {
+                    deduped_data.insert(hash, noop_value);
+                }
+
+                PartiallyValidData::from_raw_data_eth66(deduped_data)
+            }
+            Self::Eth68(NewPooledTransactionHashes68 { hashes, mut sizes, mut types }) => {
+                let mut deduped_data =
+                    HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+
+                for hash in hashes.into_iter().rev() {
+                    if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
+                        deduped_data.insert(hash, Some((ty, size)));
+                    }
+                }
+
+                PartiallyValidData::from_raw_data_eth68(deduped_data)
+            }
+        }
+    }
 }
 
 impl<N: NetworkPrimitives> From<NewPooledTransactionHashes> for EthMessage<N> {
