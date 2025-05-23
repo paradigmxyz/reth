@@ -34,7 +34,7 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthereumNode,
     },
-    primitives::{Header, PrimitivesSealedBlock, SealedBlock, SealedHeader},
+    primitives::{Header, PrimitivesSealedBlock, SealedHeader},
     provider::BlockExecutionResult,
     EthPrimitives, Receipt, TransactionSigned,
 };
@@ -144,7 +144,7 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.next_evm_env(parent, attributes)
     }
 
-    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> EthBlockExecutionCtx<'a> {
+    fn context_for_block<'a>(&self, block: &'a PrimitivesSealedBlock) -> EthBlockExecutionCtx<'a> {
         self.inner.context_for_block(block)
     }
 
