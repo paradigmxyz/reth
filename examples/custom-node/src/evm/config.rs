@@ -2,6 +2,7 @@ use crate::{
     evm::{alloy::CustomEvmFactory, CustomBlockAssembler},
     primitives::{Block, CustomHeader, CustomNodePrimitives},
 };
+use alloy_consensus::BlockHeader;
 use alloy_evm::EvmEnv;
 use alloy_op_evm::OpBlockExecutionCtx;
 use op_revm::OpSpecId;
@@ -46,7 +47,11 @@ impl ConfigureEvm for CustomEvmConfig {
     }
 
     fn context_for_block(&self, block: &SealedBlock<Block>) -> OpBlockExecutionCtx {
-        self.inner.context_for_block(block)
+        OpBlockExecutionCtx {
+            parent_hash: block.header().parent_hash(),
+            parent_beacon_block_root: block.header().parent_beacon_block_root(),
+            extra_data: block.header().extra_data().clone(),
+        }
     }
 
     fn context_for_next_block(
@@ -54,6 +59,10 @@ impl ConfigureEvm for CustomEvmConfig {
         parent: &SealedHeader<CustomHeader>,
         attributes: Self::NextBlockEnvCtx,
     ) -> OpBlockExecutionCtx {
-        self.inner.context_for_next_block(parent, attributes)
+        OpBlockExecutionCtx {
+            parent_hash: parent.hash(),
+            parent_beacon_block_root: attributes.parent_beacon_block_root,
+            extra_data: attributes.extra_data,
+        }
     }
 }
