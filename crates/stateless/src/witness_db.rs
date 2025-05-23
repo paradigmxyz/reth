@@ -1,19 +1,17 @@
 //! Provides the [`WitnessDatabase`] type, an implementation of [`reth_revm::Database`]
 //! specifically designed for stateless execution environments.
 
+use crate::trie::StatelessTrie;
 use alloc::{collections::btree_map::BTreeMap, format};
-use alloy_primitives::{keccak256, map::B256Map, Address, B256, U256};
-use alloy_rlp::Decodable;
-use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
+use alloy_primitives::{map::B256Map, Address, B256, U256};
 use reth_errors::ProviderError;
 use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
-use reth_trie_sparse::SparseStateTrie;
 
 /// An EVM database implementation backed by witness data.
 ///
 /// This struct implements the [`reth_revm::Database`] trait, allowing the EVM to execute
 /// transactions using:
-///  - Account and storage slot data provided by a [`reth_trie_sparse::SparseStateTrie`].
+///  - Account and storage slot data provided by a [`StatelessTrie`].
 ///  - Bytecode and ancestor block hashes provided by in-memory maps.
 ///
 /// This is designed for stateless execution scenarios where direct access to a full node's
@@ -34,7 +32,7 @@ pub(crate) struct WitnessDatabase<'a> {
     /// TODO: Ideally we do not have this trie and instead a simple map.
     /// TODO: Then as a corollary we can avoid unnecessary hashing in `Database::storage`
     /// TODO: and `Database::basic` without needing to cache the hashed Addresses and Keys
-    trie: &'a SparseStateTrie,
+    trie: &'a StatelessTrie,
 }
 
 impl<'a> WitnessDatabase<'a> {
@@ -52,7 +50,7 @@ impl<'a> WitnessDatabase<'a> {
     ///    contiguous chain of blocks. The caller is responsible for verifying the contiguity and
     ///    the block limit.
     pub(crate) const fn new(
-        trie: &'a SparseStateTrie,
+        trie: &'a StatelessTrie,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: BTreeMap<u64, B256>,
     ) -> Self {
@@ -65,27 +63,18 @@ impl Database for WitnessDatabase<'_> {
     type Error = ProviderError;
 
     /// Get basic account information by hashing the address and looking up the account RLP
-    /// in the underlying [`SparseStateTrie`].
+    /// in the underlying [`StatelessTrie`].
     ///
     /// Returns `Ok(None)` if the account is not found in the trie.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        let hashed_address = keccak256(address);
-
-        if let Some(bytes) = self.trie.get_account_value(&hashed_address) {
-            let account = TrieAccount::decode(&mut bytes.as_slice())?;
+        if let Some(account) = self.trie.account(address)? {
             return Ok(Some(AccountInfo {
                 balance: account.balance,
                 nonce: account.nonce,
                 code_hash: account.code_hash,
                 code: None,
             }));
-        }
-
-        if !self.trie.check_valid_account_witness(hashed_address) {
-            return Err(ProviderError::TrieWitnessError(format!(
-                "incomplete account witness for {hashed_address:?}"
-            )));
-        }
+        };
 
         Ok(None)
     }
@@ -94,35 +83,7 @@ impl Database for WitnessDatabase<'_> {
     ///
     /// Returns `U256::ZERO` if the slot is not found in the trie.
     fn storage(&mut self, address: Address, slot: U256) -> Result<U256, Self::Error> {
-        let hashed_address = keccak256(address);
-        let hashed_slot = keccak256(B256::from(slot));
-
-        if let Some(raw) = self.trie.get_storage_slot_value(&hashed_address, &hashed_slot) {
-            return Ok(U256::decode(&mut raw.as_slice())?)
-        }
-
-        // Storage slot value is not present in the trie, validate that the witness is complete.
-        // If the account exists in the trie...
-        if let Some(bytes) = self.trie.get_account_value(&hashed_address) {
-            // ...check that its storage is either empty or the storage trie was sufficiently
-            // revealed...
-            let account = TrieAccount::decode(&mut bytes.as_slice())?;
-            if account.storage_root != EMPTY_ROOT_HASH &&
-                !self.trie.check_valid_storage_witness(hashed_address, hashed_slot)
-            {
-                return Err(ProviderError::TrieWitnessError(format!(
-                    "incomplete storage witness: prover must supply exclusion proof for slot {hashed_slot:?} in account {hashed_address:?}"
-                )));
-            }
-        } else if !self.trie.check_valid_account_witness(hashed_address) {
-            // ...else if account is missing, validate that the account trie was sufficiently
-            // revealed.
-            return Err(ProviderError::TrieWitnessError(format!(
-                "incomplete account witness for {hashed_address:?}"
-            )));
-        }
-
-        Ok(U256::ZERO)
+        self.trie.storage(address, slot)
     }
 
     /// Get account code by its hash from the provided bytecode map.
