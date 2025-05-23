@@ -1,7 +1,7 @@
 use crate::{
     evm::{
         alloy::{CustomEvm, CustomEvmFactory},
-        CustomEvmConfig, CustomEvmTransaction,
+        CustomEvmConfig, CustomTxEnv,
     },
     primitives::CustomTransaction,
 };
@@ -27,7 +27,7 @@ pub struct CustomBlockExecutor<Evm> {
 impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = CustomEvmTransaction>,
+    E: Evm<DB = &'db mut State<DB>, Tx = CustomTxEnv>,
 {
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
