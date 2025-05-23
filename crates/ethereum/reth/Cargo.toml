@@ -46,6 +46,7 @@ reth-node-ethereum = { workspace = true, optional = true }
 
 # alloy
 alloy-rpc-types-eth = { workspace = true, optional = true }
+alloy-rpc-types.workspace = true
 
 [features]
 default = ["std"]

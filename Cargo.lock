@@ -7974,6 +7974,7 @@ dependencies = [
 name = "reth-ethereum"
 version = "1.4.3"
 dependencies = [
+ "alloy-rpc-types",
  "alloy-rpc-types-eth",
  "reth-chainspec",
  "reth-consensus",

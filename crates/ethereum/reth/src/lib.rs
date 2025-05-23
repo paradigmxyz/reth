@@ -134,4 +134,8 @@ pub mod rpc {
         #[doc(inline)]
         pub use reth_rpc_eth_types::*;
     }
+    /// Re-exported from `alloy_rpc_types`.
+    pub mod types {
+        pub use alloy_rpc_types::*;
+    }
 }
