@@ -10491,6 +10491,58 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-zk-ress-protocol"
+version = "1.4.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "alloy-rlp",
+ "arbitrary",
+ "futures",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "reth-eth-wire",
+ "reth-ethereum-primitives",
+ "reth-network",
+ "reth-network-api",
+ "reth-provider",
+ "reth-storage-errors",
+ "reth-tracing",
+ "reth-zk-ress-protocol",
+ "strum 0.27.1",
+ "strum_macros 0.27.1",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+]
+
+[[package]]
+name = "reth-zk-ress-provider"
+version = "1.4.3"
+dependencies = [
+ "alloy-consensus",
+ "alloy-primitives",
+ "eyre",
+ "futures",
+ "parking_lot",
+ "reth-chain-state",
+ "reth-errors",
+ "reth-ethereum-primitives",
+ "reth-evm",
+ "reth-node-api",
+ "reth-primitives-traits",
+ "reth-revm",
+ "reth-storage-api",
+ "reth-tasks",
+ "reth-tokio-util",
+ "reth-trie",
+ "reth-zk-ress-protocol",
+ "schnellru",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-zstd-compressors"
 version = "1.4.3"
 dependencies = [

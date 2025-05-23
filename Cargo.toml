@@ -134,6 +134,8 @@ members = [
     "crates/trie/parallel/",
     "crates/trie/sparse",
     "crates/trie/trie",
+    "crates/zk-ress/protocol",
+    "crates/zk-ress/provider",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -443,6 +445,8 @@ reth-trie-sparse = { path = "crates/trie/sparse", default-features = false }
 reth-zstd-compressors = { path = "crates/storage/zstd-compressors", default-features = false }
 reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
+reth-zk-ress-protocol = { path = "crates/zk-ress/protocol" }
+reth-zk-ress-provider = { path = "crates/zk-ress/provider" }
 
 # revm
 revm = { version = "23.1.0", default-features = false }
