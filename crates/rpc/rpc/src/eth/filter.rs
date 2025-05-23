@@ -61,44 +61,40 @@ const CACHED_MODE_BLOCK_THRESHOLD: u64 = 100;
 
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
-    'a,
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     /// Use cache-based processing for recent blocks
-    Cached(CachedMode<'a, Eth>),
+    Cached(CachedMode<Eth>),
     /// Use range-based processing for older blocks
-    Range(RangeBlockMode<'a, Eth>),
+    Range(RangeBlockMode<Eth>),
 }
 
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
-    'a,
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
-    filter_inner: &'a EthFilterInner<Eth>,
+    filter_inner: Arc<EthFilterInner<Eth>>,
     headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
     current_idx: usize,
 }
 
 /// Mode for processing blocks using range queries for older blocks
 struct RangeBlockMode<
-    'a,
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
-    filter_inner: &'a EthFilterInner<Eth>,
+    filter_inner: Arc<EthFilterInner<Eth>>,
     block_range_iter: BlockRangeInclusiveIter,
     current_headers: Option<Vec<<Eth::Provider as HeaderProvider>::Header>>,
     current_header_idx: usize,
 }
 
 impl<
-        'a,
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > RangeMode<'a, Eth>
+    > RangeMode<Eth>
 {
     /// Creates a new `RangeMode`.
     fn new(
-        filter_inner: &'a EthFilterInner<Eth>,
+        filter_inner: Arc<EthFilterInner<Eth>>,
         headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
         from_block: u64,
         to_block: u64,
@@ -147,9 +143,8 @@ impl<
 }
 
 impl<
-        'a,
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > CachedMode<'a, Eth>
+    > CachedMode<Eth>
 {
     async fn next(
         &mut self,
@@ -208,9 +203,8 @@ impl<
 }
 
 impl<
-        'a,
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-    > RangeBlockMode<'a, Eth>
+    > RangeBlockMode<Eth>
 {
     async fn next(
         &mut self,
@@ -785,7 +779,7 @@ where
     /// Returns an error if:
     ///  - underlying database error
     async fn get_logs_in_block_range_inner(
-        &self,
+        self: Arc<Self>,
         filter: &Filter,
         from_block: u64,
         to_block: u64,
@@ -813,7 +807,7 @@ where
 
         // initialize the appropriate range mode based on collected headers
         let mut range_mode = RangeMode::new(
-            self,
+            self.clone(),
             matching_headers,
             from_block,
             to_block,
