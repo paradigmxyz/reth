@@ -26,7 +26,6 @@ use reth_ethereum::{
             MainBuilder, MainContext,
         },
     },
-    tasks::TaskManager,
     node::{
         api::{FullNodeTypes, NodeTypes},
         builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
@@ -35,6 +34,7 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthEvmConfig, EthereumNode,
     },
+    tasks::TaskManager,
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
