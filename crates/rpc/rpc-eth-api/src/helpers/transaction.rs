@@ -6,7 +6,10 @@ use crate::{
     helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
     RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
 };
-use alloy_consensus::{transaction::TransactionMeta, BlockHeader, Transaction};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TransactionMeta},
+    BlockHeader, Transaction,
+};
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::TransactionBuilder;
@@ -15,12 +18,12 @@ use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, Tra
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
-use reth_provider::{
+use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
+use reth_rpc_types_compat::transaction::TransactionCompat;
+use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
-use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
-use reth_rpc_types_compat::transaction::TransactionCompat;
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
@@ -483,7 +486,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                             // part of pending block) and already. We don't need to
                             // check for pre EIP-2 because this transaction could be pre-EIP-2.
                             let transaction = tx
-                                .into_recovered_unchecked()
+                                .try_into_recovered_unchecked()
                                 .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
                             let tx = TransactionSource::Block {
