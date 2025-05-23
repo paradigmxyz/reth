@@ -8,7 +8,6 @@ use std::sync::Arc;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures_util::StreamExt;
-use reth::tasks::TaskManager;
 use reth_ethereum::{
     chainspec::ChainSpec,
     node::{
@@ -18,6 +17,7 @@ use reth_ethereum::{
     },
     provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,
+    tasks::TaskManager,
 };
 
 #[tokio::main]

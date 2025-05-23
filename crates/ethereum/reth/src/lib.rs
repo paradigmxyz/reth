@@ -117,6 +117,7 @@ pub mod trie {
 /// Re-exported rpc types
 #[cfg(feature = "rpc")]
 pub mod rpc {
+    pub use reth_rpc::eth::core::EthApiFor;
     #[doc(inline)]
     pub use reth_rpc::*;
 
