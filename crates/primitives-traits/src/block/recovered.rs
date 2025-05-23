@@ -288,7 +288,7 @@ impl<B: Block> RecoveredBlock<B> {
         &self,
         idx: usize,
     ) -> Option<Recovered<&<B::Body as BlockBody>::Transaction>> {
-        let sender = self.senders.get(idx).cloned()?;
+        let sender = self.senders.get(idx).copied()?;
         self.block.body().transactions().get(idx).map(|tx| Recovered::new_unchecked(tx, sender))
     }
 
