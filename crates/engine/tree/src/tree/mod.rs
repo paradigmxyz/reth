@@ -2104,7 +2104,7 @@ where
             let trie_input_start = Instant::now();
             let res = self.compute_trie_input(
                 persisting_kind,
-                ensure_ok!(consistent_view.provider_ro()),
+                consistent_view.clone(),
                 block.header().parent_hash(),
             );
             let trie_input = match res {
@@ -2230,18 +2230,8 @@ where
             // fallback is to compute the state root regularly in sync
             warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
             self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
-            let res = self.compute_trie_input(
-                persisting_kind,
-                ensure_ok!(self.provider.database_provider_ro()),
-                block.header().parent_hash(),
-            );
-            let trie_input = match res {
-                Ok(val) => val,
-                Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
-            };
-
             let (root, updates) =
-                ensure_ok!(state_provider.state_root_from_nodes_with_updates(trie_input));
+                ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
             (root, updates, root_time.elapsed())
         };
 
@@ -2357,7 +2347,7 @@ where
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
         let mut input =
-            self.compute_trie_input(persisting_kind, consistent_view.provider_ro()?, parent_hash)?;
+            self.compute_trie_input(persisting_kind, consistent_view.clone(), parent_hash)?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
@@ -2382,11 +2372,12 @@ where
     fn compute_trie_input(
         &self,
         persisting_kind: PersistingKind,
-        provider: P::Provider,
+        consistent_view: ConsistentDbView<P>,
         parent_hash: B256,
     ) -> Result<TrieInput, ParallelStateRootError> {
         let mut input = TrieInput::default();
 
+        let provider = consistent_view.provider_ro()?;
         let best_block_number = provider.best_block_number()?;
 
         let (mut historical, mut blocks) = self
