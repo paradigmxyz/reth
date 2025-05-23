@@ -1,5 +1,7 @@
 // Reth block related imports
-use reth_ethereum::{provider::BlockReaderIdExt, rpc::eth::EthResult, Block};
+use reth_ethereum::{
+    primitives::RethPrimitiveBlock, provider::BlockReaderIdExt, rpc::eth::EthResult,
+};
 
 // Rpc related imports
 use jsonrpsee::proc_macros::rpc;
@@ -21,7 +23,7 @@ pub struct MyRpcExt<Provider> {
 
 impl<Provider> MyRpcExtApiServer for MyRpcExt<Provider>
 where
-    Provider: BlockReaderIdExt<Block = reth_ethereum::primitives::Block> + 'static,
+    Provider: BlockReaderIdExt<Block = reth_ethreum::primitives::RethPrimitiveBlock> + 'static,
 {
     /// Showcasing how to implement a custom rpc method
     /// using the provider.

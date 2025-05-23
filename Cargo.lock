@@ -7994,6 +7994,7 @@ dependencies = [
  "reth-node-builder",
  "reth-node-core",
  "reth-node-ethereum",
+ "reth-primitives",
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",

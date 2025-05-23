@@ -16,6 +16,8 @@ pub use reth_ethereum_primitives::*;
 /// Re-exported reth primitives
 pub mod primitives {
     #[doc(inline)]
+    pub use reth_primitives::Block as RethPrimitiveBlock;
+    #[doc(inline)]
     pub use reth_primitives_traits::*;
 }
 
