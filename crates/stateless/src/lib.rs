@@ -35,7 +35,8 @@
 
 extern crate alloc;
 
-pub(crate) mod root;
+/// Sparse trie implementation for stateless validation
+pub mod trie;
 /// Implementation of stateless validation
 pub mod validation;
 pub(crate) mod witness_db;

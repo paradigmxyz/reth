@@ -194,9 +194,67 @@ impl BlobStore for DiskFileBlobStore {
 
     fn get_by_versioned_hashes_v2(
         &self,
-        _versioned_hashes: &[B256],
+        versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
-        Ok(None)
+        // we must return the blobs in order but we don't necessarily find them in the requested
+        // order
+        let mut result = vec![None; versioned_hashes.len()];
+
+        // first scan all cached full sidecars
+        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
+            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
+                for (hash_idx, match_result) in
+                    blob_sidecar.match_versioned_hashes(versioned_hashes)
+                {
+                    result[hash_idx] = Some(match_result);
+                }
+            }
+
+            // return early if all blobs are found.
+            if result.iter().all(|blob| blob.is_some()) {
+                // got all blobs, can return early
+                return Ok(Some(result.into_iter().map(Option::unwrap).collect()))
+            }
+        }
+
+        // not all versioned hashes were found, try to look up a matching tx
+        let mut missing_tx_hashes = Vec::new();
+
+        {
+            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
+            for (idx, _) in
+                result.iter().enumerate().filter(|(_, blob_and_proof)| blob_and_proof.is_none())
+            {
+                // this is safe because the result vec has the same len
+                let versioned_hash = versioned_hashes[idx];
+                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
+                    missing_tx_hashes.push(tx_hash);
+                }
+            }
+        }
+
+        // if we have missing blobs, try to read them from disk and try again
+        if !missing_tx_hashes.is_empty() {
+            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
+            for (_, blob_sidecar) in blobs_from_disk {
+                if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
+                    for (hash_idx, match_result) in
+                        blob_sidecar.match_versioned_hashes(versioned_hashes)
+                    {
+                        if result[hash_idx].is_none() {
+                            result[hash_idx] = Some(match_result);
+                        }
+                    }
+                }
+            }
+        }
+
+        // only return the blobs if we found all requested versioned hashes
+        if result.iter().all(|blob| blob.is_some()) {
+            Ok(Some(result.into_iter().map(Option::unwrap).collect()))
+        } else {
+            Ok(None)
+        }
     }
 
     fn data_size_hint(&self) -> Option<usize> {

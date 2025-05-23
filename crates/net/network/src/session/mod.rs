@@ -34,8 +34,9 @@ use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
-    Capabilities, DisconnectReason, EthStream, EthVersion, HelloMessageWithProtocols,
-    NetworkPrimitives, UnauthedP2PStream, UnifiedStatus, HANDSHAKE_TIMEOUT,
+    BlockRangeUpdate, Capabilities, DisconnectReason, EthStream, EthVersion,
+    HelloMessageWithProtocols, NetworkPrimitives, UnauthedP2PStream, UnifiedStatus,
+    HANDSHAKE_TIMEOUT,
 };
 use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -648,6 +649,15 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 }
             }
         }
+    }
+
+    pub(crate) const fn update_advertised_block_range(
+        &mut self,
+        block_range_update: BlockRangeUpdate,
+    ) {
+        self.status.earliest_block = Some(block_range_update.earliest);
+        self.status.latest_block = Some(block_range_update.latest);
+        self.status.blockhash = block_range_update.latest_hash;
     }
 }
 
