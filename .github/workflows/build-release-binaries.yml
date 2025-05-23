@@ -31,7 +31,6 @@ jobs:
           - target: riscv64gc-unknown-linux-gnu
             os: ubuntu-24.04
             profile: maxperf
-	    
         build:
           - command: build
             binary: reth
