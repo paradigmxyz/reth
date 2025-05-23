@@ -37,7 +37,7 @@ fn main() {
             let NodeHandle { node, node_exit_future } =
                 builder.node(EthereumNode::default()).launch().await?;
 
-            let notifications: reth::providers::CanonStateNotificationStream =
+            let notifications: reth_ethereum::provider::CanonStateNotificationStream =
                 node.provider.canonical_state_stream();
 
             let pool = node.pool.clone();
