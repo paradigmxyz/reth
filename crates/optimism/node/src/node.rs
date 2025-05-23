@@ -774,13 +774,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
 
 impl<Node, Pool, Txs, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for OpPayloadBuilder<Txs>
 where
-    Node: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-        >,
-    >,
+    Node: FullNodeTypes,
     Evm: ConfigureEvm<
             Primitives = PrimitivesTy<Node::Types>,
             NextBlockEnvCtx = OpNextBlockEnvAttributes,
