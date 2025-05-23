@@ -296,7 +296,7 @@ pub(crate) async fn call_new_payload<N, P: EngineApiValidWaitExt<N>>(
 ) -> TransportResult<EngineApiMessageVersion> {
     match payload {
         ExecutionPayload::V3(payload) => {
-            // We expect the caller
+            // We expect the caller to provide `parent_beacon_block_root` for V3 payloads.
             let parent_beacon_block_root = parent_beacon_block_root
                 .expect("parent_beacon_block_root is required for V3 payloads and higher");
 
