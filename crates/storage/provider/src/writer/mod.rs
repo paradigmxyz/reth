@@ -242,7 +242,7 @@ mod tests {
         test_utils::{state_root, storage_root_prehashed},
         HashedPostState, HashedStorage, StateRoot, StorageRoot,
     };
-    use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
+    use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, StateRootFromTx};
     use revm_database::{
         states::{
             bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
@@ -1117,11 +1117,9 @@ mod tests {
 
         let assert_state_root = |state: &State<EmptyDB>, expected: &PreState, msg| {
             assert_eq!(
-                StateRoot::overlay_root(
-                    tx,
-                    provider_factory.hashed_post_state(&state.bundle_state)
-                )
-                .unwrap(),
+                StateRoot::from_tx(tx)
+                    .overlay_root(provider_factory.hashed_post_state(&state.bundle_state))
+                    .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (
                     address,
                     (account, storage.into_iter())
