@@ -3,30 +3,22 @@ use core::{
     ops::{Bound, RangeBounds},
 };
 
-use alloy_primitives::U256;
 use reth_trie_common::Nibbles;
+use ruint::aliases::U256;
 
-static SLICE_MASKS: [U256; 65] = {
-    const fn shr(input: U256, rhs: usize) -> U256 {
-        let (limbs, bits) = (rhs / 64, rhs % 64);
-        let input_limbs = input.into_limbs();
-        let word_bits = 64;
-        let mut result_limbs = U256::ZERO.into_limbs();
-        let mut carry = 0;
-        let mut i = 0;
-        while i < U256::LIMBS - limbs {
-            let x = input_limbs[U256::LIMBS - 1 - i];
-            result_limbs[U256::LIMBS - 1 - i - limbs] = (x >> bits) | carry;
-            carry = (x << (word_bits - bits - 1)) << 1;
-            i += 1;
-        }
-        U256::from_limbs(result_limbs)
-    }
-
+/// This array contains 65 bitmasks used in [`PackedNibbles::slice`].
+///
+/// Each mask is a [`U256`] where:
+/// - Index 0 is just 0 (no bits set)
+/// - Index 1 has the lowest 4 bits set (one nibble)
+/// - Index 2 has the lowest 8 bits set (two nibbles)
+/// - ...and so on
+/// - Index 64 has all bits set ([`U256::MAX`])
+const SLICE_MASKS: [U256; 65] = {
     let mut masks = [U256::ZERO; 65];
     let mut i = 0;
     while i <= 64 {
-        masks[i] = if i == 64 { U256::MAX } else { shr(U256::MAX, 256 - (i * 4)) };
+        masks[i] = U256::MAX.wrapping_shr(256 - i * 4);
         i += 1;
     }
     masks
@@ -74,17 +66,17 @@ impl From<PackedNibbles> for Nibbles {
 }
 
 impl PackedNibbles {
+    pub const fn new() -> Self {
+        Self { nibbles: U256::ZERO, length: 0 }
+    }
+
     /// Creates a new `PackedNibbles` instance from an iterator of nibbles.
     ///
     /// Each item in the iterator should be a nibble (0-15).
     pub fn from_nibbles(nibbles: impl IntoIterator<Item = u8>) -> Self {
-        let mut nibbles = nibbles.into_iter().peekable();
         let mut packed = Self::default();
-        while let Some(nibble) = nibbles.next() {
-            packed.nibbles |= U256::from(nibble);
-            if nibbles.peek().is_some() {
-                packed.nibbles <<= 4;
-            }
+        for nibble in nibbles {
+            packed.nibbles = (packed.nibbles << 4) | U256::from(nibble & 0x0F);
             packed.length += 1
         }
         packed
@@ -93,7 +85,10 @@ impl PackedNibbles {
     /// Creates a new `PackedNibbles` instance from an iterator of nibbles without checking bounds.
     ///
     /// Each item in the iterator should be a nibble (0-15).
-    /// This function is essentially identical to `from_nibbles` but is kept for API compatibility.
+    ///
+    /// NOTE: This function is essentially identical to `from_nibbles`, but is kept for API
+    /// compatibility.
+    #[inline(always)]
     pub fn from_nibbles_unchecked(nibbles: impl IntoIterator<Item = u8>) -> Self {
         Self::from_nibbles(nibbles)
     }
@@ -115,40 +110,45 @@ impl PackedNibbles {
         }
     }
 
+    /// Returns the total number of bits in this [`PackedNibbles`].
+    #[inline(always)]
     const fn bit_len(&self) -> usize {
         self.length as usize * 4
     }
 
     /// Returns `true` if this [`PackedNibbles`] is empty.
+    #[inline(always)]
     pub const fn is_empty(&self) -> bool {
         self.length == 0
     }
 
     /// Returns the total number of nibbles in this [`PackedNibbles`].
+    #[inline(always)]
     pub const fn len(&self) -> usize {
         self.length as usize
     }
 
     /// Returns a slice of the underlying bytes.
+    #[inline(always)]
     pub const fn as_slice(&self) -> &[u8] {
         self.nibbles.as_le_slice()
     }
 
     /// Gets the nibble at the given position.
+    ///
     /// # Panics
     ///
-    /// Panics if the position is out of bounds.
+    /// If the position is out of bounds.
     pub const fn get_nibble(&self, pos: usize) -> u8 {
-        let byte_pos = pos / 2;
-        let byte = self.nibbles.byte(byte_pos);
+        debug_assert!(pos < self.len());
 
-        if pos % 2 == 0 {
-            // For even positions, return the high nibble
-            (byte & 0xF0) >> 4
-        } else {
-            // For odd positions, return the low nibble
-            byte & 0x0F
-        }
+        // How far from the most-significant nibble?
+        let pos_from_back = self.len() - 1 - pos; // 0-based from MSB
+        let limb = pos_from_back / 16; // 16 nibbles per u64 limb
+        let offset = (pos_from_back & 0xF) * 4; // Offset bits within that limb, so we get the one we're interested in
+
+        let word = self.nibbles.as_limbs()[limb];
+        ((word >> offset) & 0xF) as u8
     }
 
     /// Returns the last nibble in this [`PackedNibbles`], or `None` if empty.
@@ -182,8 +182,25 @@ impl PackedNibbles {
     }
 
     /// Returns the length of the common prefix between this [`PackedNibbles`] and `other`.
-    pub fn common_prefix_length(&self, other: &Self) -> usize {
-        // Calculate the max bit length of two U256s
+    pub const fn common_prefix_length(&self, other: &Self) -> usize {
+        const fn count_equal_nibbles(self_limb: u64, other_limb: u64) -> usize {
+            // Pad both limbs with trailing zeros to the same effective length
+            let lhs_bit_len = u64::BITS - self_limb.leading_zeros(); // Effective bit length of the left limb
+            let rhs_bit_len = u64::BITS - other_limb.leading_zeros(); // Effective bit length of the right limb
+            let diff = lhs_bit_len as isize - rhs_bit_len as isize; // Difference in bit lengths
+            let (lhs, rhs) = if diff < 0 {
+                (self_limb << -diff, other_limb)
+            } else {
+                (self_limb, other_limb << diff)
+            }; // Pad one of the limbs
+
+            // Count equal leading bits
+            let lz_or = (lhs | rhs).leading_zeros(); // Leading zeros common to both limbs
+            let skip = lz_or & !0b11u32; // Leading zeros common to both limbs, rounded down to the nearest nibble
+            let lz_xor = (lhs ^ rhs).leading_zeros(); // Leading bits common to both limbs
+            (lz_xor - skip) as usize / 4
+        }
+
         let self_bit_len = self.bit_len();
         let other_bit_len = other.bit_len();
 
@@ -191,23 +208,62 @@ impl PackedNibbles {
             return 0
         }
 
-        if self_bit_len == other_bit_len && self.nibbles == other.nibbles {
-            return self_bit_len / 4;
+        let min_bit_len = if self_bit_len < other_bit_len { self_bit_len } else { other_bit_len };
+
+        // How many whole limbs of the shorter key are there?
+        let full_limbs = min_bit_len / 64;
+
+        let self_limbs = self.nibbles.as_limbs();
+        let other_limbs = other.nibbles.as_limbs();
+        let mut common_nibbles = 0;
+
+        // Walk from MS-limb to LS-limb
+        let mut i = full_limbs;
+        while i > 0 {
+            i -= 1;
+            if self_limbs[i] == other_limbs[i] {
+                common_nibbles += 16;
+            } else {
+                // First differing limb – count equal nibbles inside it
+                common_nibbles += count_equal_nibbles(self_limbs[i], other_limbs[i]);
+                return common_nibbles;
+            }
         }
 
-        // align the shorter U256
-        let diff = self_bit_len as isize - other_bit_len as isize;
-        let (lhs, rhs, max_bits) = if diff < 0 {
-            (self.nibbles << -diff, other.nibbles, other_bit_len)
-        } else {
-            (self.nibbles, other.nibbles << diff, self_bit_len)
-        };
+        if min_bit_len % 64 == 0 {
+            return common_nibbles;
+        }
 
-        // count equal leading bits
-        let leading = (lhs ^ rhs).leading_zeros().saturating_sub(U256::BITS - max_bits);
+        common_nibbles + count_equal_nibbles(self_limbs[0], other_limbs[0])
+    }
 
-        // clamp to the shorter of two sequences and convert to nibbles
-        leading.min(self_bit_len.min(other_bit_len)) / 4
+    /// Creates a new [`PackedNibbles`] containing the nibbles in the specified range `[start, end)`
+    /// without checking bounds.
+    ///
+    /// # Safety
+    ///
+    /// This method does not verify that the provided range is valid for this [`PackedNibbles`].
+    /// The caller must ensure that `start <= end` and `end <= self.len()`.
+    pub const fn slice_unchecked(&self, start: usize, end: usize) -> Self {
+        // Fast path for empty slice
+        if start == end {
+            return Self::new();
+        }
+
+        // Fast path for full slice
+        if start == 0 && end == self.len() {
+            return *self;
+        }
+
+        let nibble_len = end - start;
+
+        // Shift so that the first requested nibble becomes the *least* significant one,
+        // then mask out everything to the left of the slice.
+        let shift = (self.len() - end) * 4;
+        let shifted = self.nibbles.wrapping_shr(shift);
+        let nibbles = shifted.bitand(SLICE_MASKS[nibble_len]);
+
+        Self { length: nibble_len as u8, nibbles }
     }
 
     /// Creates a new [`PackedNibbles`] containing the nibbles in the specified range.
@@ -217,7 +273,6 @@ impl PackedNibbles {
     /// This method will panic if the range is out of bounds for this [`PackedNibbles`].
     pub fn slice(&self, range: impl RangeBounds<usize>) -> Self {
         // Determine the start and end nibble indices from the range bounds
-        let len = self.len();
         let start = match range.start_bound() {
             Bound::Included(&idx) => idx,
             Bound::Excluded(&idx) => idx + 1,
@@ -226,29 +281,11 @@ impl PackedNibbles {
         let end = match range.end_bound() {
             Bound::Included(&idx) => idx + 1,
             Bound::Excluded(&idx) => idx,
-            Bound::Unbounded => len,
+            Bound::Unbounded => self.len(),
         };
-        assert!(start <= end && end <= len);
+        assert!(start <= end && end <= self.len());
 
-        // Fast path for empty slice
-        if start == end {
-            return Self::default();
-        }
-
-        // Fast path for full slice
-        if start == 0 && end == len {
-            return *self;
-        }
-
-        let nibble_len = end - start;
-
-        let shift_right_bits = len * 4 - end * 4;
-        let shifted = self.nibbles >> shift_right_bits;
-
-        let bit_len = nibble_len * 4;
-        let nibbles = if bit_len == 256 { shifted } else { shifted & SLICE_MASKS[nibble_len] };
-
-        Self { length: nibble_len as u8, nibbles }
+        self.slice_unchecked(start, end)
     }
 
     /// Pushes a single nibble to the end of the nibbles.
@@ -257,30 +294,29 @@ impl PackedNibbles {
     /// will be pushed.
     ///
     /// NOTE: if there is data in the high nibble, it will be ignored.
-    pub fn push_unchecked(&mut self, nibble: u8) {
+    pub const fn push_unchecked(&mut self, nibble: u8) {
         if self.length > 0 {
-            self.nibbles <<= 4;
+            self.nibbles = self.nibbles.wrapping_shr(4);
         }
-        self.nibbles |= U256::from(nibble & 0x0F);
+        self.nibbles = self.nibbles.bitor(U256::from_limbs([(nibble & 0x0F) as u64, 0, 0, 0]));
         self.length += 1;
     }
 
     /// Extends this [`PackedNibbles`] with the given [`PackedNibbles`].
-    pub fn extend_path(&mut self, other: &Self) {
+    pub const fn extend_path(&mut self, other: &Self) {
         if other.is_empty() {
-            // If `other` is empty, we can just return
             return;
         }
 
-        self.nibbles <<= other.bit_len();
-        self.nibbles |= other.nibbles;
+        self.nibbles = self.nibbles.wrapping_shl(other.bit_len()).bitor(other.nibbles);
         self.length += other.length;
     }
 
     /// Truncates this [`PackedNibbles`] to the specified length.
-    pub fn truncate(&mut self, new_len: usize) {
+    pub const fn truncate(&mut self, new_len: usize) {
         self.length = new_len as u8;
-        self.nibbles &= (U256::from(1) << new_len) - U256::from(1);
+        // self.nibbles &= 1 << (new_len - 1);
+        self.nibbles = self.nibbles.bitand(U256::ONE.wrapping_shl(new_len).wrapping_sub(U256::ONE));
     }
 }
 
@@ -291,7 +327,6 @@ mod tests {
     #[test]
     fn test_packed_nibles_from_nibbles() {
         let a = PackedNibbles::from_nibbles([1, 2, 3]);
-        println!("{:0width$b}", a.nibbles, width = a.bit_len());
         assert_eq!(format!("{a:?}"), "PackedNibbles(0x123)")
     }
 
@@ -499,5 +534,32 @@ mod tests {
         let o = PackedNibbles::from_nibbles([1, 2, 3, 4]);
         assert_eq!(o.common_prefix_length(&empty), 0);
         assert_eq!(empty.common_prefix_length(&o), 0);
+
+        // Test with longer sequences (16 nibbles)
+        let p = PackedNibbles::from_nibbles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]);
+        let q = PackedNibbles::from_nibbles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 1]);
+        assert_eq!(p.common_prefix_length(&q), 15);
+        assert_eq!(q.common_prefix_length(&p), 15);
+
+        // Test with different lengths but same prefix (32 vs 16 nibbles)
+        let r = PackedNibbles::from_nibbles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0]);
+        let s = PackedNibbles::from_nibbles([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15, 0,
+        ]);
+        assert_eq!(r.common_prefix_length(&s), 16);
+        assert_eq!(s.common_prefix_length(&r), 16);
+
+        // Test with very long sequences (32 nibbles) with different endings
+        let t = PackedNibbles::from_nibbles([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15, 0,
+        ]);
+        let u = PackedNibbles::from_nibbles([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15, 1,
+        ]);
+        assert_eq!(t.common_prefix_length(&u), 31);
+        assert_eq!(u.common_prefix_length(&t), 31);
     }
 }

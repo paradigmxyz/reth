@@ -133,7 +133,7 @@ fn bench_slice(c: &mut Criterion) {
     group
         .bench_function("Nibbles", |b| b.iter(|| black_box(&nybbles).slice(black_box(start..end))));
     group.bench_function("PackedNibbles", |b| {
-        b.iter(|| black_box(&packed_nibbles).slice(black_box(start..end)))
+        b.iter(|| black_box(&packed_nibbles).slice_unchecked(start, end))
     });
     group.finish();
 
@@ -146,7 +146,7 @@ fn bench_slice(c: &mut Criterion) {
     group
         .bench_function("Nibbles", |b| b.iter(|| black_box(&nybbles).slice(black_box(start..end))));
     group.bench_function("PackedNibbles", |b| {
-        b.iter(|| black_box(&packed_nibbles).slice(black_box(start..end)))
+        b.iter(|| black_box(&packed_nibbles).slice_unchecked(start, end))
     });
     group.finish();
 }
