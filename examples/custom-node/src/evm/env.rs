@@ -2,6 +2,7 @@ use crate::primitives::{CustomTransaction, CustomTransactionEnvelope, TxPayment}
 use alloy_eips::{eip2930::AccessList, Typed2718};
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
+use op_alloy_consensus::OpTxEnvelope;
 use op_revm::OpTransaction;
 use reth_ethereum::evm::{primitives::TransactionEnv, revm::context::TxEnv};
 
@@ -317,12 +318,22 @@ impl FromTxWithEncoded<CustomTransactionEnvelope> for TxEnv {
     }
 }
 
+impl FromRecoveredTx<OpTxEnvelope> for CustomEvmTransaction {
+    fn from_recovered_tx(tx: &OpTxEnvelope, sender: Address) -> Self {
+        Self::Op(OpTransaction::from_recovered_tx(tx, sender))
+    }
+}
+
+impl FromTxWithEncoded<OpTxEnvelope> for CustomEvmTransaction {
+    fn from_encoded_tx(tx: &OpTxEnvelope, sender: Address, encoded: Bytes) -> Self {
+        Self::Op(OpTransaction::from_encoded_tx(tx, sender, encoded))
+    }
+}
+
 impl FromRecoveredTx<CustomTransaction> for CustomEvmTransaction {
     fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
         match tx {
-            CustomTransaction::BuiltIn(tx) => {
-                Self::Op(OpTransaction::from_recovered_tx(tx, sender))
-            }
+            CustomTransaction::BuiltIn(tx) => Self::from_recovered_tx(tx, sender),
             CustomTransaction::Other(tx) => {
                 Self::Payment(CustomTxEnv(TxEnv::from_recovered_tx(tx, sender)))
             }
@@ -333,9 +344,7 @@ impl FromRecoveredTx<CustomTransaction> for CustomEvmTransaction {
 impl FromTxWithEncoded<CustomTransaction> for CustomEvmTransaction {
     fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
         match tx {
-            CustomTransaction::BuiltIn(tx) => {
-                Self::Op(OpTransaction::from_encoded_tx(tx, sender, encoded))
-            }
+            CustomTransaction::BuiltIn(tx) => Self::from_encoded_tx(tx, sender, encoded),
             CustomTransaction::Other(tx) => {
                 Self::Payment(CustomTxEnv(TxEnv::from_encoded_tx(tx, sender, encoded)))
             }
