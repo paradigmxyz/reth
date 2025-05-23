@@ -394,7 +394,10 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
         )
         .build_inner();
 
-        OpEthApi { inner: Arc::new(OpEthApiInner::<_> { eth_api, sequencer_client: None }) }
+        OpEthApi {
+            inner: Arc::new(OpEthApiInner::<_> { eth_api, sequencer_client: None }),
+            _nt: Default::default(),
+        }
     }
 }
 
@@ -512,8 +515,8 @@ mod test {
         let _ = init_genesis(&factory).expect("should init genesis");
         let provider = BlockchainProvider::new(factory).expect("should build provider");
 
-        let eth_api =
-            OpEthApiBuilder::default().build_evm_eth_api::<_, _>(provider, OpEvmConfig::op_dev());
+        let eth_api = OpEthApiBuilder::<Optimism>::default()
+            .build_evm_eth_api::<_, _>(provider, OpEvmConfig::op_dev());
 
         let trace = TraceApi::new(eth_api, BlockingTaskGuard::new(10), EthConfig::default());
 
