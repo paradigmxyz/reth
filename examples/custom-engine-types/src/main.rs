@@ -36,8 +36,9 @@ use reth_ethereum::{
         api::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
             validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
-            FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError,
-            NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
+            ExecutionPayload, FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError,
+            NewPayloadError, NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes,
+            PayloadValidator,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
@@ -54,6 +55,7 @@ use reth_ethereum::{
     pool::{PoolTransaction, TransactionPool},
     primitives::{RecoveredBlock, SealedBlock},
     provider::{EthStorage, StateProviderFactory},
+    tasks::TaskManager,
     Block, EthPrimitives, TransactionSigned,
 };
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};

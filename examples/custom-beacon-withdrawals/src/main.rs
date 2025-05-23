@@ -34,7 +34,7 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthereumNode,
     },
-    primitives::{Header, SealedBlock, SealedHeader},
+    primitives::{Header, PrimitivesSealedBlock, SealedBlock, SealedHeader},
     provider::BlockExecutionResult,
     EthPrimitives, Receipt, TransactionSigned,
 };

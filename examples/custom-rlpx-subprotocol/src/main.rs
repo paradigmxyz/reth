@@ -34,7 +34,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _args| async move {
+    reth_ethereum::cli::Cli::parse_args().run(|builder, _args| async move {
         // launch the node
         let NodeHandle { node, node_exit_future } =
             builder.node(EthereumNode::default()).launch().await?;

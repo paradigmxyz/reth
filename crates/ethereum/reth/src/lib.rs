@@ -17,7 +17,7 @@ pub use reth_ethereum_primitives::*;
 pub mod primitives {
     #[doc(inline)]
     pub use reth_primitives::Block as PrimitivesBlock;
-    pub use reth_primitives::TransactionSigned;
+    pub use reth_primitives::{SealedBlock as PrimitivesSealedBlock, TransactionSigned};
     #[doc(inline)]
     pub use reth_primitives_traits::*;
 }
