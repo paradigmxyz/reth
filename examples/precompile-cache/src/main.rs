@@ -26,6 +26,7 @@ use reth_ethereum::{
             MainBuilder, MainContext,
         },
     },
+    tasks::TaskManager,
     node::{
         api::{FullNodeTypes, NodeTypes},
         builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
