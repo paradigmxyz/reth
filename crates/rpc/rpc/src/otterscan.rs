@@ -116,7 +116,6 @@ where
                             TransferKind::Create => OperationType::OpCreate,
                             TransferKind::Create2 => OperationType::OpCreate2,
                             TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
-                            TransferKind::EofCreate => OperationType::OpEofCreate,
                         },
                     })
                     .collect::<Vec<_>>()

@@ -2,8 +2,8 @@
 
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::{BlockReader, ProviderBlock, ProviderReceipt};
 use reth_rpc_eth_types::EthStateCache;
+use reth_storage_api::{BlockReader, ProviderBlock, ProviderReceipt};
 
 /// Helper trait to relax trait bounds on [`FullNodeComponents`].
 ///

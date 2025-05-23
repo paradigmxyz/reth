@@ -36,8 +36,6 @@ use tracing::error;
 pub struct EthPubSub<Eth> {
     /// All nested fields bundled together.
     inner: Arc<EthPubSubInner<Eth>>,
-    /// The type that's used to spawn subscription tasks.
-    subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // === impl EthPubSub ===
@@ -52,8 +50,8 @@ impl<Eth> EthPubSub<Eth> {
 
     /// Creates a new, shareable instance.
     pub fn with_spawner(eth_api: Eth, subscription_task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = EthPubSubInner { eth_api };
-        Self { inner: Arc::new(inner), subscription_task_spawner }
+        let inner = EthPubSubInner { eth_api, subscription_task_spawner };
+        Self { inner: Arc::new(inner) }
     }
 }
 
@@ -76,7 +74,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.inner.clone();
-        self.subscription_task_spawner.spawn(Box::pin(async move {
+        self.inner.subscription_task_spawner.spawn(Box::pin(async move {
             let _ = handle_accepted(pubsub, sink, kind, params).await;
         }));
 
@@ -159,7 +157,12 @@ where
             let current_sub_res = pubsub.sync_status(initial_sync_status);
 
             // send the current status immediately
-            let msg = to_subscription_message(&current_sub_res)?;
+            let msg = SubscriptionMessage::new(
+                accepted_sink.method_name(),
+                accepted_sink.subscription_id(),
+                &current_sub_res,
+            )
+            .map_err(SubscriptionSerializeError::new)?;
 
             if accepted_sink.send(msg).await.is_err() {
                 return Ok(())
@@ -174,7 +177,13 @@ where
 
                     // send a new message now that the status changed
                     let sync_status = pubsub.sync_status(current_syncing);
-                    let msg = to_subscription_message(&sync_status)?;
+                    let msg = SubscriptionMessage::new(
+                        accepted_sink.method_name(),
+                        accepted_sink.subscription_id(),
+                        &sync_status,
+                    )
+                    .map_err(SubscriptionSerializeError::new)?;
+
                     if accepted_sink.send(msg).await.is_err() {
                         break
                     }
@@ -251,6 +260,8 @@ impl<Eth> std::fmt::Debug for EthPubSub<Eth> {
 struct EthPubSubInner<EthApi> {
     /// The `eth` API.
     eth_api: EthApi,
+    /// The type that's used to spawn subscription tasks.
+    subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // == impl EthPubSubInner ===
@@ -328,11 +339,4 @@ where
                 futures::stream::iter(all_logs)
             })
     }
-}
-
-/// Serializes a messages into a raw [`SubscriptionMessage`].
-fn to_subscription_message<T: Serialize>(
-    msg: &T,
-) -> Result<SubscriptionMessage, SubscriptionSerializeError> {
-    serde_json::value::to_raw_value(msg).map(Into::into).map_err(SubscriptionSerializeError::new)
 }

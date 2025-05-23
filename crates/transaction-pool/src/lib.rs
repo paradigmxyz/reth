@@ -174,7 +174,10 @@ pub use crate::{
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar};
+use alloy_eips::{
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip7594::BlobTransactionSidecarVariant,
+};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -246,10 +249,15 @@ where
     async fn validate_all(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = V::Transaction>,
+        transactions: impl IntoIterator<Item = V::Transaction> + Send,
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
-        futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
+        self.pool
+            .validator()
+            .validate_transactions_with_origin(origin, transactions)
             .await
+            .into_iter()
+            .map(|tx| (tx.tx_hash(), tx))
+            .collect()
     }
 
     /// Validates the given transaction
@@ -585,21 +593,21 @@ where
     fn get_blob(
         &self,
         tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         self.pool.blob_store().get(tx_hash)
     }
 
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
         self.pool.blob_store().get_all(tx_hashes)
     }
 
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         self.pool.blob_store().get_exact(tx_hashes)
     }
 

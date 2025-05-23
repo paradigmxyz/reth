@@ -11,14 +11,13 @@ use crate::{
     },
     NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
-use alloy_consensus::transaction::PooledTransaction;
 use futures::{FutureExt, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks, Hardforks};
 use reth_eth_wire::{
     protocol::Protocol, DisconnectReason, EthNetworkPrimitives, HelloMessageWithProtocols,
 };
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_network_api::{
     events::{PeerEvent, SessionInfo},
     test_utils::{PeersHandle, PeersHandleProvider},
@@ -246,7 +245,10 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionVariant,
+            >,
         > + Unpin
         + 'static,
 {
@@ -314,7 +316,10 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionVariant,
+            >,
         > + Unpin
         + 'static,
 {
@@ -562,7 +567,10 @@ where
         + Unpin
         + 'static,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TransactionSigned, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TransactionSigned,
+                Pooled = PooledTransactionVariant,
+            >,
         > + Unpin
         + 'static,
 {

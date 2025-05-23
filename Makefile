@@ -65,7 +65,7 @@ RUST_BUILD_FLAGS =
 # Enable static linking to ensure reproducibility across builds
 RUST_BUILD_FLAGS += --C target-feature=+crt-static
 # Set the linker to use static libgcc to ensure reproducibility across builds
-RUST_BUILD_FLAGS += -Clink-arg=-static-libgcc
+RUST_BUILD_FLAGS += -C link-arg=-static-libgcc
 # Remove build ID from the binary to ensure reproducibility across builds
 RUST_BUILD_FLAGS += -C link-arg=-Wl,--build-id=none
 # Remove metadata hash from symbol names to ensure reproducible builds
@@ -391,6 +391,17 @@ clippy:
 	--benches \
 	--all-features \
 	-- -D warnings
+
+clippy-op-dev:
+	cargo +nightly clippy \
+	--bin op-reth \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--locked \
+	--all-features
 
 lint-codespell: ensure-codespell
 	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"
