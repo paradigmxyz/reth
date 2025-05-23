@@ -130,3 +130,13 @@ impl EthChainSpec for ChainSpec {
         self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
     }
 }
+
+/// Trait representing the current capacities of the fork.
+pub trait EthereumCapabilities: EthereumHardforks {
+    /// Returns true if the withdrawals are active.
+    fn withdrawals_active(&self, ts: u64) -> bool {
+        self.is_shanghai_active_at_timestamp(ts)
+    }
+}
+
+impl EthereumCapabilities for ChainSpec {}

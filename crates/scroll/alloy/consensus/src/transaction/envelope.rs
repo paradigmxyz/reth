@@ -7,7 +7,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, Signature, TxKind, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 
 use crate::{ScrollTxType, TxL1Message};
@@ -364,6 +364,17 @@ impl ScrollTxEnvelope {
             Self::Eip1559(t) => t.eip2718_encoded_length(),
             Self::Eip7702(t) => t.eip2718_encoded_length(),
             Self::L1Message(t) => t.eip2718_encoded_length(),
+        }
+    }
+
+    /// Returns the signature for the transaction.
+    pub const fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::Legacy(t) => Some(*t.signature()),
+            Self::Eip2930(t) => Some(*t.signature()),
+            Self::Eip1559(t) => Some(*t.signature()),
+            Self::Eip7702(t) => Some(*t.signature()),
+            Self::L1Message(_) => None,
         }
     }
 }

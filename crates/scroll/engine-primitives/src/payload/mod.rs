@@ -11,6 +11,7 @@ use core::marker::PhantomData;
 
 use alloy_consensus::{proofs, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::eip2718::Decodable2718;
+use alloy_primitives::U256;
 use alloy_rlp::BufMut;
 use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayload, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -21,9 +22,8 @@ use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives::{Block, BlockBody, Header};
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
-use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_primitives::ScrollBlock;
-use scroll_alloy_hardforks::ScrollHardfork;
+use scroll_alloy_hardforks::ScrollHardforks;
 use scroll_alloy_rpc_types_engine::ScrollPayloadAttributes;
 
 /// The types used in the default Scroll beacon consensus engine.
@@ -98,9 +98,9 @@ impl PayloadTypes for ScrollPayloadTypes {
 /// Scroll implementation of the [`ExecutionPayload::try_into_block`], which will fail with
 /// [`PayloadError::ExtraData`] due to the Scroll blocks containing extra data for the Clique
 /// consensus.
-pub fn try_into_block<T: Decodable2718>(
+pub fn try_into_block<T: Decodable2718, CS: ScrollHardforks>(
     value: ExecutionData,
-    chainspec: Arc<ScrollChainSpec>,
+    chainspec: Arc<CS>,
 ) -> Result<Block<T>, PayloadError> {
     let mut block = match value.payload {
         ExecutionPayload::V1(payload) => try_payload_v1_to_block(payload, chainspec)?,
@@ -115,16 +115,16 @@ pub fn try_into_block<T: Decodable2718>(
 }
 
 /// Tries to convert an [`ExecutionPayloadV1`] to [`Block`].
-fn try_payload_v1_to_block<T: Decodable2718>(
+fn try_payload_v1_to_block<T: Decodable2718, CS: ScrollHardforks>(
     payload: ExecutionPayloadV1,
-    chainspec: Arc<ScrollChainSpec>,
+    chainspec: CS,
 ) -> Result<Block<T>, PayloadError> {
     // WARNING: It’s allowed for a base fee in EIP1559 to increase unbounded. We assume that
     // it will fit in an u64. This is not always necessarily true, although it is extremely
     // unlikely not to be the case, a u64 maximum would have 2^64 which equates to 18 ETH per
     // gas.
     let basefee = chainspec
-        .is_fork_active_at_block(ScrollHardfork::Curie, payload.block_number)
+        .is_curie_active_at_block(payload.block_number)
         .then_some(payload.base_fee_per_gas)
         .map(|b| b.try_into())
         .transpose()
@@ -173,7 +173,7 @@ fn try_payload_v1_to_block<T: Decodable2718>(
         extra_data: payload.extra_data,
         // Defaults
         ommers_hash: EMPTY_OMMER_ROOT_HASH,
-        difficulty: Default::default(),
+        difficulty: U256::ONE,
         nonce: Default::default(),
     };
 
@@ -181,9 +181,9 @@ fn try_payload_v1_to_block<T: Decodable2718>(
 }
 
 /// Tries to convert an [`ExecutionPayloadV2`] to [`Block`].
-fn try_payload_v2_to_block<T: Decodable2718>(
+fn try_payload_v2_to_block<T: Decodable2718, CS: ScrollHardforks>(
     payload: ExecutionPayloadV2,
-    chainspec: Arc<ScrollChainSpec>,
+    chainspec: CS,
 ) -> Result<Block<T>, PayloadError> {
     // this performs the same conversion as the underlying V1 payload, but calculates the
     // withdrawals root and adds withdrawals
@@ -195,9 +195,9 @@ fn try_payload_v2_to_block<T: Decodable2718>(
 }
 
 /// Tries to convert an [`ExecutionPayloadV3`] to [`Block`].
-fn try_payload_v3_to_block<T: Decodable2718>(
+fn try_payload_v3_to_block<T: Decodable2718, CS: ScrollHardforks>(
     payload: ExecutionPayloadV3,
-    chainspec: Arc<ScrollChainSpec>,
+    chainspec: CS,
 ) -> Result<Block<T>, PayloadError> {
     // this performs the same conversion as the underlying V2 payload, but inserts the blob gas
     // used and excess blob gas

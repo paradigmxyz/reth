@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthereumCapabilities, EthereumHardforks};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::StoredBlockOmmers,
@@ -146,8 +146,9 @@ where
 
 impl<Provider, T, H> BlockBodyReader<Provider> for EthStorage<T, H>
 where
-    Provider:
-        DBProvider + ChainSpecProvider<ChainSpec: EthereumHardforks> + OmmersProvider<Header = H>,
+    Provider: DBProvider
+        + ChainSpecProvider<ChainSpec: EthereumCapabilities>
+        + OmmersProvider<Header = H>,
     T: SignedTransaction,
     H: FullBlockHeader,
 {
@@ -168,7 +169,7 @@ where
         for (header, transactions) in inputs {
             // If we are past shanghai, then all blocks should have a withdrawal list,
             // even if empty
-            let withdrawals = if chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) {
+            let withdrawals = if chain_spec.withdrawals_active(header.timestamp()) {
                 withdrawals_cursor
                     .seek_exact(header.number())?
                     .map(|(_, w)| w.withdrawals)

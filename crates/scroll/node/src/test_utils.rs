@@ -69,7 +69,7 @@ pub fn scroll_payload_attributes(timestamp: u64) -> ScrollPayloadBuilderAttribut
         timestamp,
         prev_randao: B256::ZERO,
         suggested_fee_recipient: Address::ZERO,
-        withdrawals: Some(vec![]),
+        withdrawals: None,
         parent_beacon_block_root: Some(B256::ZERO),
     };
 
