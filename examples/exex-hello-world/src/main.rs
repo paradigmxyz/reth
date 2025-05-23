@@ -82,7 +82,7 @@ fn main() -> eyre::Result<()> {
             })
         })
     } else {
-        reth::cli::Cli::parse_args().run(|builder, _| {
+        reth_ethereum::cli::Cli::parse_args().run(|builder, _| {
             Box::pin(async move {
                 let (ethapi_tx, ethapi_rx) = oneshot::channel();
                 let handle = builder
