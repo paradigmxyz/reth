@@ -23,7 +23,7 @@ pub struct MyRpcExt<Provider> {
 
 impl<Provider> MyRpcExtApiServer for MyRpcExt<Provider>
 where
-    Provider: BlockReaderIdExt<Block = reth_ethreum::primitives::RethPrimitiveBlock> + 'static,
+    Provider: BlockReaderIdExt<Block = reth_ethereum::primitives::RethPrimitiveBlock> + 'static,
 {
     /// Showcasing how to implement a custom rpc method
     /// using the provider.
