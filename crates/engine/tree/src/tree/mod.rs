@@ -128,7 +128,21 @@ where
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
-        tracing::debug!(target: "engine::tree", overlay = ?self.overlay, "Building state provider");
+        let trie_updates = self.overlay.as_ref().map(|overlay| {
+            overlay
+                .iter()
+                .map(|block| {
+                    (
+                        block.block.recovered_block.number(),
+                        block.block.recovered_block.hash(),
+                        block.trie.storage_tries.get(&b256!(
+                            "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
+                        )),
+                    )
+                })
+                .collect::<Vec<_>>()
+        });
+        tracing::debug!(target: "engine::tree", historical = ?self.historical, ?trie_updates, "Building state provider");
         if let Some(overlay) = self.overlay.clone() {
             provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
         }
