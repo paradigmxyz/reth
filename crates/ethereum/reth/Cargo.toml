@@ -51,44 +51,48 @@ alloy-rpc-types.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-chainspec/std",
-    "reth-ethereum-primitives/std",
-    "reth-ethereum-consensus/std",
-    "reth-primitives-traits/std",
-    "reth-consensus?/std",
-    "reth-consensus-common?/std",
-    "alloy-rpc-types-eth?/std",
-    "reth-storage-api?/std",
-    "reth-evm?/std",
-    "reth-evm-ethereum?/std",
-    "reth-revm?/std",
+	"reth-chainspec/std",
+	"reth-ethereum-primitives/std",
+	"reth-ethereum-consensus/std",
+	"reth-primitives-traits/std",
+	"reth-consensus?/std",
+	"reth-consensus-common?/std",
+	"alloy-rpc-types-eth?/std",
+	"reth-storage-api?/std",
+	"reth-evm?/std",
+	"reth-evm-ethereum?/std",
+	"reth-revm?/std",
+	"reth-primitives/std"
 ]
 arbitrary = [
     "std",
     "reth-chainspec/arbitrary",
     "reth-ethereum-primitives/arbitrary",
     "reth-primitives-traits/arbitrary",
+    "reth-primitives/arbitrary",  
     "reth-db?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
+    "alloy-rpc-types/arbitrary",    
     "reth-transaction-pool?/arbitrary",
     "reth-eth-wire?/arbitrary",
 ]
 
 test-utils = [
-    "reth-chainspec/test-utils",
-    "reth-consensus?/test-utils",
-    "reth-db?/test-utils",
-    "reth-ethereum-primitives/test-utils",
-    "reth-evm?/test-utils",
-    "reth-revm?/test-utils",
-    "reth-network?/test-utils",
-    "reth-node-ethereum?/test-utils",
-    "reth-primitives-traits/test-utils",
-    "reth-provider?/test-utils",
-    "reth-trie?/test-utils",
-    "reth-transaction-pool?/test-utils",
-    "reth-evm-ethereum?/test-utils",
-    "reth-node-builder?/test-utils",
+	"reth-chainspec/test-utils",
+	"reth-consensus?/test-utils",
+	"reth-db?/test-utils",
+	"reth-ethereum-primitives/test-utils",
+	"reth-evm?/test-utils",
+	"reth-revm?/test-utils",
+	"reth-network?/test-utils",
+	"reth-node-ethereum?/test-utils",
+	"reth-primitives-traits/test-utils",
+	"reth-provider?/test-utils",
+	"reth-trie?/test-utils",
+	"reth-transaction-pool?/test-utils",
+	"reth-evm-ethereum?/test-utils",
+	"reth-node-builder?/test-utils",
+	"reth-primitives/test-utils"
 ]
 
 full = [
