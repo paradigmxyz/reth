@@ -1,4 +1,4 @@
-use crate::{OpBuiltPayload, OpNode as OtherOpNode, OpPayloadBuilderAttributes};
+use crate::{OpBuiltPayload, OpPayloadBuilderAttributes};
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
@@ -15,7 +15,7 @@ use tokio::sync::Mutex;
 
 /// Optimism Node Helper type
 pub(crate) type OpNode =
-    NodeHelperType<OtherOpNode, BlockchainProvider<NodeTypesWithDBAdapter<OtherOpNode, TmpDB>>>;
+    NodeHelperType<crate::OpNode, BlockchainProvider<NodeTypesWithDBAdapter<crate::OpNode, TmpDB>>>;
 
 /// Creates the initial setup with `num_nodes` of the node config, started and connected.
 pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, Wallet)> {

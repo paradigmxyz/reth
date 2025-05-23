@@ -32,11 +32,13 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_network::OpNetworkPrimitives;
+use reth_optimism_node_types::{OpStorage, OpTypes};
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
 };
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -47,7 +49,7 @@ use reth_optimism_txpool::{
     supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
     OpPooledTx,
 };
-use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{ext::L2EthApiExtServer, FullEthApiServer};
 use reth_rpc_eth_types::error::FromEvmError;
@@ -57,7 +59,6 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
 };
-use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc};
 
@@ -71,8 +72,6 @@ impl<N> OpNodeTypes for N where
     N: NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
 {
 }
-/// Storage implementation for Optimism.
-pub type OpStorage = EthStorage<OpTransactionSigned>;
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
@@ -227,10 +226,10 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = OpPrimitives;
-    type ChainSpec = OpChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
-    type Storage = OpStorage;
+    type Primitives = <OpTypes as NodeTypes>::Primitives;
+    type ChainSpec = <OpTypes as NodeTypes>::ChainSpec;
+    type StateCommitment = <OpTypes as NodeTypes>::StateCommitment;
+    type Storage = <OpTypes as NodeTypes>::Storage;
     type Payload = OpEngineTypes;
 }
 
@@ -932,18 +931,4 @@ where
             ctx.node.provider().clone(),
         ))
     }
-}
-
-/// Network primitive types used by Optimism networks.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub struct OpNetworkPrimitives;
-
-impl NetworkPrimitives for OpNetworkPrimitives {
-    type BlockHeader = alloy_consensus::Header;
-    type BlockBody = alloy_consensus::BlockBody<OpTransactionSigned>;
-    type Block = alloy_consensus::Block<OpTransactionSigned>;
-    type BroadcastedTransaction = OpTransactionSigned;
-    type PooledTransaction = OpPooledTransaction;
-    type Receipt = OpReceipt;
 }

@@ -70,6 +70,7 @@ pub mod database;
 
 /// Database metrics trait extensions.
 pub mod database_metrics;
+pub use database_metrics::DatabaseMetrics;
 
 pub mod mock;
 
@@ -94,3 +95,8 @@ pub use database::Database;
 
 mod unwind;
 pub use unwind::DbTxUnwindExt;
+
+/// Helper trait that unifies behaviour required to support all database operations of the node.
+pub trait FullDatabase: Database + DatabaseMetrics + Clone + Unpin {}
+
+impl<T> FullDatabase for T where T: Database + DatabaseMetrics + Clone + Unpin {}
