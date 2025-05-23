@@ -10,7 +10,6 @@ use alloy_evm::{
 use alloy_genesis::Genesis;
 use alloy_primitives::Bytes;
 use parking_lot::RwLock;
-use reth::tasks::TaskManager;
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec},
     evm::{

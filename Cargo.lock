@@ -3573,7 +3573,6 @@ dependencies = [
  "alloy-primitives",
  "eyre",
  "parking_lot",
- "reth",
  "reth-ethereum",
  "reth-tracing",
  "schnellru",
