@@ -5,6 +5,7 @@ use crate::{
     },
     primitives::CustomTransaction,
 };
+use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
@@ -41,7 +42,15 @@ where
         tx: impl ExecutableTx<Self>,
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
-        self.inner.execute_transaction_with_commit_condition(tx, f)
+        match tx.tx() {
+            CustomTransaction::BuiltIn(op_tx) => {
+                self.inner.execute_transaction_with_commit_condition(
+                    Recovered::new_unchecked(op_tx, *tx.signer()),
+                    f,
+                )
+            }
+            CustomTransaction::Other(..) => todo!(),
+        }
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<OpReceipt>), BlockExecutionError> {
