@@ -1,7 +1,7 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::TxHash;
+use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
     PendingTransactionFilterKind,
@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
+use reth_primitives_traits::Block;
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
     RpcTransaction, TransactionCompat,
@@ -21,7 +22,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt,
+    ProviderReceipt, ReceiptProvider,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -52,6 +53,237 @@ where
     ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send {
         trace!(target: "rpc::eth", "Serving eth_getLogs");
         self.logs_for_filter(filter, limits).map_err(|e| e.into())
+    }
+}
+
+/// Threshold for deciding between cached and range mode processing
+const CACHED_MODE_BLOCK_THRESHOLD: u64 = 100;
+
+/// Represents different modes for processing block ranges when filtering logs
+enum RangeMode<
+    'a,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+> {
+    /// Use cache-based processing for recent blocks
+    Cached(CachedMode<'a, Eth>),
+    /// Use range-based processing for older blocks
+    Range(RangeBlockMode<'a, Eth>),
+}
+
+/// Mode for processing blocks using cache optimization for recent blocks
+struct CachedMode<
+    'a,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+> {
+    filter_inner: &'a EthFilterInner<Eth>,
+    headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
+    current_idx: usize,
+}
+
+/// Mode for processing blocks using range queries for older blocks
+struct RangeBlockMode<
+    'a,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+> {
+    filter_inner: &'a EthFilterInner<Eth>,
+    block_range_iter: BlockRangeInclusiveIter,
+    current_headers: Option<Vec<<Eth::Provider as HeaderProvider>::Header>>,
+    current_header_idx: usize,
+}
+
+impl<
+        'a,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    > RangeMode<'a, Eth>
+{
+    /// Creates a new `RangeMode`.
+    fn new(
+        filter_inner: &'a EthFilterInner<Eth>,
+        headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
+        from_block: u64,
+        to_block: u64,
+        max_headers_range: u64,
+        chain_tip: u64,
+    ) -> Self {
+        let block_count = to_block - from_block + 1;
+        let distance_from_tip = chain_tip.saturating_sub(to_block);
+
+        // use cached mode for recent blocks (close to chain tip) and small ranges
+        if block_count <= CACHED_MODE_BLOCK_THRESHOLD &&
+            distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
+            !headers.is_empty()
+        {
+            Self::Cached(CachedMode { filter_inner, headers, current_idx: 0 })
+        } else {
+            Self::Range(RangeBlockMode {
+                filter_inner,
+                block_range_iter: BlockRangeInclusiveIter::new(
+                    from_block..=to_block,
+                    max_headers_range,
+                ),
+                current_headers: None,
+                current_header_idx: 0,
+            })
+        }
+    }
+
+    /// Gets the next (receipts, `maybe_block`, header, `block_hash`) tuple.
+    async fn next(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
+            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
+            <Eth::Provider as HeaderProvider>::Header,
+            B256,
+        )>,
+        EthFilterError,
+    > {
+        match self {
+            Self::Cached(cached) => cached.next().await,
+            Self::Range(range) => range.next().await,
+        }
+    }
+}
+
+impl<
+        'a,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    > CachedMode<'a, Eth>
+{
+    async fn next(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
+            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
+            <Eth::Provider as HeaderProvider>::Header,
+            B256,
+        )>,
+        EthFilterError,
+    > {
+        loop {
+            if self.current_idx >= self.headers.len() {
+                return Ok(None);
+            }
+
+            let (_idx, header) = &self.headers[self.current_idx];
+            let header_idx = self.current_idx; // save index before incrementing
+            self.current_idx += 1;
+
+            // calculate block hash
+            let block_hash = if header_idx + 1 < self.headers.len() {
+                // use parent hash of next header to get current header's hash
+                self.headers[header_idx + 1].1.parent_hash()
+            } else {
+                // last header, need to fetch hash from provider
+                self.filter_inner
+                    .provider()
+                    .block_hash(header.number())?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?
+            };
+
+            // try cache first for performance
+            if let Some((receipts, maybe_block)) =
+                self.filter_inner.eth_cache().get_receipts_and_maybe_block(block_hash).await?
+            {
+                return Ok(Some((receipts, maybe_block, header.clone(), block_hash)));
+            }
+
+            // cache miss - fallback to storage to ensure correctness
+            if let Some(receipts) =
+                self.filter_inner.provider().receipts_by_block(block_hash.into())?
+            {
+                let maybe_block = self
+                    .filter_inner
+                    .provider()
+                    .block(block_hash.into())?
+                    .and_then(|block| block.try_into_recovered().ok())
+                    .map(Arc::new);
+
+                return Ok(Some((Arc::new(receipts), maybe_block, header.clone(), block_hash)));
+            }
+        }
+    }
+}
+
+impl<
+        'a,
+        Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    > RangeBlockMode<'a, Eth>
+{
+    async fn next(
+        &mut self,
+    ) -> Result<
+        Option<(
+            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
+            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
+            <Eth::Provider as HeaderProvider>::Header,
+            B256,
+        )>,
+        EthFilterError,
+    > {
+        loop {
+            // if we have current headers to process
+            if let Some(ref headers) = self.current_headers {
+                while self.current_header_idx < headers.len() {
+                    let header = &headers[self.current_header_idx];
+                    self.current_header_idx += 1;
+
+                    // calculate block hash
+                    let block_hash = if self.current_header_idx < headers.len() {
+                        headers[self.current_header_idx].parent_hash()
+                    } else {
+                        self.filter_inner
+                            .provider()
+                            .block_hash(header.number())?
+                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?
+                    };
+
+                    // try cache first for performance
+                    if let Some((receipts, maybe_block)) = self
+                        .filter_inner
+                        .eth_cache()
+                        .get_receipts_and_maybe_block(block_hash)
+                        .await?
+                    {
+                        return Ok(Some((receipts, maybe_block, header.clone(), block_hash)));
+                    }
+
+                    // cache miss - fallback to storage to ensure correctness
+                    if let Some(receipts) =
+                        self.filter_inner.provider().receipts_by_block(block_hash.into())?
+                    {
+                        let maybe_block = self
+                            .filter_inner
+                            .provider()
+                            .block(block_hash.into())?
+                            .and_then(|block| block.try_into_recovered().ok())
+                            .map(Arc::new);
+
+                        return Ok(Some((
+                            Arc::new(receipts),
+                            maybe_block,
+                            header.clone(),
+                            block_hash,
+                        )));
+                    }
+                }
+
+                // finished current batch, reset for next range
+                self.current_headers = None;
+                self.current_header_idx = 0;
+            }
+
+            // get next range
+            if let Some((from, to)) = self.block_range_iter.next() {
+                let headers = self.filter_inner.provider().headers_range(from..=to)?;
+                self.current_headers = Some(headers);
+                self.current_header_idx = 0;
+            } else {
+                return Ok(None);
+            }
+        }
     }
 }
 
@@ -560,9 +792,12 @@ where
         limits: QueryLimits,
     ) -> Result<Vec<Log>, EthFilterError> {
         let mut all_logs = Vec::new();
+        let mut matching_headers = Vec::new();
 
-        // loop over the range of new blocks and check logs if the filter matches the log's bloom
-        // filter
+        // get current chain tip to determine processing mode
+        let chain_tip = self.provider().best_block_number()?;
+
+        // first collect all headers that match the bloom filter for cached mode decision
         for (from, to) in
             BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
@@ -572,44 +807,45 @@ where
                 .enumerate()
                 .filter(|(_, header)| filter.matches_bloom(header.logs_bloom()))
             {
-                // these are consecutive headers, so we can use the parent hash of the next
-                // block to get the current header's hash
-                let block_hash = match headers.get(idx + 1) {
-                    Some(child) => child.parent_hash(),
-                    None => self
-                        .provider()
-                        .block_hash(header.number())?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
-                };
+                matching_headers.push((idx, header.clone()));
+            }
+        }
 
-                let num_hash = BlockNumHash::new(header.number(), block_hash);
-                if let Some((receipts, maybe_block)) =
-                    self.eth_cache().get_receipts_and_maybe_block(num_hash.hash).await?
-                {
-                    append_matching_block_logs(
-                        &mut all_logs,
-                        maybe_block
-                            .map(ProviderOrBlock::Block)
-                            .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                        filter,
-                        num_hash,
-                        &receipts,
-                        false,
-                        header.timestamp(),
-                    )?;
+        // initialize the appropriate range mode based on collected headers
+        let mut range_mode = RangeMode::new(
+            self,
+            matching_headers,
+            from_block,
+            to_block,
+            self.max_headers_range,
+            chain_tip,
+        );
 
-                    // size check but only if range is multiple blocks, so we always return all
-                    // logs of a single block
-                    let is_multi_block_range = from_block != to_block;
-                    if let Some(max_logs_per_response) = limits.max_logs_per_response {
-                        if is_multi_block_range && all_logs.len() > max_logs_per_response {
-                            return Err(EthFilterError::QueryExceedsMaxResults {
-                                max_logs: max_logs_per_response,
-                                from_block,
-                                to_block: num_hash.number.saturating_sub(1),
-                            });
-                        }
-                    }
+        // iterate through the range mode to get receipts and blocks
+        while let Some((receipts, maybe_block, header, block_hash)) = range_mode.next().await? {
+            let num_hash = BlockNumHash::new(header.number(), block_hash);
+            append_matching_block_logs(
+                &mut all_logs,
+                maybe_block
+                    .map(ProviderOrBlock::Block)
+                    .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
+                filter,
+                num_hash,
+                &receipts,
+                false,
+                header.timestamp(),
+            )?;
+
+            // size check but only if range is multiple blocks, so we always return all
+            // logs of a single block
+            let is_multi_block_range = from_block != to_block;
+            if let Some(max_logs_per_response) = limits.max_logs_per_response {
+                if is_multi_block_range && all_logs.len() > max_logs_per_response {
+                    return Err(EthFilterError::QueryExceedsMaxResults {
+                        max_logs: max_logs_per_response,
+                        from_block,
+                        to_block: num_hash.number.saturating_sub(1),
+                    });
                 }
             }
         }
