@@ -35,6 +35,7 @@ use crate::{
     transactions::NetworkTransactionEvent,
     FetchClient, NetworkBuilder,
 };
+
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
@@ -421,12 +422,31 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         self.swarm.state().peers().handle()
     }
 
+    ///Returns the [`PeersManager`].
+    pub const fn peers_manager(&self) -> &PeersManager {
+        self.swarm.state().peers()
+    }
+
     /// Collect the peers from the [`NetworkManager`] and write them to the given
     /// `persistent_peers_file`.
+    #[cfg(feature = "serde")]
     pub fn write_peers_to_file(&self, persistent_peers_file: &Path) -> Result<(), FsPathError> {
         let known_peers = self.all_peers().collect::<Vec<_>>();
+        let peers = self.peers_manager();
+        let persistent_peers = reth_network_types::peers::config::PersistedPeers {
+            trusted: known_peers
+                .iter()
+                .filter(|p| peers.get_reputation(&p.id).is_some_and(|rep| rep > 0))
+                .copied()
+                .collect(),
+            basic: known_peers
+                .iter()
+                .filter(|p| peers.get_reputation(&p.id).is_none_or(|rep| rep <= 0))
+                .copied()
+                .collect(),
+        };
         persistent_peers_file.parent().map(fs::create_dir_all).transpose()?;
-        reth_fs_util::write_json_file(persistent_peers_file, &known_peers)?;
+        reth_fs_util::write_json_file(persistent_peers_file, &persistent_peers)?;
         Ok(())
     }
 
