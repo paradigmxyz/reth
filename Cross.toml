@@ -25,6 +25,5 @@ env.passthrough = [
     "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc"
 ]
 
-
 [build.env]
 passthrough = ["JEMALLOC_SYS_WITH_LG_PAGE"]
