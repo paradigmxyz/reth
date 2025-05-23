@@ -4,9 +4,9 @@ name: kurtosis
 
 on:
   workflow_dispatch:
-  schedule:
-    # run every 12 hours
-    - cron: "0 */12 * * *"
+  # schedule:
+  # run every 12 hours
+  # - cron: "0 */12 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -51,7 +51,7 @@ jobs:
       - name: Run kurtosis
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-          ethereum_package_args: '.github/assets/kurtosis_network_params.yaml'
+          ethereum_package_args: ".github/assets/kurtosis_network_params.yaml"
 
   notify-on-error:
     needs: test

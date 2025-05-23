@@ -4,9 +4,9 @@ name: kurtosis-op
 
 on:
   workflow_dispatch:
-  schedule:
-    # run every 12 hours
-    - cron: "0 */12 * * *"
+  # schedule:
+  # run every 12 hours
+  # - cron: "0 */12 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -79,7 +79,6 @@ jobs:
           kurtosis service logs -a op-devnet op-el-2-op-reth-op-node-op-kurtosis
           kurtosis service logs -a op-devnet op-cl-2-op-node-op-reth-op-kurtosis
           exit 1
-
 
   notify-on-error:
     needs: test

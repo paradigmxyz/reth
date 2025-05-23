@@ -4,9 +4,9 @@ name: hive
 
 on:
   workflow_dispatch:
-  schedule:
-    # run every 12 hours
-    - cron: "0 */12 * * *"
+  # schedule:
+  # run every 12 hours
+  # - cron: "0 */12 * * *"
 
 env:
   CARGO_TERM_COLOR: always
