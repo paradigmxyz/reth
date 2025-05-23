@@ -259,10 +259,10 @@ impl PackedNibbles {
 
         let nibble_len = end - start;
 
-        // Shift so that the first requested nibble becomes the *least* significant one,
-        // then mask out everything to the left of the slice.
+        // Shift so that the first requested nibble becomes the least significant one
         let shift = (self.len() - end) * 4;
-        let shifted = self.nibbles.wrapping_shr(shift);
+        let shifted = if shift == 0 { self.nibbles } else { self.nibbles.wrapping_shr(shift) };
+        // Mask out everything to the left of the slice
         let nibbles = shifted.bitand(SLICE_MASKS[nibble_len]);
 
         Self { length: nibble_len as u8, nibbles }

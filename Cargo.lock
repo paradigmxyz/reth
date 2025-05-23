@@ -10235,7 +10235,6 @@ dependencies = [
  "reth-trie-db",
  "ruint",
  "smallvec",
- "tinyvec",
  "tracing",
 ]
 
