@@ -128,8 +128,8 @@ impl<Pool, Client, Evm, Txs> OpPayloadBuilder<Pool, Client, Evm, Txs> {
 impl<Pool, Client, Evm, N, T> OpPayloadBuilder<Pool, Client, Evm, T>
 where
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
-    N: OpPayloadPrimitives,
+    Client: StateProviderFactory + ChainSpecProvider,
+    N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -203,9 +203,9 @@ where
 /// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
 impl<Pool, Client, Evm, N, Txs> PayloadBuilder for OpPayloadBuilder<Pool, Client, Evm, Txs>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
-    N: OpPayloadPrimitives,
-    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
+    N: NodePrimitives,
+    Client: StateProviderFactory + ChainSpecProvider + Clone,
+    Pool: TransactionPool,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
@@ -287,7 +287,7 @@ impl<Txs> OpBuilder<'_, Txs> {
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec + OpHardforks,
-        N: OpPayloadPrimitives,
+        N: NodePrimitives,
         Txs:
             PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx>,
     {
@@ -368,7 +368,7 @@ impl<Txs> OpBuilder<'_, Txs> {
     where
         Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec + OpHardforks,
-        N: OpPayloadPrimitives,
+        N: NodePrimitives,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let mut db = State::builder()
