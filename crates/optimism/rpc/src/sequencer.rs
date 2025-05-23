@@ -7,10 +7,10 @@ use alloy_rpc_client::{BuiltInConnectionString, ClientBuilder, RpcClient as Clie
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use alloy_transport_http::Http;
 use reth_optimism_txpool::supervisor::metrics::SequencerMetrics;
-use url::Url;
 use std::{str::FromStr, sync::Arc, time::Instant};
 use thiserror::Error;
 use tracing::warn;
+use url::Url;
 
 /// Sequencer client error
 #[derive(Error, Debug)]
@@ -55,8 +55,7 @@ struct HistoricalRpcClientInner {
 impl HistoricalRpcClient {
     /// Constructs a new historical RPC client from the given endpoint URL.
     pub async fn new(endpoint: &str) -> Result<Self, Error> {
-        let url = Url::parse(endpoint)
-            .map_err(|_| Error::InvalidUrl(endpoint.to_string()))?;
+        let url = Url::parse(endpoint).map_err(|_| Error::InvalidUrl(endpoint.to_string()))?;
 
         let http = Http::new(url);
         let is_local = http.guess_local();
@@ -82,17 +81,16 @@ impl HistoricalRpcClient {
         method: &str,
         params: Params,
     ) -> Result<Resp, Error> {
-        let resp = self
-            .client()
-            .request::<Params, Resp>(method.to_string(), params)
-            .await
-            .inspect_err(|err| {
-                warn!(
-                    target: "rpc::historical",
-                    %err,
-                    "HTTP request to historical endpoint failed"
-                );
-            })?;
+        let resp =
+            self.client().request::<Params, Resp>(method.to_string(), params).await.inspect_err(
+                |err| {
+                    warn!(
+                        target: "rpc::historical",
+                        %err,
+                        "HTTP request to historical endpoint failed"
+                    );
+                },
+            )?;
 
         Ok(resp)
     }
