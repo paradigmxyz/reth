@@ -46,7 +46,7 @@ pub use alloy_rpc_types_debug::ExecutionWitness;
 
 use reth_ethereum_primitives::Block;
 
-/// StatelessInput is a convenience structure for serializing the input needed
+/// `StatelessInput` is a convenience structure for serializing the input needed
 /// for the stateless validation function.
 #[serde_with::serde_as]
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -56,6 +56,6 @@ pub struct StatelessInput {
         as = "reth_primitives_traits::serde_bincode_compat::Block<reth_ethereum_primitives::TransactionSigned, alloy_consensus::Header>"
     )]
     pub block: Block,
-    /// ExecutionWitness for the stateless validation function
+    /// `ExecutionWitness` for the stateless validation function
     pub witness: ExecutionWitness,
 }

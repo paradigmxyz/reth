@@ -704,7 +704,7 @@ where
     }
 }
 
-/// Helper trait for [FullTransactionsReceiver] to erase the `Transaction` type.
+/// Helper trait for [`FullTransactionsReceiver`] to erase the `Transaction` type.
 #[async_trait]
 trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
     async fn drain(&self) -> FilterChanges<T>;
