@@ -856,8 +856,8 @@ mod tests {
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
         handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
-        HelloMessageWithProtocols, P2PStream, Status, StatusBuilder, UnauthedEthStream,
-        UnauthedP2PStream,
+        HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        UnifiedStatus,
     };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
@@ -881,7 +881,7 @@ mod tests {
         secret_key: SecretKey,
         local_peer_id: PeerId,
         hello: HelloMessageWithProtocols,
-        status: Status,
+        status: UnifiedStatus,
         fork_filter: ForkFilter,
         next_id: usize,
     }

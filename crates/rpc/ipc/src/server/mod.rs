@@ -256,7 +256,7 @@ pub struct IpcServerStartError {
 
 /// Data required by the server to handle requests received via an IPC connection
 #[derive(Debug, Clone)]
-#[expect(dead_code)]
+#[allow(dead_code)]
 pub(crate) struct ServiceData {
     /// Registered server methods.
     pub(crate) methods: Methods,
@@ -612,7 +612,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
         self
     }
 
-    /// Set the maximum number of connections allowed. Default is 1024.
+    /// Set the maximum number of subscriptions per connection. Default is 1024.
     pub const fn max_subscriptions_per_connection(mut self, max: u32) -> Self {
         self.settings.max_subscriptions_per_connection = max;
         self
@@ -620,7 +620,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
 
     /// The server enforces backpressure which means that
     /// `n` messages can be buffered and if the client
-    /// can't keep with up the server.
+    /// can't keep up with the server.
     ///
     /// This `capacity` is applied per connection and
     /// applies globally on the connection which implies

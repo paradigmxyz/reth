@@ -113,7 +113,7 @@ where
     pub fn validate_all_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Tx>,
+        transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         self.inner.validate_batch_with_origin(origin, transactions)
     }
@@ -144,7 +144,7 @@ where
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all_with_origin(origin, transactions)
     }
@@ -648,7 +648,7 @@ where
     fn validate_batch_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Tx>,
+        transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         let mut provider = None;
         transactions

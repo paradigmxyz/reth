@@ -713,6 +713,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     let _ = tx.send(None);
                 }
             }
+            NetworkHandleMessage::InternalBlockRangeUpdate(block_range_update) => {
+                self.swarm.sessions_mut().update_advertised_block_range(block_range_update);
+            }
             NetworkHandleMessage::EthMessage { peer_id, message } => {
                 self.swarm.sessions_mut().send_message(&peer_id, message)
             }
