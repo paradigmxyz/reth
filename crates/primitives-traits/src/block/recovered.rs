@@ -283,6 +283,15 @@ impl<B: Block> RecoveredBlock<B> {
         (self.block.into_block(), self.senders)
     }
 
+    /// Returns the `Recovered<&T>` transaction at the given index.
+    pub fn recovered_transaction(
+        &self,
+        idx: usize,
+    ) -> Option<Recovered<&<B::Body as BlockBody>::Transaction>> {
+        let sender = self.senders.get(idx).copied()?;
+        self.block.body().transactions().get(idx).map(|tx| Recovered::new_unchecked(tx, sender))
+    }
+
     /// Returns an iterator over all transactions and their sender.
     #[inline]
     pub fn transactions_with_sender(

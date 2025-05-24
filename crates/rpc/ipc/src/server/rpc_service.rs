@@ -25,7 +25,7 @@ pub struct RpcService {
 }
 
 /// Configuration of the `RpcService`.
-#[expect(dead_code)]
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub(crate) enum RpcServiceCfg {
     /// The server supports only calls.
@@ -88,7 +88,7 @@ impl RpcServiceT for RpcService {
                         id_provider,
                     } = &self.cfg
                     else {
-                        tracing::warn!("Subscriptions not supported");
+                        tracing::warn!(id = ?id, method = %name, "Attempted subscription on a service not configured for subscriptions.");
                         let rp =
                             MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError));
                         return ResponseFuture::ready(rp);
@@ -115,7 +115,7 @@ impl RpcServiceT for RpcService {
                     // happen!
 
                     let RpcServiceCfg::CallsAndSubscriptions { .. } = self.cfg else {
-                        tracing::warn!("Subscriptions not supported");
+                        tracing::warn!(id = ?id, method = %name, "Attempted unsubscription on a service not configured for subscriptions.");
                         let rp =
                             MethodResponse::error(id, ErrorObject::from(ErrorCode::InternalError));
                         return ResponseFuture::ready(rp);

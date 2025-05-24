@@ -1,24 +1,23 @@
-use crate::evm::CustomEvmConfig;
+use crate::{
+    evm::{
+        alloy::{CustomEvm, CustomEvmFactory},
+        CustomEvmConfig, CustomTxEnv,
+    },
+    primitives::CustomTransaction,
+};
+use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, ExecutableTx, OnStateHook,
+        BlockExecutorFor, CommitChanges, ExecutableTx, OnStateHook,
     },
     precompiles::PrecompilesMap,
     Database, Evm,
 };
-use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor, OpEvm};
-use op_revm::OpTransaction;
-use reth_ethereum::{evm::primitives::InspectorFor, node::api::ConfigureEvm};
-use reth_op::{
-    chainspec::OpChainSpec,
-    node::{OpEvmFactory, OpRethReceiptBuilder},
-    OpReceipt, OpTransactionSigned,
-};
-use revm::{
-    context::{result::ExecutionResult, TxEnv},
-    database::State,
-};
+use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutor};
+use reth_ethereum::evm::primitives::InspectorFor;
+use reth_op::{chainspec::OpChainSpec, node::OpRethReceiptBuilder, OpReceipt};
+use revm::{context::result::ExecutionResult, database::State};
 use std::sync::Arc;
 
 pub struct CustomBlockExecutor<Evm> {
@@ -28,9 +27,9 @@ pub struct CustomBlockExecutor<Evm> {
 impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
 where
     DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = OpTransaction<TxEnv>>,
+    E: Evm<DB = &'db mut State<DB>, Tx = CustomTxEnv>,
 {
-    type Transaction = OpTransactionSigned;
+    type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
     type Evm = E;
 
@@ -38,12 +37,20 @@ where
         self.inner.apply_pre_execution_changes()
     }
 
-    fn execute_transaction_with_result_closure(
+    fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutableTx<Self>,
-        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, BlockExecutionError> {
-        self.inner.execute_transaction_with_result_closure(tx, f)
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        match tx.tx() {
+            CustomTransaction::BuiltIn(op_tx) => {
+                self.inner.execute_transaction_with_commit_condition(
+                    Recovered::new_unchecked(op_tx, *tx.signer()),
+                    f,
+                )
+            }
+            CustomTransaction::Other(..) => todo!(),
+        }
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<OpReceipt>), BlockExecutionError> {
@@ -64,18 +71,18 @@ where
 }
 
 impl BlockExecutorFactory for CustomEvmConfig {
-    type EvmFactory = OpEvmFactory;
+    type EvmFactory = CustomEvmFactory;
     type ExecutionCtx<'a> = OpBlockExecutionCtx;
-    type Transaction = OpTransactionSigned;
+    type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
 
     fn evm_factory(&self) -> &Self::EvmFactory {
-        self.inner.evm_factory()
+        &self.custom_evm_factory
     }
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: OpEvm<&'a mut State<DB>, I, PrecompilesMap>,
+        evm: CustomEvm<&'a mut State<DB>, I, PrecompilesMap>,
         ctx: OpBlockExecutionCtx,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
