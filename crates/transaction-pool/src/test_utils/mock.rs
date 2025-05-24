@@ -389,15 +389,12 @@ impl MockTransaction {
     /// * [`MockTransaction::eip1559`]
     /// * [`MockTransaction::eip4844`]
     pub fn new_from_type(tx_type: TxType) -> Self {
-        #[expect(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => Self::legacy(),
             TxType::Eip2930 => Self::eip2930(),
             TxType::Eip1559 => Self::eip1559(),
             TxType::Eip4844 => Self::eip4844(),
             TxType::Eip7702 => Self::eip7702(),
-
-            _ => unreachable!("Invalid transaction type"),
         }
     }
 
