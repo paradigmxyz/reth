@@ -1,6 +1,9 @@
 //! Storage for blob data of EIP4844 transactions.
 
-use alloy_eips::eip4844::{BlobAndProofV1, BlobAndProofV2, BlobTransactionSidecar};
+use alloy_eips::{
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip7594::BlobTransactionSidecarVariant,
+};
 use alloy_primitives::B256;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
@@ -27,10 +30,13 @@ mod tracker;
 /// Note: this is Clone because it is expected to be wrapped in an Arc.
 pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Inserts the blob sidecar into the store
-    fn insert(&self, tx: B256, data: BlobTransactionSidecar) -> Result<(), BlobStoreError>;
+    fn insert(&self, tx: B256, data: BlobTransactionSidecarVariant) -> Result<(), BlobStoreError>;
 
     /// Inserts multiple blob sidecars into the store
-    fn insert_all(&self, txs: Vec<(B256, BlobTransactionSidecar)>) -> Result<(), BlobStoreError>;
+    fn insert_all(
+        &self,
+        txs: Vec<(B256, BlobTransactionSidecarVariant)>,
+    ) -> Result<(), BlobStoreError>;
 
     /// Deletes the blob sidecar from the store
     fn delete(&self, tx: B256) -> Result<(), BlobStoreError>;
@@ -46,7 +52,7 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     fn cleanup(&self) -> BlobStoreCleanupStat;
 
     /// Retrieves the decoded blob data for the given transaction hash.
-    fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
+    fn get(&self, tx: B256) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 
     /// Checks if the given transaction hash is in the blob store.
     fn contains(&self, tx: B256) -> Result<bool, BlobStoreError>;
@@ -60,14 +66,16 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     fn get_all(
         &self,
         txs: Vec<B256>,
-    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
+    ) -> Result<Vec<(B256, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError>;
 
-    /// Returns the exact [`BlobTransactionSidecar`] for the given transaction hashes in the exact
-    /// order they were requested.
+    /// Returns the exact [`BlobTransactionSidecarVariant`] for the given transaction hashes in the
+    /// exact order they were requested.
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
-    fn get_exact(&self, txs: Vec<B256>)
-        -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
+    fn get_exact(
+        &self,
+        txs: Vec<B256>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 
     /// Return the [`BlobAndProofV1`]s for a list of blob versioned hashes.
     fn get_by_versioned_hashes_v1(
@@ -78,6 +86,13 @@ pub trait BlobStore: fmt::Debug + Send + Sync + 'static {
     /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
     /// Blobs and proofs are returned only if they are present for _all_ requested
     /// versioned hashes.
+    ///
+    /// This differs from [`BlobStore::get_by_versioned_hashes_v1`] in that it also returns all the
+    /// cell proofs in [`BlobAndProofV2`] supported by the EIP-7594 blob sidecar variant.
+    ///
+    /// The response also differs from [`BlobStore::get_by_versioned_hashes_v1`] in that this
+    /// returns `None` if any of the requested versioned hashes are not present in the blob store:
+    /// e.g. where v1 would return `[A, None, C]` v2 would return `None`. See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#engine_getblobsv2>
     fn get_by_versioned_hashes_v2(
         &self,
         versioned_hashes: &[B256],

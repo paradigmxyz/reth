@@ -179,6 +179,8 @@ where
     fn update_status(&self, _head: reth_ethereum_forks::Head) {}
 
     fn update_sync_state(&self, _state: reth_network_p2p::sync::SyncState) {}
+
+    fn update_block_range(&self, _: reth_eth_wire_types::BlockRangeUpdate) {}
 }
 
 impl<Net> NetworkEventListenerProvider for NoopNetwork<Net>

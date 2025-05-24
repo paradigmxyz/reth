@@ -36,7 +36,11 @@ pub struct CustomHeader {
     pub extension: u64,
 }
 
-impl CustomHeader {}
+impl From<Header> for CustomHeader {
+    fn from(value: Header) -> Self {
+        CustomHeader { inner: value, extension: 0 }
+    }
+}
 
 impl AsRef<Self> for CustomHeader {
     fn as_ref(&self) -> &Self {

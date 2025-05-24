@@ -12,20 +12,20 @@ use alloy_consensus::{
         EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
         LEGACY_TX_TYPE_ID,
     },
-    transaction::PooledTransaction,
     EthereumTxEnvelope, Signed, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant, TxEip7702,
-    TxEnvelope, TxLegacy, TxType, Typed2718,
+    TxLegacy, TxType, Typed2718,
 };
 use alloy_eips::{
     eip1559::MIN_PROTOCOL_BASE_FEE,
     eip2930::AccessList,
     eip4844::{BlobTransactionSidecar, BlobTransactionValidationError, DATA_GAS_PER_BLOB},
+    eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256};
 use paste::paste;
 use rand::{distr::Uniform, prelude::Distribution};
-use reth_ethereum_primitives::{Transaction, TransactionSigned};
+use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
 use reth_primitives_traits::{
     transaction::error::TryFromRecoveredTransactionError, InMemorySize, Recovered,
     SignedTransaction,
@@ -218,7 +218,7 @@ pub enum MockTransaction {
         /// The transaction input data.
         input: Bytes,
         /// The sidecar information for the transaction.
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
         /// The blob versioned hashes for the transaction.
         blob_versioned_hashes: Vec<B256>,
         /// The size of the transaction, returned in the implementation of [`PoolTransaction`].
@@ -361,7 +361,7 @@ impl MockTransaction {
             value: Default::default(),
             input: Bytes::new(),
             access_list: Default::default(),
-            sidecar: Default::default(),
+            sidecar: BlobTransactionSidecarVariant::Eip4844(Default::default()),
             blob_versioned_hashes: Default::default(),
             size: Default::default(),
             cost: U256::ZERO,
@@ -369,12 +369,12 @@ impl MockTransaction {
     }
 
     /// Returns a new EIP4844 transaction with a provided sidecar
-    pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecar) -> Self {
+    pub fn eip4844_with_sidecar(sidecar: BlobTransactionSidecarVariant) -> Self {
         let mut transaction = Self::eip4844();
         if let Self::Eip4844 { sidecar: existing_sidecar, blob_versioned_hashes, .. } =
             &mut transaction
         {
-            *blob_versioned_hashes = sidecar.versioned_hashes().collect();
+            *blob_versioned_hashes = sidecar.versioned_hashes();
             *existing_sidecar = sidecar;
         }
         transaction
@@ -681,7 +681,7 @@ impl PoolTransaction for MockTransaction {
 
     type Consensus = TransactionSigned;
 
-    type Pooled = PooledTransaction;
+    type Pooled = PooledTransactionVariant;
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.into()
@@ -888,7 +888,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn try_into_pooled_eip4844(
         self,
-        sidecar: Arc<BlobTransactionSidecar>,
+        sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         let (tx, signer) = self.into_consensus().into_parts();
         tx.try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
@@ -898,7 +898,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn try_from_eip4844(
         tx: Recovered<Self::Consensus>,
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
         tx.try_into_pooled_eip4844(sidecar)
@@ -909,7 +909,7 @@ impl EthPoolTransaction for MockTransaction {
 
     fn validate_blob(
         &self,
-        _blob: &BlobTransactionSidecar,
+        _blob: &BlobTransactionSidecarVariant,
         _settings: &KzgSettings,
     ) -> Result<(), alloy_eips::eip4844::BlobTransactionValidationError> {
         match &self {
@@ -1023,7 +1023,7 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
                 value,
                 input,
                 access_list,
-                sidecar: BlobTransactionSidecar::default(),
+                sidecar: BlobTransactionSidecarVariant::Eip4844(BlobTransactionSidecar::default()),
                 blob_versioned_hashes: Default::default(),
                 size,
                 cost: U256::from(gas_limit) * U256::from(max_fee_per_gas) + value,
@@ -1059,10 +1059,14 @@ impl TryFrom<Recovered<TransactionSigned>> for MockTransaction {
     }
 }
 
-impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
+impl TryFrom<Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>>>
+    for MockTransaction
+{
     type Error = TryFromRecoveredTransactionError;
 
-    fn try_from(tx: Recovered<TxEnvelope>) -> Result<Self, Self::Error> {
+    fn try_from(
+        tx: Recovered<EthereumTxEnvelope<TxEip4844Variant<BlobTransactionSidecarVariant>>>,
+    ) -> Result<Self, Self::Error> {
         let sender = tx.signer();
         let transaction = tx.into_inner();
         let hash = *transaction.tx_hash();
@@ -1134,7 +1138,9 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
                     value: tx.value,
                     input: tx.input.clone(),
                     access_list: tx.access_list.clone(),
-                    sidecar: BlobTransactionSidecar::default(),
+                    sidecar: BlobTransactionSidecarVariant::Eip4844(
+                        BlobTransactionSidecar::default(),
+                    ),
                     blob_versioned_hashes: tx.blob_versioned_hashes.clone(),
                     size,
                     cost: U256::from(tx.gas_limit) * U256::from(tx.max_fee_per_gas) + tx.value,
@@ -1164,8 +1170,8 @@ impl TryFrom<Recovered<TxEnvelope>> for MockTransaction {
     }
 }
 
-impl From<Recovered<PooledTransaction>> for MockTransaction {
-    fn from(tx: Recovered<PooledTransaction>) -> Self {
+impl From<Recovered<PooledTransactionVariant>> for MockTransaction {
+    fn from(tx: Recovered<PooledTransactionVariant>) -> Self {
         let (tx, signer) = tx.into_parts();
         Recovered::<TransactionSigned>::new_unchecked(tx.into(), signer).try_into().expect(
             "Failed to convert from PooledTransactionsElementEcRecovered to MockTransaction",
@@ -1261,7 +1267,7 @@ impl From<MockTransaction> for Transaction {
                 to,
                 value,
                 access_list,
-                blob_versioned_hashes: sidecar.versioned_hashes().collect(),
+                blob_versioned_hashes: sidecar.versioned_hashes(),
                 max_fee_per_blob_gas,
                 input,
             }),

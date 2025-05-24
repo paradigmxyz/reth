@@ -45,7 +45,7 @@ impl<T> FullEthApiServer for T where
 {
 }
 
-/// Eth rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
+/// Eth rpc interface: <https://ethereum.github.io/execution-apis/docs/reference/json-rpc-api>
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "eth"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
@@ -247,7 +247,7 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     /// It returns list of addresses and storage keys used by the transaction, plus the gas
     /// consumed when the access list is added. That is, it gives you the list of addresses and
     /// storage keys that will be used by that transaction, plus the gas consumed if the access
-    /// list is included. Like eth_estimateGas, this is an estimation; the list could change
+    /// list is included. Like `eth_estimateGas`, this is an estimation; the list could change
     /// when the transaction is actually mined. Adding an accessList to your transaction does
     /// not necessary result in lower gas usage compared to a transaction without an access
     /// list.

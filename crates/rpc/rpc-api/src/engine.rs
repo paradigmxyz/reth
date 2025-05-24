@@ -191,7 +191,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
     /// blocks.
     ///
-    /// WARNING: This method is associated with the BeaconBlocksByRange message in the consensus
+    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
@@ -205,9 +205,9 @@ pub trait EngineApi<Engine: EngineTypes> {
         count: U64,
     ) -> RpcResult<ExecutionPayloadBodiesV1>;
 
-    /// This function will return the ClientVersionV1 object.
+    /// This function will return the [`ClientVersionV1`] object.
     /// See also:
-    /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
+    /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>
     ///
     ///
     /// - When connected to a single execution client, the consensus client **MUST** receive an
@@ -243,7 +243,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>>;
 }
 
-/// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation/>
+/// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/docs/reference/json-rpc-api>
 ///
 /// This also includes additional eth functions required by optimism.
 ///

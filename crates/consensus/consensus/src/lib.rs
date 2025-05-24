@@ -71,7 +71,7 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
 }
 
-/// HeaderValidator is a protocol that validates headers and their relationships.
+/// `HeaderValidator` is a protocol that validates headers and their relationships.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
     /// Validate if header is correct and follows consensus specification.
@@ -87,7 +87,7 @@ pub trait HeaderValidator<H = Header>: Debug + Send + Sync {
     ///
     /// **This should not be called for the genesis block**.
     ///
-    /// Note: Validating header against its parent does not include other HeaderValidator
+    /// Note: Validating header against its parent does not include other `HeaderValidator`
     /// validations.
     fn validate_header_against_parent(
         &self,

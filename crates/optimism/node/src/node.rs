@@ -9,7 +9,10 @@ use crate::{
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use reth_chainspec::{EthChainSpec, Hardforks};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
-use reth_network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives, PeersInfo};
+use reth_network::{
+    primitives::NetPrimitivesFor, NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
+    PeersInfo,
+};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
 };
@@ -27,7 +30,7 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes};
+use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -46,7 +49,7 @@ use reth_optimism_txpool::{
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
 use reth_rpc_api::DebugApiServer;
-use reth_rpc_eth_api::ext::L2EthApiExtServer;
+use reth_rpc_eth_api::{ext::L2EthApiExtServer, FullEthApiServer};
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -56,7 +59,7 @@ use reth_transaction_pool::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// Marker trait for Optimism node types with standard engine, chain spec, and primitives.
 pub trait OpNodeTypes:
@@ -128,10 +131,7 @@ impl OpNode {
             .payload(BasicPayloadServiceBuilder::new(
                 OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
             ))
-            .network(OpNetworkBuilder {
-                disable_txpool_gossip,
-                disable_discovery_v4: !discovery_v4,
-            })
+            .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
             .consensus(OpConsensusBuilder::default())
     }
 
@@ -254,28 +254,28 @@ pub struct OpAddOns<
     enable_tx_conditional: bool,
 }
 
-impl<N> Default for OpAddOns<N, OpEthApiBuilder>
+impl<N, NetworkT> Default for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
-    N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
-    OpEthApiBuilder: EthApiBuilder<N>,
+    N: FullNodeComponents<Types: NodeTypes>,
+    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
 {
     fn default() -> Self {
         Self::builder().build()
     }
 }
 
-impl<N> OpAddOns<N, OpEthApiBuilder>
+impl<N, NetworkT> OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
-    N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
-    OpEthApiBuilder: EthApiBuilder<N>,
+    N: FullNodeComponents<Types: NodeTypes>,
+    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
 {
     /// Build a [`OpAddOns`] using [`OpAddOnsBuilder`].
-    pub fn builder() -> OpAddOnsBuilder {
+    pub fn builder() -> OpAddOnsBuilder<NetworkT> {
         OpAddOnsBuilder::default()
     }
 }
 
-impl<N> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder>
+impl<N, NetworkT> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -289,8 +289,10 @@ where
     OpEthApiError: FromEvmError<N::Evm>,
     <N::Pool as TransactionPool>::Transaction: OpPooledTx,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
+    OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    NetworkT: op_alloy_network::Network + Unpin,
 {
-    type Handle = RpcHandle<N, OpEthApi<N>>;
+    type Handle = RpcHandle<N, OpEthApi<N, NetworkT>>;
 
     async fn launch_add_ons(
         self,
@@ -360,7 +362,7 @@ where
     }
 }
 
-impl<N> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder>
+impl<N, NetworkT> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -374,15 +376,17 @@ where
     OpEthApiError: FromEvmError<N::Evm>,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
+    OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    NetworkT: op_alloy_network::Network + Unpin,
 {
-    type EthApi = OpEthApi<N>;
+    type EthApi = OpEthApi<N, NetworkT>;
 
     fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
         self.rpc_add_ons.hooks_mut()
     }
 }
 
-impl<N> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder>
+impl<N, NetworkT> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -391,7 +395,7 @@ where
             Payload = OpEngineTypes,
         >,
     >,
-    OpEthApiBuilder: EthApiBuilder<N>,
+    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
 {
     type Validator = OpEngineValidator<N::Provider>;
 
@@ -401,9 +405,9 @@ where
 }
 
 /// A regular optimism evm and executor builder.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
-pub struct OpAddOnsBuilder {
+pub struct OpAddOnsBuilder<NetworkT> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_url: Option<String>,
@@ -411,9 +415,22 @@ pub struct OpAddOnsBuilder {
     da_config: Option<OpDAConfig>,
     /// Enable transaction conditionals.
     enable_tx_conditional: bool,
+    /// Marker for network types.
+    _nt: PhantomData<NetworkT>,
 }
 
-impl OpAddOnsBuilder {
+impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
+    fn default() -> Self {
+        Self {
+            sequencer_url: None,
+            da_config: None,
+            enable_tx_conditional: false,
+            _nt: PhantomData,
+        }
+    }
+}
+
+impl<NetworkT> OpAddOnsBuilder<NetworkT> {
     /// With a [`SequencerClient`].
     pub fn with_sequencer(mut self, sequencer_client: Option<String>) -> Self {
         self.sequencer_url = sequencer_client;
@@ -433,14 +450,14 @@ impl OpAddOnsBuilder {
     }
 }
 
-impl OpAddOnsBuilder {
+impl<NetworkT> OpAddOnsBuilder<NetworkT> {
     /// Builds an instance of [`OpAddOns`].
-    pub fn build<N>(self) -> OpAddOns<N, OpEthApiBuilder>
+    pub fn build<N>(self) -> OpAddOns<N, OpEthApiBuilder<NetworkT>>
     where
-        N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
-        OpEthApiBuilder: EthApiBuilder<N>,
+        N: FullNodeComponents<Types: NodeTypes>,
+        OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
     {
-        let Self { sequencer_url, da_config, enable_tx_conditional } = self;
+        let Self { sequencer_url, da_config, enable_tx_conditional, .. } = self;
 
         OpAddOns {
             rpc_add_ons: RpcAddOns::new(
@@ -456,18 +473,32 @@ impl OpAddOnsBuilder {
 }
 
 /// A regular optimism evm and executor builder.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 #[non_exhaustive]
-pub struct OpExecutorBuilder;
+pub struct OpExecutorBuilder<ChainSpec = OpChainSpec, Primitives = OpPrimitives> {
+    /// Marker for chain spec type.
+    _cs: PhantomData<ChainSpec>,
+    /// Marker for primitives type.
+    _p: PhantomData<Primitives>,
+}
 
-impl<Node> ExecutorBuilder<Node> for OpExecutorBuilder
+impl<ChainSpec, Primitives> Default for OpExecutorBuilder<ChainSpec, Primitives> {
+    fn default() -> Self {
+        Self { _cs: PhantomData, _p: PhantomData }
+    }
+}
+
+impl<Node, ChainSpec, Primitives> ExecutorBuilder<Node> for OpExecutorBuilder<ChainSpec, Primitives>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = Primitives>>,
+    ChainSpec: EthChainSpec + OpHardforks,
+    Primitives: NodePrimitives,
+    OpEvmConfig<ChainSpec, Primitives>: ConfigureEvm<Primitives = Primitives> + 'static,
 {
-    type EVM = OpEvmConfig;
+    type EVM = OpEvmConfig<ChainSpec, Primitives>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        let evm_config = OpEvmConfig::optimism(ctx.chain_spec());
+        let evm_config = OpEvmConfig::new(ctx.chain_spec(), OpRethReceiptBuilder::default());
 
         Ok(evm_config)
     }
@@ -477,7 +508,7 @@ where
 ///
 /// This contains various settings that can be configured and take precedence over the node's
 /// config.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct OpPoolBuilder<T = crate::txpool::OpPooledTransaction> {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,
@@ -499,6 +530,18 @@ impl<T> Default for OpPoolBuilder<T> {
             supervisor_http: DEFAULT_SUPERVISOR_URL.to_string(),
             supervisor_safety_level: SafetyLevel::CrossUnsafe,
             _pd: Default::default(),
+        }
+    }
+}
+
+impl<T> Clone for OpPoolBuilder<T> {
+    fn clone(&self) -> Self {
+        Self {
+            pool_config_overrides: self.pool_config_overrides.clone(),
+            enable_tx_conditional: self.enable_tx_conditional,
+            supervisor_http: self.supervisor_http.clone(),
+            supervisor_safety_level: self.supervisor_safety_level,
+            _pd: core::marker::PhantomData,
         }
     }
 }
@@ -746,26 +789,43 @@ where
 }
 
 /// A basic optimism network builder.
-#[derive(Debug, Default, Clone)]
-pub struct OpNetworkBuilder {
+#[derive(Debug, Default)]
+pub struct OpNetworkBuilder<NetworkP = OpNetworkPrimitives, PooledTx = OpPooledTransaction> {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
     /// Disable discovery v4
     pub disable_discovery_v4: bool,
+    /// Marker for the network primitives type
+    _np: PhantomData<NetworkP>,
+    /// Marker for the pooled transaction type
+    _pt: PhantomData<PooledTx>,
 }
 
-impl OpNetworkBuilder {
+impl<NetworkP, PooledTx> Clone for OpNetworkBuilder<NetworkP, PooledTx> {
+    fn clone(&self) -> Self {
+        Self::new(self.disable_txpool_gossip, self.disable_discovery_v4)
+    }
+}
+
+impl<NetworkP, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
+    /// Creates a new `OpNetworkBuilder`.
+    pub const fn new(disable_txpool_gossip: bool, disable_discovery_v4: bool) -> Self {
+        Self { disable_txpool_gossip, disable_discovery_v4, _np: PhantomData, _pt: PhantomData }
+    }
+}
+
+impl<NetworkP: NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
     /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
     ///
     /// This applies the configured [`OpNetworkBuilder`] settings.
     pub fn network_config<Node>(
         &self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, OpNetworkPrimitives>>
+    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, NetworkP>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4 } = self.clone();
+        let Self { disable_txpool_gossip, disable_discovery_v4, .. } = self.clone();
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?
@@ -802,18 +862,22 @@ impl OpNetworkBuilder {
     }
 }
 
-impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
+impl<Node, Pool, NetworkP, PooledTx> NetworkBuilder<Node, Pool>
+    for OpNetworkBuilder<NetworkP, PooledTx>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives>>,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-                Pooled = OpPooledTransaction,
-            >,
+            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTx>,
         > + Unpin
         + 'static,
+    NetworkP: NetworkPrimitives<
+            PooledTransaction = PooledTx,
+            BroadcastedTransaction = <<Node::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx
+        >
+        + NetPrimitivesFor<PrimitivesTy<Node::Types>>,
+    PooledTx: Send,
 {
-    type Network = NetworkHandle<OpNetworkPrimitives>;
+    type Network = NetworkHandle<NetworkP>;
 
     async fn build_network(
         self,

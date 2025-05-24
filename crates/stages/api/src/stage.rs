@@ -184,7 +184,7 @@ pub struct UnwindOutput {
 /// transactions, and persist their results to a database.
 ///
 /// Stages must have a unique [ID][StageId] and implement a way to "roll forwards"
-/// ([Stage::execute]) and a way to "roll back" ([Stage::unwind]).
+/// ([`Stage::execute`]) and a way to "roll back" ([`Stage::unwind`]).
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///

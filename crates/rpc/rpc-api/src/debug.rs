@@ -53,7 +53,7 @@ pub trait DebugApi {
     /// This expects an rlp encoded block
     ///
     /// Note, the parent of this block must be present, or it will fail. For the second parameter
-    /// see [GethDebugTracingOptions] reference.
+    /// see [`GethDebugTracingOptions`] reference.
     #[method(name = "traceBlock")]
     async fn debug_trace_block(
         &self,
@@ -63,7 +63,7 @@ pub trait DebugApi {
 
     /// Similar to `debug_traceBlock`, `debug_traceBlockByHash` accepts a block hash and will replay
     /// the block that is already present in the database. For the second parameter see
-    /// [GethDebugTracingOptions].
+    /// [`GethDebugTracingOptions`].
     #[method(name = "traceBlockByHash")]
     async fn debug_trace_block_by_hash(
         &self,
@@ -72,8 +72,8 @@ pub trait DebugApi {
     ) -> RpcResult<Vec<TraceResult>>;
 
     /// Similar to `debug_traceBlockByHash`, `debug_traceBlockByNumber` accepts a block number
-    /// [BlockNumberOrTag] and will replay the block that is already present in the database.
-    /// For the second parameter see [GethDebugTracingOptions].
+    /// [`BlockNumberOrTag`] and will replay the block that is already present in the database.
+    /// For the second parameter see [`GethDebugTracingOptions`].
     #[method(name = "traceBlockByNumber")]
     async fn debug_trace_block_by_number(
         &self,
@@ -99,7 +99,7 @@ pub trait DebugApi {
     /// The block can optionally be specified either by hash or by number as
     /// the second argument.
     /// The trace can be configured similar to `debug_traceTransaction`,
-    /// see [GethDebugTracingOptions]. The method returns the same output as
+    /// see [`GethDebugTracingOptions`]. The method returns the same output as
     /// `debug_traceTransaction`.
     #[method(name = "traceCall")]
     async fn debug_trace_call(
@@ -115,7 +115,7 @@ pub trait DebugApi {
     ///
     /// The first argument is a list of bundles. Each bundle can overwrite the block headers. This
     /// will affect all transaction in that bundle.
-    /// BlockNumber and transaction_index are optional. Transaction_index
+    /// `BlockNumber` and `transaction_index` are optional. `Transaction_index`
     /// specifies the number of tx in the block to replay and -1 means all transactions should be
     /// replayed.
     /// The trace can be configured similar to `debug_traceTransaction`.
@@ -382,7 +382,7 @@ pub trait DebugApi {
 
     /// Returns the structured logs created during the execution of EVM against a block pulled
     /// from the pool of bad ones and returns them as a JSON object. For the second parameter see
-    /// TraceConfig reference.
+    /// `TraceConfig` reference.
     #[method(name = "traceBadBlock")]
     async fn debug_trace_bad_block(
         &self,

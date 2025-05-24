@@ -73,6 +73,7 @@ exclude_crates=(
   reth-optimism-txpool # reth-transaction-pool
   reth-era-downloader # tokio
   reth-era-utils # tokio
+  reth-tracing-otlp
 )
 
 # Array to hold the results
