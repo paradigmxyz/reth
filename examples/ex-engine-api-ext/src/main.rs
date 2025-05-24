@@ -1,14 +1,14 @@
-//! Example demonstrating how to access the Engine API instance.
+//! Example demonstrating how to access the `EngineApi` instance using callback wrappers.
 //!
 //! Run with
 //!
 //! ```sh
-//! cargo run -p example-ex-engine-api-fn
+//! cargo run -p example-ex-engine-api-ext
 //! ```
 
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
-use reth_node_builder::{NodeBuilder, NodeConfig};
+use reth_node_builder::{EngineApiBuilderExt, EngineNodeLauncher, NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{
     args::RollupArgs,
@@ -16,27 +16,30 @@ use reth_optimism_node::{
     OpEngineApiBuilder, OpNode,
 };
 use reth_provider::providers::BlockchainProvider;
-use reth_rpc_api::IntoEngineApiRpcModule;
-use std::sync::Arc;
+use reth_tasks::TaskManager;
 use tokio::sync::oneshot;
 
-fn main() {
+#[tokio::main]
+async fn main() {
+    // Op node configuration and setup
     let config = NodeConfig::new(BASE_MAINNET.clone());
     let db = create_test_rw_db();
     let args = RollupArgs::default();
     let op_node = OpNode::new(args);
-    let default_builder: reth_optimism_node::OpEngineApiBuilder<OpEngineValidatorBuilder> =
+    let tasks = TaskManager::current();
+
+    let (engine_api_tx, engine_api_rx) = oneshot::channel();
+
+    let default_builder: OpEngineApiBuilder<OpEngineValidatorBuilder> =
         OpEngineApiBuilder::default();
 
-    let (_tx, _rx) = oneshot::channel::<Arc<dyn IntoEngineApiRpcModule + Send + Sync>>();
-
-    // let builder_with_sender = default_builder.with_sender(tx);
+    let builder_with_sender = default_builder.with_sender(engine_api_tx);
 
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types_and_provider::<OpNode, BlockchainProvider<NodeTypesWithDBAdapter<OpNode, _>>>()
         .with_components(op_node.components())
-        .with_add_ons(OpAddOns::default().rpc_add_ons.with_engine_api(default_builder))
+        .with_add_ons(OpAddOns::default().rpc_add_ons.with_engine_api(builder_with_sender))
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())
@@ -46,11 +49,14 @@ fn main() {
             let _client = handles.rpc.http_client();
             Ok(())
         })
-        .extend_rpc_modules(|ctx| {
-            let _ = ctx.config();
-            let _ = ctx.node().provider();
-
-            Ok(())
+        .launch_with_fn(|builder| {
+            let launcher = EngineNodeLauncher::new(
+                tasks.executor(),
+                builder.config.datadir(),
+                Default::default(),
+            );
+            builder.launch_with(launcher)
         })
-        .check_launch();
+        .await
+        .expect("Failed to launch op node");
 }

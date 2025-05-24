@@ -11,7 +11,7 @@ reth-db = { workspace = true, features = ["op", "test-utils"] }
 reth-ethereum = { workspace = true, features = ["node", "pool", "node-api", "cli", "exex"] }
 reth-node-builder.workspace = true
 reth-optimism-consensus.workspace = true
-
+reth-tasks.workspace = true
 reth-node-api.workspace = true
 reth-rpc-api.workspace = true
 reth-tracing.workspace = true

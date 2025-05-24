@@ -3452,6 +3452,7 @@ dependencies = [
  "reth-optimism-node",
  "reth-provider",
  "reth-rpc-api",
+ "reth-tasks",
  "reth-tracing",
  "serde_json",
  "tokio",
