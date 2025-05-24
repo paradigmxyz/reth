@@ -155,7 +155,7 @@ impl<OpTransactionSigned> From<EthPayloadBuilderAttributes>
 
 /// Contains the built payload.
 #[derive(Debug, Clone)]
-pub struct OpBuiltPayload<N: NodePrimitives = OpPrimitives> {
+pub struct OpBuiltPayload<N: NodePrimitives> {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// Sealed block

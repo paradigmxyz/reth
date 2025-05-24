@@ -102,6 +102,12 @@ where
 #[derive(Debug, Clone)]
 pub struct CustomEvmFactory(pub OpEvmFactory);
 
+impl CustomEvmFactory {
+    pub const fn new(op_factory: OpEvmFactory) -> Self {
+        Self(op_factory)
+    }
+}
+
 impl EvmFactory for CustomEvmFactory {
     type Evm<DB: Database, I: Inspector<OpContext<DB>>> = CustomEvm<DB, I, Self::Precompiles>;
     type Context<DB: Database> = OpContext<DB>;
