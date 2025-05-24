@@ -7,7 +7,7 @@ use bytes::Buf;
 use core::ops::Deref;
 use reth_codecs_derive::add_arbitrary_tests;
 
-/// Authorization acts as bridge which simplifies Compact implementation for AlloyAuthorization.
+/// Authorization acts as bridge which simplifies Compact implementation for `AlloyAuthorization`.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip7702::Authorization`
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]
