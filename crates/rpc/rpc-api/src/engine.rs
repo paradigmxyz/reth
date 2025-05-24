@@ -207,7 +207,7 @@ pub trait EngineApi<Engine: EngineTypes> {
 
     /// This function will return the [`ClientVersionV1`] object.
     /// See also:
-    /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
+     /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>
     ///
     ///
     /// - When connected to a single execution client, the consensus client **MUST** receive an
