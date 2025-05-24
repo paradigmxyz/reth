@@ -251,15 +251,22 @@ where
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
-            let (root, updates) =
-                StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
+            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
+            let mut current = from_block;
+            let mut final_root = B256::default();
+            while current < to_block {
+                let chunk_to = std::cmp::min(current + threshold - 1, to_block);
+                let chunk_range = current..=chunk_to;
+                let (root, updates) =
+                StateRoot::incremental_root_with_updates(provider.tx_ref(), chunk_range)
                     .map_err(|e| {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
                     })?;
-
-            provider.write_trie_updates(&updates)?;
+                provider.write_trie_updates(&updates)?;
+                final_root = root;
+                current = chunk_to + 1;
+            }
 
             let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
                 provider.count_entries::<tables::HashedStorages>()?)
@@ -272,8 +279,8 @@ where
                 processed: total_hashed_entries,
                 total: total_hashed_entries,
             };
-
-            (root, entities_checkpoint)
+            // Save the checkpoint
+            (final_root, entities_checkpoint)
         };
 
         // Reset the checkpoint
@@ -466,6 +473,65 @@ mod tests {
 
         // Validate the stage execution
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
+    }
+
+    #[tokio::test]
+    async fn execute_chunked_merkle() {
+        let (previous_stage, stage_progress) = (100, 500);
+        let threshold = 100;
+
+        // Set up the runner
+        let mut runner =
+            MerkleTestRunner { db: TestStageDB::default(), clean_threshold: threshold };
+
+        let input = ExecInput {
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                },
+                done: true
+            }) if block_number == previous_stage && processed == total &&
+                total == (
+                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
+                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                ) as u64
+        );
+
+        // Validate the stage execution
+        let provider = runner.db.factory.provider().unwrap();
+        let header = provider.header_by_number(previous_stage).unwrap().unwrap();
+        let expected_root = header.state_root;
+
+        let actual_root = runner
+            .db
+            .query(|tx| {
+                Ok(StateRoot::incremental_root_with_updates(
+                    tx,
+                    stage_progress + 1..=previous_stage,
+                ))
+            })
+            .unwrap();
+
+        assert_eq!(
+            actual_root.unwrap().0,
+            expected_root,
+            "State root mismatch after chunked processing"
+        );
     }
 
     struct MerkleTestRunner {
