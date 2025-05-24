@@ -278,11 +278,7 @@ where
                                 ))
                             })?;
 
-                            raw_fallback_proof.try_into().map_err(|e_rlp: alloy_rlp::Error| {
-                                ParallelStateRootError::Other(format!(
-                                    "Failed to decode fallback storage proof for {hashed_address}: {e_rlp}",
-                                ))
-                            })?
+                            raw_fallback_proof.try_into()?
                         }
                     };
 
@@ -308,12 +304,7 @@ where
         self.metrics.record(stats);
 
         let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
-        let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)
-            .map_err(|e_rlp: alloy_rlp::Error| {
-                ParallelStateRootError::Other(format!(
-                    "Failed to decode account subtree nodes: {e_rlp}",
-                ))
-            })?;
+        let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
 
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
