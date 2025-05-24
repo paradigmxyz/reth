@@ -19,6 +19,16 @@ pub struct CustomEvmConfig {
     pub(super) custom_evm_factory: CustomEvmFactory,
 }
 
+impl CustomEvmConfig {
+    pub const fn new(
+        inner: OpEvmConfig,
+        block_assembler: CustomBlockAssembler,
+        custom_evm_factory: CustomEvmFactory,
+    ) -> Self {
+        Self { inner, block_assembler, custom_evm_factory }
+    }
+}
+
 impl ConfigureEvm for CustomEvmConfig {
     type Primitives = CustomNodePrimitives;
     type Error = <OpEvmConfig as ConfigureEvm>::Error;

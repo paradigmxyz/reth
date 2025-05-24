@@ -15,6 +15,12 @@ pub struct CustomBlockAssembler {
     block_assembler: OpBlockAssembler<CustomChainSpec>,
 }
 
+impl CustomBlockAssembler {
+    pub const fn new(block_assembler: OpBlockAssembler<CustomChainSpec>) -> Self {
+        Self { block_assembler }
+    }
+}
+
 impl<F> BlockAssembler<F> for CustomBlockAssembler
 where
     F: for<'a> BlockExecutorFactory<
