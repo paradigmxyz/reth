@@ -11,7 +11,7 @@ use futures::TryStreamExt;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, EthereumNode},
-    rpc::EthApiFor,
+    rpc::eth::EthApiFor,
 };
 use reth_tracing::tracing::info;
 use tokio::sync::oneshot;

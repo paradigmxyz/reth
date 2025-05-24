@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
-reth-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-network = { workspace = true, optional = true }
 reth-network-api = { workspace = true, optional = true }
@@ -35,7 +34,7 @@ reth-rpc-builder = { workspace = true, optional = true }
 reth-exex = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-node-builder = { workspace = true, optional = true }
-reth-tasks.workspace = true
+reth-tasks = { workspace = true, optional = true }
 
 # reth-ethereum
 reth-ethereum-primitives.workspace = true
@@ -46,14 +45,14 @@ reth-node-ethereum = { workspace = true, optional = true }
 
 # alloy
 alloy-rpc-types-eth = { workspace = true, optional = true }
-alloy-rpc-types.workspace = true
+alloy-rpc-types-engine = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
 std = [
     "reth-chainspec/std",
     "reth-ethereum-primitives/std",
-    "reth-ethereum-consensus/std",
+    "reth-ethereum-consensus?/std",
     "reth-primitives-traits/std",
     "reth-consensus?/std",
     "reth-consensus-common?/std",
@@ -62,19 +61,18 @@ std = [
     "reth-evm?/std",
     "reth-evm-ethereum?/std",
     "reth-revm?/std",
-    "reth-primitives/std",
+    "alloy-rpc-types-engine?/std",
 ]
 arbitrary = [
     "std",
     "reth-chainspec/arbitrary",
     "reth-ethereum-primitives/arbitrary",
     "reth-primitives-traits/arbitrary",
-    "reth-primitives/arbitrary",
     "reth-db?/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
-    "alloy-rpc-types/arbitrary",
     "reth-transaction-pool?/arbitrary",
     "reth-eth-wire?/arbitrary",
+    "alloy-rpc-types-engine?/arbitrary",
 ]
 
 test-utils = [
@@ -92,7 +90,6 @@ test-utils = [
     "reth-transaction-pool?/test-utils",
     "reth-evm-ethereum?/test-utils",
     "reth-node-builder?/test-utils",
-    "reth-primitives/test-utils",
 ]
 
 full = [
@@ -128,14 +125,17 @@ node = [
 ]
 pool = ["dep:reth-transaction-pool"]
 rpc = [
+    "tasks",
     "dep:reth-rpc",
     "dep:reth-rpc-builder",
     "dep:reth-rpc-api",
     "dep:reth-rpc-eth-types",
     "dep:alloy-rpc-types-eth",
+    "dep:alloy-rpc-types-engine",
 ]
+tasks = ["dep:reth-tasks"]
 js-tracer = ["rpc", "reth-rpc/js-tracer"]
-network = ["dep:reth-network", "dep:reth-network-api", "dep:reth-eth-wire"]
-provider = ["storage-api", "dep:reth-provider", "dep:reth-db"]
+network = ["dep:reth-network", "tasks", "dep:reth-network-api", "dep:reth-eth-wire"]
+provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]

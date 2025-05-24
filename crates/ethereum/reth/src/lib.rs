@@ -16,9 +16,6 @@ pub use reth_ethereum_primitives::*;
 /// Re-exported reth primitives
 pub mod primitives {
     #[doc(inline)]
-    pub use reth_primitives::Block as PrimitivesBlock;
-    pub use reth_primitives::{SealedBlock as PrimitivesSealedBlock, TransactionSigned};
-    #[doc(inline)]
     pub use reth_primitives_traits::*;
 }
 
@@ -63,6 +60,7 @@ pub mod evm {
 pub use reth_exex as exex;
 
 /// Re-exported from `tasks`.
+#[cfg(feature = "tasks")]
 pub mod tasks {
     pub use reth_tasks::*;
 }
@@ -118,7 +116,6 @@ pub mod trie {
 /// Re-exported rpc types
 #[cfg(feature = "rpc")]
 pub mod rpc {
-    pub use reth_rpc::eth::core::EthApiFor;
     #[doc(inline)]
     pub use reth_rpc::*;
 
@@ -128,14 +125,19 @@ pub mod rpc {
     pub use reth_rpc_builder as builder;
 
     /// Re-exported eth types
+    #[allow(ambiguous_glob_reexports)]
     pub mod eth {
         #[doc(inline)]
         pub use alloy_rpc_types_eth as primitives;
         #[doc(inline)]
         pub use reth_rpc_eth_types::*;
+
+        pub use reth_rpc::eth::*;
     }
-    /// Re-exported from `alloy_rpc_types`.
+
+    /// Re-exported types
     pub mod types {
-        pub use alloy_rpc_types::*;
+        #[doc(inline)]
+        pub use alloy_rpc_types_engine as engine;
     }
 }

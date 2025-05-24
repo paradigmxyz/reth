@@ -11,7 +11,7 @@ pub mod sim_bundle;
 /// Implementation of `eth` namespace API.
 pub use builder::EthApiBuilder;
 pub use bundle::EthBundle;
-pub use core::EthApi;
+pub use core::{EthApi, EthApiFor};
 pub use filter::EthFilter;
 pub use pubsub::EthPubSub;
 

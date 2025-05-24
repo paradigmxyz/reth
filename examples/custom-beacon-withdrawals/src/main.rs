@@ -34,9 +34,9 @@ use reth_ethereum::{
         node::EthereumAddOns,
         EthereumNode,
     },
-    primitives::{Header, PrimitivesSealedBlock, SealedHeader},
+    primitives::{Header, SealedBlock, SealedHeader},
     provider::BlockExecutionResult,
-    EthPrimitives, Receipt, TransactionSigned,
+    Block, EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -144,7 +144,7 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.next_evm_env(parent, attributes)
     }
 
-    fn context_for_block<'a>(&self, block: &'a PrimitivesSealedBlock) -> EthBlockExecutionCtx<'a> {
+    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> EthBlockExecutionCtx<'a> {
         self.inner.context_for_block(block)
     }
 

@@ -1,5 +1,5 @@
 // Reth block related imports
-use reth_ethereum::{primitives::PrimitivesBlock, provider::BlockReaderIdExt, rpc::eth::EthResult};
+use reth_ethereum::{provider::BlockReaderIdExt, rpc::eth::EthResult, Block};
 
 // Rpc related imports
 use jsonrpsee::proc_macros::rpc;
@@ -11,7 +11,7 @@ use jsonrpsee::proc_macros::rpc;
 pub trait MyRpcExtApi {
     /// Returns block 0.
     #[method(name = "customMethod")]
-    fn custom_method(&self) -> EthResult<Option<PrimitivesBlock>>;
+    fn custom_method(&self) -> EthResult<Option<Block>>;
 }
 
 /// The type that implements `myRpc` rpc namespace trait
@@ -21,11 +21,11 @@ pub struct MyRpcExt<Provider> {
 
 impl<Provider> MyRpcExtApiServer for MyRpcExt<Provider>
 where
-    Provider: BlockReaderIdExt<Block = reth_ethereum::primitives::PrimitivesBlock> + 'static,
+    Provider: BlockReaderIdExt<Block = Block> + 'static,
 {
     /// Showcasing how to implement a custom rpc method
     /// using the provider.
-    fn custom_method(&self) -> EthResult<Option<PrimitivesBlock>> {
+    fn custom_method(&self) -> EthResult<Option<Block>> {
         let block = self.provider.block_by_number(0)?;
         Ok(block)
     }
