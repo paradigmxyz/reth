@@ -1,0 +1,125 @@
+//! Interfaces for the transaction pool maintenance components
+//!
+//! This module defines traits for the key components in the transaction pool
+//! maintenance system, allowing them to be replaced with custom implementations.
+
+use crate::{
+    blobstore::BlobStoreUpdates,
+    maintain::{canon_processor::CanonEventProcessor, drift_monitor::DriftMonitor},
+    traits::TransactionPoolExt,
+    PoolTransaction,
+};
+use alloy_primitives::BlockNumber;
+use futures_util::Future;
+use reth_chain_state::CanonStateNotification;
+use reth_chainspec::ChainSpecProvider;
+use reth_primitives_traits::NodePrimitives;
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+use std::pin::Pin;
+
+/// Trait defining the interface for canonical chain event processing
+pub trait CanonProcessing<N, Client, P>
+where
+    N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+{
+    /// Process a reorg event - returns true if the event was a reorg and was processed
+    fn process_reorg<'a>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut DriftMonitor,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>>;
+
+    /// Process a commit event - returns true if the event was a commit and was processed
+    fn process_commit<'a>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut DriftMonitor,
+    ) -> bool;
+
+    /// Update finalized blocks and return finalized blob hashes if any
+    fn update_finalized(&mut self, client: &Client) -> Option<BlobStoreUpdates>;
+
+    /// Get finalized blob hashes for cleanup
+    fn get_finalized_blobs(&mut self, finalized: BlockNumber) -> BlobStoreUpdates;
+}
+
+impl<N, Client, P> CanonProcessing<N, Client, P> for CanonEventProcessor<N>
+where
+    N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+{
+    fn process_reorg<'a>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut DriftMonitor,
+    ) -> Pin<Box<dyn Future<Output = bool> + Send + 'a>> {
+        Box::pin(async move { self.process_reorg(event, client, pool, drift_monitor).await })
+    }
+
+    fn process_commit<'a>(
+        &'a mut self,
+        event: CanonStateNotification<N>,
+        client: &'a Client,
+        pool: &'a P,
+        drift_monitor: &'a mut DriftMonitor,
+    ) -> bool {
+        self.process_commit(event, client, pool, drift_monitor)
+    }
+
+    fn update_finalized(&mut self, client: &Client) -> Option<BlobStoreUpdates> {
+        self.update_finalized(client)
+    }
+
+    fn get_finalized_blobs(&mut self, finalized: BlockNumber) -> BlobStoreUpdates {
+        self.get_finalized_blobs(finalized)
+    }
+}
+
+/// Pool maintainer component factory
+///
+/// This trait allows creating custom pool maintainer components
+pub trait PoolMaintainerComponentFactory<N, Client, P, C>
+where
+    N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    C: CanonProcessing<N, Client, P>,
+{
+    /// Create a canon processor
+    fn create_canon_processor(
+        &self,
+        finalized_block: Option<BlockNumber>,
+        config: crate::maintain::canon_processor::CanonEventProcessorConfig,
+        metrics: crate::metrics::MaintainPoolMetrics,
+    ) -> C;
+}
+
+/// Default implementation of the component factory
+#[derive(Debug, Clone)]
+pub struct DefaultComponentFactory;
+
+impl<N, Client, P> PoolMaintainerComponentFactory<N, Client, P, CanonEventProcessor<N>>
+    for DefaultComponentFactory
+where
+    N: NodePrimitives,
+    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+{
+    fn create_canon_processor(
+        &self,
+        finalized_block: Option<BlockNumber>,
+        config: crate::maintain::canon_processor::CanonEventProcessorConfig,
+        metrics: crate::metrics::MaintainPoolMetrics,
+    ) -> crate::maintain::canon_processor::CanonEventProcessor<N> {
+        crate::maintain::canon_processor::CanonEventProcessor::new(finalized_block, config, metrics)
+    }
+}
