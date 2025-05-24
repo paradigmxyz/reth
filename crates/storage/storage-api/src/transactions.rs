@@ -28,7 +28,7 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
 
     /// Get internal transaction identifier by transaction hash.
     ///
-    /// This is the inverse of [TransactionsProvider::transaction_by_id].
+    /// This is the inverse of [`TransactionsProvider::transaction_by_id`].
     /// Returns None if the transaction is not found.
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>>;
 

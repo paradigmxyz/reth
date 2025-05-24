@@ -481,7 +481,7 @@ tables! {
         type Value = BranchNodeCompact;
     }
 
-    /// From HashedAddress => NibblesSubKey => Intermediate value
+    /// From `HashedAddress` => `NibblesSubKey` => Intermediate value
     table StoragesTrie {
         type Key = B256;
         type Value = StorageTrieEntry;
