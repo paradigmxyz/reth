@@ -3223,7 +3223,6 @@ dependencies = [
  "eyre",
  "futures-util",
  "reqwest",
- "reth",
  "reth-ethereum",
  "serde",
  "serde_json",
@@ -3286,7 +3285,6 @@ dependencies = [
  "alloy-sol-macro",
  "alloy-sol-types",
  "eyre",
- "reth",
  "reth-ethereum",
 ]
 
@@ -3298,7 +3296,6 @@ dependencies = [
  "alloy-primitives",
  "eyre",
  "futures-util",
- "reth",
  "reth-ethereum",
  "serde_json",
  "tokio",
@@ -3313,7 +3310,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types",
  "eyre",
- "reth",
  "reth-basic-payload-builder",
  "reth-engine-local",
  "reth-ethereum",
@@ -3334,7 +3330,6 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "eyre",
- "reth",
  "reth-ethereum",
  "reth-tracing",
  "tokio",
@@ -3350,7 +3345,6 @@ dependencies = [
  "alloy-rpc-types-eth",
  "clap",
  "futures-util",
- "reth",
  "reth-ethereum",
 ]
 
@@ -3397,7 +3391,6 @@ name = "example-custom-node-components"
 version = "0.0.0"
 dependencies = [
  "eyre",
- "reth",
  "reth-ethereum",
  "reth-tracing",
 ]
@@ -3409,7 +3402,6 @@ dependencies = [
  "alloy-eips",
  "eyre",
  "futures-util",
- "reth",
  "reth-basic-payload-builder",
  "reth-ethereum",
  "reth-ethereum-payload-builder",
@@ -3424,7 +3416,6 @@ dependencies = [
  "alloy-primitives",
  "eyre",
  "futures",
- "reth",
  "reth-ethereum",
  "tokio",
  "tokio-stream",
@@ -3447,7 +3438,6 @@ dependencies = [
  "clap",
  "eyre",
  "futures",
- "reth",
  "reth-ethereum",
  "reth-op",
  "reth-tracing",
@@ -3552,7 +3542,6 @@ dependencies = [
  "alloy-primitives",
  "eyre",
  "parking_lot",
- "reth",
  "reth-ethereum",
  "reth-tracing",
  "schnellru",
@@ -3566,7 +3555,6 @@ dependencies = [
  "eyre",
  "futures",
  "jsonrpsee",
- "reth",
  "reth-ethereum",
  "tokio",
 ]
@@ -3579,7 +3567,6 @@ dependencies = [
  "alloy-rpc-types-trace",
  "clap",
  "futures-util",
- "reth",
  "reth-ethereum",
 ]
 
@@ -8063,6 +8050,7 @@ dependencies = [
 name = "reth-ethereum"
 version = "1.4.3"
 dependencies = [
+ "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "reth-chainspec",
  "reth-consensus",
@@ -8089,6 +8077,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
 ]
@@ -8981,6 +8970,7 @@ dependencies = [
  "reth-rpc-builder",
  "reth-rpc-eth-types",
  "reth-storage-api",
+ "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
 ]
