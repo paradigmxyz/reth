@@ -1,8 +1,8 @@
+//! Client support for optimism historical RPC requests.
+
 use crate::sequencer::Error;
 use alloy_json_rpc::{RpcRecv, RpcSend};
-use alloy_rpc_client::{BuiltInConnectionString, ClientBuilder, RpcClient};
-use alloy_transport_http::Http;
-use jsonrpsee_types::request;
+use alloy_rpc_client::RpcClient;
 use std::sync::Arc;
 use tracing::warn;
 
@@ -17,8 +17,10 @@ pub struct HistoricalRpcClient {
 
 impl HistoricalRpcClient {
     /// Constructs a new historical RPC client with the given endpoint URL.
-    pub async fn new(endpoint: &str) -> reqwest::Result<Self> {
-        let client = RpcClient::new_http(endpoint.parse()?);
+    pub async fn new(endpoint: &str) -> Result<Self, Error> {
+        let client = RpcClient::new_http(
+            endpoint.parse::<reqwest::Url>().map_err(|err| Error::InvalidUrl(err.to_string()))?,
+        );
 
         Ok(Self {
             inner: Arc::new(HistoricalRpcClientInner {
