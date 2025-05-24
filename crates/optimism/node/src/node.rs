@@ -14,14 +14,15 @@ use reth_network::{
     PeersInfo,
 };
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, FullNodeTypes, KeyHasherTy, NodeAddOns, NodePrimitives,
+    PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
         NetworkBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
     },
-    node::{FullNodeTypes, NodeTypes},
+    node::NodeTypes,
     rpc::{
         EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns, RpcAddOns,
         RpcHandle,
@@ -65,14 +66,44 @@ use std::{marker::PhantomData, sync::Arc};
 pub trait OpNodeTypes:
     NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
 {
+    /// The pooled transaction type for the pool.
+    type OpPooledTx: EthPoolTransaction<Consensus = TxTy<Self>, Pooled = Self::OpNetworkPooledTx>
+        + OpPooledTx;
+    /// The network pooled transaction type.
+    type OpNetworkPooledTx: Send + Sync + Unpin + 'static;
+    /// The network primitives type.
+    type OpNetworkPrimitives: NetworkPrimitives<
+            PooledTransaction = Self::OpNetworkPooledTx,
+            BroadcastedTransaction = <Self::Primitives as NodePrimitives>::SignedTx,
+        > + NetPrimitivesFor<Self::Primitives>;
 }
 /// Blanket impl for all node types that conform to the Optimism spec.
-impl<N> OpNodeTypes for N where
-    N: NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
+impl<N> OpNodeTypes for N
+where
+    N: NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>,
 {
+    type OpPooledTx = crate::txpool::OpPooledTransaction;
+    type OpNetworkPooledTx = OpPooledTransaction;
+    type OpNetworkPrimitives = OpNetworkPrimitives;
 }
 /// Storage implementation for Optimism.
-pub type OpStorage = EthStorage<OpTransactionSigned>;
+pub type OpStorage<SignedTx = OpTransactionSigned> = EthStorage<SignedTx>;
+
+/// Components builder for Optimism nodes.
+pub type OpComponentsBuilder<Node> = ComponentsBuilder<
+    Node,
+    OpPoolBuilder<<<Node as FullNodeTypes>::Types as OpNodeTypes>::OpPooledTx>,
+    BasicPayloadServiceBuilder<OpPayloadBuilder>,
+    OpNetworkBuilder<
+        <<Node as FullNodeTypes>::Types as OpNodeTypes>::OpNetworkPrimitives,
+        <<Node as FullNodeTypes>::Types as OpNodeTypes>::OpNetworkPooledTx,
+    >,
+    OpExecutorBuilder<
+        <<Node as FullNodeTypes>::Types as NodeTypes>::ChainSpec,
+        <<Node as FullNodeTypes>::Types as NodeTypes>::Primitives,
+    >,
+    OpConsensusBuilder,
+>;
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
@@ -102,16 +133,7 @@ impl OpNode {
     }
 
     /// Returns the components for the given [`RollupArgs`].
-    pub fn components<Node>(
-        &self,
-    ) -> ComponentsBuilder<
-        Node,
-        OpPoolBuilder,
-        BasicPayloadServiceBuilder<OpPayloadBuilder>,
-        OpNetworkBuilder,
-        OpExecutorBuilder,
-        OpConsensusBuilder,
-    >
+    pub fn components<Node>(&self) -> OpComponentsBuilder<Node>
     where
         Node: FullNodeTypes<Types: OpNodeTypes>,
     {
@@ -172,23 +194,9 @@ impl OpNode {
 
 impl<N> Node<N> for OpNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-        >,
-    >,
+    N: FullNodeTypes<Types: OpNodeTypes>,
 {
-    type ComponentsBuilder = ComponentsBuilder<
-        N,
-        OpPoolBuilder,
-        BasicPayloadServiceBuilder<OpPayloadBuilder>,
-        OpNetworkBuilder,
-        OpExecutorBuilder,
-        OpConsensusBuilder,
-    >;
+    type ComponentsBuilder = OpComponentsBuilder<N>;
 
     type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
@@ -230,7 +238,7 @@ impl NodeTypes for OpNode {
     type Primitives = OpPrimitives;
     type ChainSpec = OpChainSpec;
     type StateCommitment = MerklePatriciaTrie;
-    type Storage = OpStorage;
+    type Storage = OpStorage<OpTransactionSigned>;
     type Payload = OpEngineTypes;
 }
 
@@ -278,12 +286,7 @@ where
 impl<N, NetworkT> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Payload = OpEngineTypes,
-        >,
+        Types: OpNodeTypes,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -365,12 +368,7 @@ where
 impl<N, NetworkT> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Payload = OpEngineTypes,
-        >,
+        Types: OpNodeTypes,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -388,13 +386,7 @@ where
 
 impl<N, NetworkT> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Payload = OpEngineTypes,
-        >,
-    >,
+    N: FullNodeComponents<Types: OpNodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
 {
     type Validator = OpEngineValidator<N::Provider>;
@@ -750,13 +742,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
 
 impl<Node, Pool, Txs, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for OpPayloadBuilder<Txs>
 where
-    Node: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-        >,
-    >,
+    Node: FullNodeTypes<Types: OpNodeTypes>,
     Evm: ConfigureEvm<
             Primitives = PrimitivesTy<Node::Types>,
             NextBlockEnvCtx = OpNextBlockEnvAttributes,
@@ -919,15 +905,14 @@ where
 #[non_exhaustive]
 pub struct OpEngineValidatorBuilder;
 
-impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
+impl<Node> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Payload = OpEngineTypes>,
-    Node: FullNodeComponents<Types = Types>,
+    Node: FullNodeComponents<Types: OpNodeTypes>,
 {
     type Validator = OpEngineValidator<Node::Provider>;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(OpEngineValidator::new::<KeyHasherTy<Types>>(
+        Ok(OpEngineValidator::new::<KeyHasherTy<Node::Types>>(
             ctx.config.chain.clone(),
             ctx.node.provider().clone(),
         ))
