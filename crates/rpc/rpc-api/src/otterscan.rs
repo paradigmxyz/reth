@@ -44,12 +44,13 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     #[method(name = "traceTransaction")]
     async fn trace_transaction(&self, tx_hash: TxHash) -> RpcResult<Option<Vec<TraceEntry>>>;
 
-    /// Tailor-made and expanded version of eth_getBlockByNumber for block details page in
+    /// Tailor-made and expanded version of `eth_getBlockByNumber` for block details page in
     /// Otterscan.
     #[method(name = "getBlockDetails")]
     async fn get_block_details(&self, block_number: u64) -> RpcResult<BlockDetails<H>>;
 
-    /// Tailor-made and expanded version of eth_getBlockByHash for block details page in Otterscan.
+    /// Tailor-made and expanded version of `eth_getBlockByHash` for block details page in
+    /// Otterscan.
     #[method(name = "getBlockDetailsByHash")]
     async fn get_block_details_by_hash(&self, block_hash: B256) -> RpcResult<BlockDetails<H>>;
 

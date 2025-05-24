@@ -16,21 +16,21 @@ use tracing::error;
 /// An extension trait for providers that implement the engine API, to wait for a VALID response.
 #[async_trait::async_trait]
 pub trait EngineApiValidWaitExt<N>: Send + Sync {
-    /// Calls `engine_newPayloadV1` with the given [ExecutionPayloadV1], and waits until the
+    /// Calls `engine_newPayloadV1` with the given [`ExecutionPayloadV1`], and waits until the
     /// response is VALID.
     async fn new_payload_v1_wait(
         &self,
         payload: ExecutionPayloadV1,
     ) -> TransportResult<PayloadStatus>;
 
-    /// Calls `engine_newPayloadV2` with the given [ExecutionPayloadInputV2], and waits until the
+    /// Calls `engine_newPayloadV2` with the given [`ExecutionPayloadInputV2`], and waits until the
     /// response is VALID.
     async fn new_payload_v2_wait(
         &self,
         payload: ExecutionPayloadInputV2,
     ) -> TransportResult<PayloadStatus>;
 
-    /// Calls `engine_newPayloadV3` with the given [ExecutionPayloadV3], parent beacon block root,
+    /// Calls `engine_newPayloadV3` with the given [`ExecutionPayloadV3`], parent beacon block root,
     /// and versioned hashes, and waits until the response is VALID.
     async fn new_payload_v3_wait(
         &self,
@@ -39,7 +39,7 @@ pub trait EngineApiValidWaitExt<N>: Send + Sync {
         parent_beacon_block_root: B256,
     ) -> TransportResult<PayloadStatus>;
 
-    /// Calls `engine_newPayloadV4` with the given [ExecutionPayloadV3], parent beacon block root,
+    /// Calls `engine_newPayloadV4` with the given [`ExecutionPayloadV3`], parent beacon block root,
     /// versioned hashes, and requests hash, and waits until the response is VALID.
     async fn new_payload_v4_wait(
         &self,
@@ -49,24 +49,24 @@ pub trait EngineApiValidWaitExt<N>: Send + Sync {
         requests_hash: B256,
     ) -> TransportResult<PayloadStatus>;
 
-    /// Calls `engine_forkChoiceUpdatedV1` with the given [ForkchoiceState] and optional
-    /// [PayloadAttributes], and waits until the response is VALID.
+    /// Calls `engine_forkChoiceUpdatedV1` with the given [`ForkchoiceState`] and optional
+    /// [`PayloadAttributes`], and waits until the response is VALID.
     async fn fork_choice_updated_v1_wait(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated>;
 
-    /// Calls `engine_forkChoiceUpdatedV2` with the given [ForkchoiceState] and optional
-    /// [PayloadAttributes], and waits until the response is VALID.
+    /// Calls `engine_forkChoiceUpdatedV2` with the given [`ForkchoiceState`] and optional
+    /// [`PayloadAttributes`], and waits until the response is VALID.
     async fn fork_choice_updated_v2_wait(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<PayloadAttributes>,
     ) -> TransportResult<ForkchoiceUpdated>;
 
-    /// Calls `engine_forkChoiceUpdatedV3` with the given [ForkchoiceState] and optional
-    /// [PayloadAttributes], and waits until the response is VALID.
+    /// Calls `engine_forkChoiceUpdatedV3` with the given [`ForkchoiceState`] and optional
+    /// [`PayloadAttributes`], and waits until the response is VALID.
     async fn fork_choice_updated_v3_wait(
         &self,
         fork_choice_state: ForkchoiceState,
@@ -296,7 +296,7 @@ pub(crate) async fn call_new_payload<N, P: EngineApiValidWaitExt<N>>(
 ) -> TransportResult<EngineApiMessageVersion> {
     match payload {
         ExecutionPayload::V3(payload) => {
-            // We expect the caller
+            // We expect the caller to provide `parent_beacon_block_root` for V3 payloads.
             let parent_beacon_block_root = parent_beacon_block_root
                 .expect("parent_beacon_block_root is required for V3 payloads and higher");
 

@@ -134,7 +134,7 @@ pub trait TryIntoHistoricalStateProvider {
 /// has the `latest` block as its parent.
 ///
 /// All states are _inclusive_, meaning they include _all_ all changes made (executed transactions)
-/// in their respective blocks. For example [StateProviderFactory::history_by_block_number] for
+/// in their respective blocks. For example [`StateProviderFactory::history_by_block_number`] for
 /// block number `n` will return the state after block `n` was executed (transactions, withdrawals).
 /// In other words, all states point to the end of the state's respective block, which is equivalent
 /// to state at the beginning of the child block.
@@ -158,7 +158,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
         }
     }
 
-    /// Returns a [StateProvider] indexed by the given block number or tag.
+    /// Returns a [`StateProvider`] indexed by the given block number or tag.
     ///
     /// Note: if a number is provided this will only look at historical(canonical) state.
     fn state_by_block_number_or_tag(
@@ -166,13 +166,13 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
         number_or_tag: BlockNumberOrTag,
     ) -> ProviderResult<StateProviderBox>;
 
-    /// Returns a historical [StateProvider] indexed by the given historic block number.
+    /// Returns a historical [`StateProvider`] indexed by the given historic block number.
     ///
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_number(&self, block: BlockNumber) -> ProviderResult<StateProviderBox>;
 
-    /// Returns a historical [StateProvider] indexed by the given block hash.
+    /// Returns a historical [`StateProvider`] indexed by the given block hash.
     ///
     /// Note: this only looks at historical blocks, not pending blocks.
     fn history_by_block_hash(&self, block: BlockHash) -> ProviderResult<StateProviderBox>;
@@ -185,7 +185,7 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     /// Storage provider for pending state.
     ///
     /// Represents the state at the block that extends the canonical chain by one.
-    /// If there's no `pending` block, then this is equal to [StateProviderFactory::latest]
+    /// If there's no `pending` block, then this is equal to [`StateProviderFactory::latest`]
     fn pending(&self) -> ProviderResult<StateProviderBox>;
 
     /// Storage provider for pending state for the given block hash.

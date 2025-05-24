@@ -32,7 +32,7 @@ pub trait StorageReader: Send + Sync {
     ) -> ProviderResult<BTreeMap<(Address, B256), Vec<u64>>>;
 }
 
-/// Storage ChangeSet reader
+/// Storage `ChangeSet` reader
 #[cfg(feature = "db-api")]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageChangeSetReader: Send + Sync {
