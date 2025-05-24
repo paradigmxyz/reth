@@ -281,9 +281,9 @@ impl StageCheckpoint {
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum StageUnitCheckpoint {
-    /// Saves the progress of AccountHashing stage.
+    /// Saves the progress of `AccountHashing` stage.
     Account(AccountHashingCheckpoint),
-    /// Saves the progress of StorageHashing stage.
+    /// Saves the progress of `StorageHashing` stage.
     Storage(StorageHashingCheckpoint),
     /// Saves the progress of abstract stage iterating over or downloading entities.
     Entities(EntitiesCheckpoint),
