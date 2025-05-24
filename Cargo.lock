@@ -9707,6 +9707,7 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-transaction-pool",
+ "reth-trie-common",
  "revm",
  "revm-inspectors",
  "revm-primitives",
@@ -9743,6 +9744,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-network-peers",
  "reth-rpc-eth-api",
+ "reth-trie-common",
 ]
 
 [[package]]

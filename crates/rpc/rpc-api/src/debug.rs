@@ -7,6 +7,7 @@ use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -358,6 +359,15 @@ pub trait DebugApi {
     /// Starts writing a Go runtime trace to the given file.
     #[method(name = "startGoTrace")]
     async fn debug_start_go_trace(&self, file: String) -> RpcResult<()>;
+
+    /// Returns the state root of the `HashedPostState` on top of the state for the given block with
+    /// trie updates.
+    #[method(name = "stateRootWithUpdates")]
+    async fn debug_state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<(B256, TrieUpdates)>;
 
     /// Stops an ongoing CPU profile.
     #[method(name = "stopCPUProfile")]
