@@ -23,7 +23,7 @@ pub trait SyncStateProvider: Send + Sync {
 /// which point the node is considered fully synced.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait NetworkSyncUpdater: std::fmt::Debug + Send + Sync + 'static {
-    /// Notifies about a [SyncState] update.
+    /// Notifies about a [`SyncState`] update.
     fn update_sync_state(&self, state: SyncState);
 
     /// Updates the status of the p2p node.

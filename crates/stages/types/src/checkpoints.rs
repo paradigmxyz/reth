@@ -73,7 +73,7 @@ impl reth_codecs::Compact for MerkleCheckpoint {
     }
 }
 
-/// Saves the progress of AccountHashing stage.
+/// Saves the progress of `AccountHashing` stage.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
@@ -88,7 +88,7 @@ pub struct AccountHashingCheckpoint {
     pub progress: EntitiesCheckpoint,
 }
 
-/// Saves the progress of StorageHashing stage.
+/// Saves the progress of `StorageHashing` stage.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(any(test, feature = "reth-codec"), derive(reth_codecs::Compact))]
@@ -281,9 +281,9 @@ impl StageCheckpoint {
 #[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(compact))]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum StageUnitCheckpoint {
-    /// Saves the progress of AccountHashing stage.
+    /// Saves the progress of `AccountHashing` stage.
     Account(AccountHashingCheckpoint),
-    /// Saves the progress of StorageHashing stage.
+    /// Saves the progress of `StorageHashing` stage.
     Storage(StorageHashingCheckpoint),
     /// Saves the progress of abstract stage iterating over or downloading entities.
     Entities(EntitiesCheckpoint),
