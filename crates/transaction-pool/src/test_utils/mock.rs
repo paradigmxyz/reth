@@ -374,7 +374,7 @@ impl MockTransaction {
         if let Self::Eip4844 { sidecar: existing_sidecar, blob_versioned_hashes, .. } =
             &mut transaction
         {
-            *blob_versioned_hashes = sidecar.versioned_hashes();
+            *blob_versioned_hashes = sidecar.versioned_hashes().collect();
             *existing_sidecar = sidecar;
         }
         transaction
@@ -1264,7 +1264,7 @@ impl From<MockTransaction> for Transaction {
                 to,
                 value,
                 access_list,
-                blob_versioned_hashes: sidecar.versioned_hashes(),
+                blob_versioned_hashes: sidecar.versioned_hashes().collect(),
                 max_fee_per_blob_gas,
                 input,
             }),
