@@ -12,10 +12,6 @@ use alloy_evm::{
 };
 use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
-use reth::{
-    builder::{components::ExecutorBuilder, BuilderContext},
-    primitives::SealedBlock,
-};
 use reth_ethereum::{
     chainspec::ChainSpec,
     cli::interface::Cli,
@@ -34,12 +30,13 @@ use reth_ethereum::{
     },
     node::{
         api::{ConfigureEvm, FullNodeTypes, NodeTypes},
+        builder::{components::ExecutorBuilder, BuilderContext},
         node::EthereumAddOns,
         EthereumNode,
     },
-    primitives::{Header, SealedHeader},
+    primitives::{Header, SealedBlock, SealedHeader},
     provider::BlockExecutionResult,
-    EthPrimitives, Receipt, TransactionSigned,
+    Block, EthPrimitives, Receipt, TransactionSigned,
 };
 use std::{fmt::Display, sync::Arc};
 
@@ -147,7 +144,7 @@ impl ConfigureEvm for CustomEvmConfig {
         self.inner.next_evm_env(parent, attributes)
     }
 
-    fn context_for_block<'a>(&self, block: &'a SealedBlock) -> EthBlockExecutionCtx<'a> {
+    fn context_for_block<'a>(&self, block: &'a SealedBlock<Block>) -> EthBlockExecutionCtx<'a> {
         self.inner.context_for_block(block)
     }
 
