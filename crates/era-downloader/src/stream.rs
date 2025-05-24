@@ -1,4 +1,5 @@
 use crate::{client::HttpClient, EraClient};
+use alloy_primitives::BlockNumber;
 use futures_util::{stream::FuturesOrdered, FutureExt, Stream, StreamExt};
 use reqwest::Url;
 use reth_fs_util as fs;
@@ -23,11 +24,12 @@ use std::{
 pub struct EraStreamConfig {
     max_files: usize,
     max_concurrent_downloads: usize,
+    start_from: Option<BlockNumber>,
 }
 
 impl Default for EraStreamConfig {
     fn default() -> Self {
-        Self { max_files: 5, max_concurrent_downloads: 3 }
+        Self { max_files: 5, max_concurrent_downloads: 3, start_from: None }
     }
 }
 
@@ -43,6 +45,15 @@ impl EraStreamConfig {
         self.max_concurrent_downloads = max_concurrent_downloads;
         self
     }
+
+    /// Overrides the starting ERA file index to be the first one that contains `block_number`.
+    ///
+    /// The normal behavior is that the ERA file index is recovered from the last file inside the
+    /// download folder.
+    pub const fn start_from(mut self, block_number: BlockNumber) -> Self {
+        self.start_from.replace(block_number);
+        self
+    }
 }
 
 /// An asynchronous stream of ERA1 files.
@@ -50,12 +61,13 @@ impl EraStreamConfig {
 /// # Examples
 /// ```
 /// use futures_util::StreamExt;
-/// use reth_era_downloader::{EraStream, HttpClient};
+/// use reth_era_downloader::{EraMeta, EraStream, HttpClient};
 ///
 /// # async fn import(mut stream: EraStream<impl HttpClient + Clone + Send + Sync + 'static + Unpin>) -> eyre::Result<()> {
-/// while let Some(file) = stream.next().await {
-///     let file = file?;
-///     // Process `file: Box<Path>`
+/// while let Some(meta) = stream.next().await {
+///     let meta = meta?;
+///     // Process file at `meta.path(): &Path`
+///     meta.mark_as_processed()?;
 /// }
 /// # Ok(())
 /// # }
@@ -93,13 +105,28 @@ impl<Http> EraStream<Http> {
 }
 
 /// Contains information about an ERA file.
-pub trait EraMeta: AsRef<Path> {
+pub trait EraMeta: Debug {
     /// Marking this particular ERA file as "processed" lets the caller hint that it is no longer
     /// going to be using it.
     ///
     /// The meaning of that is up to the implementation. The caller should assume that after this
     /// point is no longer possible to safely read it.
-    fn mark_as_processed(self) -> eyre::Result<()>;
+    fn mark_as_processed(&self) -> eyre::Result<()>;
+
+    /// A path to the era file.
+    ///
+    /// File should be openable and treated as read-only.
+    fn path(&self) -> &Path;
+}
+
+impl<T: EraMeta> EraMeta for Box<T> {
+    fn mark_as_processed(&self) -> eyre::Result<()> {
+        T::mark_as_processed(self)
+    }
+
+    fn path(&self) -> &Path {
+        T::path(self)
+    }
 }
 
 /// Contains information about ERA file that is hosted remotely and represented by a temporary
@@ -123,8 +150,12 @@ impl AsRef<Path> for EraRemoteMeta {
 
 impl EraMeta for EraRemoteMeta {
     /// Removes a temporary local file representation of the remotely hosted original.
-    fn mark_as_processed(self) -> eyre::Result<()> {
-        Ok(fs::remove_file(self.path)?)
+    fn mark_as_processed(&self) -> eyre::Result<()> {
+        Ok(fs::remove_file(&self.path)?)
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
     }
 }
 

@@ -97,7 +97,7 @@ async fn test_mainnet_era1_only_file_decompression_and_decoding() -> eyre::Resul
         }
 
         // Read back from buffer
-        let mut reader = Era1Reader::new(Cursor::new(&buffer));
+        let reader = Era1Reader::new(Cursor::new(&buffer));
         let read_back_file = reader.read(file.id.network_name.clone())?;
 
         // Verify basic properties are preserved
