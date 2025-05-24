@@ -1,6 +1,7 @@
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{keccak256, map::B256Map, Address, Bytes, B256, U256};
 use reth_revm::{
     state::{AccountInfo, Bytecode},
+    witness::ExecutionWitnessRecord,
     Database,
 };
 use reth_trie::{HashedPostState, HashedStorage};
@@ -10,16 +11,31 @@ use reth_trie::{HashedPostState, HashedStorage};
 /// slots.
 pub(crate) struct StateWitnessRecorderDatabase<D> {
     database: D,
+    // The following fields are essentially the ExecutionWitnessRecord without the preimages.
+    // We are extending the strategy that ress uses so that we get witnesses for
+    // invalid blocks.
     state: HashedPostState,
+    codes: B256Map<Bytes>,
+    lowest_block_number: Option<u64>,
 }
 
 impl<D> StateWitnessRecorderDatabase<D> {
     pub(crate) fn new(database: D) -> Self {
-        Self { database, state: Default::default() }
+        Self {
+            database,
+            state: Default::default(),
+            codes: Default::default(),
+            lowest_block_number: None,
+        }
     }
 
-    pub(crate) fn into_state(self) -> HashedPostState {
-        self.state
+    pub(crate) fn execution_witness_record(self) -> ExecutionWitnessRecord {
+        ExecutionWitnessRecord {
+            hashed_state: self.state,
+            codes: self.codes.values().cloned().collect(),
+            keys: Vec::new(),
+            lowest_block_number: self.lowest_block_number,
+        }
     }
 }
 
@@ -46,11 +62,24 @@ impl<D: Database> Database for StateWitnessRecorderDatabase<D> {
         Ok(value)
     }
 
+    // TODO: Something to note, for invalid blocks, it might be a dos vector
+    // TODO: If the block is invalid because it tried to access, lets say block 0
+    // TODO: via the BLOCKHASH opcode. If the code adds all headers from current to
+    // TODO: 0, then that will likely not be provable.
+    // TODO: We should just keep the most recent 256
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        self.database.block_hash(number)
+        let block_hash = self.database.block_hash(number)?;
+        if let Some(lowest) = self.lowest_block_number {
+            self.lowest_block_number = Some(lowest.min(number));
+        } else {
+            self.lowest_block_number = Some(number);
+        }
+        Ok(block_hash)
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.database.code_by_hash(code_hash)
+        let bytecode = self.database.code_by_hash(code_hash)?;
+        self.codes.insert(code_hash, bytecode.bytes());
+        Ok(bytecode)
     }
 }
