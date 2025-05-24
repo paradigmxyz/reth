@@ -15,7 +15,7 @@ use reth_trie::{
     updates::TrieUpdates,
     HashedPostState, HashedStorage, StateRoot, StorageRoot,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot, DatabaseTrieCursorFactory};
+use reth_trie_db::{DatabaseStateRoot, DatabaseTrieCursorFactory};
 use std::collections::BTreeMap;
 
 proptest! {
@@ -89,9 +89,16 @@ proptest! {
                 .unwrap();
         }
 
+        let storage_root = StorageRoot::new_hashed(
+            reth_trie_db::DatabaseTrieCursorFactory::new(provider.tx_ref()),
+            reth_trie_db::DatabaseHashedCursorFactory::new(provider.tx_ref()),
+            hashed_address,
+            Default::default(),
+            reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
+        );
+
         // Compute initial storage root and updates
-        let (_, _, mut storage_trie_nodes) =
-            StorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address).root_with_updates().unwrap();
+        let (_, _, mut storage_trie_nodes) = storage_root.root_with_updates().unwrap();
 
         let mut storage = init_storage;
         for (is_deleted, mut storage_update) in storage_updates {
@@ -110,15 +117,20 @@ proptest! {
             // Compute root with in-memory trie nodes overlay
             let mut trie_nodes = TrieUpdates::default();
             trie_nodes.insert_storage_updates(hashed_address, storage_trie_nodes.clone());
-            let (storage_root, _, trie_updates) =
-                StorageRoot::from_tx_hashed(provider.tx_ref(), hashed_address)
-                    .with_prefix_set(hashed_storage.construct_prefix_set().freeze())
-                    .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                        DatabaseTrieCursorFactory::new(provider.tx_ref()),
-                        &trie_nodes.into_sorted(),
-                    ))
-                    .root_with_updates()
-                    .unwrap();
+
+            let sorted_trie_nodes = trie_nodes.into_sorted();
+            let storage_root = StorageRoot::new_hashed(
+                InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider.tx_ref()),
+                    &sorted_trie_nodes,
+                ),
+                reth_trie_db::DatabaseHashedCursorFactory::new(provider.tx_ref()),
+                hashed_address,
+                hashed_storage.construct_prefix_set().freeze(),
+                reth_trie::metrics::TrieRootMetrics::new(reth_trie::TrieType::Storage),
+            );
+
+            let (storage_root, _, trie_updates) = storage_root.root_with_updates().unwrap();
 
             storage_trie_nodes.extend(trie_updates);
 
