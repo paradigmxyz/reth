@@ -285,7 +285,11 @@ impl PackedNibbles {
             Bound::Excluded(&idx) => idx,
             Bound::Unbounded => self.len(),
         };
-        assert!(start <= end && end <= self.len());
+        assert!(start <= end, "Cannot slice with a start index greater than the end index");
+        assert!(
+            end <= self.len(),
+            "Cannot slice with an end index greater than the length of the nibbles"
+        );
 
         self.slice_unchecked(start, end)
     }
@@ -316,15 +320,11 @@ impl PackedNibbles {
 
     /// Truncates this [`PackedNibbles`] to the specified length, in nibbles.
     pub const fn truncate(&mut self, new_len: usize) {
-        if new_len == 0 {
-            self.length = 0;
-            self.nibbles = U256::ZERO;
-        } else if new_len < self.len() {
-            self.length = new_len as u8;
-            // To keep the leftmost nibbles, we need to shift right to remove the rightmost nibbles
-            let bits_to_remove = (self.len() - new_len) * 4;
-            self.nibbles = self.nibbles.wrapping_shr(bits_to_remove);
-        }
+        assert!(
+            new_len <= self.len(),
+            "Cannot truncate to a length greater than the current length"
+        );
+        *self = self.slice_unchecked(0, new_len);
     }
 }
 
@@ -572,5 +572,38 @@ mod tests {
         ]);
         assert_eq!(nibbles1.common_prefix_length(&nibbles2), 31);
         assert_eq!(nibbles2.common_prefix_length(&nibbles1), 31);
+    }
+
+    #[test]
+    fn test_packed_nibbles_truncate() {
+        // Test truncating empty nibbles
+        let mut nibbles = PackedNibbles::default();
+        nibbles.truncate(0);
+        assert_eq!(nibbles, PackedNibbles::default());
+
+        // Test truncating to zero length
+        let mut nibbles = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        nibbles.truncate(0);
+        assert_eq!(nibbles, PackedNibbles::default());
+
+        // Test truncating to same length (should be no-op)
+        let mut nibbles = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        nibbles.truncate(4);
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([1, 2, 3, 4]));
+
+        // Individual nibble test with a simple 2-nibble truncation
+        let mut nibbles = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        nibbles.truncate(2);
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([1, 2]));
+
+        // Test simple truncation
+        let mut nibbles = PackedNibbles::from_nibbles([1, 2, 3, 4]);
+        nibbles.truncate(2);
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([1, 2]));
+
+        // Test truncating to single nibble
+        let mut nibbles = PackedNibbles::from_nibbles([5, 6, 7, 8]);
+        nibbles.truncate(1);
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([5]));
     }
 }

@@ -206,6 +206,52 @@ fn bench_ord(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_truncate(c: &mut Criterion) {
+    let mut rng = rand::rng();
+
+    let mut group = c.benchmark_group("truncate");
+    for truncate_percent in [25, 50, 75] {
+        let original_len = 64;
+        let new_len = (original_len * truncate_percent) / 100;
+
+        group.bench_with_input(
+            BenchmarkId::new("Nibbles", truncate_percent),
+            &truncate_percent,
+            |b, _| {
+                b.iter_batched(
+                    || {
+                        let (nybbles, _) = generate_nibbles(&mut rng, original_len);
+                        nybbles
+                    },
+                    |mut nibbles| {
+                        black_box(&mut nibbles).truncate(new_len);
+                        black_box(nibbles)
+                    },
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("PackedNibbles", truncate_percent),
+            &truncate_percent,
+            |b, _| {
+                b.iter_batched(
+                    || {
+                        let (_, packed) = generate_nibbles(&mut rng, original_len);
+                        packed
+                    },
+                    |mut nibbles| {
+                        black_box(&mut nibbles).truncate(new_len);
+                        black_box(nibbles)
+                    },
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+    }
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_push_unchecked,
@@ -215,5 +261,6 @@ criterion_group!(
     bench_slice,
     bench_starts_with,
     bench_ord,
+    bench_truncate,
 );
 criterion_main!(benches);
