@@ -10,7 +10,6 @@ use reth_optimism_txpool::supervisor::metrics::SequencerMetrics;
 use std::{str::FromStr, sync::Arc, time::Instant};
 use thiserror::Error;
 use tracing::warn;
-use url::Url;
 
 /// Sequencer client error
 #[derive(Error, Debug)]
@@ -38,67 +37,6 @@ pub enum Error {
         #[source]
         reqwest::Error,
     ),
-}
-
-/// A client that forwards RPC requests to a historical Ethereum node
-#[derive(Debug)]
-pub struct HistoricalRpcClient {
-    inner: Arc<HistoricalRpcClientInner>,
-}
-
-#[derive(Debug)]
-struct HistoricalRpcClientInner {
-    historical_endpoint: String,
-    client: Client,
-}
-
-impl HistoricalRpcClient {
-    /// Constructs a new historical RPC client from the given endpoint URL.
-    pub async fn new(endpoint: &str) -> Result<Self, Error> {
-        let url = Url::parse(endpoint).map_err(|_| Error::InvalidUrl(endpoint.to_string()))?;
-
-        let http = Http::new(url);
-        let is_local = http.guess_local();
-
-        let client = Client::new(http, is_local);
-
-        Ok(Self {
-            inner: Arc::new(HistoricalRpcClientInner {
-                historical_endpoint: endpoint.to_string(),
-                client,
-            }),
-        })
-    }
-
-    /// Returns a reference to the underlying RPC client
-    fn client(&self) -> &Client {
-        &self.inner.client
-    }
-
-    /// Forwards a JSON-RPC request to the historical endpoint
-    pub async fn request<Params: RpcSend, Resp: RpcRecv>(
-        &self,
-        method: &str,
-        params: Params,
-    ) -> Result<Resp, Error> {
-        let resp =
-            self.client().request::<Params, Resp>(method.to_string(), params).await.inspect_err(
-                |err| {
-                    warn!(
-                        target: "rpc::historical",
-                        %err,
-                        "HTTP request to historical endpoint failed"
-                    );
-                },
-            )?;
-
-        Ok(resp)
-    }
-
-    /// Returns the configured historical endpoint URL
-    pub fn endpoint(&self) -> &str {
-        &self.inner.historical_endpoint
-    }
 }
 
 /// A client to interact with a Sequencer

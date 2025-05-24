@@ -68,7 +68,6 @@ async-trait.workspace = true
 jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
 jsonrpsee.workspace = true
-url.workspace = true
 
 # misc
 eyre.workspace = true
