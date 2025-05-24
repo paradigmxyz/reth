@@ -8,7 +8,7 @@ use alloy_consensus::{Block, BlockBody};
 use eyre::Result;
 use op_alloy_consensus::OpPooledTransaction;
 use reth_ethereum::{
-    chainspec::{EthChainSpec, Hardforks},
+    chainspec::{EthChainInitSpec, Hardforks},
     network::{NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives},
     node::api::{FullNodeTypes, NodeTypes, TxTy},
     pool::{PoolTransaction, TransactionPool},

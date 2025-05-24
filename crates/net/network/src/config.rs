@@ -6,7 +6,7 @@ use crate::{
     transactions::TransactionsManagerConfig,
     NetworkHandle, NetworkManager,
 };
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainInitSpec, EthChainSpec, Hardforks};
 use reth_discv4::{Discv4Config, Discv4ConfigBuilder, NatResolver, DEFAULT_DISCOVERY_ADDRESS};
 use reth_discv5::NetworkStackId;
 use reth_dns_discovery::DnsDiscoveryConfig;
@@ -548,7 +548,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         chain_spec: Arc<ChainSpec>,
     ) -> NetworkConfig<NoopProvider<ChainSpec>, N>
     where
-        ChainSpec: EthChainSpec + Hardforks + 'static,
+        ChainSpec: EthChainSpec + EthChainInitSpec + Hardforks + 'static,
     {
         self.build(NoopProvider::eth(chain_spec))
     }
@@ -573,7 +573,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     /// establishing a connection.
     pub fn build<C>(self, client: C) -> NetworkConfig<C, N>
     where
-        C: ChainSpecProvider<ChainSpec: Hardforks>,
+        C: ChainSpecProvider<ChainSpec: Hardforks + EthChainInitSpec>,
     {
         let peer_id = self.get_peer_id();
         let chain_spec = client.chain_spec();
@@ -600,7 +600,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
-            hash: chain_spec.genesis_hash(),
+            hash: EthChainInitSpec::genesis_hash(&chain_spec),
             number: 0,
             timestamp: chain_spec.genesis().timestamp,
             difficulty: chain_spec.genesis().difficulty,
@@ -732,7 +732,7 @@ mod tests {
         Arc::make_mut(&mut chain_spec).hardforks = Default::default();
 
         // check that the forkid is initialized with the genesis and no other forks
-        let genesis_fork_hash = ForkHash::from(chain_spec.genesis_hash());
+        let genesis_fork_hash = ForkHash::from(EthChainInitSpec::genesis_hash(&chain_spec));
 
         // enforce that the fork_id set in the status is consistent with the generated fork filter
         let config = builder().build_with_noop_provider(chain_spec);

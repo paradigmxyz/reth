@@ -12,9 +12,6 @@ use reth_network_peers::NodeRecord;
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthChainSpec: Send + Sync + Unpin + Debug {
-    /// The header type of the network.
-    type Header;
-
     /// Returns the [`Chain`] object this spec targets.
     fn chain(&self) -> Chain;
 
@@ -44,15 +41,6 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// Returns a string representation of the hardforks.
     fn display_hardforks(&self) -> Box<dyn Display>;
 
-    /// The genesis header.
-    fn genesis_header(&self) -> &Self::Header;
-
-    /// The genesis block specification.
-    fn genesis(&self) -> &Genesis;
-
-    /// The bootnodes for the chain, if any.
-    fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
-
     /// Returns `true` if this chain contains Optimism configuration.
     fn is_optimism(&self) -> bool {
         self.chain().is_optimism()
@@ -67,9 +55,29 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn final_paris_total_difficulty(&self) -> Option<U256>;
 }
 
-impl EthChainSpec for ChainSpec {
-    type Header = Header;
+/// Trait representing a type for initializing the chain
+///
+/// Note: This is not a part of `EthChainSpec` because it is only needed
+/// to initialize the chain and not for block validation.
+#[auto_impl::auto_impl(&, Arc)]
+pub trait EthChainInitSpec {
+    /// The header type of the network.
+    type Header;
 
+    /// The genesis block specification.
+    fn genesis(&self) -> &Genesis;
+
+    /// The genesis header.
+    fn genesis_header(&self) -> &Self::Header;
+
+    /// The genesis hash.
+    fn genesis_hash(&self) -> B256;
+
+    /// The bootnodes for the chain, if any.
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>>;
+}
+
+impl EthChainSpec for ChainSpec {
     fn chain(&self) -> Chain {
         self.chain
     }
@@ -112,23 +120,31 @@ impl EthChainSpec for ChainSpec {
         Box::new(Self::display_hardforks(self))
     }
 
-    fn genesis_header(&self) -> &Self::Header {
-        self.genesis_header()
-    }
-
-    fn genesis(&self) -> &Genesis {
-        self.genesis()
-    }
-
-    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.bootnodes()
-    }
-
     fn is_optimism(&self) -> bool {
         false
     }
 
     fn final_paris_total_difficulty(&self) -> Option<U256> {
         self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
+    }
+}
+
+impl EthChainInitSpec for ChainSpec {
+    type Header = Header;
+
+    fn genesis(&self) -> &Genesis {
+        self.genesis()
+    }
+
+    fn genesis_hash(&self) -> B256 {
+        self.genesis_hash()
+    }
+
+    fn genesis_header(&self) -> &Self::Header {
+        self.genesis_header()
+    }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.bootnodes()
     }
 }
