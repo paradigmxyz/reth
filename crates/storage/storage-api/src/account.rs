@@ -46,7 +46,7 @@ pub trait AccountExtReader {
     ) -> ProviderResult<BTreeMap<Address, Vec<BlockNumber>>>;
 }
 
-/// AccountChange reader
+/// `AccountChange` reader
 #[auto_impl(&, Arc, Box)]
 pub trait ChangeSetReader {
     /// Iterate over account changesets and return the account state from before this block.
