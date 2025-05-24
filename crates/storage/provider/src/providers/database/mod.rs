@@ -524,6 +524,13 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
             |_| true,
         )
     }
+
+    fn receipts_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        self.provider()?.receipts_by_block_range(block_range)
+    }
 }
 
 impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
