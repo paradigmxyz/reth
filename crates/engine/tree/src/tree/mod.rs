@@ -572,6 +572,7 @@ where
         };
 
         let block_hash = block.hash();
+        let header = block.clone_sealed_header();
         let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
         if lowest_buffered_ancestor == block_hash {
             lowest_buffered_ancestor = block.parent_hash();
@@ -626,6 +627,8 @@ where
                 }));
             }
         }
+        let engine_event = BeaconConsensusEngineEvent::BlockReceived(header);
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         Ok(outcome)
     }
