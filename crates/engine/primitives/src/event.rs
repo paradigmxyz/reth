@@ -72,7 +72,7 @@ where
                 write!(f, "LiveSyncProgress({progress:?})")
             }
             Self::BlockReceived(header) => {
-                write!(f, "BlockReceived({:?})", header.num_hash())
+                write!(f, "BlockReceived({:?})", header.hash())
             }
         }
     }
