@@ -22,13 +22,13 @@ fn bench_get_seq_iter(c: &mut Criterion) {
             for (key_len, data_len) in
                 cursor.iter::<ObjectLength, ObjectLength>().map(Result::unwrap)
             {
-                i = i + *key_len + *data_len;
+                i += *key_len + *data_len;
                 count += 1;
             }
             for (key_len, data_len) in
                 cursor.iter::<ObjectLength, ObjectLength>().filter_map(Result::ok)
             {
-                i = i + *key_len + *data_len;
+                i += *key_len + *data_len;
                 count += 1;
             }
 
@@ -36,7 +36,7 @@ fn bench_get_seq_iter(c: &mut Criterion) {
                 let mut i = 0;
                 for result in cursor.iter::<ObjectLength, ObjectLength>() {
                     let (key_len, data_len) = result?;
-                    i = i + *key_len + *data_len;
+                    i += *key_len + *data_len;
                 }
                 Ok(())
             }
