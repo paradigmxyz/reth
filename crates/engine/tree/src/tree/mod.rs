@@ -2389,6 +2389,19 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
+        info!(
+            target: "engine::tree",
+            account_nodes = input.nodes.account_nodes.len(),
+            removed_nodes = input.nodes.removed_nodes.len(),
+            storage_tries = ?input.nodes.storage_tries.iter().map(|(address, trie)| (address, trie.len())).collect::<BTreeMap<_, _>>(),
+            accounts = input.state.accounts.len(),
+            storages = input.state.storages.len(),
+            account_prefix_set_len = input.prefix_sets.account_prefix_set.len(),
+            storage_prefix_set_len = ?input.prefix_sets.storage_prefix_sets.iter().map(|(address, prefix_set)| (address, prefix_set.len())).collect::<BTreeMap<_, _>>(),
+            destroyed_accounts = input.prefix_sets.destroyed_accounts.len(),
+            "Computed trie input for parallel state root"
+        );
+
         ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 
