@@ -8953,6 +8953,7 @@ dependencies = [
  "reth-db",
  "reth-eth-wire",
  "reth-evm",
+ "reth-exex",
  "reth-network",
  "reth-network-api",
  "reth-node-api",
