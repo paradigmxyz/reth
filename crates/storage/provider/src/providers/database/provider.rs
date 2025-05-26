@@ -335,6 +335,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 block_hash: parent_hash,
             })))
         }
+
+        tracing::info!(
+            target: "providers::db",
+            updates = ?trie_updates.storage_tries.get(&b256!(
+                "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
+            )),
+            "Unwinding storage trie updates",
+        );
+
         self.write_trie_updates(&trie_updates)?;
 
         Ok(())
@@ -2353,14 +2362,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         &self,
         storage_tries: &B256Map<StorageTrieUpdates>,
     ) -> ProviderResult<usize> {
-        tracing::info!(
-            target: "providers::db",
-            updates = ?storage_tries.get(&b256!(
-                "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
-            )),
-            "Writing storage trie updates",
-        );
-
         let mut num_entries = 0;
         let mut storage_tries = Vec::from_iter(storage_tries);
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));

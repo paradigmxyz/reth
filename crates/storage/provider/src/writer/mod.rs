@@ -4,6 +4,7 @@ use crate::{
     StorageLocation, TrieWriter,
 };
 use alloy_consensus::BlockHeader;
+use alloy_primitives::b256;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_db_api::transaction::{DbTx, DbTxMut};
 use reth_errors::ProviderResult;
@@ -179,6 +180,15 @@ where
             // insert hashes and intermediate merkle nodes
             self.database()
                 .write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+
+            tracing::info!(
+                target: "providers::db",
+                updates = ?trie.storage_tries.get(&b256!(
+                    "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
+                )),
+                "Writing storage trie updates",
+            );
+
             self.database().write_trie_updates(&trie)?;
         }
 
