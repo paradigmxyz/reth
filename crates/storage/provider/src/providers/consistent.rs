@@ -1103,6 +1103,13 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             },
         )
     }
+
+    fn receipts_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        self.storage_provider.receipts_by_block_range(block_range)
+    }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProviderIdExt for ConsistentProvider<N> {

@@ -512,6 +512,13 @@ where
     ) -> ProviderResult<Vec<Self::Receipt>> {
         Ok(vec![])
     }
+
+    fn receipts_by_block_range(
+        &self,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        Ok(vec![])
+    }
 }
 
 impl<T, ChainSpec> ReceiptProviderIdExt for MockEthProvider<T, ChainSpec>
