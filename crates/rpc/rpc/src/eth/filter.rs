@@ -859,25 +859,6 @@ enum RangeMode<
     Range(RangeBlockMode<Eth>),
 }
 
-/// Mode for processing blocks using cache optimization for recent blocks
-struct CachedMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-> {
-    filter_inner: Arc<EthFilterInner<Eth>>,
-    sealed_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
-    current_idx: usize,
-}
-
-/// Mode for processing blocks using range queries for older blocks
-struct RangeBlockMode<
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
-> {
-    filter_inner: Arc<EthFilterInner<Eth>>,
-    block_range_iter: BlockRangeInclusiveIter,
-    current_sealed_headers: Option<Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
-    current_header_idx: usize,
-}
-
 impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
     > RangeMode<Eth>
@@ -925,6 +906,15 @@ impl<
     }
 }
 
+/// Mode for processing blocks using cache optimization for recent blocks
+struct CachedMode<
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+> {
+    filter_inner: Arc<EthFilterInner<Eth>>,
+    sealed_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    current_idx: usize,
+}
+
 impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
     > CachedMode<Eth>
@@ -963,6 +953,16 @@ impl<
             }
         }
     }
+}
+
+/// Mode for processing blocks using range queries for older blocks
+struct RangeBlockMode<
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+> {
+    filter_inner: Arc<EthFilterInner<Eth>>,
+    block_range_iter: BlockRangeInclusiveIter,
+    current_sealed_headers: Option<Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
+    current_header_idx: usize,
 }
 
 impl<
