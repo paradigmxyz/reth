@@ -513,7 +513,12 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
         txs: Vec<TxHash>,
     ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
-        txs.into_iter().filter_map(|tx| self.get(&tx))
+        // Optimized implementation: do direct HashMap lookups without intermediate get() calls
+        // This avoids the overhead of calling get() for each hash, which does unnecessary cloning
+        let by_hash = &self.all_transactions.by_hash;
+        txs.into_iter().filter_map(move |tx_hash| {
+            by_hash.get(&tx_hash).cloned()
+        })
     }
 
     /// Returns all transactions sent from the given sender.
