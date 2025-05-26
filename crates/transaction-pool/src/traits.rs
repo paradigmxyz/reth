@@ -1151,7 +1151,6 @@ impl PoolTransaction for EthPooledTransaction {
     }
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
-        let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_parts();
         match tx {
             PooledTransactionVariant::Eip4844(tx) => {
@@ -1161,11 +1160,14 @@ impl PoolTransaction for EthPooledTransaction {
                 let tx = Signed::new_unchecked(tx, sig, hash);
                 let tx = TransactionSigned::from(tx);
                 let tx = Recovered::new_unchecked(tx, signer);
+                // we only need the encoded length of the transaction, excluding the blob sidecar
+                let encoded_length = tx.encode_2718_len();
                 let mut pooled = Self::new(tx, encoded_length);
                 pooled.blob_sidecar = EthBlobTransactionSidecar::Present(blob);
                 pooled
             }
             tx => {
+                let encoded_length = tx.encode_2718_len();
                 // no blob sidecar
                 let tx = Recovered::new_unchecked(tx.into(), signer);
                 Self::new(tx, encoded_length)

@@ -318,11 +318,11 @@ where
         };
 
         // Reject transactions over defined size to prevent DOS attacks
-        let tx_input_len = transaction.input().len();
-        if tx_input_len > self.max_tx_input_bytes {
+        let tx_len = transaction.encoded_length();
+        if tx_len > self.max_tx_input_bytes {
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::OversizedData(tx_input_len, self.max_tx_input_bytes),
+                InvalidPoolTransactionError::OversizedData(tx_len, self.max_tx_input_bytes),
             ))
         }
 
