@@ -321,6 +321,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         if subnode.position().is_last_child() ||
             (subnode.position().is_parent() && !allow_root_to_child_nibble)
         {
+            trace!(target: "trie::walker", ?subnode, "backtracking to previous level");
             self.stack.pop();
             self.move_to_next_sibling(false)?;
             return Ok(())
@@ -329,6 +330,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         subnode.inc_nibble();
 
         if subnode.node.is_none() {
+            trace!(target: "trie::walker", ?subnode, "empty node, consuming");
             return self.consume_node()
         }
 

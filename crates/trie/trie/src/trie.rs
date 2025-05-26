@@ -396,7 +396,7 @@ where
         self,
         retain_updates: bool,
     ) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
-        let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_addres = ?self.hashed_address);
+        let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_address = ?self.hashed_address);
         let _enter = span.enter();
 
         trace!(target: "trie::storage_root", "calculating storage root");
