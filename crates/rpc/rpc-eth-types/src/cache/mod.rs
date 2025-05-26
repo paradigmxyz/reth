@@ -62,6 +62,8 @@ type ReceiptsLruCache<R, L> =
 
 type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSender<H>>;
 
+type CachedReceiptsAndBlock<B, R> = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>;
+
 /// Provides async access to cached eth data
 ///
 /// This is the frontend for the async caching service which manages cached data on a different
@@ -185,7 +187,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     pub async fn get_receipts_and_maybe_block(
         &self,
         block_hash: B256,
-    ) -> ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>> {
+    ) -> CachedReceiptsAndBlock<B, R> {
         let (response_tx, rx) = oneshot::channel();
         let _ = self.to_service.send(CacheAction::GetCachedBlock { block_hash, response_tx });
 
@@ -201,12 +203,12 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     pub fn get_receipts_and_maybe_block_stream<'a>(
         &'a self,
         hashes: Vec<B256>,
-    ) -> impl Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + 'a {
+    ) -> impl Stream<Item = CachedReceiptsAndBlock<B, R>> + 'a {
         let futures = hashes.into_iter().map(move |hash| self.get_receipts_and_maybe_block(hash));
 
-        FuturesOrdered::from_iter(futures)
+        futures.collect::<FuturesOrdered<_>>()
     }
-
+    
     /// Requests the header for the given hash.
     ///
     /// Returns an error if the header is not found.
