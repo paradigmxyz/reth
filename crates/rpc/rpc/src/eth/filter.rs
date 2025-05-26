@@ -24,6 +24,7 @@ use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderReceipt, ReceiptProvider,
 };
+use reth_primitives_traits::SealedHeader;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -863,7 +864,7 @@ struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
+    sealed_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
     current_idx: usize,
 }
 
@@ -873,7 +874,7 @@ struct RangeBlockMode<
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
     block_range_iter: BlockRangeInclusiveIter,
-    current_headers: Option<Vec<<Eth::Provider as HeaderProvider>::Header>>,
+    current_sealed_headers: Option<Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
     current_header_idx: usize,
 }
 
@@ -898,7 +899,11 @@ impl<
             distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
             !headers.is_empty()
         {
-            Self::Cached(CachedMode { filter_inner, headers, current_idx: 0 })
+            // seal headers for cached mode to eliminate duplicated hash calculation
+            let sealed_headers = headers.into_iter()
+                .map(|(_, header)| SealedHeader::seal_slow(header))
+                .collect();
+            Self::Cached(CachedMode { filter_inner, sealed_headers, current_idx: 0 })
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
@@ -906,7 +911,7 @@ impl<
                     from_block..=to_block,
                     max_headers_range,
                 ),
-                current_headers: None,
+                current_sealed_headers: None,
                 current_header_idx: 0,
             })
         }
@@ -927,31 +932,21 @@ impl<
 {
     async fn next(&mut self) -> Result<ReceiptBlockResult<Eth::Provider>, EthFilterError> {
         loop {
-            if self.current_idx >= self.headers.len() {
+            if self.current_idx >= self.sealed_headers.len() {
                 return Ok(None);
             }
 
-            let (_idx, header) = &self.headers[self.current_idx];
-            let header_idx = self.current_idx; // save index before incrementing
+            let sealed_header = &self.sealed_headers[self.current_idx];
             self.current_idx += 1;
 
-            // calculate block hash
-            let block_hash = if header_idx + 1 < self.headers.len() {
-                // use parent hash of next header to get current header's hash
-                self.headers[header_idx + 1].1.parent_hash()
-            } else {
-                // last header, need to fetch hash from provider
-                self.filter_inner
-                    .provider()
-                    .block_hash(header.number())?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?
-            };
+            let block_hash = sealed_header.hash();
+            let header = sealed_header.header().clone();
 
             // try cache first for performance
             if let Some((receipts, maybe_block)) =
                 self.filter_inner.eth_cache().get_receipts_and_maybe_block(block_hash).await?
             {
-                return Ok(Some((receipts, maybe_block, header.clone(), block_hash)));
+                return Ok(Some((receipts, maybe_block, header, block_hash)));
             }
 
             // cache miss - fallback to storage to ensure correctness
@@ -965,7 +960,7 @@ impl<
                     .and_then(|block| block.try_into_recovered().ok())
                     .map(Arc::new);
 
-                return Ok(Some((Arc::new(receipts), maybe_block, header.clone(), block_hash)));
+                return Ok(Some((Arc::new(receipts), maybe_block, header, block_hash)));
             }
         }
     }
@@ -977,21 +972,14 @@ impl<
 {
     async fn next(&mut self) -> Result<ReceiptBlockResult<Eth::Provider>, EthFilterError> {
         loop {
-            // if we have current headers to process
-            if let Some(ref headers) = self.current_headers {
-                while self.current_header_idx < headers.len() {
-                    let header = &headers[self.current_header_idx];
+            // if we have current sealed headers to process
+            if let Some(ref sealed_headers) = self.current_sealed_headers {
+                while self.current_header_idx < sealed_headers.len() {
+                    let sealed_header = &sealed_headers[self.current_header_idx];
                     self.current_header_idx += 1;
 
-                    // calculate block hash
-                    let block_hash = if self.current_header_idx < headers.len() {
-                        headers[self.current_header_idx].parent_hash()
-                    } else {
-                        self.filter_inner
-                            .provider()
-                            .block_hash(header.number())?
-                            .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?
-                    };
+                    let block_hash = sealed_header.hash();
+                    let header = sealed_header.header().clone();
 
                     // try cache first for performance
                     if let Some((receipts, maybe_block)) = self
@@ -1000,7 +988,7 @@ impl<
                         .get_receipts_and_maybe_block(block_hash)
                         .await?
                     {
-                        return Ok(Some((receipts, maybe_block, header.clone(), block_hash)));
+                        return Ok(Some((receipts, maybe_block, header, block_hash)));
                     }
 
                     // cache miss - fallback to storage to ensure correctness
@@ -1014,24 +1002,23 @@ impl<
                             .and_then(|block| block.try_into_recovered().ok())
                             .map(Arc::new);
 
-                        return Ok(Some((
-                            Arc::new(receipts),
-                            maybe_block,
-                            header.clone(),
-                            block_hash,
-                        )));
+                        return Ok(Some((Arc::new(receipts), maybe_block, header, block_hash)));
                     }
                 }
 
                 // finished current batch, reset for next range
-                self.current_headers = None;
+                self.current_sealed_headers = None;
                 self.current_header_idx = 0;
             }
 
             // get next range
             if let Some((from, to)) = self.block_range_iter.next() {
                 let headers = self.filter_inner.provider().headers_range(from..=to)?;
-                self.current_headers = Some(headers);
+                // seal headers to eliminate duplicated hash calculation
+                let sealed_headers = headers.into_iter()
+                    .map(SealedHeader::seal_slow)
+                    .collect();
+                self.current_sealed_headers = Some(sealed_headers);
                 self.current_header_idx = 0;
             } else {
                 return Ok(None);
