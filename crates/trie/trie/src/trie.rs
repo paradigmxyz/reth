@@ -417,26 +417,10 @@ where
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
-                    if self.hashed_address ==
-                        b256!(
-                            "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
-                        )
-                    {
-                        tracing::info!(target: "trie", ?node, "Branch node");
-                    }
-
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
-                    if self.hashed_address ==
-                        b256!(
-                            "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
-                        )
-                    {
-                        tracing::info!(target: "trie", ?hashed_slot, ?value, "Leaf node");
-                    }
-
                     tracker.inc_leaf();
                     hash_builder.add_leaf(
                         Nibbles::unpack(hashed_slot),

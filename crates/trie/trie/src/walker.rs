@@ -291,13 +291,14 @@ impl<C: TrieCursor> TrieWalker<C> {
         }
 
         // Create a new CursorSubNode and push it to the stack.
-        let subnode = CursorSubNode::new(key, Some(node));
+        let subnode = CursorSubNode::new(key.clone(), Some(node));
         let position = subnode.position();
         self.stack.push(subnode);
         self.update_skip_node();
 
         // Delete the current node if it's included in the prefix set or it doesn't contain the root
         // hash.
+        trace!(target: "trie::walker", ?key, can_skip = ?self.can_skip_current_node, ?position, "Checking if current node should be deleted");
         if !self.can_skip_current_node || position.is_child() {
             if let Some((keys, key)) = self.removed_keys.as_mut().zip(self.cursor.current()?) {
                 keys.insert(key);
