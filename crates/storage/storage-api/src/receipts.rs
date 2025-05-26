@@ -42,7 +42,7 @@ pub trait ReceiptProvider: Send + Sync {
     /// Get receipts by block range.
     ///
     /// Returns a vector where each element contains all receipts for a block in the range.
-    /// The outer vector index corresponds to blocks in the range (block_range.start() + index).
+    /// The outer vector index corresponds to blocks in the range (`block_range.start()` + index).
     /// Empty blocks will have empty inner vectors.
     ///
     /// This is more efficient than calling `receipts_by_block` multiple times for contiguous ranges
