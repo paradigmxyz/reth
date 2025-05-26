@@ -13,7 +13,7 @@ impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, 
 where
     Self: RpcNodeCoreExt<
         Provider: TransactionsProvider<Transaction = TransactionSigned>
-            + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
+                      + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
     >,
     Provider: BlockReader + ChainSpecProvider,
     <<Self as reth_rpc_eth_api::RpcNodeCore>::Provider as BlockReader>::Block: 'static,
