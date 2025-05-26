@@ -589,7 +589,7 @@ where
                         .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
                 };
 
-                matching_headers.push(HeadersBlockHash{ header: header.clone(), block_hash });
+                matching_headers.push(HeadersBlockHash { header: header.clone(), block_hash });
             }
         }
 
@@ -865,7 +865,10 @@ where
 }
 
 /// Helper type for headers plus block hashes
-struct HeadersBlockHash<H> where H: BlockHeader{
+struct HeadersBlockHash<H>
+where
+    H: BlockHeader,
+{
     header: H,
     block_hash: B256,
 }
