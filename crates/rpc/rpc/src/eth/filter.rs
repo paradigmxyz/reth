@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
     RpcTransaction, TransactionCompat,
@@ -24,7 +24,6 @@ use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderReceipt, ReceiptProvider,
 };
-use reth_primitives_traits::SealedHeader;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
@@ -841,7 +840,8 @@ impl From<ProviderError> for EthFilterError {
     }
 }
 
-/// Helper type for the common pattern of returning receipts, `maybe_block`, header, and `block_hash`
+/// Helper type for the common pattern of returning receipts, `maybe_block`, header, and
+/// `block_hash`
 type ReceiptBlockResult<P> = Option<(
     Arc<Vec<ProviderReceipt<P>>>,
     Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<P>>>>,
@@ -900,9 +900,8 @@ impl<
             !headers.is_empty()
         {
             // seal headers for cached mode to eliminate duplicated hash calculation
-            let sealed_headers = headers.into_iter()
-                .map(|(_, header)| SealedHeader::seal_slow(header))
-                .collect();
+            let sealed_headers =
+                headers.into_iter().map(|(_, header)| SealedHeader::seal_slow(header)).collect();
             Self::Cached(CachedMode { filter_inner, sealed_headers, current_idx: 0 })
         } else {
             Self::Range(RangeBlockMode {
@@ -1015,9 +1014,7 @@ impl<
             if let Some((from, to)) = self.block_range_iter.next() {
                 let headers = self.filter_inner.provider().headers_range(from..=to)?;
                 // seal headers to eliminate duplicated hash calculation
-                let sealed_headers = headers.into_iter()
-                    .map(SealedHeader::seal_slow)
-                    .collect();
+                let sealed_headers = headers.into_iter().map(SealedHeader::seal_slow).collect();
                 self.current_sealed_headers = Some(sealed_headers);
                 self.current_header_idx = 0;
             } else {
