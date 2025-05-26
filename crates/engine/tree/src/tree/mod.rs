@@ -2091,8 +2091,7 @@ where
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
         let persisting_kind = self.persisting_kind_for(block.header());
-        // let run_parallel_state_root = persisting_kind.can_run_parallel_state_root();
-        let run_parallel_state_root = false;
+        let run_parallel_state_root = persisting_kind.can_run_parallel_state_root();
 
         // use prewarming background task
         let header = block.clone_sealed_header();
