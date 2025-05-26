@@ -9,6 +9,7 @@ use reth_ethereum::{
     primitives::Receipt,
 };
 use reth_op::{node::OpBlockAssembler, DepositReceipt};
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct CustomBlockAssembler {
@@ -16,8 +17,8 @@ pub struct CustomBlockAssembler {
 }
 
 impl CustomBlockAssembler {
-    pub const fn new(block_assembler: OpBlockAssembler<CustomChainSpec>) -> Self {
-        Self { block_assembler }
+    pub const fn new(chain_spec: Arc<CustomChainSpec>) -> Self {
+        Self { block_assembler: OpBlockAssembler::new(chain_spec) }
     }
 }
 

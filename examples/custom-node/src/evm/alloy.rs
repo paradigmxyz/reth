@@ -99,12 +99,12 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct CustomEvmFactory(pub OpEvmFactory);
 
 impl CustomEvmFactory {
-    pub const fn new(op_factory: OpEvmFactory) -> Self {
-        Self(op_factory)
+    pub fn new() -> Self {
+        Self::default()
     }
 }
 
