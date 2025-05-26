@@ -198,7 +198,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
     }
 
     /// Streams cached receipts and blocks for a list of block hashes, preserving input order.
-    pub fn get_receipts_and_maybe_block_exact<'a>(
+    pub fn get_receipts_and_maybe_block_stream<'a>(
         &'a self,
         hashes: Vec<B256>,
     ) -> impl Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + 'a {
