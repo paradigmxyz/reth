@@ -2112,18 +2112,6 @@ where
                 Ok(val) => val,
                 Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
             };
-            info!(
-                target: "engine::tree",
-                account_nodes = trie_input.nodes.account_nodes.len(),
-                removed_nodes = trie_input.nodes.removed_nodes.len(),
-                storage_tries = ?trie_input.nodes.storage_tries.iter().map(|(address, trie)| (address, trie.len())).collect::<BTreeMap<_, _>>(),
-                accounts = trie_input.state.accounts.len(),
-                storages = trie_input.state.storages.len(),
-                account_prefix_set_len = trie_input.prefix_sets.account_prefix_set.len(),
-                storage_prefix_set_len = ?trie_input.prefix_sets.storage_prefix_sets.iter().map(|(address, prefix_set)| (address, prefix_set.len())).collect::<BTreeMap<_, _>>(),
-                destroyed_accounts = trie_input.prefix_sets.destroyed_accounts.len(),
-                "Computed trie input for state root task"
-            );
 
             self.metrics
                 .block_validation
@@ -2253,18 +2241,6 @@ where
                 Ok(val) => val,
                 Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
             };
-            info!(
-                target: "engine::tree",
-                account_nodes = trie_input.nodes.account_nodes.len(),
-                removed_nodes = trie_input.nodes.removed_nodes.len(),
-                storage_tries = ?trie_input.nodes.storage_tries.iter().map(|(address, trie)| (address, trie.len())).collect::<BTreeMap<_, _>>(),
-                accounts = trie_input.state.accounts.len(),
-                storages = trie_input.state.storages.len(),
-                account_prefix_set_len = trie_input.prefix_sets.account_prefix_set.len(),
-                storage_prefix_set_len = ?trie_input.prefix_sets.storage_prefix_sets.iter().map(|(address, prefix_set)| (address, prefix_set.len())).collect::<BTreeMap<_, _>>(),
-                destroyed_accounts = trie_input.prefix_sets.destroyed_accounts.len(),
-                "Computed trie input for regular state root"
-            );
 
             // Extend with block we are validating root for.
             trie_input.append_ref(&hashed_state);
@@ -2391,14 +2367,9 @@ where
 
         info!(
             target: "engine::tree",
-            account_nodes = input.nodes.account_nodes.len(),
-            removed_nodes = input.nodes.removed_nodes.len(),
-            storage_tries = ?input.nodes.storage_tries.iter().map(|(address, trie)| (address, trie.len())).collect::<BTreeMap<_, _>>(),
-            accounts = input.state.accounts.len(),
-            storages = input.state.storages.len(),
-            account_prefix_set_len = input.prefix_sets.account_prefix_set.len(),
-            storage_prefix_set_len = ?input.prefix_sets.storage_prefix_sets.iter().map(|(address, prefix_set)| (address, prefix_set.len())).collect::<BTreeMap<_, _>>(),
-            destroyed_accounts = input.prefix_sets.destroyed_accounts.len(),
+            storage_tries = ?input.nodes.storage_tries.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
+            storage = ?input.state.storages.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
+            storage_prefix_set = ?input.prefix_sets.storage_prefix_sets.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
             "Computed trie input for parallel state root"
         );
 
