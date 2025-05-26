@@ -2365,14 +2365,6 @@ where
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
-        info!(
-            target: "engine::tree",
-            storage_tries = ?input.nodes.storage_tries.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            storage = ?input.state.storages.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            storage_prefix_set = ?input.prefix_sets.storage_prefix_sets.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            "Computed trie input for parallel state root"
-        );
-
         ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
 

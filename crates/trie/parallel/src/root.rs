@@ -1,7 +1,7 @@
 #[cfg(feature = "metrics")]
 use crate::metrics::ParallelStateRootMetrics;
 use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets};
-use alloy_primitives::B256;
+use alloy_primitives::{b256, B256};
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
@@ -89,6 +89,12 @@ where
         let storage_root_targets = StorageRootTargets::new(
             prefix_sets.account_prefix_set.iter().map(|nibbles| B256::from_slice(&nibbles.pack())),
             prefix_sets.storage_prefix_sets,
+        );
+
+        info!(
+            target: "engine::tree",
+            storage_root_targets_for_0x57 = ?storage_root_targets.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
+            "Calculating parallel state root"
         );
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
