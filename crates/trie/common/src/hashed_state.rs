@@ -6,7 +6,7 @@ use crate::{
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
-    keccak256,
+    b256, keccak256,
     map::{hash_map, B256Map, B256Set, HashMap, HashSet},
     Address, B256, U256,
 };
@@ -328,7 +328,15 @@ impl HashedPostState {
         let storages = self
             .storages
             .into_iter()
-            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+            .map(|(hashed_address, storage)| {
+                let sorted = storage.clone().into_sorted();
+                if hashed_address ==
+                    b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")
+                {
+                    reth_tracing::tracing::info!(target: "trie", ?storage, ?sorted, "Sorted storage");
+                }
+                (hashed_address, sorted)
+            })
             .collect();
 
         HashedPostStateSorted { accounts, storages }
