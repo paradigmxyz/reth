@@ -181,18 +181,19 @@ impl<B: Block + 'static, R: Send + Sync + 'static> EthStateCache<B, R> {
         Ok(block.zip(receipts))
     }
 
-    /// Retrieves receipts and maybe blocks for a list of block hashes, returning a stream of results.
+    /// Retrieves receipts and maybe blocks for a list of block hashes, 
+    /// returning a stream of results.
+    #[expect(clippy::type_complexity)]
     pub fn get_receipts_and_maybe_block_exact(
         &self,
         hashes: Vec<B256>,
-    ) -> impl Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + Send {
+    ) -> impl Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + Send
+    {
         let mut stream = futures::stream::FuturesOrdered::new();
 
         for hash in hashes {
             let cache = self.clone();
-            stream.push_back(async move {
-                cache.get_receipts_and_maybe_block(hash).await
-            });
+            stream.push_back(async move { cache.get_receipts_and_maybe_block(hash).await });
         }
 
         stream
