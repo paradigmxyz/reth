@@ -548,7 +548,7 @@ impl DedupPayload for NewPooledTransactionHashes {
     }
 
     fn dedup(self) -> PartiallyValidData<Self::Value> {
-        self.dedup()
+        Self::dedup(self)
     }
 }
 
