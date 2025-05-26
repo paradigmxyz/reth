@@ -9,8 +9,8 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
 use reth_evm::{
-    system_calls::SystemCaller, ConfigureEvm, Database, Evm, EvmEnvFor, HaltReasonFor,
-    InspectorFor, TxEnvFor,
+    evm::EvmFactoryExt, system_calls::SystemCaller, ConfigureEvm, Database, Evm, EvmEnvFor,
+    HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{BlockBody, RecoveredBlock, SignedTransaction};
@@ -290,7 +290,7 @@ pub trait Trace:
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>>,
+        Insp: Clone + for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>>,
         R: Send + 'static,
     {
         async move {
@@ -334,43 +334,29 @@ pub trait Trace:
                         // we need + 1 because the index is 0-based
                         highest as usize + 1
                     });
-                let mut results = Vec::with_capacity(max_transactions);
 
-                let mut transactions = block
-                    .transactions_recovered()
-                    .take(max_transactions)
-                    .enumerate()
-                    .map(|(idx, tx)| {
-                        let tx_info = TransactionInfo {
-                            hash: Some(*tx.tx_hash()),
-                            index: Some(idx as u64),
-                            block_hash: Some(block_hash),
-                            block_number: Some(block_number),
-                            base_fee: Some(base_fee),
-                        };
-                        let tx_env = this.evm_config().tx_env(tx);
-                        (tx_info, tx_env)
-                    })
-                    .peekable();
+                let mut idx = 0;
 
-                while let Some((tx_info, tx)) = transactions.next() {
-                    let mut inspector = inspector_setup();
-                    let (res, _) = this.inspect(
-                        StateCacheDbRefMutWrapper(&mut db),
-                        evm_env.clone(),
-                        tx,
-                        &mut inspector,
+                let results = this
+                    .evm_config()
+                    .evm_factory()
+                    .create_tracer(StateCacheDbRefMutWrapper(&mut db), evm_env, inspector_setup())
+                    .try_trace_many(
+                        block.transactions_recovered().take(max_transactions),
+                        |tx, res, inspector, db| {
+                            let ResultAndState { result, state } = res;
+                            let tx_info = TransactionInfo {
+                                hash: Some(*tx.tx_hash()),
+                                index: Some(idx),
+                                block_hash: Some(block_hash),
+                                block_number: Some(block_number),
+                                base_fee: Some(base_fee),
+                            };
+                            idx += 1;
+
+                            f(tx_info, inspector, result, &state, &*db.0)
+                        },
                     )?;
-                    let ResultAndState { result, state } = res;
-                    results.push(f(tx_info, inspector, result, &state, &db)?);
-
-                    // need to apply the state changes of this transaction before executing the
-                    // next transaction, but only if there's a next transaction
-                    if transactions.peek().is_some() {
-                        // commit the state changes to the DB
-                        db.commit(state)
-                    }
-                }
 
                 Ok(Some(results))
             })
@@ -448,7 +434,7 @@ pub trait Trace:
             + Send
             + 'static,
         Setup: FnMut() -> Insp + Send + 'static,
-        Insp: for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>>,
+        Insp: Clone + for<'a, 'b> InspectorFor<Self::Evm, StateCacheDbRefMutWrapper<'a, 'b>>,
         R: Send + 'static,
     {
         self.trace_block_until_with_inspector(block_id, block, None, insp_setup, f)
