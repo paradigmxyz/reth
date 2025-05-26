@@ -49,6 +49,7 @@ use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use state::TreeState;
 use std::{
+    collections::BTreeMap,
     fmt::Debug,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -142,7 +143,7 @@ where
                 })
                 .collect::<Vec<_>>()
         });
-        tracing::debug!(target: "engine::tree", historical = ?self.historical, ?trie_updates, "Building state provider");
+        debug!(target: "engine::tree", historical = ?self.historical, ?trie_updates, "Building state provider");
         if let Some(overlay) = self.overlay.clone() {
             provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
         }
@@ -2112,6 +2113,18 @@ where
                 Ok(val) => val,
                 Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
             };
+            info!(
+                target: "engine::tree",
+                account_nodes = trie_input.nodes.account_nodes.len(),
+                removed_nodes = trie_input.nodes.removed_nodes.len(),
+                storage_tries = ?trie_input.nodes.storage_tries.iter().map(|(address, trie)| (address, trie.len())).collect::<BTreeMap<_, _>>(),
+                accounts = trie_input.state.accounts.len(),
+                storages = trie_input.state.storages.len(),
+                account_prefix_set_len = trie_input.prefix_sets.account_prefix_set.len(),
+                storage_prefix_set_len = ?trie_input.prefix_sets.storage_prefix_sets.iter().map(|(address, prefix_set)| (address, prefix_set.len())).collect::<BTreeMap<_, _>>(),
+                destroyed_accounts = trie_input.prefix_sets.destroyed_accounts.len(),
+                "Computed trie input for state root task"
+            );
 
             self.metrics
                 .block_validation
@@ -2241,9 +2254,21 @@ where
                 Ok(val) => val,
                 Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
             };
+            info!(
+                target: "engine::tree",
+                account_nodes = trie_input.nodes.account_nodes.len(),
+                removed_nodes = trie_input.nodes.removed_nodes.len(),
+                storage_tries = ?trie_input.nodes.storage_tries.iter().map(|(address, trie)| (address, trie.len())).collect::<BTreeMap<_, _>>(),
+                accounts = trie_input.state.accounts.len(),
+                storages = trie_input.state.storages.len(),
+                account_prefix_set_len = trie_input.prefix_sets.account_prefix_set.len(),
+                storage_prefix_set_len = ?trie_input.prefix_sets.storage_prefix_sets.iter().map(|(address, prefix_set)| (address, prefix_set.len())).collect::<BTreeMap<_, _>>(),
+                destroyed_accounts = trie_input.prefix_sets.destroyed_accounts.len(),
+                "Computed trie input for regular state root"
+            );
+
             // Extend with block we are validating root for.
             trie_input.append_ref(&hashed_state);
-
             let (root, updates) =
                 ensure_ok!(state_provider.state_root_from_nodes_with_updates(trie_input));
             (root, updates, root_time.elapsed())
