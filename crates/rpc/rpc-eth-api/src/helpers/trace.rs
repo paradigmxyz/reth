@@ -343,8 +343,7 @@ pub trait Trace:
                     .create_tracer(StateCacheDbRefMutWrapper(&mut db), evm_env, inspector_setup())
                     .try_trace_many(
                         block.transactions_recovered().take(max_transactions),
-                        |tx, res, inspector, db| {
-                            let ResultAndState { result, state } = res;
+                        |tx, result, state, inspector, db| {
                             let tx_info = TransactionInfo {
                                 hash: Some(*tx.tx_hash()),
                                 index: Some(idx),
@@ -354,7 +353,7 @@ pub trait Trace:
                             };
                             idx += 1;
 
-                            f(tx_info, inspector, result, &state, &*db.0)
+                            f(tx_info, inspector, result, state, &*db.0)
                         },
                     )
                     .collect::<Result<_, _>>()?;

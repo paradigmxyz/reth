@@ -730,8 +730,8 @@ vergen-git2 = "1.0.5"
 # alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "919e588" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "919e588" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "c85868d" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "c85868d" }
 #
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
