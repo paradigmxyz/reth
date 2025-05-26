@@ -323,18 +323,9 @@ impl DiskFileBlobStoreInner {
         {
             // cache the versioned hashes to tx hash
             let mut map = self.versioned_hashes_to_txhash.lock();
-            match &data {
-                BlobTransactionSidecarVariant::Eip4844(data) => {
-                    data.versioned_hashes().for_each(|hash| {
-                        map.insert(hash, tx);
-                    });
-                }
-                BlobTransactionSidecarVariant::Eip7594(data) => {
-                    data.versioned_hashes().for_each(|hash| {
-                        map.insert(hash, tx);
-                    });
-                }
-            }
+            data.versioned_hashes().for_each(|hash| {
+                map.insert(hash, tx);
+            });
         }
 
         self.blob_cache.lock().insert(tx, Arc::new(data));
@@ -364,18 +355,9 @@ impl DiskFileBlobStoreInner {
             // cache versioned hashes to tx hash
             let mut map = self.versioned_hashes_to_txhash.lock();
             for (tx, data) in &txs {
-                match data {
-                    BlobTransactionSidecarVariant::Eip4844(data) => {
-                        data.versioned_hashes().for_each(|hash| {
-                            map.insert(hash, *tx);
-                        });
-                    }
-                    BlobTransactionSidecarVariant::Eip7594(data) => {
-                        data.versioned_hashes().for_each(|hash| {
-                            map.insert(hash, *tx);
-                        });
-                    }
-                }
+                data.versioned_hashes().for_each(|hash| {
+                    map.insert(hash, *tx);
+                });
             }
         }
 
