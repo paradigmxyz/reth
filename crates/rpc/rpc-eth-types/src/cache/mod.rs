@@ -185,7 +185,7 @@ impl<B: Block + 'static, R: Send + Sync + 'static> EthStateCache<B, R> {
     pub fn get_receipts_and_maybe_block_exact(
         &self,
         hashes: Vec<B256>,
-    ) -> Pin<Box<dyn Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + Send>> {
+    ) -> impl Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + Send {
         let mut stream = futures::stream::FuturesOrdered::new();
 
         for hash in hashes {
@@ -195,7 +195,7 @@ impl<B: Block + 'static, R: Send + Sync + 'static> EthStateCache<B, R> {
             });
         }
 
-        Box::pin(stream)
+        stream
     }
 
     /// Retrieves receipts and blocks from cache if block is in the cache, otherwise only receipts.
