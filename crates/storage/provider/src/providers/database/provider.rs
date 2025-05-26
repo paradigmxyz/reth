@@ -1609,12 +1609,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             if indices.tx_count == 0 {
                 result.push(Vec::new());
             } else {
-                let mut block_receipts = Vec::with_capacity(indices.tx_count as usize);
-                for _ in 0..indices.tx_count {
-                    if let Some(receipt) = receipts_iter.next() {
-                        block_receipts.push(receipt);
-                    }
-                }
+                let block_receipts =
+                    receipts_iter.by_ref().take(indices.tx_count as usize).collect();
                 result.push(block_receipts);
             }
         }
