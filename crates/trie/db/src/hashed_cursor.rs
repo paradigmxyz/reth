@@ -1,4 +1,4 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{b256, B256, U256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     tables,
@@ -101,7 +101,15 @@ where
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        Ok(self.cursor.next_dup_val()?.map(|e| (e.key, e.value)))
+        let result = self.cursor.next_dup_val()?.map(|e| (e.key, e.value));
+
+        if self.hashed_address ==
+            b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")
+        {
+            tracing::trace!(target: "trie::db::hashed_cursor", hashed_address = ?self.hashed_address, ?result, "DatabaseHashedStorageCursor::next");
+        }
+
+        Ok(result)
     }
 }
 
