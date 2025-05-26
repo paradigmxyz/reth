@@ -2111,7 +2111,6 @@ where
                 Ok(val) => val,
                 Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
             };
-            tracing::info!(target: "engine::tree", nodes = ?trie_input.nodes, "Computed trie input");
 
             self.metrics
                 .block_validation
