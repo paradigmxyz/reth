@@ -356,7 +356,8 @@ pub trait Trace:
 
                             f(tx_info, inspector, result, &state, &*db.0)
                         },
-                    )?;
+                    )
+                    .collect::<Result<_, _>>()?;
 
                 Ok(Some(results))
             })
