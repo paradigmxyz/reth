@@ -12,7 +12,7 @@ use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
 use reth_provider::{
-    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx,
+    providers::ConsistentDbView, BlockNumReader, BlockReader, DatabaseProviderFactory, FactoryTx,
     StateCommitmentProvider,
 };
 use reth_revm::state::EvmState;
@@ -21,6 +21,7 @@ use reth_trie::{
     HashedPostStateSorted, HashedStorage, MultiProofTargets, TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
+use revm_primitives::b256;
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
@@ -80,12 +81,23 @@ pub(super) struct MultiProofConfig<Factory> {
     pub prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
-impl<Factory> MultiProofConfig<Factory> {
+impl<Factory> MultiProofConfig<Factory>
+where
+    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
+{
     /// Creates a new state root config from the consistent view and the trie input.
     pub(super) fn new_from_input(
         consistent_view: ConsistentDbView<Factory>,
         input: TrieInput,
     ) -> Self {
+        tracing::info!(
+            target: "engine::tree",
+            chain_info = ?consistent_view.provider_ro().and_then(|provider| provider.chain_info()),
+            trie_nodes_for_0x57 = ?input.nodes.storage_tries.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
+            hashed_state_for_0x57 = ?input.state.storages.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
+            storage_root_targets_for_0x57 = ?input.prefix_sets.storage_prefix_sets.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
+            "Creating multiproof config"
+        );
         Self {
             consistent_view,
             nodes_sorted: Arc::new(input.nodes.into_sorted()),
