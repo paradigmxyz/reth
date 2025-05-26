@@ -93,6 +93,8 @@ where
 
         info!(
             target: "engine::tree",
+            trie_nodes_for_0x57 = ?trie_nodes_sorted.storage_tries.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
+            hashed_state_for_0x57 = ?hashed_state_sorted.storages.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
             storage_root_targets_for_0x57 = ?storage_root_targets.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
             "Calculating parallel state root"
         );
