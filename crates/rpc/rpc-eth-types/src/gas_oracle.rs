@@ -130,7 +130,10 @@ where
     }
 
     /// Suggests a gas price estimate based on recent blocks, using the configured percentile.
-    pub async fn suggest_tip_cap(&self) -> EthResult<U256> {
+    pub async fn suggest_tip_cap(&self) -> EthResult<U256>
+    where
+    <Provider as BlockReader>::Block: 'static,
+     {
         let header = self
             .provider
             .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
@@ -224,7 +227,9 @@ where
         &self,
         block_hash: B256,
         limit: usize,
-    ) -> EthResult<Option<(B256, Vec<U256>)>> {
+    ) -> EthResult<Option<(B256, Vec<U256>)>>
+    where <Provider as BlockReader>::Block: 'static
+     {
         // check the cache (this will hit the disk if the block is not cached)
         let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
             return Ok(None)

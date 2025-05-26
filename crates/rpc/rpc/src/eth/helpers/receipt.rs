@@ -13,9 +13,10 @@ impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, 
 where
     Self: RpcNodeCoreExt<
         Provider: TransactionsProvider<Transaction = TransactionSigned>
-                      + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
+            + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
     >,
     Provider: BlockReader + ChainSpecProvider,
+    <<EthApi<Provider, Pool, Network, EvmConfig> as reth_rpc_eth_api::RpcNodeCore>::Provider as BlockReader>::Block: 'static,
 {
     async fn build_transaction_receipt(
         &self,
@@ -24,7 +25,6 @@ where
         receipt: Receipt,
     ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
         let hash = meta.block_hash;
-        // get all receipts for the block
         let all_receipts = self
             .cache()
             .get_receipts(hash)

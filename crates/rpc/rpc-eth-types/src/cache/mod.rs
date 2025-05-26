@@ -77,7 +77,7 @@ impl<B: Block, R> Clone for EthStateCache<B, R> {
     }
 }
 
-impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
+impl<B: Block + 'static, R: Send + Sync + 'static> EthStateCache<B, R> {
     /// Creates and returns both [`EthStateCache`] frontend and the memory bound service.
     fn create<Provider, Tasks>(
         provider: Provider,
@@ -179,6 +179,23 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
         Ok(block.zip(receipts))
+    }
+
+    /// Retrieves receipts and maybe blocks for a list of block hashes, returning a stream of results.
+    pub fn get_receipts_and_maybe_block_exact(
+        &self,
+        hashes: Vec<B256>,
+    ) -> Pin<Box<dyn Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + Send>> {
+        let mut stream = futures::stream::FuturesOrdered::new();
+
+        for hash in hashes {
+            let cache = self.clone();
+            stream.push_back(async move {
+                cache.get_receipts_and_maybe_block(hash).await
+            });
+        }
+
+        Box::pin(stream)
     }
 
     /// Retrieves receipts and blocks from cache if block is in the cache, otherwise only receipts.
