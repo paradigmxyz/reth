@@ -594,11 +594,13 @@ where
         );
 
         // iterate through the range mode to get receipts and blocks
-        while let Some((receipts, maybe_block, header, block_hash)) = range_mode.next().await? {
+        while let Some(ReceiptBlockResult { receipts, recovered_block, header, block_hash }) =
+            range_mode.next().await?
+        {
             let num_hash = BlockNumHash::new(header.number(), block_hash);
             append_matching_block_logs(
                 &mut all_logs,
-                maybe_block
+                recovered_block
                     .map(ProviderOrBlock::Block)
                     .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
                 filter,
@@ -842,12 +844,15 @@ impl From<ProviderError> for EthFilterError {
 
 /// Helper type for the common pattern of returning receipts, `maybe_block`, header, and
 /// `block_hash`
-type ReceiptBlockResult<P> = Option<(
-    Arc<Vec<ProviderReceipt<P>>>,
-    Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<P>>>>,
-    <P as HeaderProvider>::Header,
-    B256,
-)>;
+struct ReceiptBlockResult<P>
+where
+    P: ReceiptProvider + BlockReader,
+{
+    receipts: Arc<Vec<ProviderReceipt<P>>>,
+    recovered_block: Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<P>>>>,
+    header: <P as HeaderProvider>::Header,
+    block_hash: B256,
+}
 
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
@@ -898,7 +903,7 @@ impl<
     }
 
     /// Gets the next (receipts, `maybe_block`, header, `block_hash`) tuple.
-    async fn next(&mut self) -> Result<ReceiptBlockResult<Eth::Provider>, EthFilterError> {
+    async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         match self {
             Self::Cached(cached) => cached.next().await,
             Self::Range(range) => range.next().await,
@@ -919,7 +924,7 @@ impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
     > CachedMode<Eth>
 {
-    async fn next(&mut self) -> Result<ReceiptBlockResult<Eth::Provider>, EthFilterError> {
+    async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         loop {
             if self.current_idx >= self.sealed_headers.len() {
                 return Ok(None);
@@ -932,24 +937,34 @@ impl<
             let header = sealed_header.header().clone();
 
             // try cache first for performance
-            if let Some((receipts, maybe_block)) =
+            if let Some((receipts, recovered_block)) =
                 self.filter_inner.eth_cache().get_receipts_and_maybe_block(block_hash).await?
             {
-                return Ok(Some((receipts, maybe_block, header, block_hash)));
+                return Ok(Some(ReceiptBlockResult {
+                    receipts,
+                    recovered_block,
+                    header,
+                    block_hash,
+                }))
             }
 
             // cache miss - fallback to storage to ensure correctness
             if let Some(receipts) =
                 self.filter_inner.provider().receipts_by_block(block_hash.into())?
             {
-                let maybe_block = self
+                let recovered_block = self
                     .filter_inner
                     .provider()
                     .block(block_hash.into())?
                     .and_then(|block| block.try_into_recovered().ok())
                     .map(Arc::new);
 
-                return Ok(Some((Arc::new(receipts), maybe_block, header, block_hash)));
+                return Ok(Some(ReceiptBlockResult {
+                    receipts: Arc::new(receipts),
+                    recovered_block,
+                    header,
+                    block_hash,
+                }));
             }
         }
     }
@@ -969,7 +984,7 @@ impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
     > RangeBlockMode<Eth>
 {
-    async fn next(&mut self) -> Result<ReceiptBlockResult<Eth::Provider>, EthFilterError> {
+    async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         loop {
             // if we have current sealed headers to process
             if let Some(ref sealed_headers) = self.current_sealed_headers {
@@ -981,27 +996,30 @@ impl<
                     let header = sealed_header.header().clone();
 
                     // try cache first for performance
-                    if let Some((receipts, maybe_block)) = self
+                    if let Some((receipts, recovered_block)) = self
                         .filter_inner
                         .eth_cache()
                         .get_receipts_and_maybe_block(block_hash)
                         .await?
                     {
-                        return Ok(Some((receipts, maybe_block, header, block_hash)));
+                        return Ok(Some(ReceiptBlockResult {
+                            receipts,
+                            recovered_block,
+                            header,
+                            block_hash,
+                        }));
                     }
 
                     // cache miss - fallback to storage to ensure correctness
                     if let Some(receipts) =
                         self.filter_inner.provider().receipts_by_block(block_hash.into())?
                     {
-                        let maybe_block = self
-                            .filter_inner
-                            .provider()
-                            .block(block_hash.into())?
-                            .and_then(|block| block.try_into_recovered().ok())
-                            .map(Arc::new);
-
-                        return Ok(Some((Arc::new(receipts), maybe_block, header, block_hash)));
+                        return Ok(Some(ReceiptBlockResult {
+                            receipts: Arc::new(receipts),
+                            recovered_block: None,
+                            header,
+                            block_hash,
+                        }));
                     }
                 }
 
