@@ -259,6 +259,7 @@ where
             db_entry = self.cursor.next()?;
         }
 
+        tracing::trace!(target: "trie::hashed_cursor::post_state", ?last_slot, ?post_state_entry, ?db_entry, "HashedPostStateStorageCursor::next_inner");
         // Compare two entries and return the lowest.
         Ok(Self::compare_entries(post_state_entry, db_entry))
     }
