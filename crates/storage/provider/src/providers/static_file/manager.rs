@@ -1421,7 +1421,7 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> Rec
         &self,
         _block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
-        unreachable!()
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
