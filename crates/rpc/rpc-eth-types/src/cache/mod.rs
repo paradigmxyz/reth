@@ -62,7 +62,8 @@ type ReceiptsLruCache<R, L> =
 
 type HeaderLruCache<H, L> = MultiConsumerLruCache<B256, H, L, HeaderResponseSender<H>>;
 
-type CachedReceiptsAndBlock<B, R> = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>;
+type CachedReceiptsAndBlock<B, R> =
+    ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>;
 
 /// Provides async access to cached eth data
 ///
@@ -208,7 +209,7 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
 
         futures.collect::<FuturesOrdered<_>>()
     }
-    
+
     /// Requests the header for the given hash.
     ///
     /// Returns an error if the header is not found.
