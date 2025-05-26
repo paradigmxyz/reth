@@ -18,7 +18,7 @@ use reth_rpc_server_types::{
         DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
-use reth_storage_api::{BlockReader, BlockReaderIdExt};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, ReceiptProvider};
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
@@ -230,6 +230,7 @@ where
     ) -> EthResult<Option<(B256, Vec<U256>)>>
     where
         <Provider as BlockReader>::Block: 'static,
+        <Provider as ReceiptProvider>::Receipt: 'static,
     {
         // check the cache (this will hit the disk if the block is not cached)
         let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
