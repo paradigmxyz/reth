@@ -22,9 +22,9 @@ pub struct TrieUpdates {
 impl TrieUpdates {
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
-        self.account_nodes.is_empty() &&
-            self.removed_nodes.is_empty() &&
-            self.storage_tries.is_empty()
+        self.account_nodes.is_empty()
+            && self.removed_nodes.is_empty()
+            && self.storage_tries.is_empty()
     }
 
     /// Returns reference to updated account nodes.
@@ -352,6 +352,7 @@ mod serde_nibbles_map {
 
 /// Sorted trie updates used for lookups and insertions.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdatesSorted {
     /// Sorted collection of updated state nodes with corresponding paths.
     pub account_nodes: Vec<(Nibbles, BranchNodeCompact)>,
@@ -380,6 +381,7 @@ impl TrieUpdatesSorted {
 
 /// Sorted trie updates used for lookups and insertions.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct StorageTrieUpdatesSorted {
     /// Flag indicating whether the trie has been deleted/wiped.
     pub is_deleted: bool,

@@ -110,6 +110,52 @@ impl BundleStateSorted {
     }
 }
 
+// #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+// struct StorageTrieUpdatesSorted {
+//     pub is_deleted: bool,
+//     /// Collection of updated storage trie nodes.
+//     #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_map"))]
+//     pub storage_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
+//     /// Collection of removed storage trie nodes.
+//     #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_set"))]
+//     pub removed_nodes: BTreeSet<Nibbles>,
+// }
+
+// impl StorageTrieUpdatesSorted {
+//     fn from_storage_trie_updates(storage_trie: &StorageTrieUpdates) -> Self {
+//         Self {
+//             is_deleted: storage_trie.is_deleted,
+//             storage_nodes: BTreeMap::from_iter(storage_trie.storage_nodes.clone()),
+//             removed_nodes: BTreeSet::from_iter(storage_trie.removed_nodes.clone()),
+//         }
+//     }
+// }
+// #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+// struct TrieUpdatesSorted {
+//     /// Collection of updated intermediate account nodes indexed by full path.
+//     #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_map"))]
+//     pub account_nodes: BTreeMap<Nibbles, BranchNodeCompact>,
+//     /// Collection of removed intermediate account nodes indexed by full path.
+//     #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_set"))]
+//     pub removed_nodes: BTreeSet<Nibbles>,
+//     /// Collection of updated storage tries indexed by the hashed address.
+//     pub storage_tries: BTreeMap<B256, StorageTrieUpdatesSorted, FbBuildHasher<32>>,
+// }
+
+// impl TrieUpdatesSorted {
+//     fn from_trie_updates(trie_updates: &TrieUpdates) -> Self {
+//         let account_nodes = BTreeMap::from_iter(trie_updates.account_nodes.clone());
+//         let removed_nodes = BTreeSet::from_iter(trie_updates.removed_nodes.clone());
+//         let storage_tries = trie_updates
+//             .storage_tries
+//             .iter()
+//             .map(|(key, value)| (*key, StorageTrieUpdatesSorted::from_storage_trie_updates(&value)))
+//             .collect();
+
+//         TrieUpdatesSorted { account_nodes, removed_nodes, storage_tries }
+//     }
+// }
+
 /// Generates a witness for the given block and saves it to a file.
 #[derive(Debug)]
 pub struct InvalidBlockWitnessHook<P, E> {
@@ -315,15 +361,17 @@ where
                 warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root(), ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
             }
 
-            if &trie_output != original_updates {
+            let trie_output_sorted = trie_output.into_sorted();
+            let original_updates_sorted = original_updates.clone().into_sorted();
+            if trie_output_sorted != original_updates_sorted {
                 // Trie updates are too big to diff, so we just save the original and re-executed
                 let original_path = self.save_file(
                     format!("{}_{}.trie_updates.original.json", block.number(), block.hash()),
-                    original_updates,
+                    &original_updates_sorted,
                 )?;
                 let re_executed_path = self.save_file(
                     format!("{}_{}.trie_updates.re_executed.json", block.number(), block.hash()),
-                    &trie_output,
+                    &trie_output_sorted,
                 )?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
