@@ -840,6 +840,14 @@ impl From<ProviderError> for EthFilterError {
     }
 }
 
+/// Helper type for the common pattern of returning receipts, `maybe_block`, header, and `block_hash`
+type ReceiptBlockResult<P> = Option<(
+    Arc<Vec<ProviderReceipt<P>>>,
+    Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<P>>>>,
+    <P as HeaderProvider>::Header,
+    B256,
+)>;
+
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
@@ -905,17 +913,7 @@ impl<
     }
 
     /// Gets the next (receipts, `maybe_block`, header, `block_hash`) tuple.
-    async fn next(
-        &mut self,
-    ) -> Result<
-        Option<(
-            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
-            <Eth::Provider as HeaderProvider>::Header,
-            B256,
-        )>,
-        EthFilterError,
-    > {
+    async fn next(&mut self) -> Result<ReceiptBlockResult<Eth::Provider>, EthFilterError> {
         match self {
             Self::Cached(cached) => cached.next().await,
             Self::Range(range) => range.next().await,
@@ -927,17 +925,7 @@ impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
     > CachedMode<Eth>
 {
-    async fn next(
-        &mut self,
-    ) -> Result<
-        Option<(
-            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
-            <Eth::Provider as HeaderProvider>::Header,
-            B256,
-        )>,
-        EthFilterError,
-    > {
+    async fn next(&mut self) -> Result<ReceiptBlockResult<Eth::Provider>, EthFilterError> {
         loop {
             if self.current_idx >= self.headers.len() {
                 return Ok(None);
@@ -987,17 +975,7 @@ impl<
         Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
     > RangeBlockMode<Eth>
 {
-    async fn next(
-        &mut self,
-    ) -> Result<
-        Option<(
-            Arc<Vec<ProviderReceipt<Eth::Provider>>>,
-            Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<Eth::Provider>>>>,
-            <Eth::Provider as HeaderProvider>::Header,
-            B256,
-        )>,
-        EthFilterError,
-    > {
+    async fn next(&mut self) -> Result<ReceiptBlockResult<Eth::Provider>, EthFilterError> {
         loop {
             // if we have current headers to process
             if let Some(ref headers) = self.current_headers {
