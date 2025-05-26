@@ -16,7 +16,7 @@ where
             + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
     >,
     Provider: BlockReader + ChainSpecProvider,
-    <<EthApi<Provider, Pool, Network, EvmConfig> as reth_rpc_eth_api::RpcNodeCore>::Provider as BlockReader>::Block: 'static,
+    <<Self as reth_rpc_eth_api::RpcNodeCore>::Provider as BlockReader>::Block: 'static,
 {
     async fn build_transaction_receipt(
         &self,
