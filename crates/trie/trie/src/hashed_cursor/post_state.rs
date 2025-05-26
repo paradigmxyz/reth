@@ -232,8 +232,17 @@ where
     /// Find the storage entry that is right after current cursor position.
     fn next_inner(&mut self, last_slot: B256) -> Result<Option<(B256, U256)>, DatabaseError> {
         // Attempt to find the account's storage in post state.
-        let post_state_entry =
-            self.post_state_cursor.as_mut().and_then(|c| c.first_after(&last_slot));
+        let post_state_entry = loop {
+            let Some((key, value)) =
+                self.post_state_cursor.as_mut().and_then(|c| c.first_after(&last_slot))
+            else {
+                break None
+            };
+            if self.is_slot_zero_valued(&key) {
+                continue;
+            }
+            break Some((key, value));
+        };
 
         // Return post state entry immediately if database was wiped.
         if self.storage_wiped {
