@@ -181,7 +181,7 @@ impl<B: Block + 'static, R: Send + Sync + 'static> EthStateCache<B, R> {
         Ok(block.zip(receipts))
     }
 
-    /// Retrieves receipts and maybe blocks for a list of block hashes, 
+    /// Retrieves receipts and maybe blocks for a list of block hashes,
     /// returning a stream of results.
     #[expect(clippy::type_complexity)]
     pub fn get_receipts_and_maybe_block_exact(
