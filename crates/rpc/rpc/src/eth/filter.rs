@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_primitives_traits::{Block, SealedHeader};
+use reth_primitives_traits::Block;
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
     RpcTransaction, TransactionCompat,
@@ -27,10 +27,10 @@ use reth_storage_api::{
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt,
     future::Future,
-    iter::StepBy,
+    iter::{Peekable, StepBy},
     ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
@@ -574,22 +574,22 @@ where
             BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
         {
             let headers = self.provider().headers_range(from..=to)?;
-            for (idx, header) in headers
-                .iter()
-                .enumerate()
-                .filter(|(_, header)| filter.matches_bloom(header.logs_bloom()))
-            {
-                // these are consecutive headers, so we can use the parent hash of the next
-                // block to get the current header's hash
-                let block_hash = match headers.get(idx + 1) {
-                    Some(child) => child.parent_hash(),
+
+            let mut headers_iter = headers
+                .into_iter()
+                .filter(|header| filter.matches_bloom(header.logs_bloom()))
+                .peekable();
+
+            while let Some(header) = headers_iter.next() {
+                let block_hash = match headers_iter.peek() {
+                    Some(child_header) => child_header.parent_hash(),
                     None => self
                         .provider()
                         .block_hash(header.number())?
                         .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
                 };
 
-                matching_headers.push(HeadersBlockHash { header: header.clone(), block_hash });
+                matching_headers.push(HeadersBlockHash { header, block_hash });
             }
         }
 
@@ -908,12 +908,9 @@ impl<
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
-                block_range_iter: BlockRangeInclusiveIter::new(
-                    from_block..=to_block,
-                    max_headers_range,
-                ),
-                current_sealed_headers: None,
-                current_header_idx: 0,
+                iter: headers_block_hash.into_iter().peekable(),
+                next: VecDeque::new(),
+                max_range: max_headers_range as usize,
             })
         }
     }
@@ -991,9 +988,9 @@ struct RangeBlockMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    block_range_iter: BlockRangeInclusiveIter,
-    current_sealed_headers: Option<Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
-    current_header_idx: usize,
+    iter: Peekable<std::vec::IntoIter<HeadersBlockHash<<Eth::Provider as HeaderProvider>::Header>>>,
+    next: VecDeque<ReceiptBlockResult<Eth::Provider>>,
+    max_range: usize,
 }
 
 impl<
@@ -1001,60 +998,65 @@ impl<
     > RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
-        loop {
-            // if we have current sealed headers to process
-            if let Some(ref sealed_headers) = self.current_sealed_headers {
-                while self.current_header_idx < sealed_headers.len() {
-                    let sealed_header = &sealed_headers[self.current_header_idx];
-                    self.current_header_idx += 1;
+        if let Some(result) = self.next.pop_front() {
+            return Ok(Some(result));
+        }
 
-                    let block_hash = sealed_header.hash();
-                    let header = sealed_header.header().clone();
+        let next_header = match self.iter.next() {
+            Some(header) => header,
+            None => return Ok(None),
+        };
 
-                    // try cache first for performance
-                    if let Some((receipts, recovered_block)) = self
-                        .filter_inner
-                        .eth_cache()
-                        .get_receipts_and_maybe_block(block_hash)
-                        .await?
-                    {
-                        return Ok(Some(ReceiptBlockResult {
-                            receipts,
-                            recovered_block,
-                            header,
-                            block_hash,
-                        }));
-                    }
+        let start_number = next_header.header.number();
+        let mut range_headers = vec![next_header];
 
-                    // cache miss - fallback to storage to ensure correctness
-                    if let Some(receipts) =
-                        self.filter_inner.provider().receipts_by_block(block_hash.into())?
-                    {
-                        return Ok(Some(ReceiptBlockResult {
-                            receipts: Arc::new(receipts),
-                            recovered_block: None,
-                            header,
-                            block_hash,
-                        }));
-                    }
+        // peek ahead to extend range up to max_range size
+        while range_headers.len() < self.max_range {
+            if let Some(peeked) = self.iter.peek() {
+                // Check if next block is consecutive
+                if peeked.header.number() == start_number + range_headers.len() as u64 {
+                    let next = self.iter.next().unwrap();
+                    range_headers.push(next);
+                } else {
+                    break;
                 }
-
-                // finished current batch, reset for next range
-                self.current_sealed_headers = None;
-                self.current_header_idx = 0;
-            }
-
-            // get next range
-            if let Some((from, to)) = self.block_range_iter.next() {
-                let headers = self.filter_inner.provider().headers_range(from..=to)?;
-                // seal headers to eliminate duplicated hash calculation
-                let sealed_headers = headers.into_iter().map(SealedHeader::seal_slow).collect();
-                self.current_sealed_headers = Some(sealed_headers);
-                self.current_header_idx = 0;
             } else {
-                return Ok(None);
+                break;
             }
         }
+
+        let start_block = range_headers[0].header.number();
+        let end_block = range_headers.last().unwrap().header.number();
+
+        let receipts_range =
+            self.filter_inner.provider().receipts_by_block_range(start_block..=end_block)?;
+
+        for (i, header_block_hash) in range_headers.into_iter().enumerate() {
+            let header = header_block_hash.header;
+            let block_hash = header_block_hash.block_hash;
+
+            // get receipts for this specific block from the range result
+            if let Some(receipts) = receipts_range.get(i) {
+                if !receipts.is_empty() {
+                    // TODO: refactor when https://github.com/paradigmxyz/reth/issues/16470 is done
+                    let recovered_block = self
+                        .filter_inner
+                        .provider()
+                        .block(block_hash.into())?
+                        .and_then(|block| block.try_into_recovered().ok())
+                        .map(Arc::new);
+
+                    self.next.push_back(ReceiptBlockResult {
+                        receipts: Arc::new(receipts.clone()),
+                        recovered_block,
+                        header,
+                        block_hash,
+                    });
+                }
+            }
+        }
+
+        Ok(self.next.pop_front())
     }
 }
 
