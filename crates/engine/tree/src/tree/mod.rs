@@ -2104,7 +2104,7 @@ where
             let trie_input_start = Instant::now();
             let res = self.compute_trie_input(
                 persisting_kind,
-                consistent_view.clone(),
+                ensure_ok!(consistent_view.provider_ro()),
                 block.header().parent_hash(),
             );
             let trie_input = match res {
@@ -2230,8 +2230,21 @@ where
             // fallback is to compute the state root regularly in sync
             warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
             self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
+
+            let res = self.compute_trie_input(
+                persisting_kind,
+                ensure_ok!(self.provider.database_provider_ro()),
+                block.header().parent_hash(),
+            );
+            let mut trie_input = match res {
+                Ok(val) => val,
+                Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
+            };
+            // Extend with block we are validating root for.
+            trie_input.append_ref(&hashed_state);
+
             let (root, updates) =
-                ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
+                ensure_ok!(state_provider.state_root_from_nodes_with_updates(trie_input));
             (root, updates, root_time.elapsed())
         };
 
@@ -2347,7 +2360,7 @@ where
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
         let mut input =
-            self.compute_trie_input(persisting_kind, consistent_view.clone(), parent_hash)?;
+            self.compute_trie_input(persisting_kind, consistent_view.provider_ro()?, parent_hash)?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
@@ -2369,15 +2382,14 @@ where
     ///    block.
     /// 3. Once in-memory blocks are collected and optionally filtered, we compute the
     ///    [`HashedPostState`] from them.
-    fn compute_trie_input(
+    fn compute_trie_input<TP: DBProvider + BlockNumReader>(
         &self,
         persisting_kind: PersistingKind,
-        consistent_view: ConsistentDbView<P>,
+        provider: TP,
         parent_hash: B256,
     ) -> Result<TrieInput, ParallelStateRootError> {
         let mut input = TrieInput::default();
 
-        let provider = consistent_view.provider_ro()?;
         let best_block_number = provider.best_block_number()?;
 
         let (mut historical, mut blocks) = self
