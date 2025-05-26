@@ -2362,8 +2362,20 @@ where
 
         let mut input =
             self.compute_trie_input(persisting_kind, consistent_view.provider_ro()?, parent_hash)?;
+        let original_input = input
+            .state
+            .storages
+            .get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"))
+            .cloned();
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
+
+        tracing::info!(
+            target: "engine::tree",
+            ?original_input,
+            extended_input = ?input.state.storages.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
+            "Preparing input"
+        );
 
         ParallelStateRoot::new(consistent_view, input).incremental_root_with_updates()
     }
