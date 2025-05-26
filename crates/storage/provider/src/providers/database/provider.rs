@@ -25,7 +25,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
-    keccak256,
+    b256, keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
@@ -2353,6 +2353,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         &self,
         storage_tries: &B256Map<StorageTrieUpdates>,
     ) -> ProviderResult<usize> {
+        tracing::info!(
+            target: "providers::db",
+            updates = ?storage_tries.get(&b256!(
+                "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
+            )),
+            "Writing storage trie updates",
+        );
+
         let mut num_entries = 0;
         let mut storage_tries = Vec::from_iter(storage_tries);
         storage_tries.sort_unstable_by(|a, b| a.0.cmp(b.0));
