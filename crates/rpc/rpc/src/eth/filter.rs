@@ -579,7 +579,17 @@ where
                 .enumerate()
                 .filter(|(_, header)| filter.matches_bloom(header.logs_bloom()))
             {
-                matching_headers.push((idx, header.clone()));
+                // these are consecutive headers, so we can use the parent hash of the next
+                // block to get the current header's hash
+                let block_hash = match headers.get(idx + 1) {
+                    Some(child) => child.parent_hash(),
+                    None => self
+                        .provider()
+                        .block_hash(header.number())?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
+                };
+
+                matching_headers.push(HeadersBlockHash{ header: header.clone(), block_hash });
             }
         }
 
@@ -854,6 +864,12 @@ where
     block_hash: B256,
 }
 
+/// Helper type for headers plus block hashes
+struct HeadersBlockHash<H> where H: BlockHeader{
+    header: H,
+    block_hash: B256,
+}
+
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
@@ -871,7 +887,7 @@ impl<
     /// Creates a new `RangeMode`.
     fn new(
         filter_inner: Arc<EthFilterInner<Eth>>,
-        headers: Vec<(usize, <Eth::Provider as HeaderProvider>::Header)>,
+        headers_block_hash: Vec<HeadersBlockHash<<Eth::Provider as HeaderProvider>::Header>>,
         from_block: u64,
         to_block: u64,
         max_headers_range: u64,
@@ -883,12 +899,9 @@ impl<
         // use cached mode for recent blocks (close to chain tip) and small ranges
         if block_count <= CACHED_MODE_BLOCK_THRESHOLD &&
             distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
-            !headers.is_empty()
+            !headers_block_hash.is_empty()
         {
-            // seal headers for cached mode to eliminate duplicated hash calculation
-            let sealed_headers =
-                headers.into_iter().map(|(_, header)| SealedHeader::seal_slow(header)).collect();
-            Self::Cached(CachedMode { filter_inner, sealed_headers, current_idx: 0 })
+            Self::Cached(CachedMode { filter_inner, headers_block_hash, current_idx: 0 })
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
@@ -916,7 +929,7 @@ struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    sealed_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    headers_block_hash: Vec<HeadersBlockHash<<Eth::Provider as HeaderProvider>::Header>>,
     current_idx: usize,
 }
 
@@ -926,15 +939,15 @@ impl<
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         loop {
-            if self.current_idx >= self.sealed_headers.len() {
+            if self.current_idx >= self.headers_block_hash.len() {
                 return Ok(None);
             }
 
-            let sealed_header = &self.sealed_headers[self.current_idx];
+            let header_block_hash = &self.headers_block_hash[self.current_idx];
             self.current_idx += 1;
 
-            let block_hash = sealed_header.hash();
-            let header = sealed_header.header().clone();
+            let block_hash = header_block_hash.block_hash;
+            let header = header_block_hash.header.clone();
 
             // try cache first for performance
             if let Some((receipts, recovered_block)) =
