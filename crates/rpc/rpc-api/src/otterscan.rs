@@ -64,7 +64,7 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     #[method(name = "getBlockTransactions")]
     async fn get_block_transactions(
         &self,
-        block_number: u64,
+        block_number: LenientBlockNumberOrTag,
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<OtsBlockTransactions<T, H>>;
@@ -74,7 +74,7 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     async fn search_transactions_before(
         &self,
         address: Address,
-        block_number: u64,
+        block_number: LenientBlockNumberOrTag,
         page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts>;
 
@@ -83,7 +83,7 @@ pub trait Otterscan<T: RpcObject, H: RpcObject> {
     async fn search_transactions_after(
         &self,
         address: Address,
-        block_number: u64,
+        block_number: LenientBlockNumberOrTag,
         page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts>;
 
