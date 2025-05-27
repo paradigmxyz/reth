@@ -1405,7 +1405,7 @@ where
 
             let mut trie_input = self.compute_trie_input(
                 self.persisting_kind_for(block.recovered_block().header()),
-                self.provider.database_provider_ro().unwrap(),
+                self.provider.database_provider_ro()?,
                 block.recovered_block().parent_hash(),
             )?;
             // Extend with block we are generating trie updates for.
@@ -2284,10 +2284,7 @@ where
         };
 
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
-        let updates = trie_output
-            .storage_tries
-            .get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"));
-        debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, ?updates, "Calculated state root");
+        debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
         // ensure state root matches
         if state_root != block.header().state_root() {
@@ -2397,11 +2394,6 @@ where
 
         let mut input =
             self.compute_trie_input(persisting_kind, consistent_view.provider_ro()?, parent_hash)?;
-        let original_input = input
-            .state
-            .storages
-            .get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"))
-            .cloned();
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
