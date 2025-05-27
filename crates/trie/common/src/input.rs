@@ -37,7 +37,7 @@ impl TrieInput {
         self.nodes.extend(other.nodes);
         core::mem::swap(&mut self.state, &mut other.state);
         self.state.extend(other.state);
-        core::mem::swap(&mut self.prefix_sets, &mut other.prefix_sets);
+        // No need to swap prefix sets, as they will be sorted and deduplicated.
         self.prefix_sets.extend(other.prefix_sets);
     }
 
