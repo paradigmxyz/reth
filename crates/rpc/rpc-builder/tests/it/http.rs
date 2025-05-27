@@ -434,9 +434,12 @@ where
     let nonce = 1;
     let block_hash = B256::default();
 
-    OtterscanClient::<Transaction, Header>::get_header_by_number(client, block_number)
-        .await
-        .unwrap();
+    OtterscanClient::<Transaction, Header>::get_header_by_number(
+        client,
+        LenientBlockNumberOrTag::new(BlockNumberOrTag::Number(block_number)),
+    )
+    .await
+    .unwrap();
 
     OtterscanClient::<Transaction, Header>::has_code(client, address, None).await.unwrap();
     OtterscanClient::<Transaction, Header>::has_code(client, address, Some(block_number.into()))
