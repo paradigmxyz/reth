@@ -6,7 +6,7 @@ use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
     OpPayloadAttributes,
 };
-use reth_chainspec::{ChainHardforks, ChainSpec};
+use reth_chainspec::ChainHardforks;
 use reth_consensus::ConsensusError;
 use reth_node_api::{
     payload::{
@@ -268,6 +268,7 @@ mod test {
     use crate::engine;
     use alloy_primitives::{b64, Address, B256, B64};
     use alloy_rpc_types_engine::PayloadAttributes;
+    use reth_chainspec::ChainSpec;
     use reth_node_builder::EngineValidator;
     use reth_optimism_chainspec::BASE_SEPOLIA;
     use reth_provider::noop::NoopProvider;
