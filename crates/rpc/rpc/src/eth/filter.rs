@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
-use futures::future::TryFutureExt;
+use futures::{future::TryFutureExt, Stream, StreamExt};
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{Block, SealedHeader};
@@ -32,6 +32,7 @@ use std::{
     future::Future,
     iter::{Peekable, StepBy},
     ops::RangeInclusive,
+    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -894,9 +895,19 @@ impl<
             distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
             !sealed_headers.is_empty()
         {
+            // extract block hashes for the stream
+            let block_hashes: Vec<alloy_primitives::B256> = sealed_headers.iter()
+                .map(|header| header.hash())
+                .collect();
+
+            // create the stream upfront
+            let receipt_stream = filter_inner.eth_cache()
+                .get_receipts_and_maybe_block_stream(block_hashes);
+
             Self::Cached(CachedMode {
                 filter_inner,
-                sealed_headers_iter: sealed_headers.into_iter(),
+                receipt_stream: Box::pin(receipt_stream),
+                headers_iter: sealed_headers.into_iter(),
             })
         } else {
             Self::Range(RangeBlockMode {
@@ -917,13 +928,16 @@ impl<
     }
 }
 
+/// A boxed stream that yields receipt and block data for cached receipt queries.
+type ReceiptStream<P> = Pin<Box<dyn Stream<Item = reth_errors::ProviderResult<Option<(Arc<Vec<ProviderReceipt<P>>>, Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<P>>>>)>>> + Send>>;
+
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    sealed_headers_iter:
-        std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    receipt_stream: ReceiptStream<Eth::Provider>,
+    headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
 impl<
@@ -932,34 +946,43 @@ impl<
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         loop {
-            let header = match self.sealed_headers_iter.next() {
+            // get next header
+            let header = match self.headers_iter.next() {
                 Some(header) => header,
                 None => return Ok(None),
             };
 
-            // try cache first for performance
-            if let Some((receipts, recovered_block)) =
-                self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?
-            {
-                return Ok(Some(ReceiptBlockResult { receipts, recovered_block, header }))
-            }
+            // get corresponding receipt result from stream
+            match self.receipt_stream.next().await {
+                Some(Ok(Some((receipts, recovered_block)))) => {
+                    return Ok(Some(ReceiptBlockResult {
+                        receipts,
+                        recovered_block,
+                        header,
+                    }));
+                },
+                Some(Ok(None)) => {
+                    // cache miss - fallback to storage to ensure correctness
+                    if let Some(receipts) =
+                        self.filter_inner.provider().receipts_by_block(header.hash().into())?
+                    {
+                        let recovered_block = self
+                            .filter_inner
+                            .provider()
+                            .block(header.hash().into())?
+                            .and_then(|block| block.try_into_recovered().ok())
+                            .map(Arc::new);
 
-            // cache miss - fallback to storage to ensure correctness
-            if let Some(receipts) =
-                self.filter_inner.provider().receipts_by_block(header.hash().into())?
-            {
-                let recovered_block = self
-                    .filter_inner
-                    .provider()
-                    .block(header.hash().into())?
-                    .and_then(|block| block.try_into_recovered().ok())
-                    .map(Arc::new);
-
-                return Ok(Some(ReceiptBlockResult {
-                    receipts: Arc::new(receipts),
-                    recovered_block,
-                    header,
-                }));
+                        return Ok(Some(ReceiptBlockResult {
+                            receipts: Arc::new(receipts),
+                            recovered_block,
+                            header,
+                        }));
+                    }
+                    // continue loop if no receipts found
+                },
+                Some(Err(e)) => return Err(e.into()),
+                None => return Ok(None),
             }
         }
     }
@@ -1452,7 +1475,20 @@ mod tests {
 
         let headers = vec![test_header.clone()];
 
-        let mut cached_mode = CachedMode { filter_inner, sealed_headers_iter: headers.into_iter() };
+        // extract block hashes for the stream
+        let block_hashes: Vec<alloy_primitives::B256> = headers.iter()
+            .map(|header: &SealedHeader<_>| header.hash())
+            .collect();
+
+        // create the owned stream
+        let receipt_stream = filter_inner.eth_cache()
+            .get_receipts_and_maybe_block_stream(block_hashes);
+
+        let mut cached_mode = CachedMode {
+            filter_inner,
+            receipt_stream: Box::pin(receipt_stream),
+            headers_iter: headers.into_iter(),
+        };
 
         // should find the receipt from provider fallback (cache will be empty)
         let result = cached_mode.next().await;
@@ -1489,9 +1525,22 @@ mod tests {
         );
         let filter_inner = eth_filter.inner;
 
-        let headers = vec![];
+        let headers: Vec<SealedHeader<alloy_consensus::Header>> = vec![];
 
-        let mut cached_mode = CachedMode { filter_inner, sealed_headers_iter: headers.into_iter() };
+        // extract block hashes for the stream
+        let block_hashes: Vec<alloy_primitives::B256> = headers.iter()
+            .map(|header: &SealedHeader<_>| header.hash())
+            .collect();
+
+        // create the owned stream
+        let receipt_stream = filter_inner.eth_cache()
+            .get_receipts_and_maybe_block_stream(block_hashes);
+
+        let mut cached_mode = CachedMode {
+            filter_inner,
+            receipt_stream: Box::pin(receipt_stream),
+            headers_iter: headers.into_iter(),
+        };
 
         // should immediately return None for empty headers
         let result = cached_mode.next().await;
