@@ -2477,7 +2477,7 @@ where
             input.append_cached_ref(block.trie_updates(), block.hashed_state())
         }
 
-        trace!(
+        debug!(
             target: "engine::tree",
             persisted_trie_updates = ?self.state.tree_state.persisted_trie_updates.get(&b256!("0x4f6ef303b5311061f100887c243d1b411e84ea664d7356ff70c5f8642cfe640c")),
             "Persisted trie updates for forked block 04"
