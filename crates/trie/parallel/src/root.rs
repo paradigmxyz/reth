@@ -91,15 +91,6 @@ where
             prefix_sets.storage_prefix_sets,
         );
 
-        info!(
-            target: "engine::tree",
-            chain_info = ?self.view.provider_ro()?.chain_info(),
-            trie_nodes_for_0x57 = ?trie_nodes_sorted.storage_tries.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            hashed_state_for_0x57 = ?hashed_state_sorted.storages.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            storage_root_targets_for_0x57 = ?storage_root_targets.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            "Calculating parallel state root"
-        );
-
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
         debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");

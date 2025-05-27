@@ -19,7 +19,6 @@ alloy-trie = { workspace = true, features = ["ethereum"] }
 alloy-consensus.workspace = true
 reth-primitives-traits.workspace = true
 reth-codecs = { workspace = true, optional = true }
-reth-tracing.workspace = true
 
 alloy-rpc-types-eth = { workspace = true, optional = true }
 alloy-serde = { workspace = true, optional = true }

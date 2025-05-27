@@ -10366,7 +10366,6 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-primitives-traits",
- "reth-tracing",
  "revm-database",
  "revm-state",
  "serde",

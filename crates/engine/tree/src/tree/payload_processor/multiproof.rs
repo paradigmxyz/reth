@@ -90,14 +90,6 @@ where
         consistent_view: ConsistentDbView<Factory>,
         input: TrieInput,
     ) -> Self {
-        tracing::info!(
-            target: "engine::tree",
-            chain_info = ?consistent_view.provider_ro().and_then(|provider| provider.chain_info()),
-            trie_nodes_for_0x57 = ?input.nodes.storage_tries.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            hashed_state_for_0x57 = ?input.state.storages.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            storage_root_targets_for_0x57 = ?input.prefix_sets.storage_prefix_sets.get(&b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")),
-            "Creating multiproof config"
-        );
         Self {
             consistent_view,
             nodes_sorted: Arc::new(input.nodes.into_sorted()),

@@ -25,7 +25,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
 use alloy_primitives::{
-    b256, keccak256,
+    keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
@@ -335,15 +335,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 block_hash: parent_hash,
             })))
         }
-
-        tracing::info!(
-            target: "providers::db",
-            updates = ?trie_updates.storage_tries.get(&b256!(
-                "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
-            )),
-            "Unwinding storage trie updates",
-        );
-
         self.write_trie_updates(&trie_updates)?;
 
         Ok(())
