@@ -1415,4 +1415,87 @@ mod tests {
         assert!(result3.is_ok());
         assert!(result3.unwrap().is_none());
     }
+
+    #[tokio::test]
+    async fn test_cached_mode_with_mock_receipts() {
+        // create test data
+        let test_hash = FixedBytes::from([42u8; 32]);
+        let test_block_number = 100u64;
+        let test_header = SealedHeader::new(
+            alloy_consensus::Header {
+                number: test_block_number,
+                gas_used: 50_000,
+                ..Default::default()
+            },
+            test_hash,
+        );
+
+        // add a mock receipt to the provider
+        let mock_receipt = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+            success: true,
+        };
+
+        let provider = MockEthProvider::default();
+        provider.add_header(test_hash, test_header.header().clone());
+        provider.add_receipts(test_block_number, vec![mock_receipt.clone()]);
+
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+        let filter_inner = eth_filter.inner;
+
+        let headers = vec![test_header.clone()];
+
+        let mut cached_mode = CachedMode { filter_inner, sealed_headers_iter: headers.into_iter() };
+
+        // should find the receipt from provider fallback (cache will be empty)
+        let result = cached_mode.next().await;
+        assert!(result.is_ok());
+        let receipt_result = result.unwrap();
+        assert!(receipt_result.is_some());
+
+        let receipt_block_result = receipt_result.unwrap();
+        assert_eq!(receipt_block_result.header.hash(), test_hash);
+        assert_eq!(receipt_block_result.header.number, test_block_number);
+        assert_eq!(receipt_block_result.receipts.len(), 1);
+        assert_eq!(receipt_block_result.receipts[0].tx_type, mock_receipt.tx_type);
+        assert_eq!(
+            receipt_block_result.receipts[0].cumulative_gas_used,
+            mock_receipt.cumulative_gas_used
+        );
+        assert_eq!(receipt_block_result.receipts[0].success, mock_receipt.success);
+
+        // iterator should be exhausted
+        let result2 = cached_mode.next().await;
+        assert!(result2.is_ok());
+        assert!(result2.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_cached_mode_empty_headers() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+        let filter_inner = eth_filter.inner;
+
+        let headers = vec![];
+
+        let mut cached_mode = CachedMode { filter_inner, sealed_headers_iter: headers.into_iter() };
+
+        // should immediately return None for empty headers
+        let result = cached_mode.next().await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
 }
