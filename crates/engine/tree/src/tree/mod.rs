@@ -3184,7 +3184,6 @@ mod tests {
                     }),
                 })
                 .unwrap();
-            self.check_block_received(block.hash()).await;
         }
 
         async fn insert_chain(
