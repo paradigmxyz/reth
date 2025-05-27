@@ -2287,21 +2287,8 @@ where
             // fallback is to compute the state root regularly in sync
             warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
             self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
-
-            let res = self.compute_trie_input(
-                persisting_kind,
-                ensure_ok!(self.provider.database_provider_ro()),
-                block.header().parent_hash(),
-            );
-            let mut trie_input = match res {
-                Ok(val) => val,
-                Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
-            };
-
-            // Extend with block we are validating root for.
-            trie_input.append_ref(&hashed_state);
             let (root, updates) =
-                ensure_ok!(state_provider.state_root_from_nodes_with_updates(trie_input));
+                ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
             (root, updates, root_time.elapsed())
         };
 
@@ -2517,7 +2504,7 @@ where
         input.append(revert_state);
 
         // Extend with contents of parent in-memory blocks.
-        let mut extend_trie_updates = false;
+        let mut extend_trie_updates = true;
         for block in blocks.iter().rev() {
             if let Some(trie_updates) = block.trie_updates().filter(|_| extend_trie_updates) {
                 input.append_cached_ref(trie_updates, block.hashed_state())
