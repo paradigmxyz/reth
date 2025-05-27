@@ -12,7 +12,7 @@ use metrics::Histogram;
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
 use reth_provider::{
-    providers::ConsistentDbView, BlockNumReader, BlockReader, DatabaseProviderFactory, FactoryTx,
+    providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, FactoryTx,
     StateCommitmentProvider,
 };
 use reth_revm::state::EvmState;
@@ -21,7 +21,6 @@ use reth_trie::{
     HashedPostStateSorted, HashedStorage, MultiProofTargets, TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
-use revm_primitives::b256;
 use std::{
     collections::{BTreeMap, VecDeque},
     ops::DerefMut,
