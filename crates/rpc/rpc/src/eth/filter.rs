@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_primitives_traits::Block;
+use reth_primitives_traits::{Block, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
     RpcTransaction, TransactionCompat,
@@ -583,10 +583,10 @@ where
             while let Some(header) = headers_iter.next() {
                 let block_hash = match headers_iter.peek() {
                     Some(child_header) => child_header.parent_hash(),
-                    None => self
-                        .provider()
-                        .block_hash(header.number())?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
+                    None => {
+                        let sealed_header = SealedHeader::seal_slow(header.clone());
+                        sealed_header.hash()
+                    }
                 };
 
                 matching_headers.push(HeadersBlockHash { header, block_hash });
