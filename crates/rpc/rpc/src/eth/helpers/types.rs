@@ -68,7 +68,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxType;
+    use alloy_consensus::{Transaction, TxType};
     use reth_rpc_eth_types::simulate::resolve_transaction;
     use revm::database::CacheDB;
 
