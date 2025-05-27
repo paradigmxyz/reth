@@ -1063,8 +1063,17 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{eth::EthApi, EthApiBuilder};
+    use alloy_primitives::FixedBytes;
     use rand::Rng;
+    use reth_chainspec::ChainSpecProvider;
+    use reth_evm_ethereum::EthEvmConfig;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::test_utils::MockEthProvider;
+    use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators;
+    use reth_transaction_pool::test_utils::{testing_pool, TestPool};
+    use std::{collections::VecDeque, sync::Arc};
 
     #[test]
     fn test_block_range_iter() {
@@ -1086,5 +1095,189 @@ mod tests {
         }
 
         assert_eq!(end, *range.end());
+    }
+
+    // Helper function to create a test EthApi instance
+    fn build_test_eth_api(
+        provider: MockEthProvider,
+    ) -> EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig> {
+        EthApiBuilder::new(
+            provider.clone(),
+            testing_pool(),
+            NoopNetwork::default(),
+            EthEvmConfig::new(provider.chain_spec()),
+        )
+        .build()
+    }
+
+    #[tokio::test]
+    async fn test_range_block_mode_empty_range() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+        let filter_inner = eth_filter.inner;
+
+        let headers = vec![];
+        let max_range = 100;
+
+        let mut range_mode = RangeBlockMode {
+            filter_inner,
+            iter: headers.into_iter().peekable(),
+            next: VecDeque::new(),
+            max_range,
+        };
+
+        let result = range_mode.next().await;
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_range_block_mode_queued_results_priority() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+        let filter_inner = eth_filter.inner;
+
+        let headers = vec![
+            HeadersBlockHash {
+                header: alloy_consensus::Header { number: 100, ..Default::default() },
+                block_hash: FixedBytes::random(),
+            },
+            HeadersBlockHash {
+                header: alloy_consensus::Header { number: 101, ..Default::default() },
+                block_hash: FixedBytes::random(),
+            },
+        ];
+
+        // Create specific mock results to test ordering
+        let expected_block_hash_1 = FixedBytes::from([1u8; 32]);
+        let expected_block_hash_2 = FixedBytes::from([2u8; 32]);
+
+        let mock_result_1 = ReceiptBlockResult {
+            receipts: Arc::new(vec![]),
+            recovered_block: None,
+            header: alloy_consensus::Header { number: 42, ..Default::default() },
+            block_hash: expected_block_hash_1,
+        };
+
+        let mock_result_2 = ReceiptBlockResult {
+            receipts: Arc::new(vec![]),
+            recovered_block: None,
+            header: alloy_consensus::Header { number: 43, ..Default::default() },
+            block_hash: expected_block_hash_2,
+        };
+
+        let mut range_mode = RangeBlockMode {
+            filter_inner,
+            iter: headers.into_iter().peekable(),
+            next: VecDeque::from([mock_result_1, mock_result_2]), // Queue two results
+            max_range: 100,
+        };
+
+        // first call should return the first queued result (FIFO order)
+        let result1 = range_mode.next().await;
+        assert!(result1.is_ok());
+        let receipt_result1 = result1.unwrap().unwrap();
+        assert_eq!(receipt_result1.block_hash, expected_block_hash_1);
+        assert_eq!(receipt_result1.header.number, 42);
+
+        // second call should return the second queued result
+        let result2 = range_mode.next().await;
+        assert!(result2.is_ok());
+        let receipt_result2 = result2.unwrap().unwrap();
+        assert_eq!(receipt_result2.block_hash, expected_block_hash_2);
+        assert_eq!(receipt_result2.header.number, 43);
+
+        // queue should now be empty
+        assert!(range_mode.next.is_empty());
+
+        let result3 = range_mode.next().await;
+        assert!(result3.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_range_block_mode_single_block_no_receipts() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+        let filter_inner = eth_filter.inner;
+
+        let headers = vec![HeadersBlockHash {
+            header: alloy_consensus::Header { number: 100, ..Default::default() },
+            block_hash: FixedBytes::random(),
+        }];
+
+        let mut range_mode = RangeBlockMode {
+            filter_inner,
+            iter: headers.into_iter().peekable(),
+            next: VecDeque::new(),
+            max_range: 100,
+        };
+
+        let result = range_mode.next().await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_range_block_mode_iterator_exhaustion() {
+        let provider = MockEthProvider::default();
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+        let filter_inner = eth_filter.inner;
+
+        let headers = vec![
+            HeadersBlockHash {
+                header: alloy_consensus::Header { number: 100, ..Default::default() },
+                block_hash: FixedBytes::random(),
+            },
+            HeadersBlockHash {
+                header: alloy_consensus::Header { number: 101, ..Default::default() },
+                block_hash: FixedBytes::random(),
+            },
+        ];
+
+        let mut range_mode = RangeBlockMode {
+            filter_inner,
+            iter: headers.into_iter().peekable(),
+            next: VecDeque::new(),
+            max_range: 1,
+        };
+
+        let result1 = range_mode.next().await;
+        assert!(result1.is_ok());
+
+        assert!(range_mode.iter.peek().is_some());
+
+        let result2 = range_mode.next().await;
+        assert!(result2.is_ok());
+
+        // now iterator should be exhausted
+        assert!(range_mode.iter.peek().is_none());
+
+        // further calls should return None
+        let result3 = range_mode.next().await;
+        assert!(result3.is_ok());
+        assert!(result3.unwrap().is_none());
     }
 }
