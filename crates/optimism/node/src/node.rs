@@ -406,7 +406,11 @@ where
     >,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
 {
-    type Validator = OpEngineValidator<N::Provider>;
+    type Validator = OpEngineValidator<
+        N::Provider,
+        <<N::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx,
+        <N::Types as NodeTypes>::ChainSpec,
+    >;
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         OpEngineValidatorBuilder::default().build(ctx).await
@@ -951,7 +955,11 @@ where
     Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Payload = OpEngineTypes>,
     Node: FullNodeComponents<Types = Types>,
 {
-    type Validator = OpEngineValidator<Node::Provider>;
+    type Validator = OpEngineValidator<
+        Node::Provider,
+        <<Node::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx,
+        <Node::Types as NodeTypes>::ChainSpec,
+    >;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(OpEngineValidator::new::<KeyHasherTy<Types>>(
