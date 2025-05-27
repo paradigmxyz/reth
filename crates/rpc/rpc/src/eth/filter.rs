@@ -1067,6 +1067,7 @@ mod tests {
     use alloy_primitives::FixedBytes;
     use rand::Rng;
     use reth_chainspec::ChainSpecProvider;
+    use reth_ethereum_primitives::TxType;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
@@ -1160,19 +1161,39 @@ mod tests {
             },
         ];
 
-        // Create specific mock results to test ordering
+        // create specific mock results to test ordering
         let expected_block_hash_1 = FixedBytes::from([1u8; 32]);
         let expected_block_hash_2 = FixedBytes::from([2u8; 32]);
 
+        // create mock receipts to test receipt handling
+        let mock_receipt_1 = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 100_000,
+            logs: vec![],
+            success: true,
+        };
+        let mock_receipt_2 = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Eip1559,
+            cumulative_gas_used: 200_000,
+            logs: vec![],
+            success: true,
+        };
+        let mock_receipt_3 = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Eip2930,
+            cumulative_gas_used: 150_000,
+            logs: vec![],
+            success: false, // Different success status
+        };
+
         let mock_result_1 = ReceiptBlockResult {
-            receipts: Arc::new(vec![]),
+            receipts: Arc::new(vec![mock_receipt_1.clone(), mock_receipt_2.clone()]),
             recovered_block: None,
             header: alloy_consensus::Header { number: 42, ..Default::default() },
             block_hash: expected_block_hash_1,
         };
 
         let mock_result_2 = ReceiptBlockResult {
-            receipts: Arc::new(vec![]),
+            receipts: Arc::new(vec![mock_receipt_3.clone()]),
             recovered_block: None,
             header: alloy_consensus::Header { number: 43, ..Default::default() },
             block_hash: expected_block_hash_2,
@@ -1192,12 +1213,36 @@ mod tests {
         assert_eq!(receipt_result1.block_hash, expected_block_hash_1);
         assert_eq!(receipt_result1.header.number, 42);
 
+        // verify receipts
+        assert_eq!(receipt_result1.receipts.len(), 2);
+        assert_eq!(receipt_result1.receipts[0].tx_type, mock_receipt_1.tx_type);
+        assert_eq!(
+            receipt_result1.receipts[0].cumulative_gas_used,
+            mock_receipt_1.cumulative_gas_used
+        );
+        assert_eq!(receipt_result1.receipts[0].success, mock_receipt_1.success);
+        assert_eq!(receipt_result1.receipts[1].tx_type, mock_receipt_2.tx_type);
+        assert_eq!(
+            receipt_result1.receipts[1].cumulative_gas_used,
+            mock_receipt_2.cumulative_gas_used
+        );
+        assert_eq!(receipt_result1.receipts[1].success, mock_receipt_2.success);
+
         // second call should return the second queued result
         let result2 = range_mode.next().await;
         assert!(result2.is_ok());
         let receipt_result2 = result2.unwrap().unwrap();
         assert_eq!(receipt_result2.block_hash, expected_block_hash_2);
         assert_eq!(receipt_result2.header.number, 43);
+
+        // verify receipts
+        assert_eq!(receipt_result2.receipts.len(), 1);
+        assert_eq!(receipt_result2.receipts[0].tx_type, mock_receipt_3.tx_type);
+        assert_eq!(
+            receipt_result2.receipts[0].cumulative_gas_used,
+            mock_receipt_3.cumulative_gas_used
+        );
+        assert_eq!(receipt_result2.receipts[0].success, mock_receipt_3.success);
 
         // queue should now be empty
         assert!(range_mode.next.is_empty());
