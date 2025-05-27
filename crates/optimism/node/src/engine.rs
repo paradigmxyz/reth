@@ -105,7 +105,7 @@ impl<P, Tx, Chain> PayloadValidator for OpEngineValidator<P, Tx, Chain>
 where
     P: StateProviderFactory + Unpin + 'static,
     Tx: SignedTransaction + Unpin + 'static,
-    Chain: EthChainSpec + OpHardforks + Hardforks + Unpin + 'static,
+    Chain: EthChainSpec + OpHardforks + Hardforks + 'static,
 {
     type Block = alloy_consensus::Block<Tx>;
     type ExecutionData = OpExecutionData;
@@ -159,7 +159,7 @@ where
     >,
     P: StateProviderFactory + Unpin + 'static,
     Tx: SignedTransaction + Unpin + 'static + Send + Sync,
-    Chain: EthChainSpec + OpHardforks + Hardforks + Unpin + 'static + Send + Sync,
+    Chain: EthChainSpec + OpHardforks + Hardforks + 'static,
 {
     fn validate_version_specific_fields(
         &self,
