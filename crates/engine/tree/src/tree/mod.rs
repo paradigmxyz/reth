@@ -759,6 +759,26 @@ where
         Ok(true)
     }
 
+    /// Check if the given block has any ancestors with missing trie updates.
+    fn has_ancestors_with_missing_trie_updates(
+        &self,
+        target_header: &SealedHeader<N::BlockHeader>,
+    ) -> ProviderResult<bool> {
+        // Walk back through the chain starting from the parent of the target block
+        let mut current_hash = target_header.parent_hash();
+        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+            // Check if this block is missing trie updates
+            if block.trie.is_none() {
+                return Ok(true);
+            }
+
+            // Move to the parent block
+            current_hash = block.recovered_block().parent_hash();
+        }
+
+        Ok(false)
+    }
+
     /// Returns the persisting kind for the input block.
     fn persisting_kind_for(&self, block: &N::BlockHeader) -> PersistingKind {
         // Check that we're currently persisting.
@@ -2304,10 +2324,12 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
 
-        let is_fork = match self.is_fork(block.sealed_header().clone()) {
-            Ok(val) => val,
-            Err(e) => return Err((e.into(), block)),
-        };
+        let is_fork = ensure_ok!(self.is_fork(block.sealed_header().clone()));
+        let missing_trie_updates =
+            ensure_ok!(self.has_ancestors_with_missing_trie_updates(block.sealed_header()));
+        // If the block is a fork or has ancestors with missing trie updates, we don't save the trie
+        // updates, because they may be incorrect. Instead, they will be recomputed on persistance.
+        let save_trie_updates = !(is_fork || missing_trie_updates);
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
@@ -2315,7 +2337,7 @@ where
                 execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
                 hashed_state: Arc::new(hashed_state),
             },
-            trie: (!is_fork).then(|| Arc::new(trie_output)),
+            trie: save_trie_updates.then(|| Arc::new(trie_output)),
         };
 
         // if the parent is the canonical head, we can insert the block as the pending block
