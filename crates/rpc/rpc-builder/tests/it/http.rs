@@ -457,7 +457,7 @@ where
     )
     .await
     .unwrap_err();
-    OtterscanClient::<Transaction, Header>::get_block_details(client, BlockNumberOrTag::default())
+    OtterscanClient::<Transaction, Header>::get_block_details(client, Default::default())
         .await
         .unwrap_err();
 

@@ -1,5 +1,5 @@
 use alloy_consensus::{BlockHeader, Transaction, Typed2718};
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId, BlockNumberOrTag};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
@@ -173,8 +173,9 @@ where
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(
         &self,
-        block_number: BlockNumberOrTag,
+        block_number: LenientBlockNumberOrTag,
     ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
+        let block_number = block_number.into_inner();
         let block = self.eth.block_by_number(block_number, true);
         let block_id = block_number.into();
         let receipts = self.eth.block_receipts(block_id);
