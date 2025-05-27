@@ -1,11 +1,8 @@
 use crate::{
-    blinded::{
-        BlindedProvider, BlindedProviderFactory, DefaultBlindedProvider,
-        DefaultBlindedProviderFactory,
-    },
-    LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
+    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
+    LeafLookup, RevealedSparseTrie, SparseTrie, SparseTrieState, TrieMasks,
 };
-use alloc::{boxed::Box, collections::VecDeque, vec::Vec};
+use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     hex,
     map::{B256Map, HashMap, HashSet},
@@ -110,15 +107,16 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         self.revealed_account_paths.contains(&Nibbles::unpack(account))
     }
 
-    /// Uses the input `SparseTrie` to populate the backing data structures in the `state` trie.
-    pub fn populate_from<P>(&mut self, trie: Box<RevealedSparseTrie<P>>) {
+    /// Uses the input `SparseTrieState` to populate the backing data structures in the `state`
+    /// trie.
+    pub fn populate_from(&mut self, trie: SparseTrieState) {
         if let Some(new_trie) = self.state.as_revealed_mut() {
-            new_trie.populate_from_trie(trie);
+            new_trie.use_allocated_state(trie);
         } else {
             self.state = SparseTrie::revealed_with_provider(
                 self.provider_factory.account_node_provider(),
                 trie,
-            );
+            )
         }
     }
 
@@ -662,7 +660,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         &mut self,
     ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
         match self.state {
-            SparseTrie::Blind { allocated: _ } => {
+            SparseTrie::Blind | SparseTrie::AllocatedEmpty { .. } => {
                 let (root_node, hash_mask, tree_mask) = self
                     .provider_factory
                     .account_node_provider()
@@ -882,7 +880,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Clears and takes the account trie.
-    pub fn take_cleared_account_trie(&mut self) -> SparseTrie<DefaultBlindedProvider> {
+    pub fn take_cleared_account_trie_state(&mut self) -> SparseTrieState {
         let trie = core::mem::take(&mut self.state);
         trie.cleared()
     }
@@ -988,7 +986,7 @@ mod tests {
         assert_eq!(proofs.len(), 1);
 
         let mut sparse = SparseStateTrie::default();
-        assert_eq!(sparse.state, SparseTrie::Blind { allocated: None });
+        assert_eq!(sparse.state, SparseTrie::Blind);
 
         sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
         assert_eq!(sparse.state, SparseTrie::revealed_empty());

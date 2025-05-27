@@ -9,9 +9,9 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProvider},
+    blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie, SparseTrie,
+    SparseStateTrie, SparseTrieState,
 };
 use std::{
     sync::mpsc,
@@ -63,41 +63,39 @@ where
         }
     }
 
-    /// Creates a new sparse trie, populating the accounts trie with the given cleared `SparseTrie`
-    /// if it exists.
+    /// Creates a new sparse trie, populating the accounts trie with the given cleared
+    /// `SparseTrieState` if it exists.
     pub(super) fn new_with_stored_trie(
         executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         trie_metrics: MultiProofTaskMetrics,
-        sparse_trie: Option<SparseTrie<DefaultBlindedProvider>>,
+        sparse_trie_state: Option<SparseTrieState>,
     ) -> Self {
-        if let Some(sparse_trie) = sparse_trie {
+        if let Some(sparse_trie_state) = sparse_trie_state {
             Self::with_accounts_trie(
                 executor,
                 updates,
                 blinded_provider_factory,
                 trie_metrics,
-                sparse_trie,
+                sparse_trie_state,
             )
         } else {
             Self::new(executor, updates, blinded_provider_factory, trie_metrics)
         }
     }
 
-    /// Creates a new sparse trie task, using the given cleared `SparseTrie` for the accounts trie.
+    /// Creates a new sparse trie task, using the given cleared `SparseTrieState` for the accounts
+    /// trie.
     pub(super) fn with_accounts_trie(
         executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
-        cleared_accounts_trie: SparseTrie<DefaultBlindedProvider>,
+        sparse_trie_state: SparseTrieState,
     ) -> Self {
         let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
-
-        if let SparseTrie::Revealed(cleared) = cleared_accounts_trie {
-            trie.populate_from(cleared);
-        }
+        trie.populate_from(sparse_trie_state);
 
         Self { executor, updates, metrics, trie }
     }
@@ -149,7 +147,7 @@ where
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
         // take the account trie
-        let trie = self.trie.take_cleared_account_trie();
+        let trie = self.trie.take_cleared_account_trie_state();
 
         Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
     }
@@ -164,7 +162,7 @@ pub struct StateRootComputeOutcome {
     /// The trie updates.
     pub trie_updates: TrieUpdates,
     /// The account state trie.
-    pub trie: SparseTrie<DefaultBlindedProvider>,
+    pub trie: SparseTrieState,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
