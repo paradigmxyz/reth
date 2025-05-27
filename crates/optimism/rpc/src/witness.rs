@@ -16,7 +16,7 @@ pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     errors::{ProviderError, ProviderResult},
-    BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
+    BlockReaderIdExt, HeaderProvider, NodePrimitivesProvider, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -44,10 +44,15 @@ impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig> {
 impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    Provider: NodePrimitivesProvider + BlockReaderIdExt<Header = alloy_consensus::Header>,
+    Provider: NodePrimitivesProvider<
+            Primitives: NodePrimitives<BlockHeader = <Provider as HeaderProvider>::Header>,
+        > + BlockReaderIdExt,
 {
     /// Fetches the parent header by hash.
-    fn parent_header(&self, parent_block_hash: B256) -> ProviderResult<SealedHeader> {
+    fn parent_header(
+        &self,
+        parent_block_hash: B256,
+    ) -> ProviderResult<SealedHeader<<Provider as HeaderProvider>::Header>> {
         self.inner
             .provider
             .sealed_header_by_hash(parent_block_hash)?
@@ -62,9 +67,11 @@ where
     Pool: TransactionPool<
             Transaction: OpPooledTx<Consensus = <Provider::Primitives as NodePrimitives>::SignedTx>,
         > + 'static,
-    Provider: BlockReaderIdExt<Header = alloy_consensus::Header>
-        + NodePrimitivesProvider<Primitives: OpPayloadPrimitives>
-        + StateProviderFactory
+    Provider: BlockReaderIdExt
+        + NodePrimitivesProvider<
+            Primitives: OpPayloadPrimitives
+                            + NodePrimitives<BlockHeader = <Provider as HeaderProvider>::Header>,
+        > + StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
         + 'static,
