@@ -1,6 +1,7 @@
 //! Internal errors for the tree module.
 
 use alloy_consensus::BlockHeader;
+use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::execute::InternalBlockExecutionError;
@@ -17,6 +18,9 @@ pub enum AdvancePersistenceError {
     /// A provider error
     #[error(transparent)]
     Provider(#[from] ProviderError),
+    /// Missing ancestor
+    #[error("Missing ancestor with hash {0}")]
+    MissingAncestor(B256),
 }
 
 #[derive(thiserror::Error)]

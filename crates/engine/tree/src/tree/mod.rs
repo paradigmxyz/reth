@@ -1025,7 +1025,7 @@ where
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
             } else if self.should_persist() {
-                let blocks_to_persist = self.get_canonical_blocks_to_persist();
+                let blocks_to_persist = self.get_canonical_blocks_to_persist()?;
                 self.persist_blocks(blocks_to_persist);
             }
         }
@@ -1354,7 +1354,11 @@ where
     /// Returns a batch of consecutive canonical blocks to persist in the range
     /// `(last_persisted_number .. canonical_head - threshold]` . The expected
     /// order is oldest -> newest.
-    fn get_canonical_blocks_to_persist(&mut self) -> Vec<ExecutedBlockWithTrieUpdates<N>> {
+    fn get_canonical_blocks_to_persist(
+        &mut self,
+    ) -> Result<Vec<ExecutedBlockWithTrieUpdates<N>>, AdvancePersistenceError> {
+        debug_assert!(!self.persistence_state.in_progress());
+
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
@@ -1392,34 +1396,33 @@ where
             );
 
             let provider = self
-                .state_provider_builder(block.recovered_block().parent_hash())
-                .unwrap()
-                .unwrap()
-                .build()
-                .unwrap();
-
-            let mut trie_input = self
-                .compute_trie_input(
-                    self.persisting_kind_for(block.recovered_block().header()),
-                    self.provider.database_provider_ro().unwrap(),
+                .state_provider_builder(block.recovered_block().parent_hash())?
+                .ok_or(AdvancePersistenceError::MissingAncestor(
                     block.recovered_block().parent_hash(),
-                )
-                .unwrap();
+                ))?
+                .build()?;
+
+            let mut trie_input = self.compute_trie_input(
+                self.persisting_kind_for(block.recovered_block().header()),
+                self.provider.database_provider_ro().unwrap(),
+                block.recovered_block().parent_hash(),
+            )?;
             // Extend with block we are validating root for.
             trie_input.append_ref(block.hashed_state());
-            let (_, updates) = provider.state_root_from_nodes_with_updates(trie_input).unwrap();
+            let (_, updates) = provider.state_root_from_nodes_with_updates(trie_input)?;
 
-            let trie_updates = Arc::new(updates.clone());
-            self.state
+            let trie_updates = Arc::new(updates);
+            let tree_state_block = self
+                .state
                 .tree_state
                 .blocks_by_hash
                 .get_mut(&block.recovered_block().hash())
-                .unwrap()
-                .trie = Some(trie_updates.clone());
+                .expect("block to persist are consticted from tree state blocks");
+            tree_state_block.trie = Some(trie_updates.clone());
             block.trie = Some(trie_updates);
         }
 
-        blocks_to_persist
+        Ok(blocks_to_persist)
     }
 
     /// This clears the blocks from the in-memory tree state that have been persisted to the
@@ -2423,7 +2426,7 @@ where
         persisting_kind: PersistingKind,
         provider: TP,
         parent_hash: B256,
-    ) -> Result<TrieInput, ParallelStateRootError> {
+    ) -> ProviderResult<TrieInput> {
         let mut input = TrieInput::default();
 
         let best_block_number = provider.best_block_number()?;
@@ -3712,7 +3715,7 @@ mod tests {
             .with_persistence_threshold(persistence_threshold)
             .with_memory_block_buffer_target(memory_block_buffer_target);
 
-        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
+        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist().unwrap();
 
         let expected_blocks_to_persist_length: usize =
             (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
@@ -3733,7 +3736,7 @@ mod tests {
 
         assert!(test_harness.tree.state.tree_state.block_by_hash(fork_block_hash).is_some());
 
-        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist();
+        let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist().unwrap();
         assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
 
         // check that the fork block is not included in the blocks to persist
