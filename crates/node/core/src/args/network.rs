@@ -203,6 +203,7 @@ impl NetworkArgs {
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
             propagation_mode: Default::default(),
+            announcement_filter_kind: Default::default(),
         }
     }
 

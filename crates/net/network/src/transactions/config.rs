@@ -9,8 +9,10 @@ use crate::transactions::constants::tx_fetcher::{
     DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
     DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
 };
+use alloy_primitives::B256;
 use derive_more::{Constructor, Display};
 use reth_eth_wire::NetworkPrimitives;
+use reth_ethereum_primitives::TxType;
 
 /// Configuration for managing transactions within the network.
 #[derive(Debug, Clone)]
@@ -23,6 +25,9 @@ pub struct TransactionsManagerConfig {
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
+    /// Determines the policy for filtering incoming transaction annoucements based on `TxType`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub announcement_filter_kind: AnnouncementFilterKind,
 }
 
 impl Default for TransactionsManagerConfig {
@@ -31,6 +36,7 @@ impl Default for TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
+            announcement_filter_kind: AnnouncementFilterKind::default(),
         }
     }
 }
@@ -148,4 +154,125 @@ impl FromStr for TransactionPropagationKind {
             _ => Err(format!("Invalid transaction propagation policy: {s}")),
         }
     }
+}
+
+/// Defines the outcome of evaluating a transaction against an `AnnouncementFilteringPolicy`.
+///
+/// Dictates how the `TransactionManager` should proceed on an announced transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnnouncementAcceptance {
+    /// Accept the transaction annoucement.
+    Accept,
+    /// Log the transaction but no fetching the transaction or penalizing the peer.
+    Ignore,
+    /// Reject
+    Reject {
+        /// If true, the peer sending this annoucement should be penalized.
+        penalize_peer: bool,
+    },
+}
+
+/// A policy that defines how to handle incoming transaction annoucements,
+/// particularly concerning transaction types and other annoucement metadata.
+pub trait AnnouncementFilteringPolicy: Send + Sync + Unpin + 'static {
+    /// Decides how to handle a transaction announcement based on its type, hash, and size.
+    fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance;
+}
+
+/// An `AnnouncementFilteringPolicy` that enforces strict validation of transaction types.
+#[derive(Debug, Clone, Default)]
+pub struct StrictAnnouncementFilter;
+
+impl AnnouncementFilteringPolicy for StrictAnnouncementFilter {
+    fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
+        match TxType::try_from(ty) {
+            Ok(_valid_type) => AnnouncementAcceptance::Accept,
+            Err(_) => {
+                tracing::trace!(target: "net::tx::policy::strict",
+                    %ty,
+                    %size,
+                    %hash,
+                    "Invalid or unrecognized transaction type in announcement. Rejecting entry and recommending peer penalization."
+                );
+                AnnouncementAcceptance::Reject { penalize_peer: true }
+            }
+        }
+    }
+}
+
+/// An `AnnouncementFilteringPolicy` that is more permissive towards unknown transaction types.
+///
+/// Allows for handling of new or future transaction types that a local node may not yet fully
+/// support or recognize.
+#[derive(Debug, Clone, Default)]
+pub struct RelaxedAnnouncementFilter;
+
+impl AnnouncementFilteringPolicy for RelaxedAnnouncementFilter {
+    fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
+        match TxType::try_from(ty) {
+            Ok(_valid_type) => AnnouncementAcceptance::Accept,
+            Err(_) => {
+                tracing::trace!(target: "net::tx::policy::relaxed",
+                    %ty,
+                    %size,
+                    %hash,
+                    "Unknown transaction type in announcement. Ignoring entry."
+                );
+                AnnouncementAcceptance::Ignore
+            }
+        }
+    }
+}
+
+/// A container for policies that govern the behaviour of the `TransactionManager`.
+///
+/// This struct bundles different policies, such as how transactions are propagated and how incoming
+/// transaction announcements are filtered.
+#[derive(Debug, Clone)]
+pub struct NetworkPolicies<P, A>
+where
+    P: TransactionPropagationPolicy,
+    A: AnnouncementFilteringPolicy,
+{
+    /// Policy determining to which peers transactions are propagated.
+    pub propagation: P,
+    /// Policy determining how incoming transaction announcements are filtered,
+    /// especially concerning transaction types.
+    pub announcement_filter: A,
+}
+
+impl<P, A> NetworkPolicies<P, A>
+where
+    P: TransactionPropagationPolicy,
+    A: AnnouncementFilteringPolicy,
+{
+    /// Creates a new `NetworkPolicies` instance.
+    pub const fn new(propagation: P, announcement_filter: A) -> Self {
+        Self { propagation, announcement_filter }
+    }
+
+    /// Returns a reference to the configured transaction propagation policy.
+    pub const fn propagation_policy(&self) -> &P {
+        &self.propagation
+    }
+
+    /// Returns a reference to the configured announcement filtering policy.
+    pub const fn announcement_filtering_policy(&self) -> &A {
+        &self.announcement_filter
+    }
+}
+
+/// Specifies the kind of transaction announcement filtering policy to be used by the
+/// `TransactionManager`.
+///
+/// This enum is typically set in the `TransactionManagerConfig` to allow users to choose how
+/// strictly the node should validate announced transactions.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum AnnouncementFilterKind {
+    /// Use the `StrictAnnouncementFilter`, which rejects and penalizes unknown transaction types.
+    #[default]
+    Strict,
+    /// Use the `RelaxedAnnouncementFilter`, which ignores unknown transaction types.
+    Relaxed,
 }
