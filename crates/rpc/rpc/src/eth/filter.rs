@@ -895,7 +895,7 @@ impl<
             distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
             !sealed_headers.is_empty()
         {
-            Self::Cached(CachedMode { filter_inner, sealed_headers, current_idx: 0 })
+            Self::Cached(CachedMode { filter_inner, sealed_headers_iter: sealed_headers.into_iter() })
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
@@ -920,8 +920,7 @@ struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    sealed_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
-    current_idx: usize,
+    sealed_headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
 impl<
@@ -930,12 +929,10 @@ impl<
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         loop {
-            if self.current_idx >= self.sealed_headers.len() {
-                return Ok(None);
-            }
-
-            let header_block_hash = &self.sealed_headers[self.current_idx];
-            self.current_idx += 1;
+            let header_block_hash = match self.sealed_headers_iter.next() {
+                Some(header) => header,
+                None => return Ok(None),
+            };
 
             let block_hash = header_block_hash.hash();
             let header = header_block_hash.header().clone();
