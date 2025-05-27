@@ -1,0 +1,26 @@
+[package]
+name = "reth-node-ethstats"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+# reth
+reth-storage-api.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-pubsub.workspace = true
+alloy-transport.workspace = true
+
+# async
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+
+[lints]
+workspace = true
