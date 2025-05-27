@@ -1,4 +1,4 @@
-use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_trace::otterscan::{
