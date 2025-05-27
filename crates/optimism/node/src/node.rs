@@ -7,14 +7,16 @@ use crate::{
     OpEngineApiBuilder, OpEngineTypes,
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
-use reth_chainspec::{EthChainSpec, Hardforks};
+use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{
     primitives::NetPrimitivesFor, NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
     PeersInfo,
 };
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives, PayloadTypes,
+    PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -35,8 +37,11 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
+    OpPayloadBuilderAttributes,
 };
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{
+    DepositReceipt, OpPrimitives, OpReceipt, OpTransaction, OpTransactionSigned,
+};
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -774,7 +779,24 @@ impl<Txs> OpPayloadBuilder<Txs> {
 
 impl<Node, Pool, Txs, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for OpPayloadBuilder<Txs>
 where
-    Node: FullNodeTypes,
+    Node: FullNodeTypes<
+        Provider: ChainSpecProvider<ChainSpec: OpHardforks>,
+        Types: NodeTypes<
+            Primitives: NodePrimitives<
+                BlockHeader = alloy_consensus::Header,
+                BlockBody = alloy_consensus::BlockBody<
+                    <<<Node as FullNodeTypes>::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx,
+                >,
+                Receipt: DepositReceipt,
+                SignedTx: OpTransaction,
+            >,
+            Payload: PayloadTypes<
+                BuiltPayload = reth_optimism_payload_builder::OpBuiltPayload<<<Node as FullNodeTypes>::Types as NodeTypes>::Primitives>,
+                PayloadAttributes = OpPayloadAttributes,
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<<<<Node as FullNodeTypes>::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx>,
+            >
+        >,
+    >,
     Evm: ConfigureEvm<
             Primitives = PrimitivesTy<Node::Types>,
             NextBlockEnvCtx = OpNextBlockEnvAttributes,

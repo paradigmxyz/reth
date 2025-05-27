@@ -23,7 +23,9 @@ use reth_evm::{
 use reth_execution_types::ExecutionOutcome;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{transaction::OpTransaction, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
+use reth_optimism_primitives::{
+    transaction::OpTransaction, DepositReceipt, ADDRESS_L2_TO_L1_MESSAGE_PASSER,
+};
 use reth_optimism_txpool::{
     estimated_da_size::DataAvailabilitySized,
     interop::{is_valid_interop, MaybeInteropTransaction},
@@ -128,8 +130,13 @@ impl<Pool, Client, Evm, Txs> OpPayloadBuilder<Pool, Client, Evm, Txs> {
 impl<Pool, Client, Evm, N, T> OpPayloadBuilder<Pool, Client, Evm, T>
 where
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
-    Client: StateProviderFactory + ChainSpecProvider,
-    N: NodePrimitives,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks>,
+    N: NodePrimitives<
+        BlockHeader = alloy_consensus::Header,
+        BlockBody = alloy_consensus::BlockBody<<N as NodePrimitives>::SignedTx>,
+        Receipt: DepositReceipt,
+        SignedTx: OpTransaction,
+    >,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
 {
     /// Constructs an Optimism payload from the transactions sent via the
@@ -203,9 +210,14 @@ where
 /// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
 impl<Pool, Client, Evm, N, Txs> PayloadBuilder for OpPayloadBuilder<Pool, Client, Evm, Txs>
 where
-    N: NodePrimitives,
-    Client: StateProviderFactory + ChainSpecProvider + Clone,
-    Pool: TransactionPool,
+    N: NodePrimitives<
+        BlockHeader = alloy_consensus::Header,
+        BlockBody = alloy_consensus::BlockBody<<N as NodePrimitives>::SignedTx>,
+        Receipt: DepositReceipt,
+        SignedTx: OpTransaction,
+    >,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + Clone,
+    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
 {
@@ -287,7 +299,12 @@ impl<Txs> OpBuilder<'_, Txs> {
     where
         EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec + OpHardforks,
-        N: NodePrimitives,
+        N: NodePrimitives<
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = alloy_consensus::BlockBody<<N as NodePrimitives>::SignedTx>,
+            Receipt: DepositReceipt,
+            SignedTx: OpTransaction,
+        >,
         Txs:
             PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx>,
     {
@@ -368,7 +385,12 @@ impl<Txs> OpBuilder<'_, Txs> {
     where
         Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
         ChainSpec: EthChainSpec + OpHardforks,
-        N: NodePrimitives,
+        N: NodePrimitives<
+            BlockHeader = alloy_consensus::Header,
+            BlockBody = alloy_consensus::BlockBody<<N as NodePrimitives>::SignedTx>,
+            Receipt: DepositReceipt,
+            SignedTx: OpTransaction,
+        >,
         Txs: PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx>>,
     {
         let mut db = State::builder()
