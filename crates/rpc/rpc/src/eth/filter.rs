@@ -896,13 +896,12 @@ impl<
             !sealed_headers.is_empty()
         {
             // extract block hashes for the stream
-            let block_hashes: Vec<alloy_primitives::B256> = sealed_headers.iter()
-                .map(|header| header.hash())
-                .collect();
+            let block_hashes: Vec<alloy_primitives::B256> =
+                sealed_headers.iter().map(|header| header.hash()).collect();
 
             // create the stream upfront
-            let receipt_stream = filter_inner.eth_cache()
-                .get_receipts_and_maybe_block_stream(block_hashes);
+            let receipt_stream =
+                filter_inner.eth_cache().get_receipts_and_maybe_block_stream(block_hashes);
 
             Self::Cached(CachedMode {
                 filter_inner,
@@ -929,7 +928,18 @@ impl<
 }
 
 /// A boxed stream that yields receipt and block data for cached receipt queries.
-type ReceiptStream<P> = Pin<Box<dyn Stream<Item = reth_errors::ProviderResult<Option<(Arc<Vec<ProviderReceipt<P>>>, Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<P>>>>)>>> + Send>>;
+type ReceiptStream<P> = Pin<
+    Box<
+        dyn Stream<
+                Item = reth_errors::ProviderResult<
+                    Option<(
+                        Arc<Vec<ProviderReceipt<P>>>,
+                        Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<P>>>>,
+                    )>,
+                >,
+            > + Send,
+    >,
+>;
 
 /// Mode for processing blocks using cache optimization for recent blocks
 struct CachedMode<
@@ -955,12 +965,8 @@ impl<
             // get corresponding receipt result from stream
             match self.receipt_stream.next().await {
                 Some(Ok(Some((receipts, recovered_block)))) => {
-                    return Ok(Some(ReceiptBlockResult {
-                        receipts,
-                        recovered_block,
-                        header,
-                    }));
-                },
+                    return Ok(Some(ReceiptBlockResult { receipts, recovered_block, header }));
+                }
                 Some(Ok(None)) => {
                     // cache miss - fallback to storage to ensure correctness
                     if let Some(receipts) =
@@ -980,7 +986,7 @@ impl<
                         }));
                     }
                     // continue loop if no receipts found
-                },
+                }
                 Some(Err(e)) => return Err(e.into()),
                 None => return Ok(None),
             }
@@ -1476,13 +1482,12 @@ mod tests {
         let headers = vec![test_header.clone()];
 
         // extract block hashes for the stream
-        let block_hashes: Vec<alloy_primitives::B256> = headers.iter()
-            .map(|header: &SealedHeader<_>| header.hash())
-            .collect();
+        let block_hashes: Vec<alloy_primitives::B256> =
+            headers.iter().map(|header: &SealedHeader<_>| header.hash()).collect();
 
         // create the owned stream
-        let receipt_stream = filter_inner.eth_cache()
-            .get_receipts_and_maybe_block_stream(block_hashes);
+        let receipt_stream =
+            filter_inner.eth_cache().get_receipts_and_maybe_block_stream(block_hashes);
 
         let mut cached_mode = CachedMode {
             filter_inner,
@@ -1528,13 +1533,12 @@ mod tests {
         let headers: Vec<SealedHeader<alloy_consensus::Header>> = vec![];
 
         // extract block hashes for the stream
-        let block_hashes: Vec<alloy_primitives::B256> = headers.iter()
-            .map(|header: &SealedHeader<_>| header.hash())
-            .collect();
+        let block_hashes: Vec<alloy_primitives::B256> =
+            headers.iter().map(|header: &SealedHeader<_>| header.hash()).collect();
 
         // create the owned stream
-        let receipt_stream = filter_inner.eth_cache()
-            .get_receipts_and_maybe_block_stream(block_hashes);
+        let receipt_stream =
+            filter_inner.eth_cache().get_receipts_and_maybe_block_stream(block_hashes);
 
         let mut cached_mode = CachedMode {
             filter_inner,
