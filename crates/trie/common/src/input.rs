@@ -31,6 +31,16 @@ impl TrieInput {
         Self { nodes: TrieUpdates::default(), state, prefix_sets }
     }
 
+    /// Prepend another trie input to the current one.
+    pub fn prepend_self(&mut self, mut other: Self) {
+        core::mem::swap(&mut self.nodes, &mut other.nodes);
+        self.nodes.extend(other.nodes);
+        core::mem::swap(&mut self.state, &mut other.state);
+        self.state.extend(other.state);
+        core::mem::swap(&mut self.prefix_sets, &mut other.prefix_sets);
+        self.prefix_sets.extend(other.prefix_sets);
+    }
+
     /// Prepend state to the input and extend the prefix sets.
     pub fn prepend(&mut self, mut state: HashedPostState) {
         self.prefix_sets.extend(state.construct_prefix_sets());
