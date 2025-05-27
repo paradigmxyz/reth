@@ -378,6 +378,68 @@ maxperf-op: ## Builds `op-reth` with the most aggressive optimisations.
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
 
+##@ Profile-Guided Optimization (PGO)
+
+# Directory for PGO data
+PGO_DATA_DIR ?= $(CARGO_TARGET_DIR)/pgo-data
+
+.PHONY: pgo-generate
+pgo-generate: ## Build reth with PGO instrumentation generation.
+	@echo "Building reth with PGO instrumentation..."
+	@mkdir -p $(PGO_DATA_DIR)
+	RUSTFLAGS="-C target-cpu=native -C profile-generate=$(PGO_DATA_DIR)" \
+		cargo build --profile maxperf --features "$(FEATURES)" --bin reth
+
+.PHONY: pgo-run
+pgo-run: ## Run reth to collect PGO data. You can override PGO_RUN_CMD to customize the workload.
+	@echo "Running reth to collect PGO data..."
+	@echo "This will sync mainnet for 5 minutes to collect profile data."
+	@echo "You can customize this by setting PGO_RUN_CMD environment variable."
+	$(PGO_RUN_CMD)
+
+# Default PGO run command - sync mainnet for 5 minutes to get representative data
+# For better PGO results, specify a recent mainnet block hash to sync heavier blocks:
+# Example: PGO_RUN_CMD="timeout 300 $(CARGO_TARGET_DIR)/maxperf/reth node --datadir $(CARGO_TARGET_DIR)/pgo-datadir --debug.tip 0xYOUR_BLOCK_HASH" make pgo
+PGO_RUN_CMD ?= timeout 300 $(CARGO_TARGET_DIR)/maxperf/reth node \
+	--datadir $(CARGO_TARGET_DIR)/pgo-datadir \
+	--chain mainnet \
+	|| echo "Reth stopped after 5 minutes as expected for PGO data collection"
+
+.PHONY: pgo-merge
+pgo-merge: ## Merge PGO profile data.
+	@echo "Merging PGO profile data..."
+	@command -v llvm-profdata >/dev/null 2>&1 || { echo "Error: llvm-profdata not found. Please install LLVM tools."; exit 1; }
+	llvm-profdata merge -o $(PGO_DATA_DIR)/merged.profdata $(PGO_DATA_DIR)/*.profraw
+
+.PHONY: pgo-build
+pgo-build: ## Build reth using PGO profile data.
+	@echo "Building optimized reth with PGO profile data..."
+	@test -f $(PGO_DATA_DIR)/merged.profdata || { echo "Error: merged.profdata not found. Run 'make pgo-merge' first."; exit 1; }
+	RUSTFLAGS="-C target-cpu=native -C profile-use=$(PGO_DATA_DIR)/merged.profdata -C llvm-args=-pgo-warn-missing-function" \
+		cargo build --profile maxperf --features "$(FEATURES)" --bin reth
+
+.PHONY: pgo-clean
+pgo-clean: ## Clean PGO data and temporary directories.
+	@echo "Cleaning PGO data..."
+	rm -rf $(PGO_DATA_DIR)
+	rm -rf $(CARGO_TARGET_DIR)/pgo-datadir
+
+.PHONY: pgo
+pgo: pgo-clean pgo-generate pgo-run pgo-merge pgo-build ## Run full PGO workflow: instrument, collect, and optimize.
+	@echo "PGO build complete! Binary location: $(CARGO_TARGET_DIR)/maxperf/reth"
+	@echo "PGO can provide 10-30% performance improvements."
+
+.PHONY: pgo-bench
+pgo-bench: ## Run benchmarks to collect PGO data instead of mainnet sync.
+	@echo "Building reth with PGO instrumentation for benchmarks..."
+	@mkdir -p $(PGO_DATA_DIR)
+	RUSTFLAGS="-C target-cpu=native -C profile-generate=$(PGO_DATA_DIR)" \
+		cargo build --profile maxperf --features "$(FEATURES)" --all
+	@echo "Running benchmarks to collect PGO data..."
+	RUSTFLAGS="-C target-cpu=native -C profile-generate=$(PGO_DATA_DIR)" \
+		cargo bench --profile maxperf --features "$(FEATURES)" -- --warm-up 1 --bench
+	$(MAKE) pgo-merge pgo-build
+
 
 fmt:
 	cargo +nightly fmt
