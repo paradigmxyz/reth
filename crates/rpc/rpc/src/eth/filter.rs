@@ -881,7 +881,7 @@ impl<
     /// Creates a new `RangeMode`.
     fn new(
         filter_inner: Arc<EthFilterInner<Eth>>,
-        headers_block_hash: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+        sealed_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
         from_block: u64,
         to_block: u64,
         max_headers_range: u64,
@@ -893,13 +893,13 @@ impl<
         // use cached mode for recent blocks (close to chain tip) and small ranges
         if block_count <= CACHED_MODE_BLOCK_THRESHOLD &&
             distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
-            !headers_block_hash.is_empty()
+            !sealed_headers.is_empty()
         {
-            Self::Cached(CachedMode { filter_inner, headers_block_hash, current_idx: 0 })
+            Self::Cached(CachedMode { filter_inner, sealed_headers, current_idx: 0 })
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
-                iter: headers_block_hash.into_iter().peekable(),
+                iter: sealed_headers.into_iter().peekable(),
                 next: VecDeque::new(),
                 max_range: max_headers_range as usize,
             })
@@ -920,7 +920,7 @@ struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    headers_block_hash: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    sealed_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
     current_idx: usize,
 }
 
@@ -930,11 +930,11 @@ impl<
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         loop {
-            if self.current_idx >= self.headers_block_hash.len() {
+            if self.current_idx >= self.sealed_headers.len() {
                 return Ok(None);
             }
 
-            let header_block_hash = &self.headers_block_hash[self.current_idx];
+            let header_block_hash = &self.sealed_headers[self.current_idx];
             self.current_idx += 1;
 
             let block_hash = header_block_hash.hash();
