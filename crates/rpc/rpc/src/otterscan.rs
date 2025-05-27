@@ -78,9 +78,9 @@ where
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(
         &self,
-        block_number: u64,
+        block_number: LenientBlockNumberOrTag,
     ) -> RpcResult<Option<RpcHeader<Eth::NetworkTypes>>> {
-        self.eth.header_by_number(BlockNumberOrTag::Number(block_number)).await
+        self.eth.header_by_number(block_number.into()).await
     }
 
     /// Handler for `ots_hasCode`
