@@ -1,6 +1,6 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{SignableTransaction, Transaction as _, TxEnvelope};
+use alloy_consensus::{SignableTransaction, TxEnvelope};
 use alloy_network::{Ethereum, Network};
 use alloy_primitives::Signature;
 use alloy_rpc_types::TransactionRequest;
@@ -44,24 +44,7 @@ where
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let tx = tx.convert::<TxEnvelope>();
-
-        let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
-        } = tx_info;
-
-        let effective_gas_price = base_fee
-            .map(|base_fee| {
-                tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
-            })
-            .unwrap_or_else(|| tx.max_fee_per_gas());
-
-        Ok(Transaction {
-            inner: tx,
-            block_hash,
-            block_number,
-            transaction_index,
-            effective_gas_price: Some(effective_gas_price),
-        })
+        Ok(Transaction::from_transaction(tx, tx_info))
     }
 
     fn build_simulate_v1_transaction(
@@ -85,7 +68,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::TxType;
+    use alloy_consensus::{Transaction, TxType};
     use reth_rpc_eth_types::simulate::resolve_transaction;
     use revm::database::CacheDB;
 
