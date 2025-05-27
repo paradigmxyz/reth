@@ -70,14 +70,15 @@ pub enum FilterOutcome {
     ReportPeer,
 }
 
-/// Wrapper for types that implement [`FilterAnnouncement`]. The definition of a valid
-/// announcement is network dependent. For example, different networks support different
-/// [`TxType`]s, and different [`TxType`]s have different transaction size constraints. Defaults to
-/// [`EthMessageFilter`].
+/// A generic wrapper for types that provide message filtering capabilities.
+///
+/// This struct is typically used with types implementing traits like [`PartiallyFilterMessage`],
+/// which perform initial stateless validation on network messages, such as checking for empty
+/// payloads or removing duplicate entries.
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct MessageFilter<N = EthMessageFilter>(N);
 
-/// Filter for announcements containing EIP [`TxType`]s.
+/// Filter for announcements containing EIP [reth_ethereum_primitives::TxType]s.
 #[derive(Debug, Default)]
 pub struct EthMessageFilter;
 
