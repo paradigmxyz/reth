@@ -204,16 +204,16 @@ where
     /// Handler for `ots_getBlockTransactions`
     async fn get_block_transactions(
         &self,
-        block_number: u64,
+        block_number: LenientBlockNumberOrTag,
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<
         OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>,
     > {
-        let block_id = block_number.into();
+        let block_number = block_number.into_inner();
         // retrieve full block and its receipts
-        let block = self.eth.block_by_number(block_id, true);
-        let block_id = block_id.into();
+        let block = self.eth.block_by_number(block_number, true);
+        let block_id = block_number.into();
         let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
@@ -292,7 +292,7 @@ where
     async fn search_transactions_before(
         &self,
         _address: Address,
-        _block_number: u64,
+        _block_number: LenientBlockNumberOrTag,
         _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
@@ -302,7 +302,7 @@ where
     async fn search_transactions_after(
         &self,
         _address: Address,
-        _block_number: u64,
+        _block_number: LenientBlockNumberOrTag,
         _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
