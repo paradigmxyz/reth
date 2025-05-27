@@ -3212,9 +3212,9 @@ mod tests {
         async fn check_block_received(&mut self, hash: B256) {
             let event = self.from_tree_rx.recv().await.unwrap();
             match event {
-                EngineApiEvent::BeaconConsensus(
-                    BeaconConsensusEngineEvent::BlockReceived(header),
-                ) => {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::BlockReceived(
+                    header,
+                )) => {
                     assert_eq!(header.hash(), hash);
                 }
                 _ => panic!("Unexpected event: {event:#?}"),
