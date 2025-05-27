@@ -164,7 +164,7 @@ where
         let witness_state_provider = self.provider.state_by_block_hash(ancestor_hash)?;
         let mut trie_input = TrieInput::default();
         for block in executed_ancestors.into_iter().rev() {
-            trie_input.append_cached_ref(&block.trie, &block.hashed_state);
+            trie_input.append_cached_ref(block.trie.as_ref().unwrap(), &block.hashed_state);
         }
         let mut hashed_state = db.into_state();
         hashed_state.extend(record.hashed_state);

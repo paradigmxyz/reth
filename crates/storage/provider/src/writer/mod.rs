@@ -181,15 +181,7 @@ where
             self.database()
                 .write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
 
-            tracing::info!(
-                target: "providers::db",
-                updates = ?trie.storage_tries.get(&b256!(
-                    "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
-                )),
-                "Writing storage trie updates",
-            );
-
-            self.database().write_trie_updates(&trie)?;
+            self.database().write_trie_updates(&trie.unwrap())?;
         }
 
         // update history indices

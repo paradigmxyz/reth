@@ -819,7 +819,7 @@ pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
     #[into]
     pub block: ExecutedBlock<N>,
     /// Trie updates that result of applying the block.
-    pub trie: Arc<TrieUpdates>,
+    pub trie: Option<Arc<TrieUpdates>>,
 }
 
 impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
@@ -828,15 +828,15 @@ impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
         recovered_block: Arc<RecoveredBlock<N::Block>>,
         execution_output: Arc<ExecutionOutcome<N::Receipt>>,
         hashed_state: Arc<HashedPostState>,
-        trie: Arc<TrieUpdates>,
+        trie: Option<Arc<TrieUpdates>>,
     ) -> Self {
         Self { block: ExecutedBlock { recovered_block, execution_output, hashed_state }, trie }
     }
 
     /// Returns a reference to the trie updates for the block
     #[inline]
-    pub fn trie_updates(&self) -> &TrieUpdates {
-        &self.trie
+    pub fn trie_updates(&self) -> Option<&TrieUpdates> {
+        self.trie.as_ref().map(|trie| trie.as_ref())
     }
 
     /// Converts the value into [`SealedBlock`].

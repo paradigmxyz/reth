@@ -216,7 +216,7 @@ impl<N: NodePrimitives> TreeState<N> {
                     // finally, move the trie updates
                     self.persisted_trie_updates.insert(
                         removed.recovered_block().hash(),
-                        (removed.recovered_block().number(), removed.trie),
+                        (removed.recovered_block().number(), removed.trie.unwrap()),
                     );
                 }
             }

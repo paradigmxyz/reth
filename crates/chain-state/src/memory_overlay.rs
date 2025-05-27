@@ -59,7 +59,9 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
             let mut trie_state = MemoryOverlayTrieState::default();
             for block in self.in_memory.iter().rev() {
                 trie_state.state.extend_ref(block.hashed_state.as_ref());
-                trie_state.nodes.extend_ref(block.trie.as_ref());
+                if let Some(nodes) = block.trie.as_ref() {
+                    trie_state.nodes.extend_ref(nodes);
+                }
             }
             trie_state
         })

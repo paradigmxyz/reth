@@ -129,21 +129,6 @@ where
     /// Creates a new state provider from this builder.
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
-        let trie_updates = self.overlay.as_ref().map(|overlay| {
-            overlay
-                .iter()
-                .map(|block| {
-                    (
-                        block.block.recovered_block.number(),
-                        block.block.recovered_block.hash(),
-                        block.trie.storage_tries.get(&b256!(
-                            "0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde"
-                        )),
-                    )
-                })
-                .collect::<Vec<_>>()
-        });
-        debug!(target: "engine::tree", historical = ?self.historical, ?trie_updates, "Building state provider");
         if let Some(overlay) = self.overlay.clone() {
             provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
         }
@@ -1364,7 +1349,7 @@ where
     /// Returns a batch of consecutive canonical blocks to persist in the range
     /// `(last_persisted_number .. canonical_head - threshold]` . The expected
     /// order is oldest -> newest.
-    fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlockWithTrieUpdates<N>> {
+    fn get_canonical_blocks_to_persist(&mut self) -> Vec<ExecutedBlockWithTrieUpdates<N>> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
@@ -1389,6 +1374,39 @@ where
 
         // reverse the order so that the oldest block comes first
         blocks_to_persist.reverse();
+
+        for block in &mut blocks_to_persist {
+            if block.trie.is_some() {
+                continue
+            }
+
+            let provider = self
+                .state_provider_builder(block.recovered_block().parent_hash())
+                .unwrap()
+                .unwrap()
+                .build()
+                .unwrap();
+
+            let mut trie_input = self
+                .compute_trie_input(
+                    self.persisting_kind_for(block.recovered_block().header()),
+                    self.provider.database_provider_ro().unwrap(),
+                    block.recovered_block().parent_hash(),
+                )
+                .unwrap();
+            // Extend with block we are validating root for.
+            trie_input.append_ref(block.hashed_state());
+            let (_, updates) = provider.state_root_from_nodes_with_updates(trie_input).unwrap();
+
+            let trie_updates = Arc::new(updates.clone());
+            self.state
+                .tree_state
+                .blocks_by_hash
+                .get_mut(&block.recovered_block().hash())
+                .unwrap()
+                .trie = Some(trie_updates.clone());
+            block.trie = Some(trie_updates);
+        }
 
         blocks_to_persist
     }
@@ -1842,7 +1860,7 @@ where
                         .persisted_trie_updates
                         .get(&block.recovered_block.hash())
                         .cloned()?;
-                    Some(ExecutedBlockWithTrieUpdates { block: block.clone(), trie })
+                    Some(ExecutedBlockWithTrieUpdates { block: block.clone(), trie: Some(trie) })
                 })
                 .collect::<Vec<_>>();
             self.reinsert_reorged_blocks(old);
@@ -2271,13 +2289,18 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
 
+        let is_fork = match self.is_fork(block_num_hash.hash) {
+            Ok(val) => val,
+            Err(e) => return Err((e.into(), block.clone())),
+        };
+
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
                 recovered_block: Arc::new(block),
                 execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
                 hashed_state: Arc::new(hashed_state),
             },
-            trie: Arc::new(trie_output),
+            trie: (!is_fork).then(|| Arc::new(trie_output)),
         };
 
         // if the parent is the canonical head, we can insert the block as the pending block
@@ -2292,10 +2315,6 @@ where
 
         // emit insert event
         let elapsed = start.elapsed();
-        let is_fork = match self.is_fork(block_num_hash.hash) {
-            Ok(val) => val,
-            Err(e) => return Err((e.into(), executed.block.recovered_block().clone())),
-        };
         let engine_event = if is_fork {
             BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
@@ -2474,7 +2493,11 @@ where
 
         // Extend with contents of parent in-memory blocks.
         for block in blocks.iter().rev() {
-            input.append_cached_ref(block.trie_updates(), block.hashed_state())
+            if let Some(trie_updates) = block.trie_updates() {
+                input.append_cached_ref(trie_updates, block.hashed_state())
+            } else {
+                input.append_ref(block.hashed_state())
+            }
         }
 
         Ok(input)
@@ -3623,7 +3646,7 @@ mod tests {
                     execution_output: Arc::new(ExecutionOutcome::default()),
                     hashed_state: Arc::new(HashedPostState::default()),
                 },
-                trie: Arc::new(TrieUpdates::default()),
+                trie: Some(Arc::new(TrieUpdates::default())),
             });
         }
         test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
@@ -3635,7 +3658,7 @@ mod tests {
                     execution_output: Arc::new(ExecutionOutcome::default()),
                     hashed_state: Arc::new(HashedPostState::default()),
                 },
-                trie: Arc::new(TrieUpdates::default()),
+                trie: Some(Arc::new(TrieUpdates::default())),
             });
         }
 

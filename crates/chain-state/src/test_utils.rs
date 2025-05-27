@@ -222,7 +222,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 vec![Requests::default()],
             )),
             Arc::new(HashedPostState::default()),
-            Arc::new(TrieUpdates::default()),
+            Some(Arc::new(TrieUpdates::default())),
         )
     }
 
