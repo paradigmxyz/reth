@@ -1357,6 +1357,8 @@ where
     fn get_canonical_blocks_to_persist(
         &mut self,
     ) -> Result<Vec<ExecutedBlockWithTrieUpdates<N>>, AdvancePersistenceError> {
+        // We will calculate the state root using the database, so we need to be sure there are no
+        // changes
         debug_assert!(!self.persistence_state.in_progress());
 
         let mut blocks_to_persist = Vec::new();
@@ -1419,7 +1421,7 @@ where
                 .tree_state
                 .blocks_by_hash
                 .get_mut(&block.recovered_block().hash())
-                .expect("block to persist are consticted from tree state blocks");
+                .expect("block to persist are constructed from tree state blocks");
             tree_state_block.trie = Some(trie_updates.clone());
             block.trie = Some(trie_updates);
         }

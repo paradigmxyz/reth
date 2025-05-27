@@ -819,6 +819,9 @@ pub struct ExecutedBlockWithTrieUpdates<N: NodePrimitives = EthPrimitives> {
     #[into]
     pub block: ExecutedBlock<N>,
     /// Trie updates that result of applying the block.
+    ///
+    /// If [`None`], the trie updates should be computed when persisting the block **on top of the
+    /// canonical parent**.
     pub trie: Option<Arc<TrieUpdates>>,
 }
 
@@ -836,7 +839,7 @@ impl<N: NodePrimitives> ExecutedBlockWithTrieUpdates<N> {
     /// Returns a reference to the trie updates for the block
     #[inline]
     pub fn trie_updates(&self) -> Option<&TrieUpdates> {
-        self.trie.as_ref().map(|trie| trie.as_ref())
+        self.trie.as_ref().map(Arc::as_ref)
     }
 
     /// Converts the value into [`SealedBlock`].
