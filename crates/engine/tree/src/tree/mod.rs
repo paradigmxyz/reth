@@ -2450,11 +2450,10 @@ where
             .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
 
         // Retrieve revert state for historical block.
-        let revert_state = if block_number == best_block_number {
+        if block_number == best_block_number {
             // We do not check against the `last_block_number` here because
             // `HashedPostState::from_reverts` only uses the database tables, and not static files.
             debug!(target: "engine::tree", block_number, best_block_number, "Empty revert state");
-            HashedPostState::default()
         } else {
             let revert_state = HashedPostState::from_reverts::<
                 <P::StateCommitment as StateCommitment>::KeyHasher,
@@ -2468,20 +2467,29 @@ where
                 storages = revert_state.storages.len(),
                 "Non-empty revert state"
             );
-            revert_state
+            input.append(revert_state);
+
+            // Convert the historical block to the block hash.
+            let block_hash = provider
+                .convert_number(historical)?
+                .ok_or_else(|| ProviderError::BlockHashNotFound(historical.as_hash().unwrap()))?;
+
+            if let Some((_, trie_updates)) =
+                self.state.tree_state.persisted_trie_updates.get(&block_hash)
+            {
+                debug!(
+                    target: "engine::tree",
+                    trie_updates_for_0x57 = ?trie_updates.storage_tries.get(&b256!("0x4f6ef303b5311061f100887c243d1b411e84ea664d7356ff70c5f8642cfe640c")),
+                    "Extending with persisted trie updates"
+                );
+                input.nodes.extend_ref(trie_updates);
+            }
         };
-        input.append(revert_state);
 
         // Extend with contents of parent in-memory blocks.
         for block in blocks.iter().rev() {
             input.append_cached_ref(block.trie_updates(), block.hashed_state())
         }
-
-        debug!(
-            target: "engine::tree",
-            persisted_trie_updates = ?self.state.tree_state.persisted_trie_updates.get(&b256!("0x4f6ef303b5311061f100887c243d1b411e84ea664d7356ff70c5f8642cfe640c")),
-            "Persisted trie updates for forked block 04"
-        );
 
         Ok(input)
     }
