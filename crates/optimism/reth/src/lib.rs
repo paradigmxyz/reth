@@ -63,6 +63,16 @@ pub mod evm {
     pub use reth_revm as revm;
 }
 
+/// Re-exported exex types
+#[cfg(feature = "exex")]
+pub use reth_exex as exex;
+
+/// Re-exported from `tasks`.
+#[cfg(feature = "tasks")]
+pub mod tasks {
+    pub use reth_tasks::*;
+}
+
 /// Re-exported reth network types
 #[cfg(feature = "network")]
 pub mod network {

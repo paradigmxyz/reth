@@ -248,11 +248,11 @@ where
     async fn validate_all(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = V::Transaction>,
+        transactions: impl IntoIterator<Item = V::Transaction> + Send,
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
         self.pool
             .validator()
-            .validate_transactions(transactions.into_iter().map(|tx| (origin, tx)).collect())
+            .validate_transactions_with_origin(origin, transactions)
             .await
             .into_iter()
             .map(|tx| (tx.tx_hash(), tx))

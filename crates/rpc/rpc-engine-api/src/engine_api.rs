@@ -61,32 +61,6 @@ pub struct EngineApi<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpe
     inner: Arc<EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>>,
 }
 
-struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec> {
-    /// The provider to interact with the chain.
-    provider: Provider,
-    /// Consensus configuration
-    chain_spec: Arc<ChainSpec>,
-    /// The channel to send messages to the beacon consensus engine.
-    beacon_consensus: BeaconConsensusEngineHandle<PayloadT>,
-    /// The type that can communicate with the payload service to retrieve payloads.
-    payload_store: PayloadStore<PayloadT>,
-    /// For spawning and executing async tasks
-    task_spawner: Box<dyn TaskSpawner>,
-    /// The latency and response type metrics for engine api calls
-    metrics: EngineApiMetrics,
-    /// Identification of the execution client used by the consensus client
-    client: ClientVersionV1,
-    /// The list of all supported Engine capabilities available over the engine endpoint.
-    capabilities: EngineCapabilities,
-    /// Transaction pool.
-    tx_pool: Pool,
-    /// Engine validator.
-    validator: Validator,
-    /// Start time of the latest payload request
-    latest_new_payload_response: Mutex<Option<Instant>>,
-    accept_execution_requests_hash: bool,
-}
-
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>
     EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
@@ -850,26 +824,6 @@ where
     }
 }
 
-impl<Provider, PayloadT, Pool, Validator, ChainSpec>
-    EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>
-where
-    PayloadT: PayloadTypes,
-{
-    /// Tracks the elapsed time between the new payload response and the received forkchoice update
-    /// request.
-    fn record_elapsed_time_on_fcu(&self) {
-        if let Some(start_time) = self.latest_new_payload_response.lock().take() {
-            let elapsed_time = start_time.elapsed();
-            self.metrics.latency.new_payload_forkchoice_updated_time_diff.record(elapsed_time);
-        }
-    }
-
-    /// Updates the timestamp for the latest new payload response.
-    fn on_new_payload_response(&self) {
-        self.latest_new_payload_response.lock().replace(Instant::now());
-    }
-}
-
 // This is the concrete ethereum engine API implementation.
 #[async_trait]
 impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
@@ -1090,7 +1044,7 @@ where
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
     /// blocks.
     ///
-    /// WARNING: This method is associated with the BeaconBlocksByRange message in the consensus
+    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
@@ -1160,6 +1114,63 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EngineApi").finish_non_exhaustive()
+    }
+}
+
+impl<Provider, PayloadT, Pool, Validator, ChainSpec> Clone
+    for EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
+where
+    PayloadT: PayloadTypes,
+{
+    fn clone(&self) -> Self {
+        Self { inner: Arc::clone(&self.inner) }
+    }
+}
+
+/// The container type for the engine API internals.
+struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec> {
+    /// The provider to interact with the chain.
+    provider: Provider,
+    /// Consensus configuration
+    chain_spec: Arc<ChainSpec>,
+    /// The channel to send messages to the beacon consensus engine.
+    beacon_consensus: BeaconConsensusEngineHandle<PayloadT>,
+    /// The type that can communicate with the payload service to retrieve payloads.
+    payload_store: PayloadStore<PayloadT>,
+    /// For spawning and executing async tasks
+    task_spawner: Box<dyn TaskSpawner>,
+    /// The latency and response type metrics for engine api calls
+    metrics: EngineApiMetrics,
+    /// Identification of the execution client used by the consensus client
+    client: ClientVersionV1,
+    /// The list of all supported Engine capabilities available over the engine endpoint.
+    capabilities: EngineCapabilities,
+    /// Transaction pool.
+    tx_pool: Pool,
+    /// Engine validator.
+    validator: Validator,
+    /// Start time of the latest payload request
+    latest_new_payload_response: Mutex<Option<Instant>>,
+    accept_execution_requests_hash: bool,
+}
+
+impl<Provider, PayloadT, Pool, Validator, ChainSpec>
+    EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>
+where
+    PayloadT: PayloadTypes,
+{
+    /// Tracks the elapsed time between the new payload response and the received forkchoice update
+    /// request.
+    fn record_elapsed_time_on_fcu(&self) {
+        if let Some(start_time) = self.latest_new_payload_response.lock().take() {
+            let elapsed_time = start_time.elapsed();
+            self.metrics.latency.new_payload_forkchoice_updated_time_diff.record(elapsed_time);
+        }
+    }
+
+    /// Updates the timestamp for the latest new payload response.
+    fn on_new_payload_response(&self) {
+        self.latest_new_payload_response.lock().replace(Instant::now());
     }
 }
 

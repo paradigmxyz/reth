@@ -113,7 +113,7 @@ where
     pub fn validate_all_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Tx>,
+        transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         self.inner.validate_batch_with_origin(origin, transactions)
     }
@@ -144,7 +144,7 @@ where
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all_with_origin(origin, transactions)
     }
@@ -563,10 +563,29 @@ where
                         )
                     }
                 }
-                EthBlobTransactionSidecar::Present(blob) => {
+                EthBlobTransactionSidecar::Present(sidecar) => {
                     let now = Instant::now();
+
+                    if self.fork_tracker.is_osaka_activated() {
+                        if sidecar.is_eip4844() {
+                            return TransactionValidationOutcome::Invalid(
+                                transaction,
+                                InvalidPoolTransactionError::Eip4844(
+                                    Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka,
+                                ),
+                            )
+                        }
+                    } else if sidecar.is_eip7594() {
+                        return TransactionValidationOutcome::Invalid(
+                            transaction,
+                            InvalidPoolTransactionError::Eip4844(
+                                Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka,
+                            ),
+                        )
+                    }
+
                     // validate the blob
-                    if let Err(err) = transaction.validate_blob(&blob, self.kzg_settings.get()) {
+                    if let Err(err) = transaction.validate_blob(&sidecar, self.kzg_settings.get()) {
                         return TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::Eip4844(
@@ -577,7 +596,7 @@ where
                     // Record the duration of successful blob validation as histogram
                     self.validation_metrics.blob_validation_duration.record(now.elapsed());
                     // store the extracted blob
-                    maybe_blob_sidecar = Some(blob);
+                    maybe_blob_sidecar = Some(sidecar);
                 }
             }
         }
@@ -629,7 +648,7 @@ where
     fn validate_batch_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Tx>,
+        transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         let mut provider = None;
         transactions
@@ -640,16 +659,20 @@ where
 
     fn on_new_head_block<T: BlockHeader>(&self, new_tip_block: &T) {
         // update all forks
-        if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
-            self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
-        }
-
         if self.chain_spec().is_shanghai_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.shanghai.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
+        if self.chain_spec().is_cancun_active_at_timestamp(new_tip_block.timestamp()) {
+            self.fork_tracker.cancun.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
         if self.chain_spec().is_prague_active_at_timestamp(new_tip_block.timestamp()) {
             self.fork_tracker.prague.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        if self.chain_spec().is_osaka_active_at_timestamp(new_tip_block.timestamp()) {
+            self.fork_tracker.osaka.store(true, std::sync::atomic::Ordering::Relaxed);
         }
 
         if let Some(blob_params) =

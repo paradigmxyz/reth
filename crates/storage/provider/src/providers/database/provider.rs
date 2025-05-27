@@ -1562,6 +1562,61 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             |_| true,
         )
     }
+
+    fn receipts_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        if block_range.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // collect block body indices for each block in the range
+        let mut block_body_indices = Vec::new();
+        for block_num in block_range {
+            if let Some(indices) = self.block_body_indices(block_num)? {
+                block_body_indices.push(indices);
+            } else {
+                // use default indices for missing blocks (empty block)
+                block_body_indices.push(StoredBlockBodyIndices::default());
+            }
+        }
+
+        if block_body_indices.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // find blocks with transactions to determine transaction range
+        let non_empty_blocks: Vec<_> =
+            block_body_indices.iter().filter(|indices| indices.tx_count > 0).collect();
+
+        if non_empty_blocks.is_empty() {
+            // all blocks are empty
+            return Ok(vec![Vec::new(); block_body_indices.len()]);
+        }
+
+        // calculate the overall transaction range
+        let first_tx = non_empty_blocks[0].first_tx_num();
+        let last_tx = non_empty_blocks[non_empty_blocks.len() - 1].last_tx_num();
+
+        // fetch all receipts in the transaction range
+        let all_receipts = self.receipts_by_tx_range(first_tx..=last_tx)?;
+        let mut receipts_iter = all_receipts.into_iter();
+
+        // distribute receipts to their respective blocks
+        let mut result = Vec::with_capacity(block_body_indices.len());
+        for indices in &block_body_indices {
+            if indices.tx_count == 0 {
+                result.push(Vec::new());
+            } else {
+                let block_receipts =
+                    receipts_iter.by_ref().take(indices.tx_count as usize).collect();
+                result.push(block_receipts);
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> WithdrawalsProvider
@@ -3197,5 +3252,259 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
     fn prune_modes_ref(&self) -> &PruneModes {
         self.prune_modes_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
+        BlockWriter,
+    };
+    use reth_testing_utils::generators::{self, random_block, BlockParams};
+
+    #[test]
+    fn test_receipts_by_block_range_empty_range() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider().unwrap();
+
+        // empty range should return empty vec
+        let start = 10u64;
+        let end = 9u64;
+        let result = provider.receipts_by_block_range(start..=end).unwrap();
+        assert_eq!(result, Vec::<Vec<reth_ethereum_primitives::Receipt>>::new());
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_nonexistent_blocks() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider().unwrap();
+
+        // non-existent blocks should return empty vecs for each block
+        let result = provider.receipts_by_block_range(10..=12).unwrap();
+        assert_eq!(result, vec![vec![], vec![], vec![]]);
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_single_block() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .insert_block(
+                data.genesis.clone().try_recover().unwrap(),
+                crate::StorageLocation::Database,
+            )
+            .unwrap();
+        provider_rw
+            .insert_block(data.blocks[0].0.clone(), crate::StorageLocation::Database)
+            .unwrap();
+        provider_rw
+            .write_state(
+                &data.blocks[0].1,
+                crate::OriginalValuesKnown::No,
+                crate::StorageLocation::Database,
+            )
+            .unwrap();
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let result = provider.receipts_by_block_range(1..=1).unwrap();
+
+        // should have one vec with one receipt
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].len(), 1);
+        assert_eq!(result[0][0], data.blocks[0].1.receipts()[0][0]);
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_multiple_blocks() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .insert_block(
+                data.genesis.clone().try_recover().unwrap(),
+                crate::StorageLocation::Database,
+            )
+            .unwrap();
+        for i in 0..3 {
+            provider_rw
+                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
+                .unwrap();
+            provider_rw
+                .write_state(
+                    &data.blocks[i].1,
+                    crate::OriginalValuesKnown::No,
+                    crate::StorageLocation::Database,
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let result = provider.receipts_by_block_range(1..=3).unwrap();
+
+        // should have 3 vecs, each with one receipt
+        assert_eq!(result.len(), 3);
+        for (i, block_receipts) in result.iter().enumerate() {
+            assert_eq!(block_receipts.len(), 1);
+            assert_eq!(block_receipts[0], data.blocks[i].1.receipts()[0][0]);
+        }
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_blocks_with_varying_tx_counts() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .insert_block(
+                data.genesis.clone().try_recover().unwrap(),
+                crate::StorageLocation::Database,
+            )
+            .unwrap();
+
+        // insert blocks 1-3 with receipts
+        for i in 0..3 {
+            provider_rw
+                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
+                .unwrap();
+            provider_rw
+                .write_state(
+                    &data.blocks[i].1,
+                    crate::OriginalValuesKnown::No,
+                    crate::StorageLocation::Database,
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let result = provider.receipts_by_block_range(1..=3).unwrap();
+
+        // verify each block has one receipt
+        assert_eq!(result.len(), 3);
+        for block_receipts in &result {
+            assert_eq!(block_receipts.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_partial_range() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .insert_block(
+                data.genesis.clone().try_recover().unwrap(),
+                crate::StorageLocation::Database,
+            )
+            .unwrap();
+        for i in 0..3 {
+            provider_rw
+                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
+                .unwrap();
+            provider_rw
+                .write_state(
+                    &data.blocks[i].1,
+                    crate::OriginalValuesKnown::No,
+                    crate::StorageLocation::Database,
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+
+        // request range that includes both existing and non-existing blocks
+        let result = provider.receipts_by_block_range(2..=5).unwrap();
+        assert_eq!(result.len(), 4);
+
+        // blocks 2-3 should have receipts, blocks 4-5 should be empty
+        assert_eq!(result[0].len(), 1); // block 2
+        assert_eq!(result[1].len(), 1); // block 3
+        assert_eq!(result[2].len(), 0); // block 4 (doesn't exist)
+        assert_eq!(result[3].len(), 0); // block 5 (doesn't exist)
+
+        assert_eq!(result[0][0], data.blocks[1].1.receipts()[0][0]);
+        assert_eq!(result[1][0], data.blocks[2].1.receipts()[0][0]);
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_all_empty_blocks() {
+        let factory = create_test_provider_factory();
+        let mut rng = generators::rng();
+
+        // create blocks with no transactions
+        let mut blocks = Vec::new();
+        for i in 1..=3 {
+            let block =
+                random_block(&mut rng, i, BlockParams { tx_count: Some(0), ..Default::default() });
+            blocks.push(block);
+        }
+
+        let provider_rw = factory.provider_rw().unwrap();
+        for block in blocks {
+            provider_rw
+                .insert_block(block.try_recover().unwrap(), crate::StorageLocation::Database)
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+        let result = provider.receipts_by_block_range(1..=3).unwrap();
+
+        assert_eq!(result.len(), 3);
+        for block_receipts in result {
+            assert_eq!(block_receipts.len(), 0);
+        }
+    }
+
+    #[test]
+    fn test_receipts_by_block_range_consistency_with_individual_calls() {
+        let factory = create_test_provider_factory();
+        let data = BlockchainTestData::default();
+
+        let provider_rw = factory.provider_rw().unwrap();
+        provider_rw
+            .insert_block(
+                data.genesis.clone().try_recover().unwrap(),
+                crate::StorageLocation::Database,
+            )
+            .unwrap();
+        for i in 0..3 {
+            provider_rw
+                .insert_block(data.blocks[i].0.clone(), crate::StorageLocation::Database)
+                .unwrap();
+            provider_rw
+                .write_state(
+                    &data.blocks[i].1,
+                    crate::OriginalValuesKnown::No,
+                    crate::StorageLocation::Database,
+                )
+                .unwrap();
+        }
+        provider_rw.commit().unwrap();
+
+        let provider = factory.provider().unwrap();
+
+        // get receipts using block range method
+        let range_result = provider.receipts_by_block_range(1..=3).unwrap();
+
+        // get receipts using individual block calls
+        let mut individual_results = Vec::new();
+        for block_num in 1..=3 {
+            let receipts =
+                provider.receipts_by_block(block_num.into()).unwrap().unwrap_or_default();
+            individual_results.push(receipts);
+        }
+
+        assert_eq!(range_result, individual_results);
     }
 }
