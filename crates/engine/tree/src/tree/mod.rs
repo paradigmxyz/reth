@@ -731,6 +731,8 @@ where
         let canonical_head = self.state.tree_state.canonical_head();
         let mut current_hash;
         let mut current_block = target_header;
+        // We do not query the `target_header` using `self.sealed_header_by_hash` because it is
+        // already provided as an argument and may not be available in the database yet.
         loop {
             if current_block.hash() == canonical_head.hash {
                 return Ok(false)
@@ -1371,8 +1373,13 @@ where
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
-    /// `(last_persisted_number .. canonical_head - threshold]` . The expected
+    /// `(last_persisted_number .. canonical_head - threshold]`. The expected
     /// order is oldest -> newest.
+    ///
+    /// For those blocks that didn't have the trie updates calculated, runs the state root
+    /// calculaton, and saves the trie updates.
+    ///
+    /// Returns an error if the state root calculation fails.
     fn get_canonical_blocks_to_persist(
         &mut self,
     ) -> Result<Vec<ExecutedBlockWithTrieUpdates<N>>, AdvancePersistenceError> {
@@ -1440,7 +1447,7 @@ where
                 .tree_state
                 .blocks_by_hash
                 .get_mut(&block.recovered_block().hash())
-                .expect("block to persist are constructed from tree state blocks");
+                .expect("blocks to persist are constructed from tree state blocks");
             tree_state_block.trie = Some(trie_updates.clone());
             block.trie = Some(trie_updates);
         }
