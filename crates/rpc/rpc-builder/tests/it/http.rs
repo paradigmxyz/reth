@@ -2,7 +2,7 @@
 //! Standalone http tests
 
 use crate::utils::{launch_http, launch_http_ws, launch_ws};
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId, BlockNumberOrTag};
 use alloy_primitives::{hex_literal::hex, Address, Bytes, TxHash, B256, B64, U256, U64};
 use alloy_rpc_types_eth::{
     transaction::TransactionRequest, Block, FeeHistory, Filter, Header, Index, Log,
@@ -451,7 +451,13 @@ where
 
     OtterscanClient::<Transaction, Header>::trace_transaction(client, tx_hash).await.unwrap();
 
-    OtterscanClient::<Transaction, Header>::get_block_details(client, block_number)
+    OtterscanClient::<Transaction, Header>::get_block_details(
+        client,
+        LenientBlockNumberOrTag::new(BlockNumberOrTag::Number(block_number)),
+    )
+    .await
+    .unwrap_err();
+    OtterscanClient::<Transaction, Header>::get_block_details(client, Default::default())
         .await
         .unwrap_err();
 
