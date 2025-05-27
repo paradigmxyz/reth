@@ -589,7 +589,7 @@ where
                     }
                 };
 
-                matching_headers.push(HeadersBlockHash { header, block_hash });
+                matching_headers.push(SealedHeader::new(header, block_hash));
             }
         }
 
@@ -864,15 +864,6 @@ where
     block_hash: B256,
 }
 
-/// Helper type for headers plus block hashes
-struct HeadersBlockHash<H>
-where
-    H: BlockHeader,
-{
-    header: H,
-    block_hash: B256,
-}
-
 /// Represents different modes for processing block ranges when filtering logs
 enum RangeMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
@@ -890,7 +881,7 @@ impl<
     /// Creates a new `RangeMode`.
     fn new(
         filter_inner: Arc<EthFilterInner<Eth>>,
-        headers_block_hash: Vec<HeadersBlockHash<<Eth::Provider as HeaderProvider>::Header>>,
+        headers_block_hash: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
         from_block: u64,
         to_block: u64,
         max_headers_range: u64,
@@ -929,7 +920,7 @@ struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    headers_block_hash: Vec<HeadersBlockHash<<Eth::Provider as HeaderProvider>::Header>>,
+    headers_block_hash: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
     current_idx: usize,
 }
 
@@ -946,8 +937,8 @@ impl<
             let header_block_hash = &self.headers_block_hash[self.current_idx];
             self.current_idx += 1;
 
-            let block_hash = header_block_hash.block_hash;
-            let header = header_block_hash.header.clone();
+            let block_hash = header_block_hash.hash();
+            let header = header_block_hash.header().clone();
 
             // try cache first for performance
             if let Some((receipts, recovered_block)) =
@@ -988,7 +979,7 @@ struct RangeBlockMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    iter: Peekable<std::vec::IntoIter<HeadersBlockHash<<Eth::Provider as HeaderProvider>::Header>>>,
+    iter: Peekable<std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
     next: VecDeque<ReceiptBlockResult<Eth::Provider>>,
     max_range: usize,
 }
@@ -1007,14 +998,14 @@ impl<
             None => return Ok(None),
         };
 
-        let start_number = next_header.header.number();
+        let start_number = next_header.header().number();
         let mut range_headers = vec![next_header];
 
         // peek ahead to extend range up to max_range size
         while range_headers.len() < self.max_range {
             if let Some(peeked) = self.iter.peek() {
                 // Check if next block is consecutive
-                if peeked.header.number() == start_number + range_headers.len() as u64 {
+                if peeked.header().number() == start_number + range_headers.len() as u64 {
                     let next = self.iter.next().unwrap();
                     range_headers.push(next);
                 } else {
@@ -1025,15 +1016,15 @@ impl<
             }
         }
 
-        let start_block = range_headers[0].header.number();
-        let end_block = range_headers.last().unwrap().header.number();
+        let start_block = range_headers[0].header().number();
+        let end_block = range_headers.last().unwrap().header().number();
 
         let receipts_range =
             self.filter_inner.provider().receipts_by_block_range(start_block..=end_block)?;
 
         for (i, header_block_hash) in range_headers.into_iter().enumerate() {
-            let header = header_block_hash.header;
-            let block_hash = header_block_hash.block_hash;
+            let header = header_block_hash.header();
+            let block_hash = header_block_hash.hash();
 
             // get receipts for this specific block from the range result
             if let Some(receipts) = receipts_range.get(i) {
@@ -1049,7 +1040,7 @@ impl<
                     self.next.push_back(ReceiptBlockResult {
                         receipts: Arc::new(receipts.clone()),
                         recovered_block,
-                        header,
+                        header: header.clone(),
                         block_hash,
                     });
                 }
@@ -1151,14 +1142,14 @@ mod tests {
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
-            HeadersBlockHash {
-                header: alloy_consensus::Header { number: 100, ..Default::default() },
-                block_hash: FixedBytes::random(),
-            },
-            HeadersBlockHash {
-                header: alloy_consensus::Header { number: 101, ..Default::default() },
-                block_hash: FixedBytes::random(),
-            },
+            SealedHeader::new(
+                alloy_consensus::Header { number: 100, ..Default::default() },
+                FixedBytes::random(),
+            ),
+            SealedHeader::new(
+                alloy_consensus::Header { number: 101, ..Default::default() },
+                FixedBytes::random(),
+            ),
         ];
 
         // create specific mock results to test ordering
@@ -1263,10 +1254,10 @@ mod tests {
         );
         let filter_inner = eth_filter.inner;
 
-        let headers = vec![HeadersBlockHash {
-            header: alloy_consensus::Header { number: 100, ..Default::default() },
-            block_hash: FixedBytes::random(),
-        }];
+        let headers = vec![SealedHeader::new(
+            alloy_consensus::Header { number: 100, ..Default::default() },
+            FixedBytes::random(),
+        )];
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
@@ -1292,14 +1283,14 @@ mod tests {
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
-            HeadersBlockHash {
-                header: alloy_consensus::Header { number: 100, ..Default::default() },
-                block_hash: FixedBytes::random(),
-            },
-            HeadersBlockHash {
-                header: alloy_consensus::Header { number: 101, ..Default::default() },
-                block_hash: FixedBytes::random(),
-            },
+            SealedHeader::new(
+                alloy_consensus::Header { number: 100, ..Default::default() },
+                FixedBytes::random(),
+            ),
+            SealedHeader::new(
+                alloy_consensus::Header { number: 101, ..Default::default() },
+                FixedBytes::random(),
+            ),
         ];
 
         let mut range_mode = RangeBlockMode {
