@@ -32,7 +32,9 @@ use reth_optimism_txpool::{
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives_traits::{NodePrimitives, SealedHeader, SignedTransaction, TxTy};
+use reth_primitives_traits::{
+    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
+};
 use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, db::State,
     witness::ExecutionWitnessRecord,
@@ -486,10 +488,8 @@ pub struct OpPayloadBuilderCtx<Evm: ConfigureEvm, ChainSpec> {
     /// The chainspec
     pub chain_spec: Arc<ChainSpec>,
     /// How to build the payload.
-    pub config: PayloadConfig<
-        OpPayloadBuilderAttributes<TxTy<Evm::Primitives>>,
-        <Evm::Primitives as NodePrimitives>::BlockHeader,
-    >,
+    pub config:
+        PayloadConfig<OpPayloadBuilderAttributes<TxTy<Evm::Primitives>>, HeaderTy<Evm::Primitives>>,
     /// Marker to check whether the job has been cancelled.
     pub cancel: CancelOnDrop,
     /// The currently best payload.
@@ -502,7 +502,7 @@ where
     ChainSpec: EthChainSpec + OpHardforks,
 {
     /// Returns the parent block the payload will be build on.
-    pub fn parent(&self) -> &SealedHeader<<Evm::Primitives as NodePrimitives>::BlockHeader> {
+    pub fn parent(&self) -> &SealedHeaderFor<Evm::Primitives> {
         self.config.parent_header.as_ref()
     }
 

@@ -16,7 +16,7 @@ pub use reth_rpc_api::DebugExecutionWitnessApiServer;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     errors::{ProviderError, ProviderResult},
-    BlockReaderIdExt, HeaderProvider, NodePrimitivesProvider, StateProviderFactory,
+    BlockReaderIdExt, NodePrimitivesProvider, StateProviderFactory,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::TransactionPool;
@@ -44,15 +44,14 @@ impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig> {
 impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    Provider: NodePrimitivesProvider<
-            Primitives: NodePrimitives<BlockHeader = <Provider as HeaderProvider>::Header>,
-        > + BlockReaderIdExt,
+    Provider: NodePrimitivesProvider<Primitives: NodePrimitives<BlockHeader = Provider::Header>>
+        + BlockReaderIdExt,
 {
     /// Fetches the parent header by hash.
     fn parent_header(
         &self,
         parent_block_hash: B256,
-    ) -> ProviderResult<SealedHeader<<Provider as HeaderProvider>::Header>> {
+    ) -> ProviderResult<SealedHeader<Provider::Header>> {
         self.inner
             .provider
             .sealed_header_by_hash(parent_block_hash)?
@@ -69,8 +68,7 @@ where
         > + 'static,
     Provider: BlockReaderIdExt
         + NodePrimitivesProvider<
-            Primitives: OpPayloadPrimitives
-                            + NodePrimitives<BlockHeader = <Provider as HeaderProvider>::Header>,
+            Primitives: OpPayloadPrimitives + NodePrimitives<BlockHeader = Provider::Header>,
         > + StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
         + Clone
