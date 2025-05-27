@@ -1381,9 +1381,10 @@ where
             current_hash = block.recovered_block().parent_hash();
         }
 
-        // reverse the order so that the oldest block comes first
+        // Reverse the order so that the oldest block comes first
         blocks_to_persist.reverse();
 
+        // Calculate missing trie updates
         for block in &mut blocks_to_persist {
             if block.trie.is_some() {
                 continue
@@ -1407,10 +1408,11 @@ where
                 self.provider.database_provider_ro().unwrap(),
                 block.recovered_block().parent_hash(),
             )?;
-            // Extend with block we are validating root for.
+            // Extend with block we are generating trie updates for.
             trie_input.append_ref(block.hashed_state());
             let (_, updates) = provider.state_root_from_nodes_with_updates(trie_input)?;
 
+            // Update trie updates in both tree state and blocks to persist that we return
             let trie_updates = Arc::new(updates);
             let tree_state_block = self
                 .state
