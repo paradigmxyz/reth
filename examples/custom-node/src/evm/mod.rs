@@ -1,5 +1,6 @@
 mod alloy;
 mod assembler;
+mod builder;
 mod config;
 mod env;
 mod executor;
