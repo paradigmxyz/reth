@@ -1272,6 +1272,114 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_range_block_mode_provider_receipts() {
+        let provider = MockEthProvider::default();
+
+        let header_1 = alloy_consensus::Header { number: 100, ..Default::default() };
+        let header_2 = alloy_consensus::Header { number: 101, ..Default::default() };
+        let header_3 = alloy_consensus::Header { number: 102, ..Default::default() };
+
+        let block_hash_1 = FixedBytes::random();
+        let block_hash_2 = FixedBytes::random();
+        let block_hash_3 = FixedBytes::random();
+
+        provider.add_header(block_hash_1, header_1.clone());
+        provider.add_header(block_hash_2, header_2.clone());
+        provider.add_header(block_hash_3, header_3.clone());
+
+        // create mock receipts to test provider fetching
+        let receipt_100_1 = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+            success: true,
+        };
+        let receipt_100_2 = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Eip1559,
+            cumulative_gas_used: 42_000,
+            logs: vec![],
+            success: true,
+        };
+        let receipt_101_1 = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Eip2930,
+            cumulative_gas_used: 30_000,
+            logs: vec![],
+            success: false,
+        };
+
+        provider.add_receipts(100, vec![receipt_100_1.clone(), receipt_100_2.clone()]);
+        provider.add_receipts(101, vec![receipt_101_1.clone()]);
+
+        let eth_api = build_test_eth_api(provider);
+
+        let eth_filter = super::EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+        let filter_inner = eth_filter.inner;
+
+        let headers = vec![
+            SealedHeader::new(header_1, block_hash_1),
+            SealedHeader::new(header_2, block_hash_2),
+            SealedHeader::new(header_3, block_hash_3),
+        ];
+
+        let mut range_mode = RangeBlockMode {
+            filter_inner,
+            iter: headers.into_iter().peekable(),
+            next: VecDeque::new(),
+            max_range: 3, // include the 3 blocks in the first queried results
+        };
+
+        // first call should fetch receipts from provider and return first block with receipts
+        let result = range_mode.next().await;
+        assert!(result.is_ok());
+        let receipt_result = result.unwrap().unwrap();
+
+        assert_eq!(receipt_result.block_hash, block_hash_1);
+        assert_eq!(receipt_result.header.number, 100);
+        assert_eq!(receipt_result.receipts.len(), 2);
+
+        // verify receipts
+        assert_eq!(receipt_result.receipts[0].tx_type, receipt_100_1.tx_type);
+        assert_eq!(
+            receipt_result.receipts[0].cumulative_gas_used,
+            receipt_100_1.cumulative_gas_used
+        );
+        assert_eq!(receipt_result.receipts[0].success, receipt_100_1.success);
+
+        assert_eq!(receipt_result.receipts[1].tx_type, receipt_100_2.tx_type);
+        assert_eq!(
+            receipt_result.receipts[1].cumulative_gas_used,
+            receipt_100_2.cumulative_gas_used
+        );
+        assert_eq!(receipt_result.receipts[1].success, receipt_100_2.success);
+
+        // second call should return the second block with receipts
+        let result2 = range_mode.next().await;
+        assert!(result2.is_ok());
+        let receipt_result2 = result2.unwrap().unwrap();
+
+        assert_eq!(receipt_result2.block_hash, block_hash_2);
+        assert_eq!(receipt_result2.header.number, 101);
+        assert_eq!(receipt_result2.receipts.len(), 1);
+
+        // verify receipts
+        assert_eq!(receipt_result2.receipts[0].tx_type, receipt_101_1.tx_type);
+        assert_eq!(
+            receipt_result2.receipts[0].cumulative_gas_used,
+            receipt_101_1.cumulative_gas_used
+        );
+        assert_eq!(receipt_result2.receipts[0].success, receipt_101_1.success);
+
+        // third call should return None since no more blocks with receipts
+        let result3 = range_mode.next().await;
+        assert!(result3.is_ok());
+        assert!(result3.unwrap().is_none());
+    }
+
+    #[tokio::test]
     async fn test_range_block_mode_iterator_exhaustion() {
         let provider = MockEthProvider::default();
         let eth_api = build_test_eth_api(provider);
