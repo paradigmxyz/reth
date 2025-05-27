@@ -275,7 +275,7 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
-        rpc_block.into_consensus().map_transactions(|tx| tx.inner.into_inner().into())
+        rpc_block.into_consensus().convert_transactions()
     }
 }
 
