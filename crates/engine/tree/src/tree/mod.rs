@@ -726,11 +726,13 @@ where
     ///   extension of the canonical chain.
     /// * walking back from the current head to verify that the target hash is not already part of
     ///   the canonical chain.
-    fn is_fork(&self, target_hash: B256) -> ProviderResult<bool> {
+    fn is_fork(&self, target_header: SealedHeader<N::BlockHeader>) -> ProviderResult<bool> {
+        let target_hash = target_header.hash();
         // verify that the given hash is not part of an extension of the canon chain.
         let canonical_head = self.state.tree_state.canonical_head();
-        let mut current_hash = target_hash;
-        while let Some(current_block) = self.sealed_header_by_hash(current_hash)? {
+        let mut current_hash;
+        let mut current_block = target_header;
+        loop {
             if current_block.hash() == canonical_head.hash {
                 return Ok(false)
             }
@@ -739,6 +741,9 @@ where
                 break
             }
             current_hash = current_block.parent_hash();
+
+            let Some(next_block) = self.sealed_header_by_hash(current_hash)? else { break };
+            current_block = next_block;
         }
 
         // verify that the given hash is not already part of canonical chain stored in memory
@@ -2295,9 +2300,9 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
 
-        let is_fork = match self.is_fork(block_num_hash.hash) {
+        let is_fork = match self.is_fork(block.sealed_header().clone()) {
             Ok(val) => val,
-            Err(e) => return Err((e.into(), block.clone())),
+            Err(e) => return Err((e.into(), block)),
         };
 
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
@@ -4113,7 +4118,10 @@ mod tests {
         test_harness.check_canon_head(chain_b_tip_hash);
 
         // verify that chain A is now considered a fork
-        assert!(test_harness.tree.is_fork(chain_a.last().unwrap().hash()).unwrap());
+        assert!(test_harness
+            .tree
+            .is_fork(chain_a.last().unwrap().sealed_header().clone())
+            .unwrap());
     }
 
     #[tokio::test]

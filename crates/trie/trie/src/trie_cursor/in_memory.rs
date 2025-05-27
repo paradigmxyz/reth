@@ -3,7 +3,7 @@ use crate::{
     forward_cursor::ForwardInMemoryCursor,
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
 };
-use alloy_primitives::{b256, map::HashSet, B256};
+use alloy_primitives::{map::HashSet, B256};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::{BranchNodeCompact, Nibbles};
 
@@ -181,12 +181,6 @@ impl<'a, C> InMemoryStorageTrieCursor<'a, C> {
         cursor: C,
         updates: Option<&'a StorageTrieUpdatesSorted>,
     ) -> Self {
-        if hashed_address ==
-            b256!("0x0b41f77934b340fd6836dcdb232774759f126d73736cdea5c3f855d34335ebde")
-        {
-            tracing::trace!(target: "trie::cursor::in_memory", ?hashed_address, ?updates, "Creating new storage trie cursor")
-        }
-
         let in_memory_cursor = updates.map(|u| ForwardInMemoryCursor::new(&u.storage_nodes));
         let removed_nodes = updates.map(|u| &u.removed_nodes);
         let storage_trie_cleared = updates.is_some_and(|u| u.is_deleted);

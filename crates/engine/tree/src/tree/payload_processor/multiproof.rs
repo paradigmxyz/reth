@@ -81,10 +81,7 @@ pub(super) struct MultiProofConfig<Factory> {
     pub prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
-impl<Factory> MultiProofConfig<Factory>
-where
-    Factory: DatabaseProviderFactory<Provider: BlockReader> + StateCommitmentProvider,
-{
+impl<Factory> MultiProofConfig<Factory> {
     /// Creates a new state root config from the consistent view and the trie input.
     pub(super) fn new_from_input(
         consistent_view: ConsistentDbView<Factory>,
