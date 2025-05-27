@@ -99,8 +99,14 @@ where
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct CustomEvmFactory(pub OpEvmFactory);
+
+impl CustomEvmFactory {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 impl EvmFactory for CustomEvmFactory {
     type Evm<DB: Database, I: Inspector<OpContext<DB>>> = CustomEvm<DB, I, Self::Precompiles>;
