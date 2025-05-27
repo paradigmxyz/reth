@@ -895,7 +895,10 @@ impl<
             distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
             !sealed_headers.is_empty()
         {
-            Self::Cached(CachedMode { filter_inner, sealed_headers_iter: sealed_headers.into_iter() })
+            Self::Cached(CachedMode {
+                filter_inner,
+                sealed_headers_iter: sealed_headers.into_iter(),
+            })
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
@@ -920,7 +923,8 @@ struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
-    sealed_headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    sealed_headers_iter:
+        std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
 impl<
