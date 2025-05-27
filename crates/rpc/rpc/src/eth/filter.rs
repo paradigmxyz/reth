@@ -1,7 +1,7 @@
 //! `eth_` `Filter` RPC handler implementation
 
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{TxHash, B256};
+use alloy_primitives::{Sealable, TxHash, B256};
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
     PendingTransactionFilterKind,
@@ -583,10 +583,7 @@ where
             while let Some(header) = headers_iter.next() {
                 let block_hash = match headers_iter.peek() {
                     Some(child_header) => child_header.parent_hash(),
-                    None => {
-                        let sealed_header = SealedHeader::seal_slow(header.clone());
-                        sealed_header.hash()
-                    }
+                    None => header.hash_slow(),
                 };
 
                 matching_headers.push(SealedHeader::new(header, block_hash));
@@ -604,10 +601,10 @@ where
         );
 
         // iterate through the range mode to get receipts and blocks
-        while let Some(ReceiptBlockResult { receipts, recovered_block, header, block_hash }) =
+        while let Some(ReceiptBlockResult { receipts, recovered_block, header }) =
             range_mode.next().await?
         {
-            let num_hash = BlockNumHash::new(header.number(), block_hash);
+            let num_hash = header.num_hash();
             append_matching_block_logs(
                 &mut all_logs,
                 recovered_block
@@ -852,16 +849,18 @@ impl From<ProviderError> for EthFilterError {
     }
 }
 
-/// Helper type for the common pattern of returning receipts, `maybe_block`, header, and
-/// `block_hash`
+/// Helper type for the common pattern of returning receipts, block and the original header that is
+/// a match for the filter.
 struct ReceiptBlockResult<P>
 where
     P: ReceiptProvider + BlockReader,
 {
+    /// We always need the entire receipts for the matching block.
     receipts: Arc<Vec<ProviderReceipt<P>>>,
+    /// Block can be optional and we can fetch it lazily when needed.
     recovered_block: Option<Arc<reth_primitives_traits::RecoveredBlock<ProviderBlock<P>>>>,
-    header: <P as HeaderProvider>::Header,
-    block_hash: B256,
+    /// The header of the block.
+    header: SealedHeader<<P as HeaderProvider>::Header>,
 }
 
 /// Represents different modes for processing block ranges when filtering logs
@@ -933,34 +932,26 @@ impl<
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         loop {
-            let header_block_hash = match self.sealed_headers_iter.next() {
+            let header = match self.sealed_headers_iter.next() {
                 Some(header) => header,
                 None => return Ok(None),
             };
 
-            let block_hash = header_block_hash.hash();
-            let header = header_block_hash.header().clone();
-
             // try cache first for performance
             if let Some((receipts, recovered_block)) =
-                self.filter_inner.eth_cache().get_receipts_and_maybe_block(block_hash).await?
+                self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?
             {
-                return Ok(Some(ReceiptBlockResult {
-                    receipts,
-                    recovered_block,
-                    header,
-                    block_hash,
-                }))
+                return Ok(Some(ReceiptBlockResult { receipts, recovered_block, header }))
             }
 
             // cache miss - fallback to storage to ensure correctness
             if let Some(receipts) =
-                self.filter_inner.provider().receipts_by_block(block_hash.into())?
+                self.filter_inner.provider().receipts_by_block(header.hash().into())?
             {
                 let recovered_block = self
                     .filter_inner
                     .provider()
-                    .block(block_hash.into())?
+                    .block(header.hash().into())?
                     .and_then(|block| block.try_into_recovered().ok())
                     .map(Arc::new);
 
@@ -968,7 +959,6 @@ impl<
                     receipts: Arc::new(receipts),
                     recovered_block,
                     header,
-                    block_hash,
                 }));
             }
         }
@@ -1023,10 +1013,7 @@ impl<
         let receipts_range =
             self.filter_inner.provider().receipts_by_block_range(start_block..=end_block)?;
 
-        for (i, header_block_hash) in range_headers.into_iter().enumerate() {
-            let header = header_block_hash.header();
-            let block_hash = header_block_hash.hash();
-
+        for (i, header) in range_headers.into_iter().enumerate() {
             // get receipts for this specific block from the range result
             if let Some(receipts) = receipts_range.get(i) {
                 if !receipts.is_empty() {
@@ -1034,15 +1021,14 @@ impl<
                     let recovered_block = self
                         .filter_inner
                         .provider()
-                        .block(block_hash.into())?
+                        .block(header.hash().into())?
                         .and_then(|block| block.try_into_recovered().ok())
                         .map(Arc::new);
 
                     self.next.push_back(ReceiptBlockResult {
                         receipts: Arc::new(receipts.clone()),
                         recovered_block,
-                        header: header.clone(),
-                        block_hash,
+                        header,
                     });
                 }
             }
@@ -1180,15 +1166,19 @@ mod tests {
         let mock_result_1 = ReceiptBlockResult {
             receipts: Arc::new(vec![mock_receipt_1.clone(), mock_receipt_2.clone()]),
             recovered_block: None,
-            header: alloy_consensus::Header { number: 42, ..Default::default() },
-            block_hash: expected_block_hash_1,
+            header: SealedHeader::new(
+                alloy_consensus::Header { number: 42, ..Default::default() },
+                expected_block_hash_1,
+            ),
         };
 
         let mock_result_2 = ReceiptBlockResult {
             receipts: Arc::new(vec![mock_receipt_3.clone()]),
             recovered_block: None,
-            header: alloy_consensus::Header { number: 43, ..Default::default() },
-            block_hash: expected_block_hash_2,
+            header: SealedHeader::new(
+                alloy_consensus::Header { number: 43, ..Default::default() },
+                expected_block_hash_2,
+            ),
         };
 
         let mut range_mode = RangeBlockMode {
@@ -1202,7 +1192,7 @@ mod tests {
         let result1 = range_mode.next().await;
         assert!(result1.is_ok());
         let receipt_result1 = result1.unwrap().unwrap();
-        assert_eq!(receipt_result1.block_hash, expected_block_hash_1);
+        assert_eq!(receipt_result1.header.hash(), expected_block_hash_1);
         assert_eq!(receipt_result1.header.number, 42);
 
         // verify receipts
@@ -1224,7 +1214,7 @@ mod tests {
         let result2 = range_mode.next().await;
         assert!(result2.is_ok());
         let receipt_result2 = result2.unwrap().unwrap();
-        assert_eq!(receipt_result2.block_hash, expected_block_hash_2);
+        assert_eq!(receipt_result2.header.hash(), expected_block_hash_2);
         assert_eq!(receipt_result2.header.number, 43);
 
         // verify receipts
