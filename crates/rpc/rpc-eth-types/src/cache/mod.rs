@@ -199,12 +199,16 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
 
     /// Streams cached receipts and blocks for a list of block hashes, preserving input order.
     #[allow(clippy::type_complexity)]
-    pub fn get_receipts_and_maybe_block_stream<'a>(
-        &'a self,
+    pub fn get_receipts_and_maybe_block_stream(
+        &self,
         hashes: Vec<B256>,
-    ) -> impl Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + 'a
+    ) -> impl Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + Send
     {
-        let futures = hashes.into_iter().map(move |hash| self.get_receipts_and_maybe_block(hash));
+        let cache = Arc::new(self.clone());
+        let futures = hashes.into_iter().map(move |hash| {
+            let cache = Arc::clone(&cache);
+            async move { cache.get_receipts_and_maybe_block(hash).await }
+        });
 
         futures.collect::<FuturesOrdered<_>>()
     }
