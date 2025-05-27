@@ -1,11 +1,12 @@
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
+use core::ops::Deref;
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
     OpPayloadAttributes,
 };
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainHardforks, ChainSpec};
 use reth_consensus::ConsensusError;
 use reth_node_api::{
     payload::{
@@ -160,7 +161,7 @@ where
         >,
     ) -> Result<(), EngineObjectValidationError> {
         validate_withdrawals_presence(
-            self.chain_spec(),
+            &*self.chain_spec().inner,
             version,
             payload_or_attrs.message_validation_kind(),
             payload_or_attrs.timestamp(),
@@ -223,7 +224,7 @@ where
 /// Canyon activates the Shanghai EIPs, see the Canyon specs for more details:
 /// <https://github.com/ethereum-optimism/optimism/blob/ab926c5fd1e55b5c864341c44842d6d1ca679d99/specs/superchain-upgrades.md#canyon>
 pub fn validate_withdrawals_presence(
-    chain_spec: &ChainSpec,
+    chain_spec: impl Deref<Target = ChainHardforks>,
     version: EngineApiMessageVersion,
     message_validation_kind: MessageValidationKind,
     timestamp: u64,
