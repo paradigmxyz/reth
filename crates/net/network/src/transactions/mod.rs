@@ -6,20 +6,20 @@ pub mod config;
 pub mod constants;
 /// Component responsible for fetching transactions from [`NewPooledTransactionHashes`].
 pub mod fetcher;
+/// Defines the [`TransactionPolicies`] trait for aggregating transaction-related policies.
+pub mod policy;
 pub mod validation;
 
 pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-use config::{
-    AnnouncementAcceptance, NetworkPolicies, Policies, StrictEthAnnouncementFilter,
-    TransactionPropagationKind,
-};
+use config::{AnnouncementAcceptance, StrictEthAnnouncementFilter, TransactionPropagationKind};
 pub use config::{
     AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionPropagationMode,
     TransactionPropagationPolicy, TransactionsManagerConfig,
 };
+use policy::{NetworkPolicies, TransactionPolicies};
 pub use validation::*;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
@@ -246,7 +246,10 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 pub struct TransactionsManager<
     Pool,
     N: NetworkPrimitives = EthNetworkPrimitives,
-    PBundle: Policies = NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
+    PBundle: TransactionPolicies = NetworkPolicies<
+        TransactionPropagationKind,
+        StrictEthAnnouncementFilter,
+    >,
 > {
     /// Access to the transaction pool.
     pool: Pool,
@@ -341,7 +344,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives>
     }
 }
 
-impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: Policies>
+impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     TransactionsManager<Pool, N, PBundle>
 {
     /// Sets up a new instance with given the settings.
@@ -523,7 +526,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: Policies>
     }
 }
 
-impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: Policies>
+impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
     TransactionsManager<Pool, N, PBundle>
 {
     /// Processes a batch import results.
@@ -795,7 +798,7 @@ where
             PooledTransaction: SignedTransaction,
         > + Unpin,
 
-    PBundle: Policies,
+    PBundle: TransactionPolicies,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
@@ -1443,7 +1446,7 @@ impl<
                 BroadcastedTransaction: SignedTransaction,
                 PooledTransaction: SignedTransaction,
             > + Unpin,
-        PBundle: Policies + Unpin,
+        PBundle: TransactionPolicies + Unpin,
     > Future for TransactionsManager<Pool, N, PBundle>
 where
     Pool::Transaction:
@@ -2826,7 +2829,7 @@ mod tests {
         let transactions_manager_config = TransactionsManagerConfig::default();
 
         let propagation_policy = TransactionPropagationKind::default();
-        let announcement_policy = RelaxedEthAnnouncementFilter::default(); // This is TypedRelaxedFilter<TxType>
+        let announcement_policy = RelaxedEthAnnouncementFilter::default();
 
         let policy_bundle = NetworkPolicies::new(propagation_policy, announcement_policy);
 
@@ -2844,7 +2847,7 @@ mod tests {
             mpsc::unbounded_channel::<NetworkTransactionEvent<EthNetworkPrimitives>>();
         network_manager.set_transactions(to_tx_manager_tx);
         let network_handle = network_manager.handle().clone();
-        let network_service_handle = tokio::spawn(network_manager); // Corrected: spawn network_manager
+        let network_service_handle = tokio::spawn(network_manager);
 
         let mut tx_manager = TransactionsManager::<
             TestPool,

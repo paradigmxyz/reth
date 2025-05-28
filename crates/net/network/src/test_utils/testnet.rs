@@ -6,7 +6,8 @@ use crate::{
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
     transactions::{
-        config::{NetworkPolicies, StrictEthAnnouncementFilter, TransactionPropagationKind},
+        config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
+        policy::NetworkPolicies,
         TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
     },
     NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,

@@ -5,7 +5,8 @@ use std::fmt::Debug;
 use crate::{
     eth_requests::EthRequestHandler,
     transactions::{
-        config::{NetworkPolicies, StrictEthAnnouncementFilter, TransactionPropagationKind},
+        config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
+        policy::NetworkPolicies,
         TransactionPropagationPolicy, TransactionsManager, TransactionsManagerConfig,
     },
     NetworkHandle, NetworkManager,
