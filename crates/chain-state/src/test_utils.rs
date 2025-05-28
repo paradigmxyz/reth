@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions,
+    CanonStateSubscriptions, ExecutedTrieUpdates,
 };
 use alloy_consensus::{
     Header, SignableTransaction, Transaction as _, TxEip1559, TxReceipt, EMPTY_ROOT_HASH,
@@ -222,7 +222,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 vec![Requests::default()],
             )),
             Arc::new(HashedPostState::default()),
-            Some(Arc::new(TrieUpdates::default())),
+            ExecutedTrieUpdates::empty(),
         )
     }
 

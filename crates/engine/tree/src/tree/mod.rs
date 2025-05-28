@@ -20,7 +20,7 @@ use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
 use precompile_cache::{CachedPrecompile, PrecompileCacheMap};
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates,
+    CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
@@ -772,7 +772,7 @@ where
         let mut current_hash = target_header.parent_hash();
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
             // Check if this block is missing trie updates
-            if block.trie.is_none() {
+            if block.trie.is_missing() {
                 return true;
             }
 
@@ -1417,7 +1417,7 @@ where
 
         // Calculate missing trie updates
         for block in &mut blocks_to_persist {
-            if block.trie.is_some() {
+            if block.trie.is_present() {
                 continue
             }
 
@@ -1452,8 +1452,8 @@ where
                 .blocks_by_hash
                 .get_mut(&block.recovered_block().hash())
                 .expect("blocks to persist are constructed from tree state blocks");
-            tree_state_block.trie = Some(trie_updates.clone());
-            block.trie = Some(trie_updates);
+            tree_state_block.trie.set_present(trie_updates.clone());
+            block.trie.set_present(trie_updates);
         }
 
         Ok(blocks_to_persist)
@@ -1908,7 +1908,10 @@ where
                         .persisted_trie_updates
                         .get(&block.recovered_block.hash())
                         .cloned()?;
-                    Some(ExecutedBlockWithTrieUpdates { block: block.clone(), trie: Some(trie) })
+                    Some(ExecutedBlockWithTrieUpdates {
+                        block: block.clone(),
+                        trie: ExecutedTrieUpdates::Present(trie),
+                    })
                 })
                 .collect::<Vec<_>>();
             self.reinsert_reorged_blocks(old);
@@ -2328,13 +2331,18 @@ where
         // updates, because they may be incorrect. Instead, they will be recomputed on persistance.
         let save_trie_updates = !(is_fork || missing_trie_updates);
 
+        let trie_updates = if save_trie_updates {
+            ExecutedTrieUpdates::Present(Arc::new(trie_output))
+        } else {
+            ExecutedTrieUpdates::Missing
+        };
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
                 recovered_block: Arc::new(block),
                 execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
                 hashed_state: Arc::new(hashed_state),
             },
-            trie: save_trie_updates.then(|| Arc::new(trie_output)),
+            trie: trie_updates,
         };
 
         // if the parent is the canonical head, we can insert the block as the pending block
@@ -3670,7 +3678,7 @@ mod tests {
                     execution_output: Arc::new(ExecutionOutcome::default()),
                     hashed_state: Arc::new(HashedPostState::default()),
                 },
-                trie: Some(Arc::new(TrieUpdates::default())),
+                trie: ExecutedTrieUpdates::empty(),
             });
         }
         test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
@@ -3682,7 +3690,7 @@ mod tests {
                     execution_output: Arc::new(ExecutionOutcome::default()),
                     hashed_state: Arc::new(HashedPostState::default()),
                 },
-                trie: Some(Arc::new(TrieUpdates::default())),
+                trie: ExecutedTrieUpdates::empty(),
             });
         }
 

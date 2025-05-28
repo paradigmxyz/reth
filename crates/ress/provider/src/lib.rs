@@ -11,7 +11,9 @@
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Bytes, B256};
 use parking_lot::Mutex;
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
+use reth_chain_state::{
+    ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, MemoryOverlayStateProvider,
+};
 use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -128,7 +130,7 @@ where
                                     recovered_block: invalid,
                                     ..Default::default()
                                 },
-                                ..Default::default()
+                                trie: ExecutedTrieUpdates::empty(),
                             });
                         }
                     }

@@ -217,7 +217,7 @@ impl<N: NodePrimitives> TreeState<N> {
                 {
                     debug!(target: "engine::tree", ?num_hash, "Removed block walking back from the head");
                     // finally, move the trie updates
-                    let Some(trie_updates) = removed.trie.take() else {
+                    let Some(trie_updates) = removed.trie.take_present() else {
                         debug!(target: "engine::tree", ?num_hash, "No trie updates found for persisted block");
                         continue;
                     };
