@@ -39,7 +39,11 @@ pub struct PackedNibbles {
 impl fmt::Debug for PackedNibbles {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PackedNibbles(0x{:0width$x})", self.nibbles, width = self.length as usize / 2)
+        if self.is_empty() {
+            write!(f, "PackedNibbles(0x)")
+        } else {
+            write!(f, "PackedNibbles(0x{:0width$x})", self.nibbles, width = self.length as usize)
+        }
     }
 }
 

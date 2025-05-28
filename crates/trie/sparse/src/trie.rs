@@ -2807,20 +2807,22 @@ mod tests {
         sparse
             .update_leaf(PackedNibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
             .unwrap();
-        sparse.remove_leaf(&PackedNibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0])).unwrap();
+        sparse
+            .update_leaf(PackedNibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value.clone())
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1011)
         //     ├── 0 -> Extension (Key = 23)
         //     │        └── Branch (Mask = 0101)
-        //     │              ├── 1 -> Leaf (Key = 1, Path = 50231)
-        //     │              └── 3 -> Leaf (Key = 3, Path = 50233)
+        //     │              ├── 1 -> Leaf (Path = 50231)
+        //     │              └── 3 -> Leaf (Path = 50233)
         //     ├── 2 -> Leaf (Key = 013, Path = 52013)
         //     └── 3 -> Branch (Mask = 0101)
-        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                ├── 1 -> Leaf (Key = 02, Path = 53102)
         //                └── 3 -> Branch (Mask = 1010)
-        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
-        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
+        //                       ├── 0 -> Leaf (Path = 53302)
+        //                       └── 2 -> Leaf (Path = 53320)
         pretty_assertions::assert_eq!(
             sparse.nodes.clone().into_iter().collect::<BTreeMap<_, _>>(),
             BTreeMap::from_iter([
