@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{NodeTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
 use reth_payload_builder::PayloadId;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
@@ -46,7 +46,10 @@ pub struct LatestBlockInfo {
 }
 /// Represents a test environment.
 #[derive(Debug)]
-pub struct Environment<I> {
+pub struct Environment<I>
+where
+    I: EngineTypes,
+{
     /// Combined clients with both RPC and Engine API endpoints
     pub node_clients: Vec<NodeClient>,
     /// Tracks instance generic.
@@ -77,7 +80,10 @@ pub struct Environment<I> {
     pub slots_to_finalized: u64,
 }
 
-impl<I> Default for Environment<I> {
+impl<I> Default for Environment<I>
+where
+    I: EngineTypes,
+{
     fn default() -> Self {
         Self {
             node_clients: vec![],
@@ -100,17 +106,31 @@ impl<I> Default for Environment<I> {
 
 /// Builder for creating test scenarios
 #[expect(missing_debug_implementations)]
-#[derive(Default)]
-pub struct TestBuilder<I> {
+pub struct TestBuilder<I>
+where
+    I: EngineTypes,
+{
     setup: Option<Setup<I>>,
     actions: Vec<ActionBox<I>>,
     env: Environment<I>,
 }
 
-impl<I: 'static> TestBuilder<I> {
+impl<I> Default for TestBuilder<I>
+where
+    I: EngineTypes,
+{
+    fn default() -> Self {
+        Self { setup: None, actions: Vec::new(), env: Default::default() }
+    }
+}
+
+impl<I> TestBuilder<I>
+where
+    I: EngineTypes + 'static,
+{
     /// Create a new test builder
     pub fn new() -> Self {
-        Self { setup: None, actions: Vec::new(), env: Default::default() }
+        Self::default()
     }
 
     /// Set the test setup
