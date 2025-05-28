@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
 use reth_revm::{
     state::{AccountInfo, Bytecode},
     Database,
@@ -11,15 +11,16 @@ use reth_trie::{HashedPostState, HashedStorage};
 pub(crate) struct StateWitnessRecorderDatabase<D> {
     database: D,
     state: HashedPostState,
+    bytecodes: HashMap<B256, Bytecode>,
 }
 
 impl<D> StateWitnessRecorderDatabase<D> {
     pub(crate) fn new(database: D) -> Self {
-        Self { database, state: Default::default() }
+        Self { database, state: Default::default(), bytecodes: Default::default() }
     }
 
-    pub(crate) fn into_state(self) -> HashedPostState {
-        self.state
+    pub(crate) fn into_state_and_bytecodes(self) -> (HashedPostState, HashMap<B256, Bytecode>) {
+        (self.state, self.bytecodes)
     }
 }
 
@@ -51,6 +52,8 @@ impl<D: Database> Database for StateWitnessRecorderDatabase<D> {
     }
 
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.database.code_by_hash(code_hash)
+        let value = self.database.code_by_hash(code_hash)?;
+        self.bytecodes.insert(code_hash, value.clone());
+        Ok(value)
     }
 }

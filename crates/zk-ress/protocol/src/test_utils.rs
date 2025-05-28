@@ -1,20 +1,34 @@
 //! Miscellaneous test utilities.
 
-use crate::ZkRessProtocolProvider;
+use crate::{ZkRessProtocolProvider, ZkRessWitness};
 use alloy_consensus::Header;
-use alloy_primitives::{B256, Bytes, map::B256HashMap};
+use alloy_primitives::{map::B256HashMap, B256};
 use reth_ethereum_primitives::BlockBody;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
+    marker::PhantomData,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 /// Noop implementation of [`ZkRessProtocolProvider`].
-#[derive(Clone, Copy, Default, Debug)]
-pub struct NoopZkRessProtocolProvider;
+#[derive(Clone, Debug)]
+pub struct NoopZkRessProtocolProvider<T> {
+    __phantom: PhantomData<T>,
+}
 
-impl ZkRessProtocolProvider for NoopZkRessProtocolProvider {
+impl<T> Default for NoopZkRessProtocolProvider<T> {
+    fn default() -> Self {
+        Self { __phantom: PhantomData }
+    }
+}
+
+impl<T> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T>
+where
+    T: ZkRessWitness + Default,
+{
+    type Witness = T;
+
     fn header(&self, _block_hash: B256) -> ProviderResult<Option<Header>> {
         Ok(None)
     }
@@ -23,21 +37,21 @@ impl ZkRessProtocolProvider for NoopZkRessProtocolProvider {
         Ok(None)
     }
 
-    async fn witness(&self, _block_hash: B256) -> ProviderResult<Vec<Bytes>> {
-        Ok(Vec::new())
+    async fn witness(&self, _block_hash: B256) -> ProviderResult<Self::Witness> {
+        Ok(T::default())
     }
 }
 
 /// Mock implementation of [`ZkRessProtocolProvider`].
 #[derive(Clone, Default, Debug)]
-pub struct MockRessProtocolProvider {
+pub struct MockRessProtocolProvider<T> {
     headers: Arc<Mutex<B256HashMap<Header>>>,
     block_bodies: Arc<Mutex<B256HashMap<BlockBody>>>,
-    witnesses: Arc<Mutex<B256HashMap<Vec<Bytes>>>>,
+    witnesses: Arc<Mutex<B256HashMap<T>>>,
     witness_delay: Option<Duration>,
 }
 
-impl MockRessProtocolProvider {
+impl<T> MockRessProtocolProvider<T> {
     /// Configure witness response delay.
     pub const fn with_witness_delay(mut self, delay: Duration) -> Self {
         self.witness_delay = Some(delay);
@@ -65,17 +79,22 @@ impl MockRessProtocolProvider {
     }
 
     /// Insert witness.
-    pub fn add_witness(&self, block_hash: B256, witness: Vec<Bytes>) {
+    pub fn add_witness(&self, block_hash: B256, witness: T) {
         self.witnesses.lock().unwrap().insert(block_hash, witness);
     }
 
     /// Extend witnesses from iterator.
-    pub fn extend_witnesses(&self, witnesses: impl IntoIterator<Item = (B256, Vec<Bytes>)>) {
+    pub fn extend_witnesses(&self, witnesses: impl IntoIterator<Item = (B256, T)>) {
         self.witnesses.lock().unwrap().extend(witnesses);
     }
 }
 
-impl ZkRessProtocolProvider for MockRessProtocolProvider {
+impl<T> ZkRessProtocolProvider for MockRessProtocolProvider<T>
+where
+    T: ZkRessWitness + Default + Clone,
+{
+    type Witness = T;
+
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         Ok(self.headers.lock().unwrap().get(&block_hash).cloned())
     }
@@ -84,7 +103,7 @@ impl ZkRessProtocolProvider for MockRessProtocolProvider {
         Ok(self.block_bodies.lock().unwrap().get(&block_hash).cloned())
     }
 
-    async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
+    async fn witness(&self, block_hash: B256) -> ProviderResult<Self::Witness> {
         if let Some(delay) = self.witness_delay {
             tokio::time::sleep(delay).await;
         }

@@ -1,6 +1,6 @@
-use crate::GetHeaders;
+use crate::{GetHeaders, ZkRessWitness};
 use alloy_consensus::Header;
-use alloy_primitives::{B256, Bytes};
+use alloy_primitives::B256;
 use alloy_rlp::Encodable;
 use reth_ethereum_primitives::BlockBody;
 use reth_network::eth_requests::{MAX_BODIES_SERVE, MAX_HEADERS_SERVE, SOFT_RESPONSE_LIMIT};
@@ -9,6 +9,9 @@ use std::future::Future;
 
 /// A provider trait for ress protocol.
 pub trait ZkRessProtocolProvider: Send + Sync {
+    /// The zk-ress witness type.
+    type Witness: ZkRessWitness;
+
     /// Return block header by hash.
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>>;
 
@@ -53,5 +56,8 @@ pub trait ZkRessProtocolProvider: Send + Sync {
     }
 
     /// Return witness by block hash.
-    fn witness(&self, block_hash: B256) -> impl Future<Output = ProviderResult<Vec<Bytes>>> + Send;
+    fn witness(
+        &self,
+        block_hash: B256,
+    ) -> impl Future<Output = ProviderResult<Self::Witness>> + Send;
 }

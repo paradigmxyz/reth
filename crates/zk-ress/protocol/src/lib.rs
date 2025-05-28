@@ -12,6 +12,9 @@
 mod types;
 pub use types::*;
 
+mod witness;
+pub use witness::*;
+
 mod message;
 pub use message::*;
 
