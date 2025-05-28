@@ -735,8 +735,6 @@ where
         let canonical_head = self.state.tree_state.canonical_head();
         let mut current_hash;
         let mut current_block = Cow::Borrowed(target_header);
-        // We do not query the `target_header` using `self.sealed_header_by_hash` because it is
-        // already provided as an argument and may not be available in the database yet.
         loop {
             if current_block.hash() == canonical_head.hash {
                 return Ok(false)
