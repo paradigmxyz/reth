@@ -725,6 +725,9 @@ where
     ///   extension of the canonical chain.
     /// * walking back from the current head to verify that the target hash is not already part of
     ///   the canonical chain.
+    ///
+    /// The header is required as an arg, because we might be checking that the header is a fork
+    /// block before it's in the tree state and before it's in the database.
     fn is_fork(&self, target_header: SealedHeader<N::BlockHeader>) -> ProviderResult<bool> {
         let target_hash = target_header.hash();
         // verify that the given hash is not part of an extension of the canon chain.
@@ -764,20 +767,20 @@ where
     fn has_ancestors_with_missing_trie_updates(
         &self,
         target_header: &SealedHeader<N::BlockHeader>,
-    ) -> ProviderResult<bool> {
+    ) -> bool {
         // Walk back through the chain starting from the parent of the target block
         let mut current_hash = target_header.parent_hash();
         while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
             // Check if this block is missing trie updates
             if block.trie.is_none() {
-                return Ok(true);
+                return true;
             }
 
             // Move to the parent block
             current_hash = block.recovered_block().parent_hash();
         }
 
-        Ok(false)
+        false
     }
 
     /// Returns the persisting kind for the input block.
@@ -1420,7 +1423,7 @@ where
 
             debug!(
                 target: "engine::tree",
-                hash = ?block.recovered_block().hash(),
+                block = ?block.recovered_block().num_hash(),
                 "Calculating trie updates before persisting"
             );
 
@@ -1438,7 +1441,8 @@ where
             )?;
             // Extend with block we are generating trie updates for.
             trie_input.append_ref(block.hashed_state());
-            let (_, updates) = provider.state_root_from_nodes_with_updates(trie_input)?;
+            let (_root, updates) = provider.state_root_from_nodes_with_updates(trie_input)?;
+            debug_assert_eq!(_root, block.recovered_block().state_root());
 
             // Update trie updates in both tree state and blocks to persist that we return
             let trie_updates = Arc::new(updates);
@@ -2319,7 +2323,7 @@ where
 
         let is_fork = ensure_ok!(self.is_fork(block.sealed_header().clone()));
         let missing_trie_updates =
-            ensure_ok!(self.has_ancestors_with_missing_trie_updates(block.sealed_header()));
+            self.has_ancestors_with_missing_trie_updates(block.sealed_header());
         // If the block is a fork or has ancestors with missing trie updates, we don't save the trie
         // updates, because they may be incorrect. Instead, they will be recomputed on persistance.
         let save_trie_updates = !(is_fork || missing_trie_updates);
