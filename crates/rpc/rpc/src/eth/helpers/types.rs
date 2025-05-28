@@ -1,8 +1,7 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{SignableTransaction, TxEnvelope};
+use alloy_consensus::TxEnvelope;
 use alloy_network::{Ethereum, Network};
-use alloy_primitives::Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
 use reth_ethereum_primitives::TransactionSigned;
@@ -51,11 +50,8 @@ where
         &self,
         request: TransactionRequest,
     ) -> Result<TransactionSigned, Self::Error> {
-        let Ok(tx) = request.build_typed_tx() else {
-            return Err(EthApiError::TransactionConversionError)
-        };
-        let signature = Signature::new(Default::default(), Default::default(), false);
-        Ok(tx.into_signed(signature).into())
+        TransactionRequest::build_typed_simulate_transaction(request)
+            .map_err(|_| EthApiError::TransactionConversionError)
     }
 
     fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
