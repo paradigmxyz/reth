@@ -1,9 +1,8 @@
 // Reth block related imports
-use reth_ethereum::{provider::BlockReaderIdExt, Block};
+use reth_ethereum::{provider::BlockReaderIdExt, rpc::eth::EthResult, Block};
 
 // Rpc related imports
 use jsonrpsee::proc_macros::rpc;
-use reth::rpc::server_types::eth::EthResult;
 
 /// trait interface for a custom rpc namespace: `MyRpc`
 ///
@@ -22,7 +21,7 @@ pub struct MyRpcExt<Provider> {
 
 impl<Provider> MyRpcExtApiServer for MyRpcExt<Provider>
 where
-    Provider: BlockReaderIdExt<Block = reth::primitives::Block> + 'static,
+    Provider: BlockReaderIdExt<Block = Block> + 'static,
 {
     /// Showcasing how to implement a custom rpc method
     /// using the provider.

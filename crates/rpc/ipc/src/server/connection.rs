@@ -54,7 +54,7 @@ where
     }
 }
 
-/// Drives an [IpcConn] forward.
+/// Drives an [`IpcConn`] forward.
 ///
 /// This forwards received requests from the connection to the service and sends responses to the
 /// connection.

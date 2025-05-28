@@ -1,8 +1,8 @@
-# Use the Rust 1.86 image based on Debian Bullseye
-FROM rust:1.86-bullseye AS builder
+# Use the Rust 1.86 image based on Debian Bookworm
+FROM rust:1.86-bookworm AS builder
 
 # Install specific version of libclang-dev
-RUN apt-get update && apt-get install -y libclang-dev=1:11.0-51+nmu5
+RUN apt-get update && apt-get install -y libclang-dev=1:14.0-55.7~deb12u1
 
 # Copy the project to the container
 COPY ./ /app

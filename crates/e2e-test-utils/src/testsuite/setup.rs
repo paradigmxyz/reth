@@ -9,7 +9,7 @@ use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
-use reth_node_api::{NodeTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_rpc_api::clients::EthApiClient;
@@ -66,7 +66,10 @@ impl<I> Drop for Setup<I> {
     }
 }
 
-impl<I> Setup<I> {
+impl<I> Setup<I>
+where
+    I: EngineTypes,
+{
     /// Create a new setup with default values
     pub fn new() -> Self {
         Self::default()
@@ -161,9 +164,9 @@ impl<I> Setup<I> {
                     let rpc = node
                         .rpc_client()
                         .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
-                    let engine = node.engine_api_client();
+                    let auth = node.auth_server_handle();
 
-                    node_clients.push(crate::testsuite::NodeClient { rpc, engine });
+                    node_clients.push(crate::testsuite::NodeClient::new(rpc, auth));
                 }
 
                 // spawn a separate task just to handle the shutdown

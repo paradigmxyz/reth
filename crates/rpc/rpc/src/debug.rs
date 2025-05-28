@@ -1,4 +1,4 @@
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256};
@@ -34,9 +34,10 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProvider, StateProviderFactory, TransactionVariant,
+    StateProofProvider, StateProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
@@ -287,7 +288,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(&inspector).into())
+                        Ok(FourByteFrame::from(&inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -310,7 +311,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -341,7 +342,7 @@ where
                                 Ok(frame)
                             })
                             .await?;
-                        return Ok(frame.into())
+                        Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                     GethDebugBuiltInTracerType::MuxTracer => {
@@ -380,7 +381,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        Ok(frame)
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
                         let flat_call_config = tracer_config
@@ -406,7 +407,7 @@ where
                             })
                             .await?;
 
-                        return Ok(frame.into());
+                        Ok(frame.into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -862,6 +863,25 @@ where
 
         Ok((frame.into(), res.state))
     }
+
+    /// Returns the state root of the `HashedPostState` on top of the state for the given block with
+    /// trie updates.
+    async fn debug_state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+        block_id: Option<BlockId>,
+    ) -> Result<(B256, TrieUpdates), Eth::Error> {
+        self.inner
+            .eth_api
+            .spawn_blocking_io(move |this| {
+                let state = this
+                    .provider()
+                    .state_by_block_id(block_id.unwrap_or_default())
+                    .map_err(Eth::Error::from_eth_err)?;
+                state.state_root_with_updates(hashed_state).map_err(Eth::Error::from_eth_err)
+            })
+            .await
+    }
 }
 
 #[async_trait]
@@ -940,7 +960,7 @@ where
 
     /// Handler for `debug_getBadBlocks`
     async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(vec![])
     }
 
     /// Handler for `debug_traceChain`
@@ -1215,6 +1235,14 @@ where
 
     async fn debug_start_go_trace(&self, _file: String) -> RpcResult<()> {
         Ok(())
+    }
+
+    async fn debug_state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<(B256, TrieUpdates)> {
+        Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
     }
 
     async fn debug_stop_cpu_profile(&self) -> RpcResult<()> {

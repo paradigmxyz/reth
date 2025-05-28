@@ -14,7 +14,6 @@ mod subprotocol;
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
-use reth::builder::NodeHandle;
 use reth_ethereum::{
     network::{
         api::{test_utils::PeersHandleProvider, NetworkInfo},
@@ -22,7 +21,7 @@ use reth_ethereum::{
         protocol::IntoRlpxSubProtocol,
         NetworkConfig, NetworkManager, NetworkProtocols,
     },
-    node::EthereumNode,
+    node::{builder::NodeHandle, EthereumNode},
 };
 use subprotocol::{
     connection::CustomCommand,
@@ -35,7 +34,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::info;
 
 fn main() -> eyre::Result<()> {
-    reth::cli::Cli::parse_args().run(|builder, _args| async move {
+    reth_ethereum::cli::Cli::parse_args().run(|builder, _args| async move {
         // launch the node
         let NodeHandle { node, node_exit_future } =
             builder.node(EthereumNode::default()).launch().await?;

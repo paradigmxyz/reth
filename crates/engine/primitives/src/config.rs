@@ -75,6 +75,8 @@ pub struct TreeConfig {
     max_proof_task_concurrency: u64,
     /// Number of reserved CPU cores for non-reth processes
     reserved_cpu_cores: usize,
+    /// Whether to enable the precompile cache
+    precompile_cache_enabled: bool,
 }
 
 impl Default for TreeConfig {
@@ -93,6 +95,7 @@ impl Default for TreeConfig {
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
+            precompile_cache_enabled: false,
         }
     }
 }
@@ -114,6 +117,7 @@ impl TreeConfig {
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
         reserved_cpu_cores: usize,
+        precompile_cache_enabled: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -129,6 +133,7 @@ impl TreeConfig {
             has_enough_parallelism,
             max_proof_task_concurrency,
             reserved_cpu_cores,
+            precompile_cache_enabled,
         }
     }
 
@@ -189,9 +194,14 @@ impl TreeConfig {
         self.always_compare_trie_updates
     }
 
-    /// Return the cross-block cache size.
+    /// Returns the cross-block cache size.
     pub const fn cross_block_cache_size(&self) -> u64 {
         self.cross_block_cache_size
+    }
+
+    /// Returns whether precompile cache is enabled.
+    pub const fn precompile_cache_enabled(&self) -> bool {
+        self.precompile_cache_enabled
     }
 
     /// Setter for persistence threshold.
@@ -288,6 +298,12 @@ impl TreeConfig {
     /// Setter for the number of reserved CPU cores for any non-reth processes
     pub const fn with_reserved_cpu_cores(mut self, reserved_cpu_cores: usize) -> Self {
         self.reserved_cpu_cores = reserved_cpu_cores;
+        self
+    }
+
+    /// Setter for whether to use the precompile cache.
+    pub const fn with_precompile_cache_enabled(mut self, precompile_cache_enabled: bool) -> Self {
+        self.precompile_cache_enabled = precompile_cache_enabled;
         self
     }
 

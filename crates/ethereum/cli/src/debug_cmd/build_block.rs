@@ -1,8 +1,8 @@
 //! Command for debugging block building.
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
-    eip2718::Encodable2718,
-    eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
+    eip2718::Encodable2718, eip4844::env_settings::EnvKzgSettings,
+    eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::Decodable;
@@ -100,7 +100,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(EnvKzgSettings::Default)
     }
 
-    /// Execute `debug in-memory-merkle` command
+    /// Execute `debug build-block` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
@@ -143,8 +143,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
-                .try_clone_into_recovered()
-                .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
+                .try_into_recovered()
+                .map_err(|tx| eyre::eyre!("failed to recover tx: {}", tx.tx_hash()))?;
 
             let encoded_length = match transaction.inner() {
                 TransactionSigned::Eip4844(tx) => {
@@ -152,8 +152,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                         eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
                     })?;
 
-                    let sidecar: BlobTransactionSidecar =
-                        blobs_bundle.pop_sidecar(tx.tx().blob_versioned_hashes.len());
+                    let sidecar: BlobTransactionSidecarVariant =
+                        BlobTransactionSidecarVariant::Eip4844(
+                            blobs_bundle.pop_sidecar(tx.tx().blob_versioned_hashes.len()),
+                        );
 
                     let pooled = transaction
                         .clone()

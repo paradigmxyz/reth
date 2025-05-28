@@ -12,6 +12,10 @@ comprising of the following key changes:
 For a more in-depth list of changes and their rationale, as well as specifics about the OP Stack specification such as transaction ordering and more, see the documented [`op-geth` diff][op-geth-forkdiff],
 the [L2 EL specification][l2-el-spec], and the [OP Stack specification][op-stack-spec].
 
+### Superchain Registry
+
+Since 1.4.0 op-reth has built in support for all chains in the [superchain registry][superchain-registry]. All superchains are supported by the `--chain` argument, e.g. `--chain unichain` or `--chain unichain-sepolia`.
+
 ## Running on Optimism
 
 You will need three things to run `op-reth`:
@@ -44,7 +48,7 @@ For the sake of this tutorial, we'll use the reference implementation of the Rol
 
 ### Running `op-reth`
 
-The `optimism` feature flag in `op-reth` adds several new CLI flags to the `reth` binary:
+op-reth supports additional OP Stack specific CLI arguments:
 1. `--rollup.sequencer-http <uri>` - The sequencer endpoint to connect to. Transactions sent to the `op-reth` EL are also forwarded to this sequencer endpoint for inclusion, as the sequencer is the entity that builds blocks on OP Stack chains.
 1. `--rollup.disable-tx-pool-gossip` - Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
 1. `--rollup.enable-genesis-walkback` - Disables setting the forkchoice status to tip on startup, making the `op-node` walk back to genesis and verify the integrity of the chain before starting to sync. This can be omitted unless a corruption of local chainstate is suspected.
@@ -85,6 +89,7 @@ Consider adding the `--l1.trustrpc` flag to improve performance, if the connecti
 [l2-el-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/exec-engine.md
 [deposit-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/deposits.md
 [derivation-spec]: https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/derivation.md
+[superchain-registry]: https://github.com/ethereum-optimism/superchain-registry
 
 [op-node-docker]: https://console.cloud.google.com/artifacts/docker/oplabs-tools-artifacts/us/images/op-node
 

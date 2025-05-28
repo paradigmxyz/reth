@@ -82,6 +82,7 @@ impl<Http> EraStream<Http> {
                 files_count: Box::pin(async move { usize::MAX }),
                 next_url: Box::pin(async move { Ok(None) }),
                 recover_index: Box::pin(async move { 0 }),
+                fetch_file_list: Box::pin(async move { Ok(()) }),
                 state: Default::default(),
                 max_files: config.max_files,
                 index: 0,
@@ -192,6 +193,7 @@ struct StartingStream<Http> {
     files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
     next_url: Pin<Box<dyn Future<Output = eyre::Result<Option<Url>>> + Send + Sync + 'static>>,
     recover_index: Pin<Box<dyn Future<Output = u64> + Send + Sync + 'static>>,
+    fetch_file_list: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + 'static>>,
     state: State,
     max_files: usize,
     index: u64,
@@ -212,6 +214,7 @@ impl<Http> Debug for StartingStream<Http> {
 enum State {
     #[default]
     Initial,
+    FetchFileList,
     RecoverIndex,
     CountFiles,
     Missing(usize),
@@ -223,7 +226,16 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         if self.state == State::Initial {
-            self.recover_index();
+            self.fetch_file_list();
+        }
+
+        if self.state == State::FetchFileList {
+            if let Poll::Ready(result) = self.fetch_file_list.poll_unpin(cx) {
+                match result {
+                    Ok(_) => self.recover_index(),
+                    Err(e) => return Poll::Ready(Some(Box::pin(async move { Err(e) }))),
+                }
+            }
         }
 
         if self.state == State::RecoverIndex {
@@ -276,6 +288,15 @@ impl<Http> StartingStream<Http> {
 }
 
 impl<Http: HttpClient + Clone + Send + Sync + 'static> StartingStream<Http> {
+    fn fetch_file_list(&mut self) {
+        let client = self.client.clone();
+
+        Pin::new(&mut self.fetch_file_list)
+            .set(Box::pin(async move { client.fetch_file_list().await }));
+
+        self.state = State::FetchFileList;
+    }
+
     fn recover_index(&mut self) {
         let client = self.client.clone();
 

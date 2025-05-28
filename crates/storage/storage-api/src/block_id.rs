@@ -7,7 +7,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 /// Client trait for getting important block numbers (such as the latest block number), converting
 /// block hashes to numbers, and fetching a block hash from its block number.
 ///
-/// This trait also supports fetching block hashes and block numbers from a [BlockHashOrNumber].
+/// This trait also supports fetching block hashes and block numbers from a [`BlockHashOrNumber`].
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockNumReader: BlockHashReader + Send + Sync {
     /// Returns the current info for the chain.
@@ -48,7 +48,7 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
 /// are provided if the type implements the `pending_block_num_hash`, `finalized_block_num`, and
 /// `safe_block_num` methods.
 ///
-/// The resulting block numbers can be converted to hashes using the underlying [BlockNumReader]
+/// The resulting block numbers can be converted to hashes using the underlying [`BlockNumReader`]
 /// methods, and vice versa.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockIdReader: BlockNumReader + Send + Sync {

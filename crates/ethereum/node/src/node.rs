@@ -9,7 +9,7 @@ use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_ethereum_primitives::{EthPrimitives, PooledTransaction, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, PooledTransactionVariant, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
 use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, TxTy};
@@ -275,18 +275,7 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
-        let alloy_rpc_types_eth::Block { header, transactions, withdrawals, .. } = rpc_block;
-        reth_ethereum_primitives::Block {
-            header: header.inner,
-            body: reth_ethereum_primitives::BlockBody {
-                transactions: transactions
-                    .into_transactions()
-                    .map(|tx| tx.inner.into_inner().into())
-                    .collect(),
-                ommers: Default::default(),
-                withdrawals,
-            },
-        }
+        rpc_block.into_consensus().convert_transactions()
     }
 }
 
@@ -431,7 +420,10 @@ impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TxTy<Node::Types>,
+                Pooled = PooledTransactionVariant,
+            >,
         > + Unpin
         + 'static,
 {

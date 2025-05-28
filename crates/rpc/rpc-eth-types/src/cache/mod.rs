@@ -4,7 +4,7 @@ use super::{EthStateCacheConfig, MultiConsumerLruCache};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
-use futures::{future::Either, Stream, StreamExt};
+use futures::{future::Either, stream::FuturesOrdered, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
 use reth_errors::{ProviderError, ProviderResult};
 use reth_execution_types::Chain;
@@ -195,6 +195,18 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
 
         let block = block.map_err(|_| CacheServiceUnavailable)?;
         Ok(receipts?.map(|r| (r, block)))
+    }
+
+    /// Streams cached receipts and blocks for a list of block hashes, preserving input order.
+    #[allow(clippy::type_complexity)]
+    pub fn get_receipts_and_maybe_block_stream<'a>(
+        &'a self,
+        hashes: Vec<B256>,
+    ) -> impl Stream<Item = ProviderResult<Option<(Arc<Vec<R>>, Option<Arc<RecoveredBlock<B>>>)>>> + 'a
+    {
+        let futures = hashes.into_iter().map(move |hash| self.get_receipts_and_maybe_block(hash));
+
+        futures.collect::<FuturesOrdered<_>>()
     }
 
     /// Requests the header for the given hash.
