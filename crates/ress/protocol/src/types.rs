@@ -1,5 +1,18 @@
-use alloy_primitives::bytes::{Buf, BufMut};
-use alloy_rlp::{Decodable, Encodable};
+use alloy_primitives::{
+    bytes::{Buf, BufMut},
+    Bytes,
+};
+use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
+
+/// Full execution witness with trie nodes and bytecodes accessed in the block.
+#[derive(RlpEncodable, RlpDecodable, PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+pub struct ExecutionWitness {
+    /// State trie nodes.
+    pub state: Vec<Bytes>,
+    /// Bytecodes.
+    pub bytecodes: Vec<Bytes>,
+}
 
 /// Node type variant.
 #[repr(u8)]

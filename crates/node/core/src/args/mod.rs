@@ -64,5 +64,9 @@ pub use engine::EngineArgs;
 mod ress_args;
 pub use ress_args::RessArgs;
 
+/// `ZkRessArgs` for configuring ress subprotocol.
+mod zk_ress_args;
+pub use zk_ress_args::*;
+
 mod error;
 pub mod types;

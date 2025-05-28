@@ -3,15 +3,16 @@
 //!
 //! Examples include creating, encoding, and decoding protocol messages.
 
-use crate::{NodeType, ZkRessWitness};
+use crate::ZkRessWitness;
 use alloy_consensus::Header;
 use alloy_primitives::{
     bytes::{Buf, BufMut},
     BlockHash, B256,
 };
-use alloy_rlp::{BytesMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
+use alloy_rlp::{BytesMut, Decodable, Encodable};
 use reth_eth_wire::{message::RequestPair, protocol::Protocol, Capability};
 use reth_ethereum_primitives::BlockBody;
+use reth_ress_protocol::{GetHeaders, NodeType};
 
 /// An Ress protocol message, containing a message ID and payload.
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -244,27 +245,12 @@ impl<T: Encodable> Encodable for ZkRessMessage<T> {
     }
 }
 
-/// A request for a peer to return block headers starting at the requested block.
-/// The peer must return at most [`limit`](#structfield.limit) headers.
-/// The headers will be returned starting at [`start_hash`](#structfield.start_hash), traversing
-/// towards the genesis block.
-#[derive(PartialEq, Eq, Clone, Copy, Debug, RlpEncodable, RlpDecodable)]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct GetHeaders {
-    /// The block hash that the peer should start returning headers from.
-    pub start_hash: BlockHash,
-
-    /// The maximum number of headers to return.
-    pub limit: u64,
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::ExecutionWitness;
-
     use super::*;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
+    use reth_ress_protocol::ExecutionWitness;
     use std::fmt;
     use strum::EnumCount;
 

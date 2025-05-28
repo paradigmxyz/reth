@@ -6,10 +6,10 @@ use reth_network_api::{
     test_utils::PeersHandleProvider,
 };
 use reth_provider::test_utils::MockEthProvider;
+use reth_ress_protocol::{ExecutionWitness, GetHeaders, NodeType};
 use reth_zk_ress_protocol::{
     test_utils::{MockRessProtocolProvider, NoopZkRessProtocolProvider},
-    ExecutionWitness, GetHeaders, NodeType, ProtocolEvent, ProtocolState, ZkRessPeerRequest,
-    ZkRessProtocolHandler,
+    ProtocolEvent, ProtocolState, ZkRessPeerRequest, ZkRessProtocolHandler,
 };
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};

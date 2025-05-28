@@ -1,10 +1,11 @@
-use crate::{GetHeaders, NodeType, ZkRessMessage, ZkRessProtocolMessage, ZkRessProtocolProvider};
+use crate::{ZkRessMessage, ZkRessProtocolMessage, ZkRessProtocolProvider};
 use alloy_consensus::Header;
 use alloy_primitives::{bytes::BytesMut, BlockHash, B256};
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use reth_eth_wire::{message::RequestPair, multiplex::ProtocolConnection};
 use reth_ethereum_primitives::BlockBody;
 use reth_network_api::{test_utils::PeersHandle, PeerId, ReputationChangeKind};
+use reth_ress_protocol::{GetHeaders, NodeType};
 use reth_storage_errors::ProviderResult;
 use std::{
     collections::HashMap,

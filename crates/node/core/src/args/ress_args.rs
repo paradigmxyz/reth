@@ -21,19 +21,34 @@ pub struct RessArgs {
     pub enabled: bool,
 
     /// The maximum number of active connections for `ress` subprotocol.
-    #[arg(long = "ress.max-active-connections", default_value_t = MAX_ACTIVE_CONNECTIONS_DEFAULT)]
+    #[arg(
+        long = "ress.max-active-connections",
+        alias = "zkress.max-active-connections",
+        default_value_t = MAX_ACTIVE_CONNECTIONS_DEFAULT
+    )]
     pub max_active_connections: u64,
 
     /// The maximum witness lookback window.
-    #[arg(long = "ress.max-witness-window", default_value_t = MAX_WITNESS_WINDOW_DEFAULT)]
+    #[arg(
+        long = "ress.max-witness-window",
+        alias = "zkress.max-witness-window",
+        default_value_t = MAX_WITNESS_WINDOW_DEFAULT
+    )]
     pub max_witness_window: u64,
 
     /// The maximum number of witnesses to generate in parallel.
-    #[arg(long = "ress.witness-max-parallel", default_value_t = WITNESS_MAX_PARALLEL_DEFAULT)]
+    #[arg(
+        long = "ress.witness-max-parallel",
+        alias = "zkress.witness-max-parallel",
+        default_value_t = WITNESS_MAX_PARALLEL_DEFAULT
+    )]
     pub witness_max_parallel: usize,
 
     /// Witness cache size.
-    #[arg(long = "ress.witness-cache-size", default_value_t = WITNESS_CACHE_SIZE_DEFAULT)]
+    #[arg(
+        long = "zkress.witness-cache-size",
+        default_value_t = WITNESS_CACHE_SIZE_DEFAULT
+    )]
     pub witness_cache_size: u32,
 }
 

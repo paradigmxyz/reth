@@ -1,12 +1,13 @@
 use crate::{
     connection::{ZkRessPeerRequest, ZkRessProtocolConnection},
-    NodeType, ZkRessProtocolMessage, ZkRessProtocolProvider,
+    ZkRessProtocolMessage, ZkRessProtocolProvider,
 };
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler};
 use reth_network_api::{test_utils::PeersHandle, Direction, PeerId};
+use reth_ress_protocol::NodeType;
 use std::{
     fmt,
     net::SocketAddr,

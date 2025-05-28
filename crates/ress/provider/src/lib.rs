@@ -16,8 +16,11 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
-use reth_ress_protocol::RessProtocolProvider;
-use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
+use reth_ress_protocol::{ExecutionWitness, RessProtocolProvider};
+use reth_revm::{
+    database::StateProviderDatabase, db::State, state::Bytecode, witness::ExecutionWitnessRecord,
+};
+use reth_storage_api::{BlockReader, BlockSource, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
 use schnellru::{ByLength, LruMap};
@@ -30,7 +33,6 @@ use recorder::StateWitnessRecorderDatabase;
 
 mod pending_state;
 pub use pending_state::*;
-use reth_storage_api::{BlockReader, BlockSource, StateProviderFactory};
 
 /// Reth provider implementing [`RessProtocolProvider`].
 #[expect(missing_debug_implementations)]
@@ -41,13 +43,13 @@ pub struct RethRessProtocolProvider<P, E> {
     task_spawner: Box<dyn TaskSpawner>,
     max_witness_window: u64,
     witness_semaphore: Arc<Semaphore>,
-    witness_cache: Arc<Mutex<LruMap<B256, Arc<Vec<Bytes>>>>>,
+    witness_cache: Arc<Mutex<LruMap<B256, Arc<ExecutionWitness>>>>,
     pending_state: PendingState<EthPrimitives>,
 }
 
 impl<P, E> RethRessProtocolProvider<P, E>
 where
-    P: BlockReader<Block = Block> + StateProviderFactory,
+    P: BlockReader<Block = Block> + StateProviderFactory + Clone + 'static,
     E: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
     /// Create new ress protocol provider.
@@ -92,8 +94,8 @@ where
         Ok(maybe_block)
     }
 
-    /// Generate state witness
-    pub fn generate_witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
+    /// Generate execution witness for the target block hash.
+    pub fn generate_execution_witness(&self, block_hash: B256) -> ProviderResult<ExecutionWitness> {
         if let Some(witness) = self.witness_cache.lock().get(&block_hash).cloned() {
             return Ok(witness.as_ref().clone())
         }
@@ -166,32 +168,52 @@ where
         for block in executed_ancestors.into_iter().rev() {
             trie_input.append_cached_ref(&block.trie, &block.hashed_state);
         }
-        let mut hashed_state = db.into_state();
+        let (mut hashed_state, bytecodes) = db.into_state_and_bytecodes();
         hashed_state.extend(record.hashed_state);
 
         // Gather the state witness.
-        let witness = if hashed_state.is_empty() {
+        let state = if hashed_state.is_empty() {
             // If no state was accessed, at least the root node must be present.
             let multiproof = witness_state_provider.multiproof(
                 trie_input,
                 MultiProofTargets::from_iter([(B256::ZERO, Default::default())]),
             )?;
-            let mut witness = Vec::new();
+            let mut state = Vec::new();
             if let Some(root_node) =
                 multiproof.account_subtree.into_inner().remove(&Nibbles::default())
             {
-                witness.push(root_node);
+                state.push(root_node);
             }
-            witness
+            state
         } else {
             witness_state_provider.witness(trie_input, hashed_state)?
         };
 
+        let witness = ExecutionWitness {
+            state,
+            bytecodes: bytecodes.values().map(Bytecode::bytes).collect(),
+        };
+
         // Insert witness into the cache.
-        let cached_witness = Arc::new(witness.clone());
-        self.witness_cache.lock().insert(block_hash, cached_witness);
+        self.witness_cache.lock().insert(block_hash, Arc::new(witness.clone()));
 
         Ok(witness)
+    }
+
+    /// Spawn execution witness creation task onto the runtime.
+    pub async fn execution_witness(&self, block_hash: B256) -> ProviderResult<ExecutionWitness> {
+        let _permit = self.witness_semaphore.acquire().await.map_err(ProviderError::other)?;
+        let this = self.clone();
+        let (tx, rx) = oneshot::channel();
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = this.generate_execution_witness(block_hash);
+            let _ = tx.send(result);
+        }));
+        match rx.await {
+            Ok(Ok(witness)) => Ok(witness),
+            Ok(Err(error)) => Err(error),
+            Err(_) => Err(ProviderError::TrieWitnessError("dropped".to_owned())),
+        }
     }
 }
 
@@ -226,20 +248,9 @@ where
     async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving witness");
         let started_at = Instant::now();
-        let _permit = self.witness_semaphore.acquire().await.map_err(ProviderError::other)?;
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-        self.task_spawner.spawn_blocking(Box::pin(async move {
-            let result = this.generate_witness(block_hash);
-            let _ = tx.send(result);
-        }));
-        match rx.await {
-            Ok(Ok(witness)) => {
-                trace!(target: "reth::ress_provider", %block_hash, elapsed = ?started_at.elapsed(), "Computed witness");
-                Ok(witness)
-            }
-            Ok(Err(error)) => Err(error),
-            Err(_) => Err(ProviderError::TrieWitnessError("dropped".to_owned())),
-        }
+        self.execution_witness(block_hash).await.map(|w| {
+            trace!(target: "reth::ress_provider", %block_hash, elapsed = ?started_at.elapsed(), "Computed witness");
+            w.state
+        })
     }
 }

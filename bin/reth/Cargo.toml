@@ -44,9 +44,10 @@ reth-node-ethereum = { workspace = true, features = ["js-tracer"] }
 reth-node-builder.workspace = true
 reth-node-metrics.workspace = true
 reth-consensus.workspace = true
-reth-tokio-util.workspace = true
 reth-ress-protocol.workspace = true
 reth-ress-provider.workspace = true
+reth-zk-ress-protocol.workspace = true
+reth-zk-ress-provider.workspace = true
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }
