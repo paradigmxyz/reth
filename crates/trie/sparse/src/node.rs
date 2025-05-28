@@ -125,7 +125,7 @@ impl<'a> ExtensionNodeRef<'a> {
 }
 
 pub fn encode_path_leaf(nibbles: &PackedNibbles, is_leaf: bool) -> SmallVec<[u8; 36]> {
-    let odd_nibbles = nibbles.length % 2 != 0;
+    let odd_nibbles = nibbles.len() % 2 != 0;
     let encoded_len = nibbles.len() / 2 + 1;
     // SAFETY: `len` is calculated correctly.
     unsafe {
@@ -138,9 +138,9 @@ pub fn encode_path_leaf(nibbles: &PackedNibbles, is_leaf: bool) -> SmallVec<[u8;
                 (false, false) => ExtensionNode::EVEN_FLAG,
             });
             if odd_nibbles {
-                pack_to_unchecked(nibbles.slice(1..).as_slice(), rest);
+                pack_to_unchecked(&nibbles.slice(1..), rest);
             } else {
-                pack_to_unchecked(nibbles.as_slice(), rest);
+                pack_to_unchecked(nibbles, rest);
             }
         })
     }
@@ -152,11 +152,18 @@ pub fn encode_path_leaf(nibbles: &PackedNibbles, is_leaf: bool) -> SmallVec<[u8;
 ///
 /// `out` must be valid for at least `(self.len() + 1) / 2` bytes.
 #[inline]
-pub unsafe fn pack_to_unchecked(nibbles: &[u8], out: &mut [MaybeUninit<u8>]) {
+pub unsafe fn pack_to_unchecked(nibbles: &PackedNibbles, out: &mut [MaybeUninit<u8>]) {
     let len = nibbles.len();
-    debug_assert!(out.len() >= len);
+    debug_assert!(out.len() >= len.div_ceil(2));
     let ptr = out.as_mut_ptr().cast::<u8>();
-    for (i, b) in nibbles.iter().copied().enumerate() {
-        ptr.add(i).write(b);
+    // TODO: just take as_le_slice of U256
+    for i in 0..len / 2 {
+        let high_nibble = nibbles.get_nibble(i * 2);
+        let low_nibble = nibbles.get_nibble(i * 2 + 1);
+        ptr.add(i).write((high_nibble << 4) | low_nibble);
+    }
+    if len % 2 != 0 {
+        let i = len / 2;
+        ptr.add(i).write(nibbles.last().unwrap_unchecked() << 4);
     }
 }

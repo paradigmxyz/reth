@@ -39,7 +39,7 @@ pub struct PackedNibbles {
 impl fmt::Debug for PackedNibbles {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PackedNibbles(0x{:x})", self.nibbles)
+        write!(f, "PackedNibbles(0x{:0width$x})", self.nibbles, width = self.length as usize / 2)
     }
 }
 
@@ -610,5 +610,50 @@ mod tests {
         let mut nibbles = PackedNibbles::from_nibbles([5, 6, 7, 8]);
         nibbles.truncate(1);
         assert_eq!(nibbles, PackedNibbles::from_nibbles([5]));
+    }
+
+    #[test]
+    fn test_packed_nibbles_push_unchecked() {
+        // Test pushing to empty nibbles
+        let mut nibbles = PackedNibbles::default();
+        nibbles.push_unchecked(0x5);
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([0x5]));
+
+        // Test pushing a second nibble
+        nibbles.push_unchecked(0xA);
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([0x5, 0xA]));
+
+        // Test pushing multiple nibbles to build a sequence
+        let mut nibbles = PackedNibbles::default();
+        for nibble in [0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8] {
+            nibbles.push_unchecked(nibble);
+        }
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8]));
+
+        // Test pushing nibbles with values that exceed 4 bits (should be masked to 0x0F)
+        let mut nibbles = PackedNibbles::default();
+        nibbles.push_unchecked(0xFF); // Should become 0xF
+        nibbles.push_unchecked(0x1A); // Should become 0xA
+        nibbles.push_unchecked(0x25); // Should become 0x5
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([0xF, 0xA, 0x5]));
+
+        // Test pushing to existing nibbles (adding to the end)
+        let mut nibbles = PackedNibbles::from_nibbles([0x1, 0x2, 0x3]);
+        nibbles.push_unchecked(0x4);
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]));
+
+        // Test boundary values (0 and 15)
+        let mut nibbles = PackedNibbles::default();
+        nibbles.push_unchecked(0x0);
+        nibbles.push_unchecked(0xF);
+        assert_eq!(nibbles, PackedNibbles::from_nibbles([0x0, 0xF]));
+
+        // Test pushing many nibbles to verify no overflow issues
+        let mut nibbles = PackedNibbles::default();
+        let test_sequence: Vec<u8> = (0..32).map(|i| i % 16).collect();
+        for &nibble in &test_sequence {
+            nibbles.push_unchecked(nibble);
+        }
+        assert_eq!(nibbles, PackedNibbles::from_nibbles(test_sequence));
     }
 }
