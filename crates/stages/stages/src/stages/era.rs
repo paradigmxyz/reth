@@ -166,33 +166,38 @@ where
     }
 
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        let era = self.item.take().ok_or(StageError::MissingDownloadBuffer)?;
-        let static_file_provider = provider.static_file_provider();
+        let height = if let Some(era) = self.item.take() {
+            let static_file_provider = provider.static_file_provider();
 
-        // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
-        // when poll_execute_ready is polled.
-        let last_header_number = static_file_provider
-            .get_highest_static_file_block(StaticFileSegment::Headers)
-            .unwrap_or_default();
+            // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
+            // when poll_execute_ready is polled.
+            let last_header_number = static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::Headers)
+                .unwrap_or_default();
 
-        // Find the latest total difficulty
-        let mut td = static_file_provider
-            .header_td_by_number(last_header_number)?
-            .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
+            // Find the latest total difficulty
+            let mut td = static_file_provider
+                .header_td_by_number(last_header_number)?
+                .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
 
-        // Although headers were downloaded in reverse order, the collector iterates it in ascending
-        // order
-        let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
+            // Although headers were downloaded in reverse order, the collector iterates it in ascending
+            // order
+            let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-        let height = era::process_iter(era, &mut writer, provider, &mut self.hash_collector, &mut td, last_header_number..=input.target()).map_err(|e| StageError::Fatal(e.into()))?;
+            let height = era::process_iter(era, &mut writer, provider, &mut self.hash_collector, &mut td, last_header_number..=input.target()).map_err(|e| StageError::Fatal(e.into()))?;
 
-        self.last_block_height.replace(height);
+            self.last_block_height.replace(height);
 
-        if !self.hash_collector.is_empty() {
-            era::build_index(provider, &mut self.hash_collector)
-                .map_err(|e| StageError::Recoverable(e.into()))?;
-            self.hash_collector.clear();
-        }
+            if !self.hash_collector.is_empty() {
+                era::build_index(provider, &mut self.hash_collector)
+                    .map_err(|e| StageError::Recoverable(e.into()))?;
+                self.hash_collector.clear();
+            }
+
+            height
+        } else {
+            input.target()
+        };
 
         Ok(ExecOutput::done(StageCheckpoint::new(height)))
     }
@@ -272,8 +277,57 @@ mod tests {
         stage_test_suite, ExecuteStageTestRunner, StageTestRunner, UnwindStageTestRunner,
     };
     use alloy_primitives::B256;
+    use assert_matches::assert_matches;
     use reth_testing_utils::generators::{self, random_header};
     use test_runner::EraTestRunner;
+
+    #[tokio::test]
+    async fn test_era_range_ends_below_target() {
+        let era_cap = 2;
+        let target = 20000;
+
+        let mut runner = EraTestRunner::default();
+
+        let input = ExecInput { target: Some(era_cap), checkpoint: None };
+        runner.seed_execution(input).unwrap();
+
+        let input = ExecInput { target: Some(target), checkpoint: None };
+        let output = runner.execute(input).await.unwrap();
+
+        runner.commit();
+
+        assert_matches!(
+            output,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint { block_number, stage_checkpoint: None },
+                done: true
+            }) if block_number == 2
+        );
+
+        let output = output.unwrap();
+        let validation_output = runner.validate_execution(input, Some(output.clone()));
+
+        assert_matches!(validation_output, Ok(()));
+
+        runner.take_responses();
+
+        let input = ExecInput { target: Some(target), checkpoint: Some(output.checkpoint) };
+        let output = runner.execute(input).await.unwrap();
+
+        runner.commit();
+
+        assert_matches!(
+            output,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint { block_number, stage_checkpoint: None },
+                done: true
+            }) if block_number == target
+        );
+
+        let validation_output = runner.validate_execution(input, output.ok());
+
+        assert_matches!(validation_output, Ok(()));
+    }
 
     mod test_runner {
         use super::*;
@@ -297,7 +351,7 @@ mod tests {
         pub(crate) struct EraTestRunner {
             channel: (watch::Sender<B256>, watch::Receiver<B256>),
             db: TestStageDB,
-            responses: Vec<(Header, BlockBody<TransactionSigned>)>,
+            responses: Option<Vec<(Header, BlockBody<TransactionSigned>)>>,
         }
 
         impl Default for EraTestRunner {
@@ -318,7 +372,7 @@ mod tests {
             }
 
             fn stage(&self) -> Self::S {
-                EraStage::new(Some(StubResponses(self.responses.clone())), EtlConfig::default())
+                EraStage::new(self.responses.clone().map(StubResponses), EtlConfig::default())
             }
         }
 
@@ -383,8 +437,9 @@ mod tests {
                         tx.commit()?;
                     }
                 }
-                self.responses =
-                    blocks.iter().map(|v| (v.header().clone(), v.body().clone())).collect();
+                self.responses.replace(
+                    blocks.iter().map(|v| (v.header().clone(), v.body().clone())).collect(),
+                );
                 Ok(blocks)
             }
 
@@ -402,7 +457,13 @@ mod tests {
                             .header_td_by_number(initial_checkpoint.saturating_sub(1))?
                             .unwrap_or_default();
 
-                        for block_num in initial_checkpoint..output.checkpoint.block_number {
+                        for block_num in initial_checkpoint..
+                            output
+                                .checkpoint
+                                .block_number
+                                .min(self.responses.as_ref().map(|v| v.len()).unwrap_or_default()
+                                    as BlockNumber)
+                        {
                             // look up the header hash
                             let hash = provider.block_hash(block_num)?.expect("no header hash");
 
@@ -564,6 +625,14 @@ mod tests {
                     }
                     _ => None,
                 })
+            }
+
+            pub(crate) fn take_responses(&mut self) {
+                self.responses.take();
+            }
+
+            pub(crate) fn commit(&self) {
+                self.db.factory.static_file_provider().commit().unwrap();
             }
         }
 
