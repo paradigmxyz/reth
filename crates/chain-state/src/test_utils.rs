@@ -25,7 +25,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
+use reth_trie::{root::state_root_unhashed, HashedPostState};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
