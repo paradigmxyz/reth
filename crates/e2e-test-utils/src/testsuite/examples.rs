@@ -1,7 +1,7 @@
 //! Example tests using the test suite framework.
 
 use crate::testsuite::{
-    actions::{AssertMineBlock, ProduceBlocks},
+    actions::{AssertMineBlock, CreateFork, ProduceBlocks},
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
@@ -65,6 +65,30 @@ async fn test_testsuite_produce_blocks() -> Result<()> {
 
     let test =
         TestBuilder::new().with_setup(setup).with_action(ProduceBlocks::<EthEngineTypes>::new(0));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_testsuite_create_fork() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let setup = Setup::default()
+        .with_chain_spec(Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .build(),
+        ))
+        .with_network(NetworkSetup::single_node());
+
+    let test = TestBuilder::new()
+        .with_setup(setup)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(CreateFork::<EthEngineTypes>::new(0, 2));
 
     test.run::<EthereumNode>().await?;
 
