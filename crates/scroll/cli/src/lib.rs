@@ -10,7 +10,7 @@ pub use spec::ScrollChainSpecParser;
 
 use clap::{value_parser, Parser};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::{common::CliNodeTypes, node::NoArgs};
+use reth_cli_commands::{common::CliNodeTypes, launcher::FnLauncher, node::NoArgs};
 use reth_cli_runner::CliRunner;
 use reth_consensus::noop::NoopConsensus;
 use reth_db::DatabaseEnv;
@@ -120,9 +120,9 @@ where
 
         let runner = CliRunner::try_default_runtime()?;
         match self.command {
-            Commands::Node(command) => {
-                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
-            }
+            Commands::Node(command) => runner.run_command_until_exit(|ctx| {
+                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+            }),
             Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<Types>()),
             Commands::InitState(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<Types>())

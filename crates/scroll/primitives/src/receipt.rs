@@ -2,9 +2,12 @@ use alloy_consensus::{
     proofs::ordered_trie_root_with_encoder, Eip2718EncodableReceipt, Eip658Value, Receipt,
     ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718,
 };
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{
+    eip2718::{Eip2718Result, Encodable2718},
+    Decodable2718,
+};
 use alloy_primitives::{Bloom, Log, B256, U256};
-use alloy_rlp::{BufMut, Decodable, Header};
+use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use reth_primitives_traits::InMemorySize;
 use scroll_alloy_consensus::{ScrollTransactionReceipt, ScrollTxType};
 
@@ -76,6 +79,11 @@ impl ScrollReceipt {
         Header { list: true, payload_length: self.rlp_encoded_fields_length(bloom) }
     }
 
+    /// Returns RLP header for inner encoding without bloom.
+    pub fn rlp_header_inner_without_bloom(&self) -> Header {
+        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
+    }
+
     /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
     /// network header.
     pub fn rlp_decode_inner(
@@ -108,6 +116,82 @@ impl ScrollReceipt {
                     RlpDecodableReceipt::rlp_decode_with_bloom(buf)?;
                 Ok(ReceiptWithBloom { receipt: Self::L1Message(receipt), logs_bloom })
             }
+        }
+    }
+
+    /// RLP-encodes receipt fields without an RLP header.
+    pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
+        match self {
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => {
+                receipt.inner.status.encode(out);
+                receipt.inner.cumulative_gas_used.encode(out);
+                receipt.inner.logs.encode(out);
+            }
+            Self::L1Message(receipt) => {
+                receipt.status.encode(out);
+                receipt.cumulative_gas_used.encode(out);
+                receipt.logs.encode(out);
+            }
+        }
+    }
+
+    /// Returns length of RLP-encoded receipt fields without an RLP header.
+    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
+        match self {
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => {
+                receipt.inner.status.length() +
+                    receipt.inner.cumulative_gas_used.length() +
+                    receipt.inner.logs.length()
+            }
+            Self::L1Message(receipt) => {
+                receipt.status.length() +
+                    receipt.cumulative_gas_used.length() +
+                    receipt.logs.length()
+            }
+        }
+    }
+
+    /// RLP-decodes the receipt from the provided buffer without bloom.
+    pub fn rlp_decode_inner_without_bloom(
+        buf: &mut &[u8],
+        tx_type: ScrollTxType,
+    ) -> alloy_rlp::Result<Self> {
+        let header = Header::decode(buf)?;
+        if !header.list {
+            return Err(alloy_rlp::Error::UnexpectedString);
+        }
+
+        let remaining = buf.len();
+        let status = Decodable::decode(buf)?;
+        let cumulative_gas_used = Decodable::decode(buf)?;
+        let logs = Decodable::decode(buf)?;
+
+        if buf.len() + header.payload_length != remaining {
+            return Err(alloy_rlp::Error::UnexpectedLength);
+        }
+
+        let inner = Receipt { status, cumulative_gas_used, logs };
+
+        match tx_type {
+            ScrollTxType::Legacy => {
+                Ok(Self::Legacy(ScrollTransactionReceipt { inner, l1_fee: Default::default() }))
+            }
+            ScrollTxType::Eip2930 => {
+                Ok(Self::Eip2930(ScrollTransactionReceipt { inner, l1_fee: Default::default() }))
+            }
+            ScrollTxType::Eip1559 => {
+                Ok(Self::Eip1559(ScrollTransactionReceipt { inner, l1_fee: Default::default() }))
+            }
+            ScrollTxType::Eip7702 => {
+                Ok(Self::Eip7702(ScrollTransactionReceipt { inner, l1_fee: Default::default() }))
+            }
+            ScrollTxType::L1Message => Ok(Self::L1Message(inner)),
         }
     }
 
@@ -189,6 +273,47 @@ impl RlpDecodableReceipt for ScrollReceipt {
         }
 
         Ok(this)
+    }
+}
+
+impl Encodable2718 for ScrollReceipt {
+    fn encode_2718_len(&self) -> usize {
+        !self.tx_type().is_legacy() as usize +
+            self.rlp_header_inner_without_bloom().length_with_payload()
+    }
+
+    fn encode_2718(&self, out: &mut dyn BufMut) {
+        if !self.tx_type().is_legacy() {
+            out.put_u8(self.tx_type() as u8);
+        }
+        self.rlp_header_inner_without_bloom().encode(out);
+        self.rlp_encode_fields_without_bloom(out);
+    }
+}
+
+impl Decodable2718 for ScrollReceipt {
+    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
+        Ok(Self::rlp_decode_inner_without_bloom(buf, ScrollTxType::try_from(ty)?)?)
+    }
+
+    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
+        Ok(Self::rlp_decode_inner_without_bloom(buf, ScrollTxType::Legacy)?)
+    }
+}
+
+impl Encodable for ScrollReceipt {
+    fn encode(&self, out: &mut dyn BufMut) {
+        self.network_encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.network_len()
+    }
+}
+
+impl Decodable for ScrollReceipt {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        Ok(Self::network_decode(buf)?)
     }
 }
 

@@ -618,6 +618,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             PeerMessage::SendTransactions(_) => {
                 unreachable!("Not emitted by session")
             }
+            PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::Other(other) => {
                 debug!(target: "net", message_id=%other.id, "Ignoring unsupported message");
             }
@@ -719,6 +720,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 } else {
                     let _ = tx.send(None);
                 }
+            }
+            NetworkHandleMessage::InternalBlockRangeUpdate(block_range_update) => {
+                self.swarm.sessions_mut().update_advertised_block_range(block_range_update);
             }
             NetworkHandleMessage::EthMessage { peer_id, message } => {
                 self.swarm.sessions_mut().send_message(&peer_id, message)

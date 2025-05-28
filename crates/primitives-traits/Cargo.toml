@@ -29,10 +29,10 @@ revm-bytecode.workspace = true
 revm-state.workspace = true
 
 # scroll
-scroll-alloy-consensus = { workspace = true, optional = true }
+scroll-alloy-consensus = { workspace = true, optional = true, features = ["k256"] }
 
 # op
-op-alloy-consensus = { workspace = true, optional = true }
+op-alloy-consensus = { workspace = true, optional = true, features = ["k256"] }
 
 # crypto
 secp256k1 = { workspace = true, features = ["recovery"], optional = true }

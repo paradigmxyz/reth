@@ -185,8 +185,16 @@ where
         self.inspect = enabled;
     }
 
+    fn precompiles(&self) -> &Self::Precompiles {
+        &self.inner.0.precompiles
+    }
+
     fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
         &mut self.inner.0.precompiles
+    }
+
+    fn inspector(&self) -> &Self::Inspector {
+        &self.inner.0.inspector
     }
 
     fn inspector_mut(&mut self) -> &mut Self::Inspector {

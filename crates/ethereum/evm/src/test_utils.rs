@@ -7,7 +7,7 @@ use parking_lot::Mutex;
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_evm::{
     block::{
-        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, ExecutableTx,
+        BlockExecutionError, BlockExecutor, BlockExecutorFactory, BlockExecutorFor, CommitChanges,
     },
     eth::{EthBlockExecutionCtx, EthEvmContext},
     ConfigureEvm, Database, EthEvm, EthEvmFactory, Evm, EvmEnvFor, EvmFactory,
@@ -86,12 +86,12 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
         Ok(())
     }
 
-    fn execute_transaction_with_result_closure(
+    fn execute_transaction_with_commit_condition(
         &mut self,
-        _tx: impl ExecutableTx<Self>,
-        _f: impl FnOnce(&ExecutionResult<HaltReason>),
-    ) -> Result<u64, BlockExecutionError> {
-        Ok(0)
+        _tx: impl alloy_evm::block::ExecutableTx<Self>,
+        _f: impl FnOnce(&ExecutionResult<HaltReason>) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        Ok(Some(0))
     }
 
     fn finish(

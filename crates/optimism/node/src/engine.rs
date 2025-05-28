@@ -21,10 +21,10 @@ use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::{OpHardfork, OpHardforks};
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
 use reth_optimism_primitives::{OpBlock, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{RecoveredBlock, SealedBlock, SignedTransaction};
 use reth_provider::StateProviderFactory;
 use reth_trie_common::{HashedPostState, KeyHasher};
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// The types used in the optimism beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -66,17 +66,19 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = OpExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = OpExecutionPayloadEnvelopeV4;
+    type ExecutionPayloadEnvelopeV5 = OpExecutionPayloadEnvelopeV4;
 }
 
 /// Validator for Optimism engine API.
 #[derive(Debug, Clone)]
-pub struct OpEngineValidator<P> {
+pub struct OpEngineValidator<P, Tx> {
     inner: OpExecutionPayloadValidator<OpChainSpec>,
     provider: P,
     hashed_addr_l2tol1_msg_passer: B256,
+    phantom: PhantomData<Tx>,
 }
 
-impl<P> OpEngineValidator<P> {
+impl<P, Tx> OpEngineValidator<P, Tx> {
     /// Instantiates a new validator.
     pub fn new<KH: KeyHasher>(chain_spec: Arc<OpChainSpec>, provider: P) -> Self {
         let hashed_addr_l2tol1_msg_passer = KH::hash_key(ADDRESS_L2_TO_L1_MESSAGE_PASSER);
@@ -84,6 +86,7 @@ impl<P> OpEngineValidator<P> {
             inner: OpExecutionPayloadValidator::new(chain_spec),
             provider,
             hashed_addr_l2tol1_msg_passer,
+            phantom: PhantomData,
         }
     }
 
@@ -95,11 +98,12 @@ impl<P> OpEngineValidator<P> {
     }
 }
 
-impl<P> PayloadValidator for OpEngineValidator<P>
+impl<P, Tx> PayloadValidator for OpEngineValidator<P, Tx>
 where
     P: StateProviderFactory + Unpin + 'static,
+    Tx: SignedTransaction + Unpin + 'static,
 {
-    type Block = OpBlock;
+    type Block = alloy_consensus::Block<Tx>;
     type ExecutionData = OpExecutionData;
 
     fn ensure_well_formed_payload(
@@ -142,15 +146,24 @@ where
     }
 }
 
-impl<Types, P> EngineValidator<Types> for OpEngineValidator<P>
+impl<Types, P, Tx> EngineValidator<Types> for OpEngineValidator<P, Tx>
 where
-    Types: PayloadTypes<PayloadAttributes = OpPayloadAttributes, ExecutionData = OpExecutionData>,
+    Types: PayloadTypes<
+        PayloadAttributes = OpPayloadAttributes,
+        ExecutionData = <Self as PayloadValidator>::ExecutionData,
+        BuiltPayload: BuiltPayload<Primitives: NodePrimitives<SignedTx = Tx>>,
+    >,
     P: StateProviderFactory + Unpin + 'static,
+    Tx: SignedTransaction + Unpin + 'static + Send + Sync,
 {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, OpPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<
+            '_,
+            Types::ExecutionData,
+            <Types as PayloadTypes>::PayloadAttributes,
+        >,
     ) -> Result<(), EngineObjectValidationError> {
         validate_withdrawals_presence(
             self.chain_spec(),
@@ -171,7 +184,7 @@ where
     fn ensure_well_formed_attributes(
         &self,
         version: EngineApiMessageVersion,
-        attributes: &OpPayloadAttributes,
+        attributes: &<Types as PayloadTypes>::PayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(
             self.chain_spec(),
@@ -235,7 +248,10 @@ pub fn validate_withdrawals_presence(
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
             }
         }
-        EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 => {
             if is_shanghai && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -301,7 +317,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(None, 1732633199);
 
-        let result = <engine::OpEngineValidator<_> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -315,7 +331,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(None, 1732633200);
 
-        let result = <engine::OpEngineValidator<_> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -329,7 +345,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(Some(b64!("0000000000000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator<_> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -343,7 +359,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(Some(b64!("0000000800000008")), 1732633200);
 
-        let result = <engine::OpEngineValidator<_> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes
@@ -357,7 +373,7 @@ mod test {
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
         let attributes = get_attributes(Some(b64!("0000000000000000")), 1732633200);
 
-        let result = <engine::OpEngineValidator<_> as EngineValidator<
+        let result = <engine::OpEngineValidator<_, _> as EngineValidator<
             OpEngineTypes,
         >>::ensure_well_formed_attributes(
             &validator, EngineApiMessageVersion::V3, &attributes

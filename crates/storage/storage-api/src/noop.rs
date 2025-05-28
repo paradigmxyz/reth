@@ -306,6 +306,13 @@ impl<C: Send + Sync, N: NodePrimitives> ReceiptProvider for NoopProvider<C, N> {
     ) -> ProviderResult<Vec<Self::Receipt>> {
         Ok(Vec::new())
     }
+
+    fn receipts_by_block_range(
+        &self,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        Ok(Vec::new())
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> ReceiptProviderIdExt for NoopProvider<C, N> {}

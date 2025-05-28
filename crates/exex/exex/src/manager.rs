@@ -1380,7 +1380,7 @@ mod tests {
         // non-canonical block
         assert_eq!(
             exex_manager.wal.iter_notifications()?.collect::<WalResult<Vec<_>>>()?,
-            [notification]
+            std::slice::from_ref(&notification)
         );
 
         // Send a `FinishedHeight` event with a canonical block

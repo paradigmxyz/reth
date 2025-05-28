@@ -1,9 +1,12 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::{transaction::Recovered, SignableTransaction, Transaction as _};
+use alloy_consensus::{transaction::Recovered, SignableTransaction};
 use alloy_primitives::{Bytes, Signature, B256};
 use alloy_rpc_types_eth::TransactionInfo;
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{
+    transaction::{OpDepositInfo, OpTransactionInfo},
+    OpTxEnvelope,
+};
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
 use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
@@ -95,11 +98,11 @@ where
         tx: Recovered<OpTransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let mut tx = tx.convert::<OpTxEnvelope>();
+        let tx = tx.convert::<OpTxEnvelope>();
         let mut deposit_receipt_version = None;
         let mut deposit_nonce = None;
 
-        if let OpTxEnvelope::Deposit(tx) = tx.inner_mut() {
+        if tx.is_deposit() {
             // for depost tx we need to fetch the receipt
             self.inner
                 .eth_api
@@ -112,42 +115,11 @@ where
                         deposit_nonce = receipt.deposit_nonce;
                     }
                 });
-
-            // For consistency with op-geth, we always return `0x0` for mint if it is
-            // missing This is because op-geth does not distinguish
-            // between null and 0, because this value is decoded from RLP where null is
-            // represented as 0
-            tx.inner_mut().mint = Some(tx.mint.unwrap_or_default());
         }
+        let deposit_meta = OpDepositInfo { deposit_nonce, deposit_receipt_version };
+        let op_tx_info = OpTransactionInfo::new(tx_info, deposit_meta);
 
-        let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
-        } = tx_info;
-
-        let effective_gas_price = if tx.is_deposit() {
-            // For deposits, we must always set the `gasPrice` field to 0 in rpc
-            // deposit tx don't have a gas price field, but serde of `Transaction` will take care of
-            // it
-            0
-        } else {
-            base_fee
-                .map(|base_fee| {
-                    tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
-                })
-                .unwrap_or_else(|| tx.max_fee_per_gas())
-        };
-
-        Ok(Transaction {
-            inner: alloy_rpc_types_eth::Transaction {
-                inner: tx,
-                block_hash,
-                block_number,
-                transaction_index,
-                effective_gas_price: Some(effective_gas_price),
-            },
-            deposit_nonce,
-            deposit_receipt_version,
-        })
+        Ok(Transaction::from_transaction(tx, op_tx_info))
     }
 
     fn build_simulate_v1_transaction(

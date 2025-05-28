@@ -1,4 +1,4 @@
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256};
@@ -288,7 +288,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(&inspector).into())
+                        Ok(FourByteFrame::from(&inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -311,7 +311,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -342,7 +342,7 @@ where
                                 Ok(frame)
                             })
                             .await?;
-                        return Ok(frame.into())
+                        Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                     GethDebugBuiltInTracerType::MuxTracer => {
@@ -381,7 +381,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        Ok(frame)
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
                         let flat_call_config = tracer_config
@@ -407,7 +407,7 @@ where
                             })
                             .await?;
 
-                        return Ok(frame.into());
+                        Ok(frame.into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -941,7 +941,7 @@ where
 
     /// Handler for `debug_getBadBlocks`
     async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(vec![])
     }
 
     /// Handler for `debug_traceChain`

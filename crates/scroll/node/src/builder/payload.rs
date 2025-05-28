@@ -18,6 +18,8 @@ pub struct ScrollPayloadBuilder<Txs = ()> {
     pub best_transactions: Txs,
 }
 
+const SCROLL_GAS_LIMIT: u64 = 20_000_000;
+
 impl<Txs> ScrollPayloadBuilder<Txs> {
     /// A helper method to initialize [`reth_scroll_payload::ScrollPayloadBuilder`] with the
     /// given EVM config.
@@ -41,11 +43,18 @@ impl<Txs> ScrollPayloadBuilder<Txs> {
         Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
         Txs: ScrollPayloadTransactions<Pool::Transaction>,
     {
+        let gas_limit = if let Some(gas) = ctx.payload_builder_config().gas_limit() {
+            gas
+        } else {
+            tracing::warn!(target: "reth::cli", "Using {SCROLL_GAS_LIMIT} gas limit for ScrollPayloadBuilder. Configure with --builder.gaslimit");
+            SCROLL_GAS_LIMIT
+        };
+
         let payload_builder = reth_scroll_payload::ScrollPayloadBuilder::new(
             pool,
             evm_config,
             ctx.provider().clone(),
-            ScrollBuilderConfig::new(ctx.payload_builder_config().gas_limit()),
+            ScrollBuilderConfig::new(gas_limit),
         )
         .with_transactions(self.best_transactions);
 

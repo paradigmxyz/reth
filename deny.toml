@@ -103,6 +103,7 @@ allow-git = [
     "https://github.com/paradigmxyz/revm-inspectors",
     "https://github.com/alloy-rs/evm",
     "https://github.com/alloy-rs/hardforks",
+    "https://github.com/paradigmxyz/jsonrpsee",
     "https://github.com/scroll-tech/bn254",
     "https://github.com/scroll-tech/sp1-intrinsics",
     "https://github.com/scroll-tech/poseidon-bn254",

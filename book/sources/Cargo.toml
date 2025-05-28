@@ -13,4 +13,4 @@ reth-tracing = { path = "../../crates/tracing" }
 reth-node-api = { path = "../../crates/node/api" }
 
 [patch.crates-io]
-revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth" }
+revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth-v74" }

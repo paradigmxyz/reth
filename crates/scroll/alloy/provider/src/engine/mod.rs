@@ -35,7 +35,7 @@ pub trait ScrollEngineApi {
     /// Modifications:
     /// - Adds the below fields to the `payload_attributes`:
     ///     - transactions: an optional list of transactions to include at the start of the block.
-    ///     - no_tx_pool: a boolean which signals whether pool transactions need to be included in
+    ///     - `no_tx_pool`: a boolean which signals whether pool transactions need to be included in
     ///       the payload building task.
     async fn fork_choice_updated_v1(
         &self,
@@ -68,7 +68,7 @@ pub trait ScrollEngineApi {
     /// Returns the execution payload bodies by the range starting at `start`, containing `count`
     /// blocks.
     ///
-    /// WARNING: This method is associated with the BeaconBlocksByRange message in the consensus
+    /// WARNING: This method is associated with the `BeaconBlocksByRange` message in the consensus
     /// layer p2p specification, meaning the input should be treated as untrusted or potentially
     /// adversarial.
     ///
@@ -81,7 +81,7 @@ pub trait ScrollEngineApi {
         count: U64,
     ) -> ScrollEngineApiResult<ExecutionPayloadBodiesV1>;
 
-    /// This function will return the ClientVersionV1 object.
+    /// This function will return the `ClientVersionV1` object.
     /// See also:
     /// <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/identification.md#engine_getclientversionv1>make fmt
     ///

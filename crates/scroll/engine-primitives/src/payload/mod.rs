@@ -69,6 +69,7 @@ where
     type ExecutionPayloadEnvelopeV2 = ExecutionPayloadEnvelopeV2;
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
+    type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV4;
 }
 
 /// A default payload type for [`ScrollEngineTypes`]

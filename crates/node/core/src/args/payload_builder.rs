@@ -1,6 +1,6 @@
 use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
-use alloy_eips::{eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M, merge::SLOT_DURATION};
+use alloy_eips::merge::SLOT_DURATION;
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
@@ -18,7 +18,7 @@ pub struct PayloadBuilderArgs {
 
     /// Target gas limit for built blocks.
     #[arg(long = "builder.gaslimit", value_name = "GAS_LIMIT")]
-    pub gas_limit: u64,
+    pub gas_limit: Option<u64>,
 
     /// The interval at which the job should build a new payload after the last.
     ///
@@ -41,8 +41,8 @@ impl Default for PayloadBuilderArgs {
     fn default() -> Self {
         Self {
             extra_data: default_extra_data(),
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_36M,
             interval: Duration::from_secs(1),
+            gas_limit: None,
             deadline: SLOT_DURATION,
             max_payload_tasks: 3,
         }
@@ -62,7 +62,7 @@ impl PayloadBuilderConfig for PayloadBuilderArgs {
         self.deadline
     }
 
-    fn gas_limit(&self) -> u64 {
+    fn gas_limit(&self) -> Option<u64> {
         self.gas_limit
     }
 
@@ -112,14 +112,9 @@ mod tests {
 
     #[test]
     fn test_args_with_valid_max_tasks() {
-        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
-            "reth",
-            "--builder.max-tasks",
-            "1",
-            "--builder.gaslimit",
-            "10000000",
-        ])
-        .args;
+        let args =
+            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.max-tasks", "1"])
+                .args;
         assert_eq!(args.max_payload_tasks, 1)
     }
 
@@ -140,8 +135,6 @@ mod tests {
             "reth",
             "--builder.extradata",
             extra_data.as_str(),
-            "--builder.gaslimit",
-            "10000000",
         ])
         .args;
         assert_eq!(args.extra_data, extra_data);
@@ -161,38 +154,23 @@ mod tests {
     #[test]
     fn payload_builder_args_default_sanity_check() {
         let default_args = PayloadBuilderArgs::default();
-        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
-            "reth",
-            "--builder.gaslimit",
-            "36000000",
-        ])
-        .args;
+        let args = CommandParser::<PayloadBuilderArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
     }
 
     #[test]
     fn test_args_with_s_interval() {
-        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
-            "reth",
-            "--builder.interval",
-            "50",
-            "--builder.gaslimit",
-            "10000000",
-        ])
-        .args;
+        let args =
+            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50"])
+                .args;
         assert_eq!(args.interval, Duration::from_secs(50));
     }
 
     #[test]
     fn test_args_with_ms_interval() {
-        let args = CommandParser::<PayloadBuilderArgs>::parse_from([
-            "reth",
-            "--builder.interval",
-            "50ms",
-            "--builder.gaslimit",
-            "10000000",
-        ])
-        .args;
+        let args =
+            CommandParser::<PayloadBuilderArgs>::parse_from(["reth", "--builder.interval", "50ms"])
+                .args;
         assert_eq!(args.interval, Duration::from_millis(50));
     }
 }

@@ -14,14 +14,14 @@ use alloy_eips::Encodable2718;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, BlockValidationError, ExecutableTx, OnStateHook,
+        BlockExecutorFor, BlockValidationError, CommitChanges, ExecutableTx, OnStateHook,
     },
     Database, Evm, EvmFactory, FromRecoveredTx, FromTxWithEncoded,
 };
 use alloy_primitives::{B256, U256};
 use revm::{
     context::{
-        result::{InvalidTransaction, ResultAndState},
+        result::{ExecutionResult, InvalidTransaction, ResultAndState},
         TxEnv,
     },
     database::State,
@@ -117,11 +117,11 @@ where
         Ok(())
     }
 
-    fn execute_transaction_with_result_closure(
+    fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutableTx<Self>,
-        f: impl FnOnce(&revm::context::result::ExecutionResult<<Self::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, BlockExecutionError> {
+        f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
         let chain_spec = &self.spec;
         let is_l1_message = tx.tx().ty() == L1_MESSAGE_TRANSACTION_TYPE;
         // The sum of the transaction’s gas limit and the gas utilized in this block prior,
@@ -176,7 +176,9 @@ where
         let ResultAndState { result, state } =
             self.evm.transact(tx).map_err(move |err| BlockExecutionError::evm(err, hash))?;
 
-        f(&result);
+        if !f(&result).should_commit() {
+            return Ok(None)
+        };
 
         let l1_fee = if is_l1_message {
             U256::ZERO
@@ -198,7 +200,7 @@ where
 
         self.evm.db_mut().commit(state);
 
-        Ok(gas_used)
+        Ok(Some(gas_used))
     }
 
     fn finish(self) -> Result<(Self::Evm, BlockExecutionResult<R::Receipt>), BlockExecutionError> {

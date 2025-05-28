@@ -11,7 +11,7 @@ use core::{
 use std::sync::OnceLock;
 
 use alloy_consensus::{
-    transaction::{Either, RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    transaction::{Either, RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable},
     SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
@@ -85,6 +85,27 @@ impl SignedTransaction for ScrollTransactionSigned {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
 
+    fn recover_signer_unchecked_with_buf(
+        &self,
+        buf: &mut Vec<u8>,
+    ) -> Result<Address, RecoveryError> {
+        match &self.transaction {
+            // Scroll's L1 message does not have a signature. Directly return the `sender` address.
+            ScrollTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
+            ScrollTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
+            ScrollTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
+            ScrollTypedTransaction::Eip7702(tx) => tx.encode_for_signing(buf),
+            ScrollTypedTransaction::L1Message(tx) => return Ok(tx.sender),
+        };
+        recover_signer_unchecked(&self.signature, keccak256(buf))
+    }
+
+    fn recalculate_hash(&self) -> B256 {
+        keccak256(self.encoded_2718())
+    }
+}
+
+impl SignerRecoverable for ScrollTransactionSigned {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         // Scroll's L1 message does not have a signature. Directly return the `sender` address.
         if let ScrollTypedTransaction::L1Message(TxL1Message { sender, .. }) = self.transaction {
@@ -105,25 +126,6 @@ impl SignedTransaction for ScrollTransactionSigned {
         let Self { transaction, signature, .. } = self;
         let signature_hash = transaction.signature_hash();
         recover_signer_unchecked(signature, signature_hash)
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        match &self.transaction {
-            // Scroll's L1 message does not have a signature. Directly return the `sender` address.
-            ScrollTypedTransaction::Legacy(tx) => tx.encode_for_signing(buf),
-            ScrollTypedTransaction::Eip2930(tx) => tx.encode_for_signing(buf),
-            ScrollTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
-            ScrollTypedTransaction::Eip7702(tx) => tx.encode_for_signing(buf),
-            ScrollTypedTransaction::L1Message(tx) => return Ok(tx.sender),
-        };
-        recover_signer_unchecked(&self.signature, keccak256(buf))
-    }
-
-    fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
     }
 }
 

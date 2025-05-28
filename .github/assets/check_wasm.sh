@@ -73,6 +73,7 @@ exclude_crates=(
   reth-optimism-txpool # reth-transaction-pool
   reth-era-downloader # tokio
   reth-era-utils # tokio
+  reth-tracing-otlp
   reth-scroll-cli # tokio
   reth-scroll-node # tokio
   reth-scroll # tokio

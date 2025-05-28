@@ -44,7 +44,7 @@ mod tests {
     use crate::{ScrollEvmConfig, ScrollRethReceiptBuilder};
     use std::{convert::Infallible, sync::Arc};
 
-    use alloy_consensus::{Block, BlockBody, Header};
+    use alloy_consensus::{transaction::SignerRecoverable, Block, BlockBody, Header};
     use alloy_eips::{
         eip7702::{constants::PER_EMPTY_ACCOUNT_COST, Authorization, SignedAuthorization},
         Typed2718,
@@ -56,7 +56,7 @@ mod tests {
     };
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::ConfigureEvm;
-    use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SignedTransaction};
+    use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
     use reth_scroll_chainspec::{ScrollChainConfig, ScrollChainSpec, ScrollChainSpecBuilder};
     use reth_scroll_primitives::{
         ScrollBlock, ScrollPrimitives, ScrollReceipt, ScrollTransactionSigned,
@@ -243,8 +243,8 @@ mod tests {
         }
 
         // execute and verify output
-        let res = strategy
-            .execute_transaction(transaction.try_into_recovered().unwrap().as_recovered_ref());
+        let res =
+            strategy.execute_transaction(transaction.try_into_recovered()?.as_recovered_ref());
 
         // check for error or execution outcome
         let output = strategy.apply_post_execution_changes()?;

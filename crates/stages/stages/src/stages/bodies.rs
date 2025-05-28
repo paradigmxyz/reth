@@ -309,7 +309,7 @@ mod tests {
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
-    /// Same as [partial_body_download] except the `batch_size` is not hit.
+    /// Same as [`partial_body_download`] except the `batch_size` is not hit.
     #[tokio::test]
     async fn full_body_download() {
         let (stage_progress, previous_stage) = (1, 20);
@@ -348,7 +348,7 @@ mod tests {
         assert!(runner.validate_execution(input, output.ok()).is_ok(), "execution validation");
     }
 
-    /// Same as [full_body_download] except we have made progress before
+    /// Same as [`full_body_download`] except we have made progress before
     #[tokio::test]
     async fn sync_from_previous_progress() {
         let (stage_progress, previous_stage) = (1, 21);

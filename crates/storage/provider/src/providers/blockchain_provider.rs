@@ -440,6 +440,13 @@ impl<N: ProviderNodeTypes> ReceiptProvider for BlockchainProvider<N> {
     ) -> ProviderResult<Vec<Self::Receipt>> {
         self.consistent_provider()?.receipts_by_tx_range(range)
     }
+
+    fn receipts_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        self.consistent_provider()?.receipts_by_block_range(block_range)
+    }
 }
 
 impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
@@ -792,7 +799,9 @@ mod tests {
     use reth_errors::ProviderError;
     use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
     use reth_execution_types::{Chain, ExecutionOutcome};
-    use reth_primitives_traits::{BlockBody, RecoveredBlock, SealedBlock, SignedTransaction};
+    use reth_primitives_traits::{
+        BlockBody, RecoveredBlock, SealedBlock, SignedTransaction, SignerRecoverable,
+    };
     use reth_static_file_types::StaticFileSegment;
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,

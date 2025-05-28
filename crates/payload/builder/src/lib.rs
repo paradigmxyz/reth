@@ -122,4 +122,6 @@ pub use traits::{KeepPayloadJobAlive, PayloadJob, PayloadJobGenerator};
 
 // re-export the Ethereum engine primitives for convenience
 #[doc(inline)]
-pub use reth_ethereum_engine_primitives::{EthBuiltPayload, EthPayloadBuilderAttributes};
+pub use reth_ethereum_engine_primitives::{
+    BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes,
+};
