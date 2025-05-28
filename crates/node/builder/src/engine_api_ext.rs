@@ -12,6 +12,7 @@ use tokio::sync::oneshot;
 /// Provides access to an `EngineApi` instance with a callback
 #[derive(Debug)]
 pub struct EngineApiFn<B, F> {
+
     /// The inner builder that constructs the actual `EngineApi`
     inner: B,
     /// Optional callback function to execute with the built API

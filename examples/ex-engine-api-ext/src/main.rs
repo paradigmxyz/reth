@@ -8,7 +8,7 @@
 
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
-use reth_node_builder::{EngineApiBuilderExt, EngineNodeLauncher, NodeBuilder, NodeConfig};
+use reth_node_builder::{EngineApiBuilderExt, EngineApiFn, EngineNodeLauncher, LaunchNode, NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{
     args::RollupArgs,
@@ -21,6 +21,7 @@ use tokio::sync::oneshot;
 
 #[tokio::main]
 async fn main() {
+
     // Op node configuration and setup
     let config = NodeConfig::new(BASE_MAINNET.clone());
     let db = create_test_rw_db();
@@ -30,33 +31,14 @@ async fn main() {
 
     let (engine_api_tx, engine_api_rx) = oneshot::channel();
 
-    let default_builder: OpEngineApiBuilder<OpEngineValidatorBuilder> =
-        OpEngineApiBuilder::default();
-
-    let builder_with_sender = default_builder.with_sender(engine_api_tx);
+    let engine_api = EngineApiFn::new(OpEngineApiBuilder::<OpEngineValidatorBuilder>::default() , move |api| {
+        let _ = engine_api_tx.send(api);
+    });
 
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types_and_provider::<OpNode, BlockchainProvider<NodeTypesWithDBAdapter<OpNode, _>>>()
+        .with_types::<OpNode>()
         .with_components(op_node.components())
-        .with_add_ons(OpAddOns::default().rpc_add_ons.with_engine_api(builder_with_sender))
-        .on_component_initialized(move |ctx| {
-            let _provider = ctx.provider();
-            Ok(())
-        })
-        .on_node_started(|_full_node| Ok(()))
-        .on_rpc_started(|_ctx, handles| {
-            let _client = handles.rpc.http_client();
-            Ok(())
-        })
-        .launch_with_fn(|builder| {
-            let launcher = EngineNodeLauncher::new(
-                tasks.executor(),
-                builder.config.datadir(),
-                Default::default(),
-            );
-            builder.launch_with(launcher)
-        })
-        .await
-        .expect("Failed to launch op node");
+        .with_add_ons(OpAddOns::default().rpc_add_ons.with_engine_api(engine_api))
+        .check_launch();
 }
