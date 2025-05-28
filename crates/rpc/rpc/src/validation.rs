@@ -83,7 +83,6 @@ where
 
         inner.metrics.disallow_size.set(inner.disallow.len() as f64);
 
-        //hash metric with label using the gauge macro
         let disallow_hash = hash_disallow_list(&inner.disallow);
         let hash_gauge = gauge!("builder_validation_disallow_hash", "hash" => disallow_hash);
         hash_gauge.set(1.0);
