@@ -253,15 +253,20 @@ impl PackedNibbles {
         }
 
         // Fast path for full slice
-        if start == 0 && end == self.len() {
+        let slice_to_end = end == self.len();
+        if start == 0 && slice_to_end {
             return *self;
         }
 
         let nibble_len = end - start;
 
         // Shift so that the first requested nibble becomes the least significant one
-        let shift = (self.len() - end) * 4;
-        let shifted = if shift == 0 { self.nibbles } else { self.nibbles.wrapping_shr(shift) };
+        let shifted = if slice_to_end {
+            self.nibbles
+        } else {
+            let shift = (self.len() - end) * 4;
+            self.nibbles.wrapping_shr(shift)
+        };
         // Mask out everything to the left of the slice
         let nibbles = shifted.bitand(SLICE_MASKS[nibble_len]);
 
