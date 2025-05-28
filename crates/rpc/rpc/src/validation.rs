@@ -713,4 +713,15 @@ mod tests {
         // Empty hash should match what we observed in the metrics test
         assert_eq!(empty_hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     }
+
+    #[test]
+    //ensures parity with rbuilder hashing https://github.com/flashbots/rbuilder/blob/962c8444cdd490a216beda22c7eec164db9fc3ac/crates/rbuilder/src/live_builder/block_list_provider.rs#L248
+    fn test_disallow_list_hash_rbuilder_parity() {
+        let json = r#"["0x05E0b5B40B7b66098C2161A5EE11C5740A3A7C45","0x01e2919679362dFBC9ee1644Ba9C6da6D6245BB1","0x03893a7c7463AE47D46bc7f091665f1893656003","0x04DBA1194ee10112fE6C3207C0687DEf0e78baCf"]"#;
+        let blocklist: Vec<Address> = serde_json::from_str(json).unwrap();
+        let blocklist: HashSet<Address> = blocklist.into_iter().collect();
+        let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608"; 
+        let hash = hash_disallow_list(&blocklist);
+        assert_eq!(expected_hash, hash);
+    }
 }
