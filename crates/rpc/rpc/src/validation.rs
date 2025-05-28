@@ -49,18 +49,6 @@ pub struct ValidationApi<Provider, E: ConfigureEvm> {
     inner: Arc<ValidationApiInner<Provider, E>>,
 }
 
-fn hash_disallow_list(disallow: &HashSet<Address>) -> String {
-    let mut sorted: Vec<_> = disallow.iter().collect();
-    sorted.sort(); // sort for deterministic hashing
-
-    let mut hasher = Sha256::new();
-    for addr in sorted {
-        hasher.update(addr.as_slice());
-    }
-
-    format!("{:x}", hasher.finalize())
-}
-
 impl<Provider, E> ValidationApi<Provider, E>
 where
     E: ConfigureEvm,
@@ -520,6 +508,22 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm> {
     task_spawner: Box<dyn TaskSpawner>,
     /// Validation metrics
     metrics: ValidationMetrics,
+}
+
+/// Calculates a deterministic hash of the blocklist for change detection.
+///
+/// This function sorts addresses to ensure deterministic output regardless of
+/// insertion order, then computes a SHA256 hash of the concatenated addresses.
+fn hash_disallow_list(disallow: &HashSet<Address>) -> String {
+    let mut sorted: Vec<_> = disallow.iter().collect();
+    sorted.sort(); // sort for deterministic hashing
+
+    let mut hasher = Sha256::new();
+    for addr in sorted {
+        hasher.update(addr.as_slice());
+    }
+
+    format!("{:x}", hasher.finalize())
 }
 
 impl<Provider, E: ConfigureEvm> fmt::Debug for ValidationApiInner<Provider, E> {
