@@ -2523,15 +2523,9 @@ where
         input.append(revert_state);
 
         // Extend with contents of parent in-memory blocks.
-        let mut extend_trie_updates = true;
-        for block in blocks.iter().rev() {
-            if let Some(trie_updates) = block.trie_updates().filter(|_| extend_trie_updates) {
-                input.append_cached_ref(trie_updates, block.hashed_state())
-            } else {
-                extend_trie_updates = false;
-                input.append_ref(block.hashed_state())
-            }
-        }
+        input.extend_with_blocks(
+            blocks.iter().rev().map(|block| (block.hashed_state(), block.trie_updates())),
+        );
 
         Ok(input)
     }
