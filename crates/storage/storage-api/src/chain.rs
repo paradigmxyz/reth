@@ -85,12 +85,33 @@ impl<T, Provider, Primitives: FullNodePrimitives> ChainStorageReader<Provider, P
 }
 
 /// Ethereum storage implementation.
-#[derive(Debug, Clone, Copy)]
-pub struct EthStorage<T = TransactionSigned, H = Header>(PhantomData<(T, H)>);
+#[derive(Debug, Clone)]
+pub struct EthStorage<T = TransactionSigned, H = Header> {
+    chain_spec: Option<Box<dyn EthereumHardforks>>,
+    _marker: PhantomData<(T, H)>,
+}
 
 impl<T, H> Default for EthStorage<T, H> {
     fn default() -> Self {
-        Self(Default::default())
+        Self {
+            chain_spec: None,
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl<T, H> EthStorage<T, H> {
+    /// Creates a new instance with a specific chain specification
+    pub fn new(chain_spec: Box<dyn EthereumHardforks>) -> Self {
+        Self {
+            chain_spec: Some(chain_spec),
+            _marker: Default::default(),
+        }
+    }
+
+    /// Sets the chain specification
+    pub fn set_chain_spec(&mut self, chain_spec: Box<dyn EthereumHardforks>) {
+        self.chain_spec = Some(chain_spec);
     }
 }
 
@@ -158,8 +179,8 @@ where
         provider: &Provider,
         inputs: Vec<ReadBodyInput<'_, Self::Block>>,
     ) -> ProviderResult<Vec<<Self::Block as Block>::Body>> {
-        // TODO: Ideally storage should hold its own copy of chain spec
-        let chain_spec = provider.chain_spec();
+        // Use local chain spec if available, otherwise fallback to provider's chain spec
+        let chain_spec = self.chain_spec.as_ref().map(|cs| cs.as_ref()).unwrap_or_else(|| provider.chain_spec());
 
         let mut withdrawals_cursor = provider.tx_ref().cursor_read::<tables::BlockWithdrawals>()?;
 
