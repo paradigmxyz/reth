@@ -49,6 +49,7 @@ use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use state::TreeState;
 use std::{
+    borrow::Cow,
     fmt::Debug,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -728,12 +729,12 @@ where
     ///
     /// The header is required as an arg, because we might be checking that the header is a fork
     /// block before it's in the tree state and before it's in the database.
-    fn is_fork(&self, target_header: SealedHeader<N::BlockHeader>) -> ProviderResult<bool> {
+    fn is_fork(&self, target_header: &SealedHeader<N::BlockHeader>) -> ProviderResult<bool> {
         let target_hash = target_header.hash();
         // verify that the given hash is not part of an extension of the canon chain.
         let canonical_head = self.state.tree_state.canonical_head();
         let mut current_hash;
-        let mut current_block = target_header;
+        let mut current_block = Cow::Borrowed(target_header);
         // We do not query the `target_header` using `self.sealed_header_by_hash` because it is
         // already provided as an argument and may not be available in the database yet.
         loop {
@@ -747,7 +748,7 @@ where
             current_hash = current_block.parent_hash();
 
             let Some(next_block) = self.sealed_header_by_hash(current_hash)? else { break };
-            current_block = next_block;
+            current_block = Cow::Owned(next_block);
         }
 
         // verify that the given hash is not already part of canonical chain stored in memory
@@ -2324,7 +2325,7 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
 
-        let is_fork = ensure_ok!(self.is_fork(block.sealed_header().clone()));
+        let is_fork = ensure_ok!(self.is_fork(block.sealed_header()));
         let missing_trie_updates =
             self.has_ancestors_with_missing_trie_updates(block.sealed_header());
         // If the block is a fork or has ancestors with missing trie updates, we don't save the trie
@@ -4146,10 +4147,7 @@ mod tests {
         test_harness.check_canon_head(chain_b_tip_hash);
 
         // verify that chain A is now considered a fork
-        assert!(test_harness
-            .tree
-            .is_fork(chain_a.last().unwrap().sealed_header().clone())
-            .unwrap());
+        assert!(test_harness.tree.is_fork(chain_a.last().unwrap().sealed_header()).unwrap());
     }
 
     #[tokio::test]
