@@ -19,7 +19,7 @@ use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
 use reth_tasks::TaskSpawner;
 use reth_trie::{MultiProofTargets, Nibbles, TrieInput};
-use reth_zk_ress_protocol::RessProtocolProvider;
+use reth_zk_ress_protocol::ZkRessProtocolProvider;
 use schnellru::{ByLength, LruMap};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::{oneshot, Semaphore};
@@ -195,7 +195,7 @@ where
     }
 }
 
-impl<P, E> RessProtocolProvider for RethRessProtocolProvider<P, E>
+impl<P, E> ZkRessProtocolProvider for RethRessProtocolProvider<P, E>
 where
     P: BlockReader<Block = Block> + StateProviderFactory + Clone + 'static,
     E: ConfigureEvm<Primitives = EthPrimitives> + 'static,

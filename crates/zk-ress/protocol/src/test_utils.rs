@@ -1,8 +1,8 @@
 //! Miscellaneous test utilities.
 
-use crate::RessProtocolProvider;
+use crate::ZkRessProtocolProvider;
 use alloy_consensus::Header;
-use alloy_primitives::{map::B256HashMap, Bytes, B256};
+use alloy_primitives::{B256, Bytes, map::B256HashMap};
 use reth_ethereum_primitives::BlockBody;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
@@ -10,11 +10,11 @@ use std::{
     time::Duration,
 };
 
-/// Noop implementation of [`RessProtocolProvider`].
+/// Noop implementation of [`ZkRessProtocolProvider`].
 #[derive(Clone, Copy, Default, Debug)]
-pub struct NoopRessProtocolProvider;
+pub struct NoopZkRessProtocolProvider;
 
-impl RessProtocolProvider for NoopRessProtocolProvider {
+impl ZkRessProtocolProvider for NoopZkRessProtocolProvider {
     fn header(&self, _block_hash: B256) -> ProviderResult<Option<Header>> {
         Ok(None)
     }
@@ -32,7 +32,7 @@ impl RessProtocolProvider for NoopRessProtocolProvider {
     }
 }
 
-/// Mock implementation of [`RessProtocolProvider`].
+/// Mock implementation of [`ZkRessProtocolProvider`].
 #[derive(Clone, Default, Debug)]
 pub struct MockRessProtocolProvider {
     headers: Arc<Mutex<B256HashMap<Header>>>,
@@ -90,7 +90,7 @@ impl MockRessProtocolProvider {
     }
 }
 
-impl RessProtocolProvider for MockRessProtocolProvider {
+impl ZkRessProtocolProvider for MockRessProtocolProvider {
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         Ok(self.headers.lock().unwrap().get(&block_hash).cloned())
     }

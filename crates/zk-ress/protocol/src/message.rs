@@ -6,31 +6,31 @@
 use crate::NodeType;
 use alloy_consensus::Header;
 use alloy_primitives::{
+    B256, BlockHash, Bytes,
     bytes::{Buf, BufMut},
-    BlockHash, Bytes, B256,
 };
 use alloy_rlp::{BytesMut, Decodable, Encodable, RlpDecodable, RlpEncodable};
-use reth_eth_wire::{message::RequestPair, protocol::Protocol, Capability};
+use reth_eth_wire::{Capability, message::RequestPair, protocol::Protocol};
 use reth_ethereum_primitives::BlockBody;
 
 /// An Ress protocol message, containing a message ID and payload.
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct RessProtocolMessage {
+pub struct ZkRessProtocolMessage {
     /// The unique identifier representing the type of the Ress message.
-    pub message_type: RessMessageID,
+    pub message_type: ZkRessMessageID,
     /// The content of the message, including specific data based on the message type.
-    pub message: RessMessage,
+    pub message: ZkRessMessage,
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a> arbitrary::Arbitrary<'a> for RessProtocolMessage {
+impl<'a> arbitrary::Arbitrary<'a> for ZkRessProtocolMessage {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let message: RessMessage = u.arbitrary()?;
+        let message: ZkRessMessage = u.arbitrary()?;
         Ok(Self { message_type: message.message_id(), message })
     }
 }
 
-impl RessProtocolMessage {
+impl ZkRessProtocolMessage {
     /// Returns the capability for the flavor of `zkress` protocol.
     pub const fn capability(name: &'static str, version: usize) -> Capability {
         Capability::new_static(name, version)
@@ -43,41 +43,41 @@ impl RessProtocolMessage {
 
     /// Create node type message.
     pub const fn node_type(node_type: NodeType) -> Self {
-        RessMessage::NodeType(node_type).into_protocol_message()
+        ZkRessMessage::NodeType(node_type).into_protocol_message()
     }
 
     /// Headers request.
     pub const fn get_headers(request_id: u64, request: GetHeaders) -> Self {
-        RessMessage::GetHeaders(RequestPair { request_id, message: request })
+        ZkRessMessage::GetHeaders(RequestPair { request_id, message: request })
             .into_protocol_message()
     }
 
     /// Headers response.
     pub const fn headers(request_id: u64, headers: Vec<Header>) -> Self {
-        RessMessage::Headers(RequestPair { request_id, message: headers }).into_protocol_message()
+        ZkRessMessage::Headers(RequestPair { request_id, message: headers }).into_protocol_message()
     }
 
     /// Block bodies request.
     pub const fn get_block_bodies(request_id: u64, block_hashes: Vec<B256>) -> Self {
-        RessMessage::GetBlockBodies(RequestPair { request_id, message: block_hashes })
+        ZkRessMessage::GetBlockBodies(RequestPair { request_id, message: block_hashes })
             .into_protocol_message()
     }
 
     /// Block bodies response.
     pub const fn block_bodies(request_id: u64, bodies: Vec<BlockBody>) -> Self {
-        RessMessage::BlockBodies(RequestPair { request_id, message: bodies })
+        ZkRessMessage::BlockBodies(RequestPair { request_id, message: bodies })
             .into_protocol_message()
     }
 
     /// Execution witness request.
     pub const fn get_witness(request_id: u64, block_hash: BlockHash) -> Self {
-        RessMessage::GetWitness(RequestPair { request_id, message: block_hash })
+        ZkRessMessage::GetWitness(RequestPair { request_id, message: block_hash })
             .into_protocol_message()
     }
 
     /// Execution witness response.
     pub const fn witness(request_id: u64, witness: Vec<Bytes>) -> Self {
-        RessMessage::Witness(RequestPair { request_id, message: witness }).into_protocol_message()
+        ZkRessMessage::Witness(RequestPair { request_id, message: witness }).into_protocol_message()
     }
 
     /// Return RLP encoded message.
@@ -89,21 +89,23 @@ impl RessProtocolMessage {
 
     /// Decodes a `RessProtocolMessage` from the given message buffer.
     pub fn decode_message(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        let message_type = RessMessageID::decode(buf)?;
+        let message_type = ZkRessMessageID::decode(buf)?;
         let message = match message_type {
-            RessMessageID::NodeType => RessMessage::NodeType(NodeType::decode(buf)?),
-            RessMessageID::GetHeaders => RessMessage::GetHeaders(RequestPair::decode(buf)?),
-            RessMessageID::Headers => RessMessage::Headers(RequestPair::decode(buf)?),
-            RessMessageID::GetBlockBodies => RessMessage::GetBlockBodies(RequestPair::decode(buf)?),
-            RessMessageID::BlockBodies => RessMessage::BlockBodies(RequestPair::decode(buf)?),
-            RessMessageID::GetWitness => RessMessage::GetWitness(RequestPair::decode(buf)?),
-            RessMessageID::Witness => RessMessage::Witness(RequestPair::decode(buf)?),
+            ZkRessMessageID::NodeType => ZkRessMessage::NodeType(NodeType::decode(buf)?),
+            ZkRessMessageID::GetHeaders => ZkRessMessage::GetHeaders(RequestPair::decode(buf)?),
+            ZkRessMessageID::Headers => ZkRessMessage::Headers(RequestPair::decode(buf)?),
+            ZkRessMessageID::GetBlockBodies => {
+                ZkRessMessage::GetBlockBodies(RequestPair::decode(buf)?)
+            }
+            ZkRessMessageID::BlockBodies => ZkRessMessage::BlockBodies(RequestPair::decode(buf)?),
+            ZkRessMessageID::GetWitness => ZkRessMessage::GetWitness(RequestPair::decode(buf)?),
+            ZkRessMessageID::Witness => ZkRessMessage::Witness(RequestPair::decode(buf)?),
         };
         Ok(Self { message_type, message })
     }
 }
 
-impl Encodable for RessProtocolMessage {
+impl Encodable for ZkRessProtocolMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         self.message_type.encode(out);
         self.message.encode(out);
@@ -119,7 +121,7 @@ impl Encodable for RessProtocolMessage {
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[cfg_attr(test, derive(strum_macros::EnumCount))]
-pub enum RessMessageID {
+pub enum ZkRessMessageID {
     /// Node type message.
     NodeType = 0x00,
 
@@ -139,7 +141,7 @@ pub enum RessMessageID {
     Witness = 0x06,
 }
 
-impl Encodable for RessMessageID {
+impl Encodable for ZkRessMessageID {
     fn encode(&self, out: &mut dyn BufMut) {
         out.put_u8(*self as u8);
     }
@@ -149,7 +151,7 @@ impl Encodable for RessMessageID {
     }
 }
 
-impl Decodable for RessMessageID {
+impl Decodable for ZkRessMessageID {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let id = match buf.first().ok_or(alloy_rlp::Error::InputTooShort)? {
             0x00 => Self::NodeType,
@@ -169,7 +171,7 @@ impl Decodable for RessMessageID {
 /// Represents a message in the ress protocol.
 #[derive(PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub enum RessMessage {
+pub enum ZkRessMessage {
     /// Represents a node type message required for handshake.
     NodeType(NodeType),
 
@@ -189,34 +191,34 @@ pub enum RessMessage {
     Witness(RequestPair<Vec<Bytes>>),
 }
 
-impl RessMessage {
-    /// Return [`RessMessageID`] that corresponds to the given message.
-    pub const fn message_id(&self) -> RessMessageID {
+impl ZkRessMessage {
+    /// Return [`ZkRessMessageID`] that corresponds to the given message.
+    pub const fn message_id(&self) -> ZkRessMessageID {
         match self {
-            Self::NodeType(_) => RessMessageID::NodeType,
-            Self::GetHeaders(_) => RessMessageID::GetHeaders,
-            Self::Headers(_) => RessMessageID::Headers,
-            Self::GetBlockBodies(_) => RessMessageID::GetBlockBodies,
-            Self::BlockBodies(_) => RessMessageID::BlockBodies,
-            Self::GetWitness(_) => RessMessageID::GetWitness,
-            Self::Witness(_) => RessMessageID::Witness,
+            Self::NodeType(_) => ZkRessMessageID::NodeType,
+            Self::GetHeaders(_) => ZkRessMessageID::GetHeaders,
+            Self::Headers(_) => ZkRessMessageID::Headers,
+            Self::GetBlockBodies(_) => ZkRessMessageID::GetBlockBodies,
+            Self::BlockBodies(_) => ZkRessMessageID::BlockBodies,
+            Self::GetWitness(_) => ZkRessMessageID::GetWitness,
+            Self::Witness(_) => ZkRessMessageID::Witness,
         }
     }
 
-    /// Convert message into [`RessProtocolMessage`].
-    pub const fn into_protocol_message(self) -> RessProtocolMessage {
+    /// Convert message into [`ZkRessProtocolMessage`].
+    pub const fn into_protocol_message(self) -> ZkRessProtocolMessage {
         let message_type = self.message_id();
-        RessProtocolMessage { message_type, message: self }
+        ZkRessProtocolMessage { message_type, message: self }
     }
 }
 
-impl From<RessMessage> for RessProtocolMessage {
-    fn from(value: RessMessage) -> Self {
+impl From<ZkRessMessage> for ZkRessProtocolMessage {
+    fn from(value: ZkRessMessage) -> Self {
         value.into_protocol_message()
     }
 }
 
-impl Encodable for RessMessage {
+impl Encodable for ZkRessMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::NodeType(node_type) => node_type.encode(out),
@@ -275,20 +277,20 @@ mod tests {
 
     #[test]
     fn protocol_message_count() {
-        let protocol = RessProtocolMessage::protocol("zkress", 1);
-        assert_eq!(protocol.messages(), RessMessageID::COUNT as u8);
+        let protocol = ZkRessProtocolMessage::protocol("zkress", 1);
+        assert_eq!(protocol.messages(), ZkRessMessageID::COUNT as u8);
     }
 
     proptest! {
         #[test]
-        fn message_type_roundtrip(message_type in arb::<RessMessageID>()) {
+        fn message_type_roundtrip(message_type in arb::<ZkRessMessageID>()) {
             rlp_roundtrip(message_type);
         }
 
         #[test]
-        fn message_roundtrip(message in arb::<RessProtocolMessage>()) {
+        fn message_roundtrip(message in arb::<ZkRessProtocolMessage>()) {
             let encoded = alloy_rlp::encode(&message);
-            let decoded = RessProtocolMessage::decode_message(&mut &encoded[..]);
+            let decoded = ZkRessProtocolMessage::decode_message(&mut &encoded[..]);
             assert_eq!(Ok(message), decoded);
         }
     }

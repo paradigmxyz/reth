@@ -22,7 +22,7 @@ mod handlers;
 pub use handlers::*;
 
 mod connection;
-pub use connection::{RessPeerRequest, RessProtocolConnection};
+pub use connection::{ZkRessPeerRequest, ZkRessProtocolConnection};
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

@@ -1,18 +1,18 @@
-use crate::{GetHeaders, NodeType, RessMessage, RessProtocolMessage, RessProtocolProvider};
+use crate::{GetHeaders, NodeType, ZkRessMessage, ZkRessProtocolMessage, ZkRessProtocolProvider};
 use alloy_consensus::Header;
-use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
-use futures::{stream::FuturesUnordered, Stream, StreamExt};
+use alloy_primitives::{B256, BlockHash, Bytes, bytes::BytesMut};
+use futures::{Stream, StreamExt, stream::FuturesUnordered};
 use reth_eth_wire::{message::RequestPair, multiplex::ProtocolConnection};
 use reth_ethereum_primitives::BlockBody;
-use reth_network_api::{test_utils::PeersHandle, PeerId, ReputationChangeKind};
+use reth_network_api::{PeerId, ReputationChangeKind, test_utils::PeersHandle};
 use reth_storage_errors::ProviderResult;
 use std::{
     collections::HashMap,
     future::Future,
     pin::Pin,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     task::{Context, Poll},
 };
@@ -22,7 +22,7 @@ use tracing::*;
 
 /// The connection handler for the custom `RLPx` protocol.
 #[derive(Debug)]
-pub struct RessProtocolConnection<P> {
+pub struct ZkRessProtocolConnection<P> {
     /// Provider.
     provider: P,
     /// The type of this node..
@@ -34,7 +34,7 @@ pub struct RessProtocolConnection<P> {
     /// Protocol connection.
     conn: ProtocolConnection,
     /// Stream of incoming commands.
-    commands: UnboundedReceiverStream<RessPeerRequest>,
+    commands: UnboundedReceiverStream<ZkRessPeerRequest>,
     /// The total number of active connections.
     active_connections: Arc<AtomicU64>,
     /// Flag indicating whether the node type was sent to the peer.
@@ -44,12 +44,12 @@ pub struct RessProtocolConnection<P> {
     /// Incremental counter for request ids.
     next_id: u64,
     /// Collection of inflight requests.
-    inflight_requests: HashMap<u64, RessPeerRequest>,
+    inflight_requests: HashMap<u64, ZkRessPeerRequest>,
     /// Pending witness responses.
     pending_witnesses: FuturesUnordered<WitnessFut>,
 }
 
-impl<P> RessProtocolConnection<P> {
+impl<P> ZkRessProtocolConnection<P> {
     /// Create new connection.
     pub fn new(
         provider: P,
@@ -57,7 +57,7 @@ impl<P> RessProtocolConnection<P> {
         peers_handle: PeersHandle,
         peer_id: PeerId,
         conn: ProtocolConnection,
-        commands: UnboundedReceiverStream<RessPeerRequest>,
+        commands: UnboundedReceiverStream<ZkRessPeerRequest>,
         active_connections: Arc<AtomicU64>,
     ) -> Self {
         Self {
@@ -88,17 +88,17 @@ impl<P> RessProtocolConnection<P> {
         self.peers_handle.reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
     }
 
-    fn on_command(&mut self, command: RessPeerRequest) -> RessProtocolMessage {
+    fn on_command(&mut self, command: ZkRessPeerRequest) -> ZkRessProtocolMessage {
         let next_id = self.next_id();
         let message = match &command {
-            RessPeerRequest::GetHeaders { request, .. } => {
-                RessProtocolMessage::get_headers(next_id, *request)
+            ZkRessPeerRequest::GetHeaders { request, .. } => {
+                ZkRessProtocolMessage::get_headers(next_id, *request)
             }
-            RessPeerRequest::GetBlockBodies { request, .. } => {
-                RessProtocolMessage::get_block_bodies(next_id, request.clone())
+            ZkRessPeerRequest::GetBlockBodies { request, .. } => {
+                ZkRessProtocolMessage::get_block_bodies(next_id, request.clone())
             }
-            RessPeerRequest::GetWitness { block_hash, .. } => {
-                RessProtocolMessage::get_witness(next_id, *block_hash)
+            ZkRessPeerRequest::GetWitness { block_hash, .. } => {
+                ZkRessProtocolMessage::get_witness(next_id, *block_hash)
             }
         };
         self.inflight_requests.insert(next_id, command);
@@ -106,9 +106,9 @@ impl<P> RessProtocolConnection<P> {
     }
 }
 
-impl<P> RessProtocolConnection<P>
+impl<P> ZkRessProtocolConnection<P>
 where
-    P: RessProtocolProvider + Clone + 'static,
+    P: ZkRessProtocolProvider + Clone + 'static,
 {
     fn on_headers_request(&self, request: GetHeaders) -> Vec<Header> {
         match self.provider.headers(request) {
@@ -134,7 +134,7 @@ where
         &self,
         request: RequestPair<B256>,
         witness_result: ProviderResult<Vec<Bytes>>,
-    ) -> RessProtocolMessage {
+    ) -> ZkRessProtocolMessage {
         let peer_id = self.peer_id;
         let block_hash = request.message;
         let witness = match witness_result {
@@ -147,32 +147,32 @@ where
                 Default::default()
             }
         };
-        RessProtocolMessage::witness(request.request_id, witness)
+        ZkRessProtocolMessage::witness(request.request_id, witness)
     }
 
-    fn on_ress_message(&mut self, msg: RessProtocolMessage) -> OnRessMessageOutcome {
+    fn on_ress_message(&mut self, msg: ZkRessProtocolMessage) -> OnRessMessageOutcome {
         match msg.message {
-            RessMessage::NodeType(node_type) => {
+            ZkRessMessage::NodeType(node_type) => {
                 if !self.node_type.is_valid_connection(&node_type) {
                     // Note types are not compatible, terminate the connection.
                     return OnRessMessageOutcome::Terminate;
                 }
             }
-            RessMessage::GetHeaders(req) => {
+            ZkRessMessage::GetHeaders(req) => {
                 let request = req.message;
                 trace!(target: "ress::net::connection", peer_id = %self.peer_id, ?request, "serving headers");
                 let header = self.on_headers_request(request);
-                let response = RessProtocolMessage::headers(req.request_id, header);
+                let response = ZkRessProtocolMessage::headers(req.request_id, header);
                 return OnRessMessageOutcome::Response(response.encoded());
             }
-            RessMessage::GetBlockBodies(req) => {
+            ZkRessMessage::GetBlockBodies(req) => {
                 let request = req.message;
                 trace!(target: "ress::net::connection", peer_id = %self.peer_id, ?request, "serving block bodies");
                 let bodies = self.on_block_bodies_request(request);
-                let response = RessProtocolMessage::block_bodies(req.request_id, bodies);
+                let response = ZkRessProtocolMessage::block_bodies(req.request_id, bodies);
                 return OnRessMessageOutcome::Response(response.encoded());
             }
-            RessMessage::GetWitness(req) => {
+            ZkRessMessage::GetWitness(req) => {
                 let block_hash = req.message;
                 trace!(target: "ress::net::connection", peer_id = %self.peer_id, %block_hash, "serving witness");
                 let provider = self.provider.clone();
@@ -181,8 +181,8 @@ where
                     (req, result)
                 }));
             }
-            RessMessage::Headers(res) => {
-                if let Some(RessPeerRequest::GetHeaders { tx, .. }) =
+            ZkRessMessage::Headers(res) => {
+                if let Some(ZkRessPeerRequest::GetHeaders { tx, .. }) =
                     self.inflight_requests.remove(&res.request_id)
                 {
                     let _ = tx.send(res.message);
@@ -190,8 +190,8 @@ where
                     self.report_bad_message();
                 }
             }
-            RessMessage::BlockBodies(res) => {
-                if let Some(RessPeerRequest::GetBlockBodies { tx, .. }) =
+            ZkRessMessage::BlockBodies(res) => {
+                if let Some(ZkRessPeerRequest::GetBlockBodies { tx, .. }) =
                     self.inflight_requests.remove(&res.request_id)
                 {
                     let _ = tx.send(res.message);
@@ -199,8 +199,8 @@ where
                     self.report_bad_message();
                 }
             }
-            RessMessage::Witness(res) => {
-                if let Some(RessPeerRequest::GetWitness { tx, .. }) =
+            ZkRessMessage::Witness(res) => {
+                if let Some(ZkRessPeerRequest::GetWitness { tx, .. }) =
                     self.inflight_requests.remove(&res.request_id)
                 {
                     let _ = tx.send(res.message);
@@ -213,7 +213,7 @@ where
     }
 }
 
-impl<P> Drop for RessProtocolConnection<P> {
+impl<P> Drop for ZkRessProtocolConnection<P> {
     fn drop(&mut self) {
         let _ = self
             .active_connections
@@ -221,9 +221,9 @@ impl<P> Drop for RessProtocolConnection<P> {
     }
 }
 
-impl<P> Stream for RessProtocolConnection<P>
+impl<P> Stream for ZkRessProtocolConnection<P>
 where
-    P: RessProtocolProvider + Clone + Unpin + 'static,
+    P: ZkRessProtocolProvider + Clone + Unpin + 'static,
 {
     type Item = BytesMut;
 
@@ -236,7 +236,7 @@ where
 
         if !this.node_type_sent {
             this.node_type_sent = true;
-            return Poll::Ready(Some(RessProtocolMessage::node_type(this.node_type).encoded()))
+            return Poll::Ready(Some(ZkRessProtocolMessage::node_type(this.node_type).encoded()))
         }
 
         'conn: loop {
@@ -256,7 +256,7 @@ where
 
             if let Poll::Ready(maybe_msg) = this.conn.poll_next_unpin(cx) {
                 let Some(next) = maybe_msg else { break 'conn };
-                let msg = match RessProtocolMessage::decode_message(&mut &next[..]) {
+                let msg = match ZkRessProtocolMessage::decode_message(&mut &next[..]) {
                     Ok(msg) => {
                         trace!(target: "ress::net::connection", peer_id = %this.peer_id, message = ?msg.message_type, "Processing message");
                         msg
@@ -291,7 +291,7 @@ type WitnessFut =
 
 /// Ress peer request.
 #[derive(Debug)]
-pub enum RessPeerRequest {
+pub enum ZkRessPeerRequest {
     /// Get block headers.
     GetHeaders {
         /// The request for block headers.

@@ -1,14 +1,14 @@
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{B256, Bytes};
 use futures::StreamExt;
-use reth_network::{test_utils::Testnet, NetworkEventListenerProvider, Peers};
+use reth_network::{NetworkEventListenerProvider, Peers, test_utils::Testnet};
 use reth_network_api::{
     events::{NetworkEvent, PeerEvent},
     test_utils::PeersHandleProvider,
 };
 use reth_provider::test_utils::MockEthProvider;
 use reth_zk_ress_protocol::{
-    test_utils::{MockRessProtocolProvider, NoopRessProtocolProvider},
-    GetHeaders, NodeType, ProtocolEvent, ProtocolState, RessPeerRequest, RessProtocolHandler,
+    GetHeaders, NodeType, ProtocolEvent, ProtocolState, ZkRessPeerRequest, ZkRessProtocolHandler,
+    test_utils::{MockRessProtocolProvider, NoopZkRessProtocolProvider},
 };
 use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, oneshot};
@@ -17,11 +17,11 @@ use tokio::sync::{mpsc, oneshot};
 async fn disconnect_on_stateful_pair() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-    let protocol_provider = NoopRessProtocolProvider;
+    let protocol_provider = NoopZkRessProtocolProvider;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
-    peer0.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer0.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider,
@@ -33,7 +33,7 @@ async fn disconnect_on_stateful_pair() {
 
     let (tx, mut from_peer1) = mpsc::unbounded_channel();
     let peer1 = &mut net.peers_mut()[1];
-    peer1.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer1.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider,
@@ -89,11 +89,11 @@ async fn disconnect_on_stateful_pair() {
 async fn message_exchange() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-    let protocol_provider = NoopRessProtocolProvider;
+    let protocol_provider = NoopZkRessProtocolProvider;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
-    peer0.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer0.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider,
@@ -105,7 +105,7 @@ async fn message_exchange() {
 
     let (tx, mut from_peer1) = mpsc::unbounded_channel();
     let peer1 = &mut net.peers_mut()[1];
-    peer1.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer1.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider,
@@ -143,7 +143,7 @@ async fn message_exchange() {
     // send get headers message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
     peer0_conn
-        .send(RessPeerRequest::GetHeaders {
+        .send(ZkRessPeerRequest::GetHeaders {
             request: GetHeaders { start_hash: B256::ZERO, limit: 1 },
             tx,
         })
@@ -152,12 +152,12 @@ async fn message_exchange() {
 
     // send get bodies message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetBlockBodies { request: Vec::new(), tx }).unwrap();
+    peer0_conn.send(ZkRessPeerRequest::GetBlockBodies { request: Vec::new(), tx }).unwrap();
     assert_eq!(rx.await.unwrap(), Vec::new());
 
     // send get witness message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx }).unwrap();
+    peer0_conn.send(ZkRessPeerRequest::GetWitness { block_hash: B256::ZERO, tx }).unwrap();
     assert_eq!(rx.await.unwrap(), Vec::<Bytes>::new());
 }
 
@@ -171,7 +171,7 @@ async fn witness_fetching_does_not_block() {
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
-    peer0.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer0.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider.clone(),
@@ -183,7 +183,7 @@ async fn witness_fetching_does_not_block() {
 
     let (tx, mut from_peer1) = mpsc::unbounded_channel();
     let peer1 = &mut net.peers_mut()[1];
-    peer1.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer1.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider,
@@ -222,14 +222,14 @@ async fn witness_fetching_does_not_block() {
     let witness_requested_at = Instant::now();
     let (witness_tx, witness_rx) = oneshot::channel();
     peer0_conn
-        .send(RessPeerRequest::GetWitness { block_hash: B256::ZERO, tx: witness_tx })
+        .send(ZkRessPeerRequest::GetWitness { block_hash: B256::ZERO, tx: witness_tx })
         .unwrap();
 
     // send get bytecode message from peer0 to peer1
     let headers_requested_at = Instant::now();
     let (tx, rx) = oneshot::channel();
     peer0_conn
-        .send(RessPeerRequest::GetHeaders {
+        .send(ZkRessPeerRequest::GetHeaders {
             request: GetHeaders { start_hash: B256::ZERO, limit: 1 },
             tx,
         })
@@ -246,11 +246,11 @@ async fn witness_fetching_does_not_block() {
 async fn max_active_connections() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(3, MockEthProvider::default()).await;
-    let protocol_provider = NoopRessProtocolProvider;
+    let protocol_provider = NoopZkRessProtocolProvider;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
-    peer0.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer0.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider,
@@ -264,7 +264,7 @@ async fn max_active_connections() {
     let peer1 = &mut net.peers_mut()[1];
     let peer1_id = peer1.peer_id();
     let peer1_addr = peer1.local_addr();
-    peer1.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer1.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider,
@@ -278,7 +278,7 @@ async fn max_active_connections() {
     let peer2 = &mut net.peers_mut()[2];
     let peer2_id = peer2.peer_id();
     let peer2_addr = peer2.local_addr();
-    peer2.add_rlpx_sub_protocol(RessProtocolHandler {
+    peer2.add_rlpx_sub_protocol(ZkRessProtocolHandler {
         protocol_name: "zkress",
         protocol_version: 1,
         provider: protocol_provider,

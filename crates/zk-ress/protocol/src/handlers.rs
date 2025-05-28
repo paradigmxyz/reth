@@ -1,18 +1,18 @@
 use crate::{
-    connection::{RessPeerRequest, RessProtocolConnection},
-    NodeType, RessProtocolMessage, RessProtocolProvider,
+    NodeType, ZkRessProtocolMessage, ZkRessProtocolProvider,
+    connection::{ZkRessPeerRequest, ZkRessProtocolConnection},
 };
 use reth_eth_wire::{
     capability::SharedCapabilities, multiplex::ProtocolConnection, protocol::Protocol,
 };
 use reth_network::protocol::{ConnectionHandler, OnNotSupported, ProtocolHandler};
-use reth_network_api::{test_utils::PeersHandle, Direction, PeerId};
+use reth_network_api::{Direction, PeerId, test_utils::PeersHandle};
 use std::{
     fmt,
     net::SocketAddr,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 use tokio::sync::mpsc;
@@ -29,7 +29,7 @@ pub enum ProtocolEvent {
         /// Peer ID.
         peer_id: PeerId,
         /// Sender part for forwarding commands.
-        to_connection: mpsc::UnboundedSender<RessPeerRequest>,
+        to_connection: mpsc::UnboundedSender<ZkRessPeerRequest>,
     },
     /// Number of max active connections exceeded. New connection was rejected.
     MaxActiveConnectionsExceeded {
@@ -61,7 +61,7 @@ impl ProtocolState {
 
 /// The protocol handler takes care of incoming and outgoing connections.
 #[derive(Clone)]
-pub struct RessProtocolHandler<P> {
+pub struct ZkRessProtocolHandler<P> {
     /// Name of the protocol.
     pub protocol_name: &'static str,
     /// Version of the protocol.
@@ -78,9 +78,9 @@ pub struct RessProtocolHandler<P> {
     pub state: ProtocolState,
 }
 
-impl<P> fmt::Debug for RessProtocolHandler<P> {
+impl<P> fmt::Debug for ZkRessProtocolHandler<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RessProtocolHandler")
+        f.debug_struct("ZkRessProtocolHandler")
             .field("node_type", &self.node_type)
             .field("peers_handle", &self.peers_handle)
             .field("max_active_connections", &self.max_active_connections)
@@ -89,9 +89,9 @@ impl<P> fmt::Debug for RessProtocolHandler<P> {
     }
 }
 
-impl<P> ProtocolHandler for RessProtocolHandler<P>
+impl<P> ProtocolHandler for ZkRessProtocolHandler<P>
 where
-    P: RessProtocolProvider + Clone + Unpin + 'static,
+    P: ZkRessProtocolProvider + Clone + Unpin + 'static,
 {
     type ConnectionHandler = Self;
 
@@ -136,14 +136,14 @@ where
     }
 }
 
-impl<P> ConnectionHandler for RessProtocolHandler<P>
+impl<P> ConnectionHandler for ZkRessProtocolHandler<P>
 where
-    P: RessProtocolProvider + Clone + Unpin + 'static,
+    P: ZkRessProtocolProvider + Clone + Unpin + 'static,
 {
-    type Connection = RessProtocolConnection<P>;
+    type Connection = ZkRessProtocolConnection<P>;
 
     fn protocol(&self) -> Protocol {
-        RessProtocolMessage::protocol(self.protocol_name, self.protocol_version)
+        ZkRessProtocolMessage::protocol(self.protocol_name, self.protocol_version)
     }
 
     fn on_unsupported_by_peer(
@@ -176,7 +176,7 @@ where
         // Increment the number of active sessions.
         self.state.active_connections.fetch_add(1, Ordering::Relaxed);
 
-        RessProtocolConnection::new(
+        ZkRessProtocolConnection::new(
             self.provider.clone(),
             self.node_type,
             self.peers_handle,
