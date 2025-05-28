@@ -55,10 +55,10 @@ fn hash_disallow_list(disallow: &HashSet<Address>) -> String {
 
     let mut hasher = Sha256::new();
     for addr in sorted {
-        hasher.update(addr.as_slice()); // Use as_slice() for Address bytes
+        hasher.update(addr.as_slice());
     }
 
-    format!("{:x}", hasher.finalize()) // lowercase hex string
+    format!("{:x}", hasher.finalize())
 }
 
 impl<Provider, E> ValidationApi<Provider, E>
