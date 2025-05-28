@@ -210,19 +210,6 @@ where
         Ok(self.block_by_hash(block_hash)?.map(|b| b.body().clone()))
     }
 
-    fn bytecode(&self, code_hash: B256) -> ProviderResult<Option<Bytes>> {
-        trace!(target: "reth::ress_provider", %code_hash, "Serving bytecode");
-        let maybe_bytecode = 'bytecode: {
-            if let Some(bytecode) = self.pending_state.find_bytecode(code_hash) {
-                break 'bytecode Some(bytecode);
-            }
-
-            self.provider.latest()?.bytecode_by_hash(&code_hash)?
-        };
-
-        Ok(maybe_bytecode.map(|bytecode| bytecode.original_bytes()))
-    }
-
     async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         trace!(target: "reth::ress_provider", %block_hash, "Serving witness");
         let started_at = Instant::now();

@@ -23,10 +23,6 @@ impl ZkRessProtocolProvider for NoopZkRessProtocolProvider {
         Ok(None)
     }
 
-    fn bytecode(&self, _code_hash: B256) -> ProviderResult<Option<Bytes>> {
-        Ok(None)
-    }
-
     async fn witness(&self, _block_hash: B256) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::new())
     }
@@ -37,7 +33,6 @@ impl ZkRessProtocolProvider for NoopZkRessProtocolProvider {
 pub struct MockRessProtocolProvider {
     headers: Arc<Mutex<B256HashMap<Header>>>,
     block_bodies: Arc<Mutex<B256HashMap<BlockBody>>>,
-    bytecodes: Arc<Mutex<B256HashMap<Bytes>>>,
     witnesses: Arc<Mutex<B256HashMap<Vec<Bytes>>>>,
     witness_delay: Option<Duration>,
 }
@@ -69,16 +64,6 @@ impl MockRessProtocolProvider {
         self.block_bodies.lock().unwrap().extend(bodies);
     }
 
-    /// Insert bytecode.
-    pub fn add_bytecode(&self, code_hash: B256, bytecode: Bytes) {
-        self.bytecodes.lock().unwrap().insert(code_hash, bytecode);
-    }
-
-    /// Extend bytecodes from iterator.
-    pub fn extend_bytecodes(&self, bytecodes: impl IntoIterator<Item = (B256, Bytes)>) {
-        self.bytecodes.lock().unwrap().extend(bytecodes);
-    }
-
     /// Insert witness.
     pub fn add_witness(&self, block_hash: B256, witness: Vec<Bytes>) {
         self.witnesses.lock().unwrap().insert(block_hash, witness);
@@ -97,10 +82,6 @@ impl ZkRessProtocolProvider for MockRessProtocolProvider {
 
     fn block_body(&self, block_hash: B256) -> ProviderResult<Option<BlockBody>> {
         Ok(self.block_bodies.lock().unwrap().get(&block_hash).cloned())
-    }
-
-    fn bytecode(&self, code_hash: B256) -> ProviderResult<Option<Bytes>> {
-        Ok(self.bytecodes.lock().unwrap().get(&code_hash).cloned())
     }
 
     async fn witness(&self, block_hash: B256) -> ProviderResult<Vec<Bytes>> {

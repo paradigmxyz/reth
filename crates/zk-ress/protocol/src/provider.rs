@@ -52,9 +52,6 @@ pub trait ZkRessProtocolProvider: Send + Sync {
         Ok(bodies)
     }
 
-    /// Return bytecode by code hash.
-    fn bytecode(&self, code_hash: B256) -> ProviderResult<Option<Bytes>>;
-
     /// Return witness by block hash.
     fn witness(&self, block_hash: B256) -> impl Future<Output = ProviderResult<Vec<Bytes>>> + Send;
 }
