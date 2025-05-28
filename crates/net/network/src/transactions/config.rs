@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fmt::Debug, marker::PhantomData, str::FromStr};
 
 use super::{
     PeerMetadata, DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
@@ -25,9 +25,6 @@ pub struct TransactionsManagerConfig {
     /// How new pending transactions are propagated.
     #[cfg_attr(feature = "serde", serde(default))]
     pub propagation_mode: TransactionPropagationMode,
-    /// Determines the policy for filtering incoming transaction annoucements based on `TxType`.
-    #[cfg_attr(feature = "serde", serde(default))]
-    pub announcement_filter_kind: AnnouncementFilterKind,
 }
 
 impl Default for TransactionsManagerConfig {
@@ -36,7 +33,6 @@ impl Default for TransactionsManagerConfig {
             transaction_fetcher_config: TransactionFetcherConfig::default(),
             max_transactions_seen_by_peer_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             propagation_mode: TransactionPropagationMode::default(),
-            announcement_filter_kind: AnnouncementFilterKind::default(),
         }
     }
 }
@@ -179,20 +175,33 @@ pub trait AnnouncementFilteringPolicy: Send + Sync + Unpin + 'static {
     fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance;
 }
 
-/// An `AnnouncementFilteringPolicy` that enforces strict validation of transaction types.
-#[derive(Debug, Clone, Default)]
-pub struct StrictAnnouncementFilter;
+/// A generic `AnnouncementFilteringPolicy` that enforces strict validation
+/// of transaction type based on a generic type `T`.
+#[derive(Debug, Clone)]
+pub struct TypedStrictFilter<T: TryFrom<u8> + Debug + Send + Sync + 'static>(PhantomData<T>);
 
-impl AnnouncementFilteringPolicy for StrictAnnouncementFilter {
+impl<T: TryFrom<u8> + Debug + Send + Sync + 'static> Default for TypedStrictFilter<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> AnnouncementFilteringPolicy for TypedStrictFilter<T>
+where
+    T: TryFrom<u8> + Debug + Send + Sync + Unpin + 'static,
+    <T as TryFrom<u8>>::Error: Debug,
+{
     fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
-        match TxType::try_from(ty) {
+        match T::try_from(ty) {
             Ok(_valid_type) => AnnouncementAcceptance::Accept,
-            Err(_) => {
-                tracing::trace!(target: "net::tx::policy::strict",
+            Err(e) => {
+                tracing::trace!(target: "net::tx::policy::strict_typed",
+                    type_param = %std::any::type_name::<T>(),
                     %ty,
                     %size,
                     %hash,
-                    "Invalid or unrecognized transaction type in announcement. Rejecting entry and recommending peer penalization."
+                    error = ?e,
+                    "Invalid or unrecognized transaction type byte. Rejecting entry and recommending peer penalization."
                 );
                 AnnouncementAcceptance::Reject { penalize_peer: true }
             }
@@ -200,23 +209,38 @@ impl AnnouncementFilteringPolicy for StrictAnnouncementFilter {
     }
 }
 
-/// An `AnnouncementFilteringPolicy` that is more permissive towards unknown transaction types.
-///
-/// Allows for handling of new or future transaction types that a local node may not yet fully
-/// support or recognize.
-#[derive(Debug, Clone, Default)]
-pub struct RelaxedAnnouncementFilter;
+/// Type alias for a `TypedStrictFilter`. This is the default strict announcement filter.
+pub type StrictEthAnnouncementFilter = TypedStrictFilter<TxType>;
 
-impl AnnouncementFilteringPolicy for RelaxedAnnouncementFilter {
+/// An [`AnnouncementFilteringPolicy`] that permissively handles unknown type bytes
+/// based on a given type `T` using `T::try_from(u8)`.
+///
+/// If `T::try_from(ty)` succeeds, the announcement is accepted. Otherwise, it's ignored.
+#[derive(Debug, Clone)]
+pub struct TypedRelaxedFilter<T: TryFrom<u8> + Debug + Send + Sync + 'static>(PhantomData<T>);
+
+impl<T: TryFrom<u8> + Debug + Send + Sync + 'static> Default for TypedRelaxedFilter<T> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<T> AnnouncementFilteringPolicy for TypedRelaxedFilter<T>
+where
+    T: TryFrom<u8> + Debug + Send + Sync + Unpin + 'static,
+    <T as TryFrom<u8>>::Error: Debug,
+{
     fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
-        match TxType::try_from(ty) {
+        match T::try_from(ty) {
             Ok(_valid_type) => AnnouncementAcceptance::Accept,
-            Err(_) => {
-                tracing::trace!(target: "net::tx::policy::relaxed",
+            Err(e) => {
+                tracing::trace!(target: "net::tx::policy::relaxed_typed",
+                    type_param = %std::any::type_name::<T>(),
                     %ty,
                     %size,
                     %hash,
-                    "Unknown transaction type in announcement. Ignoring entry."
+                    error = ?e,
+                    "Unknown transaction type byte. Ignoring entry."
                 );
                 AnnouncementAcceptance::Ignore
             }
@@ -224,21 +248,44 @@ impl AnnouncementFilteringPolicy for RelaxedAnnouncementFilter {
     }
 }
 
-/// A container for policies that govern the behaviour of the `TransactionManager`.
+/// Type alias for `TypedRelaxedFilter`. This filter accepts known Ethereum transaction types and
+/// ignores unknown ones without penalizing the peer.
+pub type RelaxedEthAnnouncementFilter = TypedRelaxedFilter<TxType>;
+
+/// A bundle of policies that control the behavior of network components like
+/// the [`TransactionsManager`](super::TransactionsManager).
 ///
-/// This struct bundles different policies, such as how transactions are propagated and how incoming
-/// transaction announcements are filtered.
+/// This trait allows for different collections of policies to be used interchangeably.
+pub trait Policies: Send + Sync + Debug + 'static {
+    /// The type of the policy used for transaction propagation.
+    type Propagation: TransactionPropagationPolicy;
+    /// The type of the policy used for filtering transaction announcements.
+    type Announcement: AnnouncementFilteringPolicy;
+
+    /// Returns a reference to the transaction propagation policy.
+    fn propagation_policy(&self) -> &Self::Propagation;
+
+    /// Returns a mutable reference to the transaction propagation policy.
+    fn propagation_policy_mut(&mut self) -> &mut Self::Propagation;
+
+    /// Returns a reference to the announcement filtering policy.
+    fn announcement_filter(&self) -> &Self::Announcement;
+}
+
+/// A container that bundles specific implementations of transaction-related policies,
+///
+/// This struct implements the [`Policies`] trait, providing a complete set of
+/// policies required by components like the [`TransactionsManager`](super::TransactionsManager).
+/// It holds a specific [`TransactionPropagationPolicy`] and an
+/// [`AnnouncementFilteringPolicy`].
 #[derive(Debug, Clone)]
 pub struct NetworkPolicies<P, A>
 where
     P: TransactionPropagationPolicy,
     A: AnnouncementFilteringPolicy,
 {
-    /// Policy determining to which peers transactions are propagated.
-    pub propagation: P,
-    /// Policy determining how incoming transaction announcements are filtered,
-    /// especially concerning transaction types.
-    pub announcement_filter: A,
+    propagation: P,
+    announcement: A,
 }
 
 impl<P, A> NetworkPolicies<P, A>
@@ -246,33 +293,38 @@ where
     P: TransactionPropagationPolicy,
     A: AnnouncementFilteringPolicy,
 {
-    /// Creates a new `NetworkPolicies` instance.
-    pub const fn new(propagation: P, announcement_filter: A) -> Self {
-        Self { propagation, announcement_filter }
-    }
-
-    /// Returns a reference to the configured transaction propagation policy.
-    pub const fn propagation_policy(&self) -> &P {
-        &self.propagation
-    }
-
-    /// Returns a reference to the configured announcement filtering policy.
-    pub const fn announcement_filtering_policy(&self) -> &A {
-        &self.announcement_filter
+    /// Creates a new bundle of network policies.
+    pub const fn new(propagation: P, announcement: A) -> Self {
+        Self { propagation, announcement }
     }
 }
 
-/// Specifies the kind of transaction announcement filtering policy to be used by the
-/// `TransactionManager`.
-///
-/// This enum is typically set in the `TransactionManagerConfig` to allow users to choose how
-/// strictly the node should validate announced transactions.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum AnnouncementFilterKind {
-    /// Use the `StrictAnnouncementFilter`, which rejects and penalizes unknown transaction types.
-    #[default]
-    Strict,
-    /// Use the `RelaxedAnnouncementFilter`, which ignores unknown transaction types.
-    Relaxed,
+impl<P, A> Policies for NetworkPolicies<P, A>
+where
+    P: TransactionPropagationPolicy + Debug,
+    A: AnnouncementFilteringPolicy + Debug,
+{
+    type Propagation = P;
+    type Announcement = A;
+
+    fn propagation_policy(&self) -> &Self::Propagation {
+        &self.propagation
+    }
+
+    fn propagation_policy_mut(&mut self) -> &mut Self::Propagation {
+        &mut self.propagation
+    }
+
+    fn announcement_filter(&self) -> &Self::Announcement {
+        &self.announcement
+    }
+}
+
+impl Default for NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter> {
+    fn default() -> Self {
+        Self {
+            propagation: TransactionPropagationKind::default(),
+            announcement: StrictEthAnnouncementFilter::default(),
+        }
+    }
 }

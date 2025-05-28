@@ -12,11 +12,13 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-use config::{AnnouncementAcceptance, TransactionPropagationKind};
+use config::{
+    AnnouncementAcceptance, NetworkPolicies, Policies, StrictEthAnnouncementFilter,
+    TransactionPropagationKind,
+};
 pub use config::{
-    AnnouncementFilterKind, AnnouncementFilteringPolicy, NetworkPolicies,
-    RelaxedAnnouncementFilter, StrictAnnouncementFilter, TransactionFetcherConfig,
-    TransactionPropagationMode, TransactionPropagationPolicy, TransactionsManagerConfig,
+    AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionPropagationMode,
+    TransactionPropagationPolicy, TransactionsManagerConfig,
 };
 pub use validation::*;
 
@@ -244,8 +246,7 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 pub struct TransactionsManager<
     Pool,
     N: NetworkPrimitives = EthNetworkPrimitives,
-    PropPolicy: TransactionPropagationPolicy = TransactionPropagationKind,
-    AnnouncePolicy: AnnouncementFilteringPolicy = StrictAnnouncementFilter,
+    PBundle: Policies = NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
 > {
     /// Access to the transaction pool.
     pool: Pool,
@@ -302,15 +303,21 @@ pub struct TransactionsManager<
     transaction_events: UnboundedMeteredReceiver<NetworkTransactionEvent<N>>,
     /// How the `TransactionsManager` is configured.
     config: TransactionsManagerConfig,
-    /// The policy to use when propagating transactions.
-    policies: NetworkPolicies<PropPolicy, AnnouncePolicy>,
+    /// Network Policies
+    policies: PBundle,
     /// `TransactionsManager` metrics
     metrics: TransactionsManagerMetrics,
     /// `AnnouncedTxTypes` metrics
     announced_tx_types_metrics: AnnouncedTxTypesMetrics,
 }
 
-impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
+impl<Pool: TransactionPool, N: NetworkPrimitives>
+    TransactionsManager<
+        Pool,
+        N,
+        NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
+    >
+{
     /// Sets up a new instance.
     ///
     /// Note: This expects an existing [`NetworkManager`](crate::NetworkManager) instance.
@@ -321,19 +328,21 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
         transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
         let propagation_policy = TransactionPropagationKind::default();
-        let announcement_policy = StrictAnnouncementFilter;
-        let policies = NetworkPolicies::new(propagation_policy, announcement_policy);
+        let announcement_policy = StrictEthAnnouncementFilter::default();
+        let default_policies = NetworkPolicies::new(propagation_policy, announcement_policy);
 
-        Self::with_policy(network, pool, from_network, transactions_manager_config, policies)
+        Self::with_policy(
+            network,
+            pool,
+            from_network,
+            transactions_manager_config,
+            default_policies,
+        )
     }
 }
 
-impl<
-        Pool: TransactionPool,
-        N: NetworkPrimitives,
-        PropPolicy: TransactionPropagationPolicy,
-        AnnouncePolicy: AnnouncementFilteringPolicy,
-    > TransactionsManager<Pool, N, PropPolicy, AnnouncePolicy>
+impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: Policies>
+    TransactionsManager<Pool, N, PBundle>
 {
     /// Sets up a new instance with given the settings.
     ///
@@ -343,7 +352,7 @@ impl<
         pool: Pool,
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
         transactions_manager_config: TransactionsManagerConfig,
-        policies: NetworkPolicies<PropPolicy, AnnouncePolicy>,
+        policies: PBundle,
     ) -> Self {
         let network_events = network.event_listener();
 
@@ -514,12 +523,8 @@ impl<
     }
 }
 
-impl<
-        Pool: TransactionPool,
-        N: NetworkPrimitives,
-        PropPolicy: TransactionPropagationPolicy,
-        AnnouncePolicy: AnnouncementFilteringPolicy,
-    > TransactionsManager<Pool, N, PropPolicy, AnnouncePolicy>
+impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: Policies>
+    TransactionsManager<Pool, N, PBundle>
 {
     /// Processes a batch import results.
     fn on_batch_import_result(&mut self, batch_results: Vec<PoolResult<TxHash>>) {
@@ -625,7 +630,7 @@ impl<
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
-        let announcement_policy = self.policies.announcement_filtering_policy();
+        let announcement_policy = &self.policies.announcement_filter();
         let mut should_report_peer = false;
         let mut tx_types_counter = TxTypesCounter::default();
 
@@ -781,7 +786,7 @@ impl<
     }
 }
 
-impl<Pool, N, PropPolicy, AnnouncePolicy> TransactionsManager<Pool, N, PropPolicy, AnnouncePolicy>
+impl<Pool, N, PBundle> TransactionsManager<Pool, N, PBundle>
 where
     Pool: TransactionPool + Unpin + 'static,
 
@@ -790,8 +795,7 @@ where
             PooledTransaction: SignedTransaction,
         > + Unpin,
 
-    PropPolicy: TransactionPropagationPolicy + Unpin,
-    AnnouncePolicy: AnnouncementFilteringPolicy + Unpin,
+    PBundle: Policies,
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
 {
@@ -1168,7 +1172,7 @@ where
             Entry::Vacant(entry) => entry.insert(peer),
         };
 
-        self.policies.propagation.on_session_established(peer);
+        self.policies.propagation_policy_mut().on_session_established(peer);
 
         // Send a `NewPooledTransactionHashes` to the peer with up to
         // `SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE`
@@ -1207,7 +1211,7 @@ where
 
                 let peer = self.peers.remove(&peer_id);
                 if let Some(mut peer) = peer {
-                    self.policies.propagation.on_session_closed(&mut peer);
+                    self.policies.propagation_policy_mut().on_session_closed(&mut peer);
                 }
                 self.transaction_fetcher.remove_peer(&peer_id);
             }
@@ -1439,9 +1443,8 @@ impl<
                 BroadcastedTransaction: SignedTransaction,
                 PooledTransaction: SignedTransaction,
             > + Unpin,
-        PropPolicy: TransactionPropagationPolicy + Unpin,
-        AnnouncePolicy: AnnouncementFilteringPolicy + Unpin,
-    > Future for TransactionsManager<Pool, N, PropPolicy, AnnouncePolicy>
+        PBundle: Policies + Unpin,
+    > Future for TransactionsManager<Pool, N, PBundle>
 where
     Pool::Transaction:
         PoolTransaction<Consensus = N::BroadcastedTransaction, Pooled = N::PooledTransaction>,
@@ -2047,6 +2050,7 @@ mod tests {
             transactions::{buffer_hash_to_tx_fetcher, new_mock_session, new_tx_manager},
             Testnet,
         },
+        transactions::config::RelaxedEthAnnouncementFilter,
         NetworkConfigBuilder, NetworkManager,
     };
     use alloy_consensus::{TxEip1559, TxLegacy};
@@ -2819,14 +2823,12 @@ mod tests {
     async fn test_relaxed_filter_ignores_unknown_tx_types() {
         reth_tracing::init_test_tracing();
 
-        let transactions_manager_config = TransactionsManagerConfig {
-            announcement_filter_kind: AnnouncementFilterKind::Relaxed,
-            ..Default::default()
-        };
+        let transactions_manager_config = TransactionsManagerConfig::default();
 
         let propagation_policy = TransactionPropagationKind::default();
-        let announcement_policy = RelaxedAnnouncementFilter;
-        let network_policies = NetworkPolicies::new(propagation_policy, announcement_policy);
+        let announcement_policy = RelaxedEthAnnouncementFilter::default(); // This is TypedRelaxedFilter<TxType>
+
+        let policy_bundle = NetworkPolicies::new(propagation_policy, announcement_policy);
 
         let pool = testing_pool();
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
@@ -2842,19 +2844,18 @@ mod tests {
             mpsc::unbounded_channel::<NetworkTransactionEvent<EthNetworkPrimitives>>();
         network_manager.set_transactions(to_tx_manager_tx);
         let network_handle = network_manager.handle().clone();
-        let network_service_handle = tokio::spawn(network_manager);
+        let network_service_handle = tokio::spawn(network_manager); // Corrected: spawn network_manager
 
         let mut tx_manager = TransactionsManager::<
             TestPool,
             EthNetworkPrimitives,
-            TransactionPropagationKind,
-            RelaxedAnnouncementFilter,
+            NetworkPolicies<TransactionPropagationKind, RelaxedEthAnnouncementFilter>,
         >::with_policy(
             network_handle.clone(),
             pool.clone(),
             from_network_rx,
             transactions_manager_config,
-            network_policies,
+            policy_bundle,
         );
 
         let peer_id = PeerId::random();
@@ -2864,8 +2865,8 @@ mod tests {
 
         let mut tx_factory = MockTransactionFactory::default();
 
-        let known_tx_mock = tx_factory.create_eip1559();
-        let known_tx_signed: Arc<ValidPoolTransaction<MockTransaction>> = Arc::new(known_tx_mock);
+        let valid_known_tx = tx_factory.create_eip1559();
+        let known_tx_signed: Arc<ValidPoolTransaction<MockTransaction>> = Arc::new(valid_known_tx);
 
         let known_tx_hash = *known_tx_signed.hash();
         let known_tx_type_byte = known_tx_signed.transaction.tx_type();

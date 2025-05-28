@@ -78,7 +78,7 @@ pub enum FilterOutcome {
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct MessageFilter<N = EthMessageFilter>(N);
 
-/// Filter for announcements containing EIP [reth_ethereum_primitives::TxType]s.
+/// Filter for announcements containing EIP [`reth_ethereum_primitives::TxType`]s.
 #[derive(Debug, Default)]
 pub struct EthMessageFilter;
 
