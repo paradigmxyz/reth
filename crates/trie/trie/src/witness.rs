@@ -21,7 +21,7 @@ use reth_execution_errors::{
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
-    SparseStateTrie,
+    PackedNibbles, SparseStateTrie,
 };
 use std::sync::{mpsc, Arc};
 
@@ -169,7 +169,7 @@ where
                 ),
             )?;
             for hashed_slot in hashed_slots.into_iter().sorted_unstable() {
-                let storage_nibbles = Nibbles::unpack(hashed_slot);
+                let storage_nibbles = PackedNibbles::unpack(hashed_slot);
                 let maybe_leaf_value = storage
                     .and_then(|s| s.storage.get(&hashed_slot))
                     .filter(|v| !v.is_zero())

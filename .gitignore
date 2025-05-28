@@ -56,3 +56,5 @@ book/sources/Cargo.lock
 
 # Cargo chef recipe file
 recipe.json
+
+**/.claude/settings.local.json

@@ -9,8 +9,8 @@ use reth_errors::ProviderError;
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
-    blinded::DefaultBlindedProviderFactory, errors::SparseStateTrieResult, SparseStateTrie,
-    SparseTrie,
+    blinded::DefaultBlindedProviderFactory, errors::SparseStateTrieResult, PackedNibbles,
+    SparseStateTrie, SparseTrie,
 };
 
 /// `StatelessTrie` structure for usage during stateless validation
@@ -195,7 +195,7 @@ fn calculate_state_root(
         for (hashed_slot, value) in
             storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot)
         {
-            let nibbles = Nibbles::unpack(hashed_slot);
+            let nibbles = PackedNibbles::unpack(hashed_slot);
             if value.is_zero() {
                 storage_trie.remove_leaf(&nibbles)?;
             } else {

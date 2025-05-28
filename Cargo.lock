@@ -10437,8 +10437,10 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "codspeed-criterion-compat",
+ "const-hex",
  "itertools 0.14.0",
  "metrics",
+ "nybbles",
  "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
@@ -10454,6 +10456,7 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
+ "ruint",
  "smallvec",
  "tracing",
 ]

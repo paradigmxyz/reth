@@ -6,12 +6,12 @@ use crate::tree::payload_processor::{
 };
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_trie::{updates::TrieUpdates, Nibbles};
+use reth_trie::updates::TrieUpdates;
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie,
+    PackedNibbles, SparseStateTrie,
 };
 use std::{
     sync::mpsc,
@@ -163,7 +163,7 @@ where
                 storage_trie.wipe()?;
             }
             for (slot, value) in storage.storage {
-                let slot_nibbles = Nibbles::unpack(slot);
+                let slot_nibbles = PackedNibbles::unpack(slot);
                 if value.is_zero() {
                     trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
                     storage_trie.remove_leaf(&slot_nibbles)?;
