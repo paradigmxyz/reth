@@ -86,6 +86,7 @@ tracing.workspace = true
 tracing-futures.workspace = true
 futures.workspace = true
 serde.workspace = true
+sha2.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 
