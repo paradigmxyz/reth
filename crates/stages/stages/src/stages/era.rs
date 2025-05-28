@@ -50,44 +50,21 @@ where
     BB: FullBlockBody<OmmerHeader = BH>,
 {
     fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<BH, BB>, StageError> {
-        Ok(match self {
-            Self::Path(path) => {
-                let stream =
-                    read_dir(path, input.next_block()).map_err(|e| StageError::Fatal(e.into()))?;
-
-                Box::new(Box::pin(stream.map(|meta| {
-                    meta.and_then(|meta| {
-                        let file = reth_fs_util::open(meta.path())?;
-                        let reader = Era1Reader::new(file);
-                        let iter = reader.iter();
-                        let iter = iter.map(era::decode);
-
-                        Ok(Box::new(iter) as Item<BH, BB>)
-                    })
-                })))
-            }
+        match self {
+            Self::Path(path) => Self::convert(
+                read_dir(path, input.next_block()).map_err(|e| StageError::Fatal(e.into()))?,
+            ),
             Self::Url(url, era_dir) => {
                 let folder = era_dir.into_boxed_path();
                 let _ = reth_fs_util::create_dir_all(&folder);
                 let client = EraClient::new(Client::new(), url, folder);
 
-                let stream = EraStream::new(
+                Self::convert(EraStream::new(
                     client,
                     EraStreamConfig::default().start_from(input.next_block()),
-                );
-
-                Box::new(Box::pin(stream.map(|meta| {
-                    meta.and_then(|meta| {
-                        let file = reth_fs_util::open(meta.path())?;
-                        let reader = Era1Reader::new(file);
-                        let iter = reader.iter();
-                        let iter = iter.map(era::decode);
-
-                        Ok(Box::new(iter) as Item<BH, BB>)
-                    })
-                })))
+                ))
             }
-        })
+        }
     }
 
     fn cleanup(&self) {
@@ -102,6 +79,31 @@ where
                 }
             }
         }
+    }
+}
+
+impl EraImportSource {
+    fn convert<BH, BB>(
+        stream: impl Stream<Item = eyre::Result<impl EraMeta + Send + Sync + 'static + Unpin>>
+            + Send
+            + Sync
+            + 'static
+            + Unpin,
+    ) -> Result<ThreadSafeEraStream<BH, BB>, StageError>
+    where
+        BH: FullBlockHeader + Value,
+        BB: FullBlockBody<OmmerHeader = BH>,
+    {
+        Ok(Box::new(Box::pin(stream.map(|meta| {
+            meta.and_then(|meta| {
+                let file = reth_fs_util::open(meta.path())?;
+                let reader = Era1Reader::new(file);
+                let iter = reader.iter();
+                let iter = iter.map(era::decode);
+
+                Ok(Box::new(iter) as Item<BH, BB>)
+            })
+        }))))
     }
 }
 
