@@ -37,11 +37,9 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
-    OpPayloadBuilderAttributes,
+    OpPayloadBuilderAttributes, OpPayloadPrimitives,
 };
-use reth_optimism_primitives::{
-    DepositReceipt, OpPrimitives, OpReceipt, OpTransaction, OpTransactionSigned,
-};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -782,14 +780,7 @@ where
     Node: FullNodeTypes<
         Provider: ChainSpecProvider<ChainSpec: OpHardforks>,
         Types: NodeTypes<
-            Primitives: NodePrimitives<
-                BlockHeader = alloy_consensus::Header,
-                BlockBody = alloy_consensus::BlockBody<
-                    <<<Node as FullNodeTypes>::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx,
-                >,
-                Receipt: DepositReceipt,
-                SignedTx: OpTransaction,
-            >,
+            Primitives: OpPayloadPrimitives,
             Payload: PayloadTypes<
                 BuiltPayload = reth_optimism_payload_builder::OpBuiltPayload<<<Node as FullNodeTypes>::Types as NodeTypes>::Primitives>,
                 PayloadAttributes = OpPayloadAttributes,
