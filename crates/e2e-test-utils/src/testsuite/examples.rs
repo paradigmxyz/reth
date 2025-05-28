@@ -64,7 +64,7 @@ async fn test_testsuite_produce_blocks() -> Result<()> {
         .with_network(NetworkSetup::single_node());
 
     let test =
-        TestBuilder::new().with_setup(setup).with_action(ProduceBlocks::<EthEngineTypes>::new(0));
+        TestBuilder::new().with_setup(setup).with_action(ProduceBlocks::<EthEngineTypes>::new(5));
 
     test.run::<EthereumNode>().await?;
 
@@ -87,8 +87,8 @@ async fn test_testsuite_create_fork() -> Result<()> {
 
     let test = TestBuilder::new()
         .with_setup(setup)
-        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
-        .with_action(CreateFork::<EthEngineTypes>::new(0, 2));
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(CreateFork::<EthEngineTypes>::new(0, 3));
 
     test.run::<EthereumNode>().await?;
 
