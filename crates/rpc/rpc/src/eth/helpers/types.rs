@@ -53,11 +53,6 @@ where
         TransactionRequest::build_typed_simulate_transaction(request)
             .map_err(|_| EthApiError::TransactionConversionError)
     }
-
-    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = tx.inner.inner_mut().input_mut();
-        *input = input.slice(..4);
-    }
 }
 
 //tests for simulate

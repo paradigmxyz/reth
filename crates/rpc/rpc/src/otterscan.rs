@@ -1,4 +1,4 @@
-use alloy_consensus::{BlockHeader, Transaction, Typed2718};
+use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
@@ -15,7 +15,7 @@ use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, TransactionCompat,
+    FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
@@ -239,15 +239,6 @@ where
 
         // Crop transactions
         *transactions = transactions.drain(page_start..page_end).collect::<Vec<_>>();
-
-        // The input field returns only the 4 bytes method selector instead of the entire
-        // calldata byte blob
-        // See also: <https://github.com/ledgerwatch/erigon/blob/aefb97b07d1c4fd32a66097a24eddd8f6ccacae0/turbo/jsonrpc/otterscan_api.go#L610-L617>
-        for tx in transactions.iter_mut() {
-            if tx.input().len() > 4 {
-                Eth::TransactionCompat::otterscan_api_truncate_input(tx);
-            }
-        }
 
         // Crop receipts and transform them into OtsTransactionReceipt
         let timestamp = Some(block.header.timestamp());
