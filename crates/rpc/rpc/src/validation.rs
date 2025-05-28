@@ -20,7 +20,11 @@ use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::BlockExecutionOutput;
-use reth_metrics::{metrics, metrics::Gauge, Metrics};
+use reth_metrics::{
+    metrics,
+    metrics::{gauge, Gauge},
+    Metrics,
+};
 use reth_node_api::NewPayloadError;
 use reth_primitives_traits::{
     constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
@@ -33,6 +37,7 @@ use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
@@ -42,6 +47,18 @@ use tracing::warn;
 pub struct ValidationApi<Provider, E: ConfigureEvm> {
     #[deref]
     inner: Arc<ValidationApiInner<Provider, E>>,
+}
+
+fn hash_disallow_list(disallow: &HashSet<Address>) -> String {
+    let mut sorted: Vec<_> = disallow.iter().collect();
+    sorted.sort(); // sort for deterministic hashing
+
+    let mut hasher = Sha256::new();
+    for addr in sorted {
+        hasher.update(addr.as_slice()); // Use as_slice() for Address bytes
+    }
+
+    format!("{:x}", hasher.finalize()) // lowercase hex string
 }
 
 impl<Provider, E> ValidationApi<Provider, E>
@@ -77,6 +94,13 @@ where
         });
 
         inner.metrics.disallow_size.set(inner.disallow.len() as f64);
+
+        //hash metric with label using the gauge macro
+        let disallow_hash = hash_disallow_list(&inner.disallow);
+        let hash_gauge =
+            gauge!("builder_validation_disallow_hash", "disallow_hash" => disallow_hash);
+        hash_gauge.set(1.0);
+
         Self { inner }
     }
 
@@ -596,4 +620,94 @@ impl From<ValidationApiError> for ErrorObject<'static> {
 pub(crate) struct ValidationMetrics {
     /// The number of entries configured in the builder validation disallow list.
     pub(crate) disallow_size: Gauge,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hash_disallow_list;
+    use revm_primitives::Address;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_hash_disallow_list_deterministic() {
+        let mut addresses = HashSet::new();
+        addresses.insert(Address::from([1u8; 20]));
+        addresses.insert(Address::from([2u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses);
+        let hash2 = hash_disallow_list(&addresses);
+
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_disallow_list_different_content() {
+        let mut addresses1 = HashSet::new();
+        addresses1.insert(Address::from([1u8; 20]));
+
+        let mut addresses2 = HashSet::new();
+        addresses2.insert(Address::from([2u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses1);
+        let hash2 = hash_disallow_list(&addresses2);
+
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_disallow_list_order_independent() {
+        let mut addresses1 = HashSet::new();
+        addresses1.insert(Address::from([1u8; 20]));
+        addresses1.insert(Address::from([2u8; 20]));
+
+        let mut addresses2 = HashSet::new();
+        addresses2.insert(Address::from([2u8; 20])); // Different insertion order
+        addresses2.insert(Address::from([1u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses1);
+        let hash2 = hash_disallow_list(&addresses2);
+
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_empty_blocklist_hash() {
+        let empty = HashSet::new();
+        let hash = hash_disallow_list(&empty);
+
+        // SHA256 of empty input
+        assert_eq!(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    }
+
+    #[test]
+    fn test_hash_format_and_length() {
+        let mut addresses = HashSet::new();
+        addresses.insert(Address::from([42u8; 20]));
+
+        let hash = hash_disallow_list(&addresses);
+
+        // SHA256 produces 64-character hex string
+        assert_eq!(hash.len(), 64);
+
+        // Should be valid lowercase hex
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(hash, hash.to_lowercase());
+    }
+
+    #[test]
+    fn test_hash_matches_metrics_output() {
+        // Test that our hash function produces the same results we saw in metrics
+        let empty = HashSet::new();
+        let empty_hash = hash_disallow_list(&empty);
+
+        let mut single = HashSet::new();
+        single.insert(Address::from([0x11u8; 20]));
+        let single_hash = hash_disallow_list(&single);
+
+        // These should be different
+        assert_ne!(empty_hash, single_hash);
+
+        // Empty hash should match what we observed in the metrics test
+        assert_eq!(empty_hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+    }
 }
