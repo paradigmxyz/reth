@@ -307,7 +307,7 @@ impl PackedNibbles {
     /// NOTE: if there is data in the high nibble, it will be ignored.
     pub const fn push_unchecked(&mut self, nibble: u8) {
         if self.length > 0 {
-            self.nibbles = self.nibbles.wrapping_shr(4);
+            self.nibbles = self.nibbles.wrapping_shl(4);
         }
         self.nibbles = self.nibbles.bitor(U256::from_limbs([(nibble & 0x0F) as u64, 0, 0, 0]));
         self.length += 1;
