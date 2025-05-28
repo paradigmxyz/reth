@@ -3,8 +3,7 @@
 use crate::testsuite::{Environment, LatestBlockInfo};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadEnvelopeV3, ExecutionPayloadV3, ForkchoiceState, PayloadAttributes,
-    PayloadStatusEnum,
+    payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
@@ -283,16 +282,42 @@ where
 
             debug!("FCU result: {:?}", fcu_result);
 
-            let payload_id = fcu_result
-                .payload_id
-                .ok_or_else(|| eyre::eyre!("No payload ID returned from forkChoiceUpdated"))?;
+            let payload_id = if let Some(payload_id) = fcu_result.payload_id {
+                debug!("Received new payload ID: {:?}", payload_id);
+                payload_id
+            } else {
+                debug!("No payload ID returned, generating fresh payload attributes for forking");
 
-            debug!("Received payload ID: {:?}", payload_id);
+                let fresh_payload_attributes = PayloadAttributes {
+                    timestamp: env.latest_header_time + env.block_timestamp_increment,
+                    prev_randao: B256::random(),
+                    suggested_fee_recipient: alloy_primitives::Address::random(),
+                    withdrawals: Some(vec![]),
+                    parent_beacon_block_root: Some(B256::ZERO),
+                };
+
+                let fresh_fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
+                    &env.node_clients[producer_idx].engine.http_client(),
+                    fork_choice_state,
+                    Some(fresh_payload_attributes.clone().into()),
+                )
+                .await?;
+
+                debug!("Fresh FCU result: {:?}", fresh_fcu_result);
+
+                if let Some(payload_id) = fresh_fcu_result.payload_id {
+                    payload_id
+                } else {
+                    debug!("Engine considers the fork base already canonical, skipping payload generation");
+                    return Ok(());
+                }
+            };
+
             env.next_payload_id = Some(payload_id);
 
             sleep(Duration::from_secs(1)).await;
 
-            let _built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
+            let built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
                 &env.node_clients[producer_idx].engine.http_client(),
                 payload_id,
             )
@@ -302,6 +327,7 @@ where
             let built_payload = payload_attributes.clone();
             env.payload_id_history.insert(latest_block.number + 1, payload_id);
             env.latest_payload_built = Some(built_payload);
+            env.latest_payload_envelope = Some(built_payload_envelope);
 
             Ok(())
         })
@@ -316,26 +342,44 @@ impl<Engine> Action<Engine> for BroadcastLatestForkchoice
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let payload = env.latest_payload_executed.clone();
-
             if env.node_clients.is_empty() {
                 return Err(eyre::eyre!("No node clients available"));
             }
-            let latest_block = env
-                .latest_block_info
-                .as_ref()
-                .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
-            let parent_hash = latest_block.hash;
-            debug!("Latest block hash: {parent_hash}");
+            // use the hash of the newly executed payload if available
+            let head_hash = if let Some(payload_envelope) = &env.latest_payload_envelope {
+                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
+                    payload_envelope.clone().into();
+                let new_block_hash = execution_payload_envelope
+                    .execution_payload
+                    .payload_inner
+                    .payload_inner
+                    .block_hash;
+                debug!("Using newly executed block hash as head: {new_block_hash}");
+                new_block_hash
+            } else {
+                // fallback to RPC query
+                let rpc_client = &env.node_clients[0].rpc;
+                let current_head_block =
+                    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+                        rpc_client,
+                        alloy_eips::BlockNumberOrTag::Latest,
+                        false,
+                    )
+                    .await?
+                    .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+                debug!("Using RPC latest block hash as head: {}", current_head_block.header.hash);
+                current_head_block.header.hash
+            };
 
             let fork_choice_state = ForkchoiceState {
-                head_block_hash: parent_hash,
-                safe_block_hash: parent_hash,
-                finalized_block_hash: parent_hash,
+                head_block_hash: head_hash,
+                safe_block_hash: head_hash,
+                finalized_block_hash: head_hash,
             };
             debug!(
                 "Broadcasting forkchoice update to {} clients. Head: {:?}",
@@ -347,7 +391,7 @@ where
                 match EngineApiClient::<Engine>::fork_choice_updated_v3(
                     &client.engine.http_client(),
                     fork_choice_state,
-                    payload.clone().map(|p| p.into()),
+                    None,
                 )
                 .await
                 {
@@ -779,6 +823,7 @@ impl<Engine> Action<Engine> for BroadcastNextNewPayload
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -791,70 +836,25 @@ where
                 .parent_beacon_block_root
                 .ok_or_else(|| eyre::eyre!("No parent beacon block root for next new payload"))?;
 
+            let payload_envelope = env
+                .latest_payload_envelope
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No execution payload envelope available"))?;
+
+            let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
+                payload_envelope.clone().into();
+            let execution_payload = execution_payload_envelope.execution_payload;
+
             // Loop through all clients and broadcast the next new payload
             let mut successful_broadcast: bool = false;
 
             for client in &env.node_clients {
                 let engine = client.engine.http_client();
-                let rpc_client = &client.rpc;
 
-                // Get latest block from the client
-                let rpc_latest_block =
-                    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                        rpc_client,
-                        alloy_eips::BlockNumberOrTag::Latest,
-                        false,
-                    )
-                    .await?
-                    .ok_or_else(|| eyre::eyre!("No latest block found from rpc"))?;
-
-                let latest_block = reth_ethereum_primitives::Block {
-                    header: rpc_latest_block.header.inner,
-                    body: reth_ethereum_primitives::BlockBody {
-                        transactions: rpc_latest_block
-                            .transactions
-                            .into_transactions()
-                            .map(|tx| tx.inner.into_inner().into())
-                            .collect(),
-                        ommers: Default::default(),
-                        withdrawals: rpc_latest_block.withdrawals,
-                    },
-                };
-
-                // Validate block number matches expected
-                let latest_block_info = env
-                    .latest_block_info
-                    .as_ref()
-                    .ok_or_else(|| eyre::eyre!("No latest block info found"))?;
-
-                if latest_block.header.number != latest_block_info.number {
-                    return Err(eyre::eyre!(
-                        "Client block number {} does not match expected block number {}",
-                        latest_block.header.number,
-                        latest_block_info.number
-                    ));
-                }
-
-                // Validate parent beacon block root
-                let latest_block_parent_beacon_block_root =
-                    latest_block.parent_beacon_block_root.ok_or_else(|| {
-                        eyre::eyre!("No parent beacon block root for latest block")
-                    })?;
-
-                if parent_beacon_block_root != latest_block_parent_beacon_block_root {
-                    return Err(eyre::eyre!(
-                        "Parent beacon block root mismatch: expected {:?}, got {:?}",
-                        parent_beacon_block_root,
-                        latest_block_parent_beacon_block_root
-                    ));
-                }
-
-                // Construct and broadcast the execution payload from the latest block
-                // The latest block should contain the latest_payload_built
-                let execution_payload = ExecutionPayloadV3::from_block_slow(&latest_block);
+                // Broadcast the execution payload
                 let result = EngineApiClient::<Engine>::new_payload_v3(
                     &engine,
-                    execution_payload,
+                    execution_payload.clone(),
                     vec![],
                     parent_beacon_block_root,
                 )
@@ -878,6 +878,163 @@ where
             if !successful_broadcast {
                 return Err(eyre::eyre!("Failed to successfully broadcast payload to any client"));
             }
+
+            Ok(())
+        })
+    }
+}
+
+/// Target for reorg operation
+#[derive(Debug, Clone)]
+pub enum ReorgTarget {
+    /// Direct block hash
+    Hash(B256),
+    /// Tagged block reference
+    Tag(String),
+}
+
+/// Action that performs a reorg by setting a new head block as canonical
+#[derive(Debug)]
+pub struct ReorgTo<Engine> {
+    /// Target for the reorg operation
+    pub target: ReorgTarget,
+    /// Tracks engine type
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> ReorgTo<Engine> {
+    /// Create a new `ReorgTo` action with a direct block hash
+    pub const fn new(target_hash: B256) -> Self {
+        Self { target: ReorgTarget::Hash(target_hash), _phantom: PhantomData }
+    }
+
+    /// Create a new `ReorgTo` action with a tagged block reference
+    pub fn new_from_tag(tag: impl Into<String>) -> Self {
+        Self { target: ReorgTarget::Tag(tag.into()), _phantom: PhantomData }
+    }
+}
+
+impl<Engine> Action<Engine> for ReorgTo<Engine>
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // resolve the target hash from either direct hash or tag
+            let target_hash = match &self.target {
+                ReorgTarget::Hash(hash) => *hash,
+                ReorgTarget::Tag(tag) => env
+                    .block_registry
+                    .get(tag)
+                    .copied()
+                    .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", tag))?,
+            };
+
+            let mut sequence = Sequence::new(vec![
+                Box::new(SetReorgTarget::new(target_hash)),
+                Box::new(BroadcastLatestForkchoice::default()),
+                Box::new(UpdateBlockInfo::default()),
+            ]);
+
+            sequence.execute(env).await
+        })
+    }
+}
+
+/// Sub-action to set the reorg target block in the environment
+#[derive(Debug)]
+pub struct SetReorgTarget {
+    /// Hash of the block to reorg to
+    pub target_hash: B256,
+}
+
+impl SetReorgTarget {
+    /// Create a new `SetReorgTarget` action
+    pub const fn new(target_hash: B256) -> Self {
+        Self { target_hash }
+    }
+}
+
+impl<Engine> Action<Engine> for SetReorgTarget
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            if env.node_clients.is_empty() {
+                return Err(eyre::eyre!("No node clients available"));
+            }
+
+            // verify the target block exists
+            let rpc_client = &env.node_clients[0].rpc;
+            let target_block = EthApiClient::<Transaction, Block, Receipt, Header>::block_by_hash(
+                rpc_client,
+                self.target_hash,
+                false,
+            )
+            .await?
+            .ok_or_else(|| eyre::eyre!("Target reorg block {} not found", self.target_hash))?;
+
+            debug!(
+                "Setting reorg target to block {} (hash: {})",
+                target_block.header.number, self.target_hash
+            );
+
+            // update environment to point to the target block
+            env.latest_block_info = Some(LatestBlockInfo {
+                hash: target_block.header.hash,
+                number: target_block.header.number,
+            });
+
+            env.latest_header_time = target_block.header.timestamp;
+
+            // update fork choice state to make the target block canonical
+            env.latest_fork_choice_state = ForkchoiceState {
+                head_block_hash: self.target_hash,
+                safe_block_hash: self.target_hash, // Simplified - in practice might be different
+                finalized_block_hash: self.target_hash, /* Simplified - in practice might be
+                                                    * different */
+            };
+
+            debug!("Set reorg target to block {}", self.target_hash);
+            Ok(())
+        })
+    }
+}
+
+/// Action that captures the current block and tags it with a name for later reference
+#[derive(Debug)]
+pub struct CaptureBlock {
+    /// Tag name to associate with the current block
+    pub tag: String,
+}
+
+impl CaptureBlock {
+    /// Create a new `CaptureBlock` action
+    pub fn new(tag: impl Into<String>) -> Self {
+        Self { tag: tag.into() }
+    }
+}
+
+impl<Engine> Action<Engine> for CaptureBlock
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let current_block = env
+                .latest_block_info
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
+
+            env.block_registry.insert(self.tag.clone(), current_block.hash);
+
+            debug!(
+                "Captured block {} (hash: {}) with tag '{}'",
+                current_block.number, current_block.hash, self.tag
+            );
 
             Ok(())
         })

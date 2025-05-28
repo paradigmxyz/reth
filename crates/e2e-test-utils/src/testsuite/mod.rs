@@ -74,10 +74,14 @@ where
     pub latest_payload_built: Option<PayloadAttributes>,
     /// Stores the most recent executed payload
     pub latest_payload_executed: Option<PayloadAttributes>,
+    /// Stores the most recent built execution payload envelope
+    pub latest_payload_envelope: Option<I::ExecutionPayloadEnvelopeV3>,
     /// Number of slots until a block is considered safe
     pub slots_to_safe: u64,
     /// Number of slots until a block is considered finalized
     pub slots_to_finalized: u64,
+    /// Registry for tagged blocks, mapping tag names to block hashes
+    pub block_registry: HashMap<String, B256>,
 }
 
 impl<I> Default for Environment<I>
@@ -98,8 +102,10 @@ where
             latest_fork_choice_state: ForkchoiceState::default(),
             latest_payload_built: None,
             latest_payload_executed: None,
+            latest_payload_envelope: None,
             slots_to_safe: 0,
             slots_to_finalized: 0,
+            block_registry: HashMap::new(),
         }
     }
 }
