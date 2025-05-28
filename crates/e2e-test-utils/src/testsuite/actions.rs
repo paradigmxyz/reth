@@ -3,7 +3,8 @@
 use crate::testsuite::{Environment, LatestBlockInfo};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes, PayloadStatusEnum,
+    payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
+    PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
@@ -15,21 +16,14 @@ use tokio::time::sleep;
 use tracing::debug;
 
 /// Validates a forkchoice update response and returns an error if invalid
-fn validate_fcu_response<Engine: EngineTypes>(
-    response: &ForkchoiceUpdated,
-    context: &str,
-) -> Result<()> {
+fn validate_fcu_response(response: &ForkchoiceUpdated, context: &str) -> Result<()> {
     match &response.payload_status.status {
         PayloadStatusEnum::Valid => {
             debug!("{}: FCU accepted as valid", context);
             Ok(())
         }
         PayloadStatusEnum::Invalid { validation_error } => {
-            Err(eyre::eyre!(
-                "{}: FCU rejected as invalid: {:?}",
-                context,
-                validation_error
-            ))
+            Err(eyre::eyre!("{}: FCU rejected as invalid: {:?}", context, validation_error))
         }
         PayloadStatusEnum::Syncing => {
             debug!("{}: FCU accepted, node is syncing", context);
@@ -311,7 +305,7 @@ where
             debug!("FCU result: {:?}", fcu_result);
 
             // validate the FCU status before proceeding
-            validate_fcu_response::<Engine>(&fcu_result, "GenerateNextPayload")?;
+            validate_fcu_response(&fcu_result, "GenerateNextPayload")?;
 
             let payload_id = if let Some(payload_id) = fcu_result.payload_id {
                 debug!("Received new payload ID: {:?}", payload_id);
@@ -337,7 +331,7 @@ where
                 debug!("Fresh FCU result: {:?}", fresh_fcu_result);
 
                 // validate the fresh FCU status
-                validate_fcu_response::<Engine>(&fresh_fcu_result, "GenerateNextPayload (fresh)")?;
+                validate_fcu_response(&fresh_fcu_result, "GenerateNextPayload (fresh)")?;
 
                 if let Some(payload_id) = fresh_fcu_result.payload_id {
                     payload_id
@@ -435,7 +429,7 @@ where
                             idx, resp.payload_status.status
                         );
                         // validate that the forkchoice update was accepted
-                        validate_fcu_response::<Engine>(&resp, &format!("Client {}", idx))?;
+                        validate_fcu_response(&resp, &format!("Client {idx}"))?;
                     }
                     Err(err) => {
                         return Err(eyre::eyre!(
