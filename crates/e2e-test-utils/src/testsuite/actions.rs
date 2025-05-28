@@ -1,6 +1,6 @@
 //! Actions that can be performed in tests.
 
-use crate::testsuite::Environment;
+use crate::testsuite::{Environment, LatestBlockInfo};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_engine::{
     payload::ExecutionPayloadEnvelopeV3, ExecutionPayloadV3, ForkchoiceState, PayloadAttributes,
@@ -194,36 +194,17 @@ where
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
-            // Calculate the starting index based on the latest block number
-            let start_idx = ((latest_info.number + 1) % num_clients as u64) as usize;
+            // simple round-robin selection based on next block number
+            let next_producer_idx = ((latest_info.number + 1) % num_clients as u64) as usize;
 
-            for i in 0..num_clients {
-                let idx = (start_idx + i) % num_clients;
-                let node_client = &env.node_clients[idx];
-                let rpc_client = &node_client.rpc;
+            env.last_producer_idx = Some(next_producer_idx);
+            debug!(
+                "Selected node {} as the next block producer for block {}",
+                next_producer_idx,
+                latest_info.number + 1
+            );
 
-                let latest_block =
-                    EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                        rpc_client,
-                        alloy_eips::BlockNumberOrTag::Latest,
-                        false,
-                    )
-                    .await?;
-
-                if let Some(block) = latest_block {
-                    let block_number = block.header.number;
-                    let block_hash = block.header.hash;
-
-                    // Check if the block hash and number match the latest block info
-                    if block_hash == latest_info.hash && block_number == latest_info.number {
-                        env.last_producer_idx = Some(idx);
-                        debug!("Selected node {} as the next block producer", idx);
-                        return Ok(());
-                    }
-                }
-            }
-
-            Err(eyre::eyre!("No suitable block producer found"))
+            Ok(())
         })
     }
 }
@@ -286,12 +267,15 @@ where
 
             let payload_attributes = env
                 .payload_attributes
-                .get(&latest_block.number)
+                .get(&(latest_block.number + 1))
                 .cloned()
-                .ok_or_else(|| eyre::eyre!("No payload attributes found for latest block"))?;
+                .ok_or_else(|| eyre::eyre!("No payload attributes found for next block"))?;
+
+            let producer_idx =
+                env.last_producer_idx.ok_or_else(|| eyre::eyre!("No block producer selected"))?;
 
             let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
-                &env.node_clients[0].engine.http_client(),
+                &env.node_clients[producer_idx].engine.http_client(),
                 fork_choice_state,
                 Some(payload_attributes.clone().into()),
             )
@@ -309,7 +293,7 @@ where
             sleep(Duration::from_secs(1)).await;
 
             let _built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
-                &env.node_clients[0].engine.http_client(),
+                &env.node_clients[producer_idx].engine.http_client(),
                 payload_id,
             )
             .await?;
@@ -383,6 +367,46 @@ where
                 }
             }
             debug!("Forkchoice update broadcasted successfully");
+            Ok(())
+        })
+    }
+}
+
+/// Action that updates environment state after block production
+#[derive(Debug, Default)]
+pub struct UpdateBlockInfo {}
+
+impl<Engine> Action<Engine> for UpdateBlockInfo
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // get the latest block from the first client to update environment state
+            let rpc_client = &env.node_clients[0].rpc;
+            let latest_block =
+                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+                    rpc_client,
+                    alloy_eips::BlockNumberOrTag::Latest,
+                    false,
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
+
+            // update environment with the new block information
+            env.latest_block_info = Some(LatestBlockInfo {
+                hash: latest_block.header.hash,
+                number: latest_block.header.number,
+            });
+
+            env.latest_header_time = latest_block.header.timestamp;
+            env.latest_fork_choice_state.head_block_hash = latest_block.header.hash;
+
+            debug!(
+                "Updated environment to block {} (hash: {})",
+                latest_block.header.number, latest_block.header.hash
+            );
+
             Ok(())
         })
     }
@@ -480,7 +504,7 @@ where
 
                     // add it to header history
                     env.latest_fork_choice_state.head_block_hash = rpc_latest_header.hash;
-                    latest_block.hash = rpc_latest_header.hash as B256;
+                    latest_block.hash = rpc_latest_header.hash;
                     latest_block.number = rpc_latest_header.inner.number;
                 }
             }
@@ -520,18 +544,20 @@ impl<Engine> Action<Engine> for ProduceBlocks<Engine>
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            // Create a sequence for producing a single block
-            let mut sequence = Sequence::new(vec![
-                Box::new(PickNextBlockProducer::default()),
-                Box::new(GeneratePayloadAttributes::default()),
-                Box::new(GenerateNextPayload::default()),
-                Box::new(BroadcastNextNewPayload::default()),
-                Box::new(BroadcastLatestForkchoice::default()),
-            ]);
             for _ in 0..self.num_blocks {
+                // create a fresh sequence for each block to avoid state pollution
+                let mut sequence = Sequence::new(vec![
+                    Box::new(PickNextBlockProducer::default()),
+                    Box::new(GeneratePayloadAttributes::default()),
+                    Box::new(GenerateNextPayload::default()),
+                    Box::new(BroadcastNextNewPayload::default()),
+                    Box::new(BroadcastLatestForkchoice::default()),
+                    Box::new(UpdateBlockInfo::default()),
+                ]);
                 sequence.execute(env).await?;
             }
             Ok(())
@@ -563,6 +589,182 @@ where
             for action in &mut self.actions {
                 action.execute(env).await?;
             }
+
+            Ok(())
+        })
+    }
+}
+
+/// Action to create a fork from a specified block number and produce blocks on top
+#[derive(Debug)]
+pub struct CreateFork<Engine> {
+    /// Block number to use as the base of the fork
+    pub fork_base_block: u64,
+    /// Number of blocks to produce on top of the fork base
+    pub num_blocks: u64,
+    /// Tracks engine type
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> CreateFork<Engine> {
+    /// Create a new `CreateFork` action
+    pub fn new(fork_base_block: u64, num_blocks: u64) -> Self {
+        Self { fork_base_block, num_blocks, _phantom: Default::default() }
+    }
+}
+
+impl<Engine> Action<Engine> for CreateFork<Engine>
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let mut sequence = Sequence::new(vec![
+                Box::new(SetForkBase::new(self.fork_base_block)),
+                Box::new(ProduceBlocks::new(self.num_blocks)),
+                Box::new(ValidateFork::new(self.fork_base_block)),
+            ]);
+
+            sequence.execute(env).await
+        })
+    }
+}
+
+/// Sub-action to set the fork base block in the environment
+#[derive(Debug)]
+pub struct SetForkBase {
+    /// Block number to use as the base of the fork
+    pub fork_base_block: u64,
+}
+
+impl SetForkBase {
+    /// Create a new `SetForkBase` action
+    pub const fn new(fork_base_block: u64) -> Self {
+        Self { fork_base_block }
+    }
+}
+
+impl<Engine> Action<Engine> for SetForkBase
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            if env.node_clients.is_empty() {
+                return Err(eyre::eyre!("No node clients available"));
+            }
+
+            // get the block at the fork base number to establish the fork point
+            let rpc_client = &env.node_clients[0].rpc;
+            let fork_base_block =
+                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+                    rpc_client,
+                    alloy_eips::BlockNumberOrTag::Number(self.fork_base_block),
+                    false,
+                )
+                .await?
+                .ok_or_else(|| eyre::eyre!("Fork base block {} not found", self.fork_base_block))?;
+
+            // update environment to point to the fork base block
+            env.latest_block_info = Some(LatestBlockInfo {
+                hash: fork_base_block.header.hash,
+                number: fork_base_block.header.number,
+            });
+
+            env.latest_header_time = fork_base_block.header.timestamp;
+
+            // update fork choice state to the fork base
+            env.latest_fork_choice_state = ForkchoiceState {
+                head_block_hash: fork_base_block.header.hash,
+                safe_block_hash: fork_base_block.header.hash,
+                finalized_block_hash: fork_base_block.header.hash,
+            };
+
+            debug!(
+                "Set fork base to block {} (hash: {})",
+                self.fork_base_block, fork_base_block.header.hash
+            );
+
+            Ok(())
+        })
+    }
+}
+
+/// Sub-action to validate that a fork was created correctly
+#[derive(Debug)]
+pub struct ValidateFork {
+    /// Number of the fork base block (stored here since we need it for validation)
+    pub fork_base_number: u64,
+}
+
+impl ValidateFork {
+    /// Create a new `ValidateFork` action
+    pub const fn new(fork_base_number: u64) -> Self {
+        Self { fork_base_number }
+    }
+}
+
+impl<Engine> Action<Engine> for ValidateFork
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let current_block_info = env
+                .latest_block_info
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
+
+            // verify that the current tip is at or ahead of the fork base
+            if current_block_info.number < self.fork_base_number {
+                return Err(eyre::eyre!(
+                    "Fork validation failed: current block number {} is behind fork base {}",
+                    current_block_info.number,
+                    self.fork_base_number
+                ));
+            }
+
+            // get the fork base hash from the environment's fork choice state
+            // we assume the fork choice state was set correctly by SetForkBase
+            let fork_base_hash = env.latest_fork_choice_state.finalized_block_hash;
+
+            // trace back from current tip to verify it's a descendant of the fork base
+            let rpc_client = &env.node_clients[0].rpc;
+            let mut current_hash = current_block_info.hash;
+            let mut current_number = current_block_info.number;
+
+            // walk backwards through the chain until we reach the fork base
+            while current_number > self.fork_base_number {
+                let block = EthApiClient::<Transaction, Block, Receipt, Header>::block_by_hash(
+                    rpc_client,
+                    current_hash,
+                    false,
+                )
+                .await?
+                .ok_or_else(|| {
+                    eyre::eyre!("Block with hash {} not found during fork validation", current_hash)
+                })?;
+
+                current_hash = block.header.parent_hash;
+                current_number = block.header.number.saturating_sub(1);
+            }
+
+            // verify we reached the expected fork base
+            if current_hash != fork_base_hash {
+                return Err(eyre::eyre!(
+                    "Fork validation failed: expected fork base hash {}, but found {} at block {}",
+                    fork_base_hash,
+                    current_hash,
+                    current_number
+                ));
+            }
+
+            debug!(
+                "Fork validation successful: tip block {} is descendant of fork base {} ({})",
+                current_block_info.number, self.fork_base_number, fork_base_hash
+            );
 
             Ok(())
         })

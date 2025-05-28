@@ -3,7 +3,7 @@
 use crate::{setup_engine, testsuite::Environment, NodeBuilderHelper, PayloadAttributesBuilder};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::PayloadAttributes;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
@@ -223,6 +223,34 @@ where
         }
 
         env.node_clients = node_clients;
+
+        // Initialize the environment with genesis block information
+        let first_client = &env.node_clients[0];
+        let genesis_block =
+            EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
+                &first_client.rpc,
+                BlockNumberOrTag::Number(0),
+                false,
+            )
+            .await?
+            .ok_or_else(|| eyre!("Genesis block not found"))?;
+
+        env.latest_block_info = Some(crate::testsuite::LatestBlockInfo {
+            hash: genesis_block.header.hash,
+            number: genesis_block.header.number,
+        });
+
+        env.latest_header_time = genesis_block.header.timestamp;
+        env.latest_fork_choice_state = ForkchoiceState {
+            head_block_hash: genesis_block.header.hash,
+            safe_block_hash: genesis_block.header.hash,
+            finalized_block_hash: genesis_block.header.hash,
+        };
+
+        debug!(
+            "Environment initialized with genesis block {} (hash: {})",
+            genesis_block.header.number, genesis_block.header.hash
+        );
 
         // TODO: For each block in self.blocks, replay it on the node
 
