@@ -301,14 +301,20 @@ where
     }
 }
 
+impl From<Receipt> for alloy_consensus::Receipt<Log> {
+    fn from(value: Receipt) -> Self {
+        Self {
+            status: value.success.into(),
+            cumulative_gas_used: value.cumulative_gas_used,
+            logs: value.logs,
+        }
+    }
+}
+
 impl From<Receipt> for alloy_consensus::ReceiptEnvelope<Log> {
     fn from(value: Receipt) -> Self {
         let tx_type = value.tx_type;
-        let receipt = value.into_with_bloom().map_receipt(|receipt| alloy_consensus::Receipt {
-            status: receipt.success.into(),
-            cumulative_gas_used: receipt.cumulative_gas_used,
-            logs: receipt.logs,
-        });
+        let receipt = value.into_with_bloom().map_receipt(Into::into);
         match tx_type {
             TxType::Legacy => Self::Legacy(receipt),
             TxType::Eip2930 => Self::Eip2930(receipt),
