@@ -20,7 +20,10 @@ use tracing::debug;
 /// Actions execute operations and potentially make assertions in a single step.
 /// The action name indicates what it does (e.g., `AssertMineBlock` would both
 /// mine a block and assert it worked).
-pub trait Action<I>: Send + 'static {
+pub trait Action<I>: Send + 'static
+where
+    I: EngineTypes,
+{
     /// Executes the action
     fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>>;
 }
@@ -29,7 +32,10 @@ pub trait Action<I>: Send + 'static {
 #[expect(missing_debug_implementations)]
 pub struct ActionBox<I>(Box<dyn Action<I>>);
 
-impl<I: 'static> ActionBox<I> {
+impl<I> ActionBox<I>
+where
+    I: EngineTypes + 'static,
+{
     /// Constructor for [`ActionBox`].
     pub fn new<A: Action<I>>(action: A) -> Self {
         Self(Box::new(action))
@@ -47,6 +53,7 @@ impl<I: 'static> ActionBox<I> {
 /// This allows using closures directly as actions with `.with_action(async move |env| {...})`.
 impl<I, F, Fut> Action<I> for F
 where
+    I: EngineTypes,
     F: FnMut(&Environment<I>) -> Fut + Send + 'static,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
@@ -227,7 +234,8 @@ pub struct GeneratePayloadAttributes {}
 
 impl<Engine> Action<Engine> for GeneratePayloadAttributes
 where
-    Engine: EngineTypes,
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -237,7 +245,7 @@ where
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
             let block_number = latest_block.number;
             let timestamp = env.latest_header_time + env.block_timestamp_increment;
-            let payload_attributes = alloy_rpc_types_engine::PayloadAttributes {
+            let payload_attributes = PayloadAttributes {
                 timestamp,
                 prev_randao: B256::random(),
                 suggested_fee_recipient: alloy_primitives::Address::random(),
@@ -257,9 +265,8 @@ pub struct GenerateNextPayload {}
 
 impl<Engine> Action<Engine> for GenerateNextPayload
 where
-    Engine: EngineTypes + PayloadTypes<PayloadAttributes = PayloadAttributes>,
-    reth_node_ethereum::engine::EthPayloadAttributes:
-        From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -277,7 +284,7 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            let payload_attributes: PayloadAttributes = env
+            let payload_attributes = env
                 .payload_attributes
                 .get(&latest_block.number)
                 .cloned()
@@ -286,7 +293,7 @@ where
             let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
                 &env.node_clients[0].engine.http_client(),
                 fork_choice_state,
-                Some(payload_attributes.clone()),
+                Some(payload_attributes.clone().into()),
             )
             .await?;
 
@@ -301,12 +308,14 @@ where
 
             sleep(Duration::from_secs(1)).await;
 
-            let built_payload: PayloadAttributes = EngineApiClient::<Engine>::get_payload_v3(
+            let _built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
                 &env.node_clients[0].engine.http_client(),
                 payload_id,
             )
-            .await?
-            .into();
+            .await?;
+
+            // Store the payload attributes that were used to generate this payload
+            let built_payload = payload_attributes.clone();
             env.payload_id_history.insert(latest_block.number + 1, payload_id);
             env.latest_payload_built = Some(built_payload);
 
@@ -321,9 +330,8 @@ pub struct BroadcastLatestForkchoice {}
 
 impl<Engine> Action<Engine> for BroadcastLatestForkchoice
 where
-    Engine: EngineTypes + PayloadTypes<PayloadAttributes = PayloadAttributes>,
-    reth_node_ethereum::engine::EthPayloadAttributes:
-        From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -355,7 +363,7 @@ where
                 match EngineApiClient::<Engine>::fork_choice_updated_v3(
                     &client.engine.http_client(),
                     fork_choice_state,
-                    payload.clone(),
+                    payload.clone().map(|p| p.into()),
                 )
                 .await
                 {
@@ -386,9 +394,8 @@ pub struct CheckPayloadAccepted {}
 
 impl<Engine> Action<Engine> for CheckPayloadAccepted
 where
-    Engine: EngineTypes<ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3>
-        + PayloadTypes<PayloadAttributes = PayloadAttributes>,
-    ExecutionPayloadEnvelopeV3: From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
+    Engine: EngineTypes,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -428,7 +435,7 @@ where
                 )
                 .await?;
 
-                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = built_payload;
+                let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = built_payload.into();
                 let new_payload_block_hash = execution_payload_envelope
                     .execution_payload
                     .payload_inner
@@ -511,7 +518,8 @@ impl<Engine> Default for ProduceBlocks<Engine> {
 
 impl<Engine> Action<Engine> for ProduceBlocks<Engine>
 where
-    Engine: EngineTypes,
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
@@ -519,6 +527,9 @@ where
             let mut sequence = Sequence::new(vec![
                 Box::new(PickNextBlockProducer::default()),
                 Box::new(GeneratePayloadAttributes::default()),
+                Box::new(GenerateNextPayload::default()),
+                Box::new(BroadcastNextNewPayload::default()),
+                Box::new(BroadcastLatestForkchoice::default()),
             ]);
             for _ in 0..self.num_blocks {
                 sequence.execute(env).await?;
@@ -542,7 +553,10 @@ impl<I> Sequence<I> {
     }
 }
 
-impl<I: Sync + Send + 'static> Action<I> for Sequence<I> {
+impl<I> Action<I> for Sequence<I>
+where
+    I: EngineTypes + Sync + Send + 'static,
+{
     fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // Execute each action in sequence
@@ -561,9 +575,8 @@ pub struct BroadcastNextNewPayload {}
 
 impl<Engine> Action<Engine> for BroadcastNextNewPayload
 where
-    Engine: EngineTypes + PayloadTypes<PayloadAttributes = PayloadAttributes>,
-    reth_node_ethereum::engine::EthPayloadAttributes:
-        From<<Engine as EngineTypes>::ExecutionPayloadEnvelopeV3>,
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
