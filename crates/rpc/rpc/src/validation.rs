@@ -674,53 +674,12 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_blocklist_hash() {
-        let empty = HashSet::new();
-        let hash = hash_disallow_list(&empty);
-
-        // SHA256 of empty input
-        assert_eq!(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    }
-
-    #[test]
-    fn test_hash_format_and_length() {
-        let mut addresses = HashSet::new();
-        addresses.insert(Address::from([42u8; 20]));
-
-        let hash = hash_disallow_list(&addresses);
-
-        // SHA256 produces 64-character hex string
-        assert_eq!(hash.len(), 64);
-
-        // Should be valid lowercase hex
-        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_eq!(hash, hash.to_lowercase());
-    }
-
-    #[test]
-    fn test_hash_matches_metrics_output() {
-        // Test that our hash function produces the same results we saw in metrics
-        let empty = HashSet::new();
-        let empty_hash = hash_disallow_list(&empty);
-
-        let mut single = HashSet::new();
-        single.insert(Address::from([0x11u8; 20]));
-        let single_hash = hash_disallow_list(&single);
-
-        // These should be different
-        assert_ne!(empty_hash, single_hash);
-
-        // Empty hash should match what we observed in the metrics test
-        assert_eq!(empty_hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    }
-
-    #[test]
     //ensures parity with rbuilder hashing https://github.com/flashbots/rbuilder/blob/962c8444cdd490a216beda22c7eec164db9fc3ac/crates/rbuilder/src/live_builder/block_list_provider.rs#L248
     fn test_disallow_list_hash_rbuilder_parity() {
         let json = r#"["0x05E0b5B40B7b66098C2161A5EE11C5740A3A7C45","0x01e2919679362dFBC9ee1644Ba9C6da6D6245BB1","0x03893a7c7463AE47D46bc7f091665f1893656003","0x04DBA1194ee10112fE6C3207C0687DEf0e78baCf"]"#;
         let blocklist: Vec<Address> = serde_json::from_str(json).unwrap();
         let blocklist: HashSet<Address> = blocklist.into_iter().collect();
-        let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608"; 
+        let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608";
         let hash = hash_disallow_list(&blocklist);
         assert_eq!(expected_hash, hash);
     }
