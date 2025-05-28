@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
-use alloy_eips::{eip4844::BlobTransactionSidecar, eip7702::SignedAuthorization};
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
@@ -103,13 +103,13 @@ pub enum ValidTransaction<T> {
         /// The valid EIP-4844 transaction.
         transaction: T,
         /// The extracted sidecar of that transaction
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     },
 }
 
 impl<T> ValidTransaction<T> {
     /// Creates a new valid transaction with an optional sidecar.
-    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecar>) -> Self {
+    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecarVariant>) -> Self {
         if let Some(sidecar) = sidecar {
             Self::ValidWithSidecar { transaction, sidecar }
         } else {
@@ -214,7 +214,7 @@ pub trait TransactionValidator: Debug + Send + Sync {
     fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
         let futures = transactions.into_iter().map(|tx| self.validate_transaction(origin, tx));
         futures_util::future::join_all(futures)
@@ -261,7 +261,7 @@ where
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         match self {
             Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,

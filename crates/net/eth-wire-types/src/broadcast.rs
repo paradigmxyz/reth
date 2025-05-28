@@ -765,6 +765,20 @@ impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
     }
 }
 
+/// The earliest block, the latest block and hash of the latest block which can be provided.
+/// See [BlockRangeUpdate](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#blockrangeupdate-0x11).
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+pub struct BlockRangeUpdate {
+    /// The earliest block which is available.
+    pub earliest: u64,
+    /// The latest block which is available.
+    pub latest: u64,
+    /// Latest available block's hash.
+    pub latest_hash: B256,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1416,6 +1416,13 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> Rec
             |_| true,
         )
     }
+
+    fn receipts_by_block_range(
+        &self,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>

@@ -12,10 +12,6 @@ env:
   BASELINE: base
   SEED: reth
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
-
 name: bench
 jobs:
   codspeed:

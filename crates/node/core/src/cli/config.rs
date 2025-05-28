@@ -42,7 +42,7 @@ pub trait PayloadBuilderConfig {
         }
 
         match chain.kind() {
-            ChainKind::Named(NamedChain::Sepolia | NamedChain::Holesky) => {
+            ChainKind::Named(NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi) => {
                 ETHEREUM_BLOCK_GAS_LIMIT_60M
             }
             _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,

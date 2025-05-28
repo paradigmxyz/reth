@@ -1,6 +1,5 @@
-use crate::{interop::MaybeInteropTransaction, supervisor::SupervisorClient, InvalidCrossTx};
+use crate::{supervisor::SupervisorClient, InvalidCrossTx, OpPooledTx};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
@@ -92,7 +91,7 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction + MaybeInteropTransaction,
+    Tx: EthPoolTransaction + OpPooledTx,
 {
     /// Create a new [`OpTransactionValidator`].
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
@@ -239,7 +238,7 @@ where
     pub async fn validate_all_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Tx>,
+        transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         futures_util::future::join_all(
             transactions.into_iter().map(|tx| self.validate_one(origin, tx)),
@@ -268,9 +267,7 @@ where
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
 
-            let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
-            let tx = valid_tx.transaction().clone_into_consensus();
-            tx.encode_2718(&mut encoded);
+            let encoded = valid_tx.transaction().encoded_2718();
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 self.chain_spec(),
@@ -328,7 +325,7 @@ where
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
     Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction + MaybeInteropTransaction,
+    Tx: EthPoolTransaction + OpPooledTx,
 {
     type Transaction = Tx;
 
@@ -350,7 +347,7 @@ where
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all_with_origin(origin, transactions).await
     }
