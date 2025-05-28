@@ -2891,7 +2891,7 @@ mod tests {
     use reth_node_ethereum::EthereumEngineValidator;
     use reth_primitives_traits::Block as _;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_trie::{updates::TrieUpdates, HashedPostState};
+    use reth_trie::HashedPostState;
     use std::{
         collections::BTreeMap,
         str::FromStr,
