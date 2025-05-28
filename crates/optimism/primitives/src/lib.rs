@@ -12,6 +12,7 @@
 extern crate alloc;
 
 pub mod bedrock;
+pub mod mantle;
 
 pub mod predeploys;
 pub use predeploys::ADDRESS_L2_TO_L1_MESSAGE_PASSER;

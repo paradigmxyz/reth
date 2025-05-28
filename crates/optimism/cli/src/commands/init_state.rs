@@ -7,6 +7,7 @@ use reth_db_common::init::init_from_state_dump;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::{
     bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD},
+    mantle::{MANTLE_SEPOLIA_HEADER, MANTLE_SEPOLIA_HEADER_HASH, MANTLE_SEPOLIA_HEADER_TTD},
     OpPrimitives,
 };
 use reth_primitives_traits::SealedHeader;
@@ -67,6 +68,29 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
                 // init_state_dump
                 static_file_provider.commit()?;
             } else if last_block_number > 0 && last_block_number < BEDROCK_HEADER.number {
+                return Err(eyre::eyre!(
+                    "Data directory should be empty when calling init-state with --without-ovm."
+                ))
+            }
+        }
+
+        if provider_factory.chain_spec().is_mantle_sepolia() {
+            let last_block_number = provider_rw.last_block_number()?;
+
+            if last_block_number == 0 {
+                reth_cli_commands::init_state::without_evm::setup_without_evm(
+                    &provider_rw,
+                    SealedHeader::new(MANTLE_SEPOLIA_HEADER, MANTLE_SEPOLIA_HEADER_HASH),
+                    MANTLE_SEPOLIA_HEADER_TTD,
+                )?;
+
+                // SAFETY: it's safe to commit static files, since in the event of a crash, they
+                // will be unwound according to database checkpoints.
+                //
+                // Necessary to commit, so the MANTLE_SEPOLIA_HEADER is accessible to provider_rw and
+                // init_state_dump
+                static_file_provider.commit()?;
+            } else if last_block_number > 0 && last_block_number < MANTLE_SEPOLIA_HEADER.number {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-ovm."
                 ))

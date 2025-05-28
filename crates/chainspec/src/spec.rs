@@ -346,6 +346,12 @@ impl ChainSpec {
         self.chain == Chain::optimism_mainnet()
     }
 
+    /// Returns `true` if this chain is Mantle Sepolia.
+    #[inline]
+    pub fn is_mantle_sepolia(&self) -> bool {
+        self.chain_id() == 5003
+    }
+
     /// Returns the known paris block, if it exists.
     #[inline]
     pub fn paris_block(&self) -> Option<u64> {
