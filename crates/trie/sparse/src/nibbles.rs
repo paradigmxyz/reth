@@ -246,12 +246,9 @@ impl PackedNibbles {
     ///
     /// This method does not verify that the provided range is valid for this [`PackedNibbles`].
     /// The caller must ensure that `start <= end` and `end <= self.len()`.
-    #[inline]
     pub const fn slice_unchecked(&self, start: usize, end: usize) -> Self {
-        let nibble_len = end - start;
-
         // Fast path for empty slice
-        if nibble_len == 0 {
+        if start == end {
             return Self::new();
         }
 
@@ -260,22 +257,15 @@ impl PackedNibbles {
             return *self;
         }
 
-        let length = nibble_len as u8;
+        let nibble_len = end - start;
 
-        // Most common case: slicing from the beginning
-        if start == 0 {
-            // Only need to mask, no shifting required
-            let mask = SLICE_MASKS[nibble_len];
-            let nibbles = self.nibbles.bitand(mask);
-            return Self { length, nibbles };
-        }
-
-        // General case: both shift and mask
+        // Shift so that the first requested nibble becomes the least significant one
         let shift = (self.len() - end) * 4;
-        let mask = SLICE_MASKS[nibble_len];
-        let nibbles = self.nibbles.wrapping_shr(shift).bitand(mask);
+        let shifted = if shift == 0 { self.nibbles } else { self.nibbles.wrapping_shr(shift) };
+        // Mask out everything to the left of the slice
+        let nibbles = shifted.bitand(SLICE_MASKS[nibble_len]);
 
-        Self { length, nibbles }
+        Self { length: nibble_len as u8, nibbles }
     }
 
     /// Creates a new [`PackedNibbles`] containing the nibbles in the specified range.
