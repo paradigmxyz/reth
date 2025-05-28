@@ -594,12 +594,13 @@ where
         Box::pin(async move {
             for _ in 0..self.num_blocks {
                 // create a fresh sequence for each block to avoid state pollution
+                // Note: This produces blocks but does NOT make them canonical
+                // Use MakeCanonical action explicitly if canonicalization is needed
                 let mut sequence = Sequence::new(vec![
                     Box::new(PickNextBlockProducer::default()),
                     Box::new(GeneratePayloadAttributes::default()),
                     Box::new(GenerateNextPayload::default()),
                     Box::new(BroadcastNextNewPayload::default()),
-                    Box::new(BroadcastLatestForkchoice::default()),
                     Box::new(UpdateBlockInfo::default()),
                 ]);
                 sequence.execute(env).await?;
@@ -1000,6 +1001,31 @@ where
 
             debug!("Set reorg target to block {}", self.target_hash);
             Ok(())
+        })
+    }
+}
+
+/// Action that makes the current latest block canonical by broadcasting a forkchoice update
+#[derive(Debug, Default)]
+pub struct MakeCanonical {}
+
+impl MakeCanonical {
+    /// Create a new `MakeCanonical` action
+    pub const fn new() -> Self {
+        Self {}
+    }
+}
+
+impl<Engine> Action<Engine> for MakeCanonical
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let mut broadcast_action = BroadcastLatestForkchoice::default();
+            broadcast_action.execute(env).await
         })
     }
 }
