@@ -17,13 +17,12 @@ use crate::{
     StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
-    WithdrawalsProvider,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
     BlockHeader, Header, TxReceipt,
 };
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
+use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
@@ -1616,37 +1615,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         }
 
         Ok(result)
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> WithdrawalsProvider
-    for DatabaseProvider<TX, N>
-{
-    fn withdrawals_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-            if let Some(number) = self.convert_hash_or_number(id)? {
-                return self.static_file_provider.get_with_static_file_or_database(
-                    StaticFileSegment::BlockMeta,
-                    number,
-                    |static_file| static_file.withdrawals_by_block(number.into(), timestamp),
-                    || {
-                        // If we are past shanghai, then all blocks should have a withdrawal list,
-                        // even if empty
-                        let withdrawals = self
-                            .tx
-                            .get::<tables::BlockWithdrawals>(number)
-                            .map(|w| w.map(|w| w.withdrawals))?
-                            .unwrap_or_default();
-                        Ok(Some(withdrawals))
-                    },
-                )
-            }
-        }
-        Ok(None)
     }
 }
 
