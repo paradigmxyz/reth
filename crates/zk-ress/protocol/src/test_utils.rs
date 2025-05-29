@@ -1,6 +1,6 @@
 //! Miscellaneous test utilities.
 
-use crate::{ZkRessProtocolProvider, ZkRessWitness};
+use crate::{ExecutionProof, ZkRessProtocolProvider};
 use alloy_consensus::Header;
 use alloy_primitives::{map::B256HashMap, B256};
 use reth_ethereum_primitives::BlockBody;
@@ -23,7 +23,7 @@ impl<T> Default for NoopZkRessProtocolProvider<T> {
     }
 }
 
-impl<T: ZkRessWitness> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T> {
+impl<T: ExecutionProof> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T> {
     type Witness = T;
 
     fn header(&self, _block_hash: B256) -> ProviderResult<Option<Header>> {
@@ -86,7 +86,7 @@ impl<T> MockRessProtocolProvider<T> {
     }
 }
 
-impl<T: ZkRessWitness> ZkRessProtocolProvider for MockRessProtocolProvider<T> {
+impl<T: ExecutionProof> ZkRessProtocolProvider for MockRessProtocolProvider<T> {
     type Witness = T;
 
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {

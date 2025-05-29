@@ -1,4 +1,4 @@
-use crate::ZkRessWitness;
+use crate::ExecutionProof;
 use alloy_consensus::Header;
 use alloy_primitives::B256;
 use alloy_rlp::Encodable;
@@ -11,7 +11,7 @@ use std::future::Future;
 /// A provider trait for ress protocol.
 pub trait ZkRessProtocolProvider: Send + Sync {
     /// The zk-ress witness type.
-    type Witness: ZkRessWitness;
+    type Witness: ExecutionProof;
 
     /// Return block header by hash.
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>>;

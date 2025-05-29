@@ -3,7 +3,7 @@
 //!
 //! Examples include creating, encoding, and decoding protocol messages.
 
-use crate::ZkRessWitness;
+use crate::ExecutionProof;
 use alloy_consensus::Header;
 use alloy_primitives::{
     bytes::{Buf, BufMut},
@@ -31,7 +31,7 @@ impl<'a, T: arbitrary::Arbitrary<'a>> arbitrary::Arbitrary<'a> for ZkRessProtoco
     }
 }
 
-impl<T: ZkRessWitness> ZkRessProtocolMessage<T> {
+impl<T: ExecutionProof> ZkRessProtocolMessage<T> {
     /// Returns the capability for the flavor of `zkress` protocol.
     pub const fn capability(name: &'static str, version: usize) -> Capability {
         Capability::new_static(name, version)
