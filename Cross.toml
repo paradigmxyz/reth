@@ -2,7 +2,7 @@
 pre-build = [
     # Use HTTPS for package sources
     "apt-get update && apt-get install --assume-yes --no-install-recommends ca-certificates",
-    "sed -i 's|http://|https://|g' /etc/apt/sources.list && find /etc/apt/ -type f \\( -name '*.list' -o -name '*.sources' \\) -exec sed -i 's|http://|https://|g' {} +",
+    "find /etc/apt/ -type f \\( -name '*.list' -o -name '*.sources' \\) -exec sed -i 's|http://|https://|g' {} +",
 
     # Configure APT retries and timeouts to handle network issues
     "echo 'Acquire::Retries \"3\";' > /etc/apt/apt.conf.d/80-retries",
