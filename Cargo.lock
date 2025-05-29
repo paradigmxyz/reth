@@ -3375,6 +3375,7 @@ dependencies = [
  "reth-op",
  "reth-optimism-consensus",
  "reth-optimism-forks",
+ "reth-optimism-payload-builder",
  "reth-payload-builder",
  "reth-rpc-api",
  "reth-rpc-engine-api",

@@ -10,7 +10,6 @@
 use crate::{evm::CustomExecutorBuilder, network::CustomNetworkBuilder};
 use chainspec::CustomChainSpec;
 use consensus::CustomConsensusBuilder;
-use engine::CustomPayloadTypes;
 use pool::CustomPoolBuilder;
 use primitives::CustomNodePrimitives;
 use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
@@ -22,6 +21,7 @@ use reth_op::node::{
     node::{OpPayloadBuilder, OpStorage},
     OpNode,
 };
+use reth_optimism_payload_builder::OpPayloadTypes;
 
 pub mod chainspec;
 pub mod consensus;
@@ -40,14 +40,14 @@ impl NodeTypes for CustomNode {
     type ChainSpec = CustomChainSpec;
     type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
     type Storage = <OpNode as NodeTypes>::Storage;
-    type Payload = CustomPayloadTypes;
+    type Payload = OpPayloadTypes<CustomNodePrimitives>;
 }
 
 impl<N> Node<N> for CustomNode
 where
     N: FullNodeTypes<
         Types: NodeTypes<
-            Payload = CustomPayloadTypes,
+            Payload = OpPayloadTypes<CustomNodePrimitives>,
             ChainSpec = CustomChainSpec,
             Primitives = CustomNodePrimitives,
             Storage = OpStorage,

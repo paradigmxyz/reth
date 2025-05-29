@@ -1,8 +1,6 @@
 use crate::{
     chainspec::CustomChainSpec,
-    engine::{
-        CustomBuiltPayload, CustomExecutionData, CustomPayloadAttributes, CustomPayloadTypes,
-    },
+    engine::{CustomBuiltPayload, CustomExecutionData, CustomPayloadAttributes},
     primitives::CustomNodePrimitives,
 };
 use alloy_rpc_types_engine::{
@@ -16,6 +14,7 @@ use reth_ethereum::node::api::{
 };
 use reth_node_builder::rpc::EngineApiBuilder;
 use reth_op::node::node::OpStorage;
+use reth_optimism_payload_builder::OpPayloadTypes;
 use reth_payload_builder::PayloadStore;
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApiError;
@@ -61,14 +60,14 @@ pub struct CustomEngineApi {
 }
 
 struct CustomEngineApiInner {
-    beacon_consensus: BeaconConsensusEngineHandle<CustomPayloadTypes>,
-    payload_store: PayloadStore<CustomPayloadTypes>,
+    beacon_consensus: BeaconConsensusEngineHandle<OpPayloadTypes<CustomNodePrimitives>>,
+    payload_store: PayloadStore<OpPayloadTypes<CustomNodePrimitives>>,
 }
 
 impl CustomEngineApiInner {
     fn new(
-        beacon_consensus: BeaconConsensusEngineHandle<CustomPayloadTypes>,
-        payload_store: PayloadStore<CustomPayloadTypes>,
+        beacon_consensus: BeaconConsensusEngineHandle<OpPayloadTypes<CustomNodePrimitives>>,
+        payload_store: PayloadStore<OpPayloadTypes<CustomNodePrimitives>>,
     ) -> Self {
         Self { beacon_consensus, payload_store }
     }
@@ -129,7 +128,7 @@ impl<N> EngineApiBuilder<N> for CustomEngineApiBuilder
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            Payload = CustomPayloadTypes,
+            Payload = OpPayloadTypes<CustomNodePrimitives>,
             ChainSpec = CustomChainSpec,
             Primitives = CustomNodePrimitives,
             Storage = OpStorage,
