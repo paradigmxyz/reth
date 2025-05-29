@@ -1,7 +1,7 @@
 use crate::primitives::CustomHeader;
 use alloy_genesis::Genesis;
 use reth_ethereum::{
-    chainspec::{EthChainSpec, EthereumHardforks, Hardfork, Hardforks},
+    chainspec::{EthChainInitSpec, EthChainSpec, EthereumHardforks, Hardfork, Hardforks},
     primitives::SealedHeader,
 };
 use reth_network_peers::NodeRecord;
@@ -48,8 +48,6 @@ impl Hardforks for CustomChainSpec {
 }
 
 impl EthChainSpec for CustomChainSpec {
-    type Header = CustomHeader;
-
     fn base_fee_params_at_block(
         &self,
         block_number: u64,
@@ -68,10 +66,6 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.base_fee_params_at_timestamp(timestamp)
     }
 
-    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.inner.bootnodes()
-    }
-
     fn chain(&self) -> reth_ethereum::chainspec::Chain {
         self.inner.chain()
     }
@@ -88,16 +82,8 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.prune_delete_limit()
     }
 
-    fn genesis(&self) -> &Genesis {
-        self.inner.genesis()
-    }
-
     fn genesis_hash(&self) -> revm_primitives::B256 {
         self.genesis_header.hash()
-    }
-
-    fn genesis_header(&self) -> &Self::Header {
-        &self.genesis_header
     }
 
     fn final_paris_total_difficulty(&self) -> Option<revm_primitives::U256> {
@@ -111,6 +97,26 @@ impl EthereumHardforks for CustomChainSpec {
         fork: reth_ethereum::chainspec::EthereumHardfork,
     ) -> reth_ethereum::chainspec::ForkCondition {
         self.inner.ethereum_fork_activation(fork)
+    }
+}
+
+impl EthChainInitSpec for CustomChainSpec {
+    type Header = CustomHeader;
+
+    fn genesis(&self) -> &Genesis {
+        self.inner.genesis()
+    }
+
+    fn genesis_header(&self) -> &Self::Header {
+        &self.genesis_header
+    }
+
+    fn genesis_hash(&self) -> revm_primitives::B256 {
+        self.genesis_header.hash()
+    }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.inner.bootnodes()
     }
 }
 

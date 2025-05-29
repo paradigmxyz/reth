@@ -61,7 +61,8 @@ pub use base_sepolia::BASE_SEPOLIA;
 use derive_more::{Constructor, Deref, From, Into};
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
-    DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
+    DisplayHardforks, EthChainInitSpec, EthChainSpec, EthereumHardforks, ForkFilter, ForkId,
+    Hardforks, Head,
 };
 use reth_ethereum_forks::{ChainHardforks, EthereumHardfork, ForkCondition};
 use reth_network_peers::NodeRecord;
@@ -226,8 +227,6 @@ impl OpChainSpec {
 }
 
 impl EthChainSpec for OpChainSpec {
-    type Header = Header;
-
     fn chain(&self) -> Chain {
         self.inner.chain()
     }
@@ -263,18 +262,6 @@ impl EthChainSpec for OpChainSpec {
         });
 
         Box::new(DisplayHardforks::new(op_forks))
-    }
-
-    fn genesis_header(&self) -> &Self::Header {
-        self.inner.genesis_header()
-    }
-
-    fn genesis(&self) -> &Genesis {
-        self.inner.genesis()
-    }
-
-    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
-        self.inner.bootnodes()
     }
 
     fn is_optimism(&self) -> bool {
@@ -426,6 +413,26 @@ impl From<ChainSpec> for OpChainSpec {
     }
 }
 
+impl EthChainInitSpec for OpChainSpec {
+    type Header = Header;
+
+    fn genesis(&self) -> &Genesis {
+        self.inner.genesis()
+    }
+
+    fn genesis_hash(&self) -> B256 {
+        self.inner.genesis_hash()
+    }
+
+    fn genesis_header(&self) -> &Self::Header {
+        self.inner.genesis_header()
+    }
+
+    fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
+        self.inner.bootnodes()
+    }
+}
+
 #[derive(Default, Debug)]
 struct OpGenesisInfo {
     optimism_chain_info: op_alloy_rpc_types::OpChainInfo,
@@ -506,7 +513,7 @@ mod tests {
     #[test]
     fn base_mainnet_forkids() {
         let mut base_mainnet = OpChainSpecBuilder::base_mainnet().build();
-        base_mainnet.inner.genesis_header.set_hash(BASE_MAINNET.genesis_hash());
+        base_mainnet.inner.genesis_header.set_hash(EthChainInitSpec::genesis_hash(&*BASE_MAINNET));
         test_fork_ids(
             &BASE_MAINNET,
             &[
@@ -614,7 +621,7 @@ mod tests {
         let mut op_mainnet = OpChainSpecBuilder::optimism_mainnet().build();
         // for OP mainnet we have to do this because the genesis header can't be properly computed
         // from the genesis.json file
-        op_mainnet.inner.genesis_header.set_hash(OP_MAINNET.genesis_hash());
+        op_mainnet.inner.genesis_header.set_hash(EthChainInitSpec::genesis_hash(&*OP_MAINNET));
         test_fork_ids(
             &op_mainnet,
             &[

@@ -91,7 +91,7 @@ mod tests {
     };
     use alloy_primitives::Bytes;
     use assert_matches::assert_matches;
-    use reth_chainspec::{EthChainSpec, MAINNET};
+    use reth_chainspec::MAINNET;
     use reth_ethereum_primitives::{Block, BlockBody};
     use reth_primitives_traits::{block::TestBlock, RecoveredBlock, SealedBlock};
     use reth_static_file_types::StaticFileSegment;
