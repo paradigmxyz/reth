@@ -8,12 +8,15 @@ use reth_era::era1_file::Era1Reader;
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
-use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
+use reth_primitives_traits::{FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    BlockHashReader, BlockReader, BlockWriter, DBProvider, HeaderProvider, NodePrimitivesProvider,
+    BlockHashReader, BlockReader, BlockWriter, DBProvider, HeaderProvider, StageCheckpointWriter,
     StaticFileProviderFactory, StaticFileWriter, StorageLocation,
 };
-use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_stages_api::{
+    CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput, HeadersCheckpoint, Stage,
+    StageError, UnwindInput, UnwindOutput,
+};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::ProviderError;
 use std::{
@@ -137,24 +140,25 @@ impl<BH, BB, F> EraStage<BH, BB, F> {
     }
 }
 
-impl<Provider, B, BB, BH, F> Stage<Provider> for EraStage<BH, BB, F>
+impl<Provider, N, F> Stage<Provider> for EraStage<N::BlockHeader, N::BlockBody, F>
 where
-    B: Block<Header=BH, Body=BB>,
-    BH: FullBlockHeader + Value,
-    BB: FullBlockBody<
-        Transaction=<<Provider as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
-        OmmerHeader=BH,
-    >,
-    Provider: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block=B> + BlockReader<Block=B>,
-    <Provider as NodePrimitivesProvider>::Primitives:
-    NodePrimitives<BlockHeader=BH, BlockBody=BB>,
-    F: EraStreamFactory<BH, BB> + Send + Sync + Clone,
+    Provider: DBProvider<Tx: DbTxMut>
+        + StaticFileProviderFactory<Primitives = N>
+        + BlockWriter<Block = N::Block>
+        + BlockReader<Block = N::Block>
+        + StageCheckpointWriter,
+    F: EraStreamFactory<N::BlockHeader, N::BlockBody> + Send + Sync + Clone,
+    N: NodePrimitives<BlockHeader: Value>,
 {
     fn id(&self) -> StageId {
         StageId::Era
     }
 
-    fn poll_execute_ready(&mut self, cx: &mut Context<'_>, input: ExecInput) -> Poll<Result<(), StageError>> {
+    fn poll_execute_ready(
+        &mut self,
+        cx: &mut Context<'_>,
+        input: ExecInput,
+    ) -> Poll<Result<(), StageError>> {
         if input.target_reached() || self.item.is_some() {
             return Poll::Ready(Ok(()));
         }
@@ -165,7 +169,10 @@ where
             }
         }
         if let Some(stream) = &mut self.stream {
-            if let Some(next) = ready!(stream.poll_next_unpin(cx)).transpose().map_err(|e| StageError::Fatal(e.into()))? {
+            if let Some(next) = ready!(stream.poll_next_unpin(cx))
+                .transpose()
+                .map_err(|e| StageError::Fatal(e.into()))?
+            {
                 self.item.replace(next);
             }
         }
@@ -177,8 +184,8 @@ where
         let height = if let Some(era) = self.item.take() {
             let static_file_provider = provider.static_file_provider();
 
-            // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
-            // when poll_execute_ready is polled.
+            // Consistency check of expected headers in static files vs DB is done on
+            // provider::sync_gap when poll_execute_ready is polled.
             let last_header_number = static_file_provider
                 .get_highest_static_file_block(StaticFileSegment::Headers)
                 .unwrap_or_default();
@@ -188,11 +195,19 @@ where
                 .header_td_by_number(last_header_number)?
                 .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
 
-            // Although headers were downloaded in reverse order, the collector iterates it in ascending
-            // order
+            // Although headers were downloaded in reverse order, the collector iterates it in
+            // ascending order
             let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
 
-            let height = era::process_iter(era, &mut writer, provider, &mut self.hash_collector, &mut td, last_header_number..=input.target()).map_err(|e| StageError::Fatal(e.into()))?;
+            let height = era::process_iter(
+                era,
+                &mut writer,
+                provider,
+                &mut self.hash_collector,
+                &mut td,
+                last_header_number..=input.target(),
+            )
+            .map_err(|e| StageError::Fatal(e.into()))?;
 
             self.last_block_height.replace(height);
 
@@ -207,7 +222,25 @@ where
             input.target()
         };
 
-        Ok(ExecOutput::done(StageCheckpoint::new(height)))
+        provider.save_stage_checkpoint(
+            StageId::Headers,
+            StageCheckpoint::new(height).with_headers_stage_checkpoint(HeadersCheckpoint {
+                block_range: CheckpointBlockRange {
+                    from: input.checkpoint().block_number,
+                    to: height,
+                },
+                progress: EntitiesCheckpoint { processed: height, total: input.target() },
+            }),
+        )?;
+        provider.save_stage_checkpoint(
+            StageId::Bodies,
+            StageCheckpoint::new(height).with_entities_stage_checkpoint(EntitiesCheckpoint {
+                processed: height,
+                total: input.target(),
+            }),
+        )?;
+
+        Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height == input.target() })
     }
 
     fn unwind(
@@ -228,8 +261,8 @@ where
             // Wipe any unprocessed era files in the download temp directory
             source.cleanup();
 
-            // First unwind the db tables, until the unwind_to block number. use the walker to unwind
-            // HeaderNumbers based on the index in CanonicalHeaders
+            // First unwind the db tables, until the unwind_to block number. use the walker to
+            // unwind HeaderNumbers based on the index in CanonicalHeaders
             // unwind from the next block number since the unwind_to block is exclusive
             provider
                 .tx_ref()
@@ -241,8 +274,8 @@ where
                 .tx_ref()
                 .unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
 
-            // determine how many headers to unwind from the static files based on the highest block and
-            // the unwind_to block
+            // determine how many headers to unwind from the static files based on the highest block
+            // and the unwind_to block
             let static_file_provider = provider.static_file_provider();
             let highest_block = static_file_provider
                 .get_highest_static_file_block(StaticFileSegment::Headers)
@@ -250,11 +283,13 @@ where
             let static_file_headers_to_unwind = highest_block - input.unwind_to;
             for block_number in (input.unwind_to + 1)..=highest_block {
                 let hash = static_file_provider.block_hash(block_number)?;
-                // we have to delete from HeaderNumbers here as well as in the above unwind, since that
-                // mapping contains entries for both headers in the db and headers in static files
+                // we have to delete from HeaderNumbers here as well as in the above unwind, since
+                // that mapping contains entries for both headers in the db and
+                // headers in static files
                 //
-                // so if we are unwinding past the lowest block in the db, we have to iterate through
-                // the HeaderNumbers entries that we'll delete in static files below
+                // so if we are unwinding past the lowest block in the db, we have to iterate
+                // through the HeaderNumbers entries that we'll delete in static
+                // files below
                 if let Some(header_hash) = hash {
                     provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
                 }
