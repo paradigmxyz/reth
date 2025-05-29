@@ -1,7 +1,16 @@
 FROM ubuntu:24.04 AS cross-base
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install --assume-yes --no-install-recommends git ca-certificates
+# Use HTTPS for package sources
+RUN apt-get update && apt-get install --assume-yes --no-install-recommends ca-certificates
+RUN find /etc/apt/ -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i 's|http://|https://|g' {} +
+
+# Configure APT retries and timeouts to handle network issues
+RUN echo 'Acquire::Retries \"3\";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout \"60\";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::ftp::Timeout \"60\";' >> /etc/apt/apt.conf.d/80-retries
+
+RUN apt-get update && apt-get install --assume-yes --no-install-recommends git
 
 RUN git clone https://github.com/cross-rs/cross /cross
 WORKDIR /cross/docker
