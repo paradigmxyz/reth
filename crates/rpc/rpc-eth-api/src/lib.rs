@@ -42,4 +42,5 @@ pub use ext::L2EthApiExtClient;
 #[cfg(feature = "client")]
 pub use filter::EthFilterApiClient;
 
+use alloy_rlp as _;
 use reth_trie_common as _;
