@@ -427,7 +427,6 @@ pgo-clean: ## Clean PGO data and temporary directories.
 .PHONY: pgo
 pgo: pgo-clean pgo-generate pgo-run pgo-merge pgo-build ## Run full PGO workflow: instrument, collect, and optimize.
 	@echo "PGO build complete! Binary location: $(CARGO_TARGET_DIR)/maxperf/reth"
-	@echo "PGO can provide 10-30% performance improvements."
 
 .PHONY: pgo-bench
 pgo-bench: ## Run benchmarks to collect PGO data instead of mainnet sync.
