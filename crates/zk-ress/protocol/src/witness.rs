@@ -3,7 +3,7 @@ use alloy_rlp::{Decodable, Encodable};
 use reth_ress_protocol::ExecutionWitness;
 
 /// A trait bound for zk-ress witnesses.
-pub trait ZkRessWitness: Encodable + Decodable + Default + Clone + Send + Sync {}
+pub trait ZkRessWitness: Encodable + Decodable + Default + Clone + Send + Sync + 'static {}
 
 /// Blanket witness implementation for arbitrary bytes.
 impl ZkRessWitness for Bytes {}
