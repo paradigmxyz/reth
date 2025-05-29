@@ -276,7 +276,7 @@ where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
-    /// Maps the [`EngineApiBuilder`] builder type.
+    /// Maps the [`reth_node_builder::rpc::EngineApiBuilder`] builder type.
     pub fn with_engine_api<T>(self, engine_api_builder: T) -> OpAddOns<N, EthB, EV, T> {
         let Self {
             rpc_add_ons,
