@@ -378,67 +378,99 @@ maxperf-op: ## Builds `op-reth` with the most aggressive optimisations.
 maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus the "asm-keccak" feature.
 	RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf --features jemalloc
 
-##@ Profile-Guided Optimization (PGO)
+##@ Profile-Guided Optimization (PGO) + BOLT
+
+# This section provides targets for building reth with Profile-Guided
+# Optimization (PGO) and BOLT (Binary Optimization and Layout Tool).
+#
+# This workflow relies on `cargo-pgo` for PGO and `llvm-bolt` for BOLT. The
+# workflow was brought mainly from this post by the `cargo-pgo` author:
+# https://kobzol.github.io/rust/cargo/2023/07/28/rust-cargo-pgo.html
+#
+# More information on installing the tools can be found in the `cargo-pgo` repo:
+# https://github.com/Kobzol/cargo-pgo
 
 # Directory for PGO data
 PGO_DATA_DIR ?= $(CARGO_TARGET_DIR)/pgo-data
+BOLT_DATA_DIR ?= $(CARGO_TARGET_DIR)/bolt-data
 
-.PHONY: pgo-generate
-pgo-generate: ## Build reth with PGO instrumentation generation.
-	@echo "Building reth with PGO instrumentation..."
+# Check for required tools
+.PHONY: pgo-check-deps
+pgo-check-deps: ## Check if required tools are installed.
+	@command -v cargo-pgo >/dev/null 2>&1 || { echo "Error: cargo-pgo not found. Install with: cargo install cargo-pgo"; exit 1; }
+	@command -v llvm-bolt >/dev/null 2>&1 || { echo "Error: llvm-bolt not found. Please install LLVM tools with BOLT support."; exit 1; }
+	@command -v perf >/dev/null 2>&1 || { echo "Error: perf not found. Please install perf for profiling."; exit 1; }
+	@command -v merge-fdata >/dev/null 2>&1 || { echo "Error: merge-fdata not found. Please install llvm-tools or llvm-profdata."; exit 1; }
+
+.PHONY: pgo-build-instrumented
+pgo-build-instrumented: pgo-check-deps ## Build reth with PGO instrumentation.
+	@echo "Building reth with PGO instrumentation using cargo-pgo..."
 	@mkdir -p $(PGO_DATA_DIR)
-	RUSTFLAGS="-C target-cpu=native -C profile-generate=$(PGO_DATA_DIR)" \
-		cargo build --profile maxperf --features "$(FEATURES)" --bin reth
+	CARGO_PGO_DATA_DIR=$(PGO_DATA_DIR) \
+		cargo pgo build --profile maxperf --features "$(FEATURES)" --bin reth
 
 .PHONY: pgo-run
-pgo-run: ## Run reth to collect PGO data. You can override PGO_RUN_CMD to customize the workload.
+pgo-run: ## Run reth to collect PGO data. You must set PGO_RUN_CMD environment variable.
+	@test -n "$(PGO_RUN_CMD)" || { echo "Error: PGO_RUN_CMD must be set. Example: PGO_RUN_CMD='timeout 300 ./target/maxperf/reth node --datadir $(CARGO_TARGET_DIR)/pgo-datadir --chain mainnet'"; exit 1; }
 	@echo "Running reth to collect PGO data..."
-	@echo "This will sync mainnet for 5 minutes to collect profile data."
-	@echo "You can customize this by setting PGO_RUN_CMD environment variable."
-	$(PGO_RUN_CMD)
+	CARGO_PGO_DATA_DIR=$(PGO_DATA_DIR) \
+		cargo pgo run --profile maxperf --features "$(FEATURES)" --bin reth -- $(PGO_RUN_CMD)
 
-# Default PGO run command - sync mainnet for 5 minutes to get representative data
-# For better PGO results, specify a recent mainnet block hash to sync heavier blocks:
-# Example: PGO_RUN_CMD="timeout 300 $(CARGO_TARGET_DIR)/maxperf/reth node --datadir $(CARGO_TARGET_DIR)/pgo-datadir --debug.tip 0xYOUR_BLOCK_HASH" make pgo
-PGO_RUN_CMD ?= timeout 300 $(CARGO_TARGET_DIR)/maxperf/reth node \
-	--datadir $(CARGO_TARGET_DIR)/pgo-datadir \
-	--chain mainnet \
-	|| echo "Reth stopped after 5 minutes as expected for PGO data collection"
+.PHONY: pgo-optimize
+pgo-optimize: ## Build PGO-optimized reth binary.
+	@echo "Building PGO-optimized reth..."
+	CARGO_PGO_DATA_DIR=$(PGO_DATA_DIR) \
+		cargo pgo optimize --profile maxperf --features "$(FEATURES)" --bin reth
 
-.PHONY: pgo-merge
-pgo-merge: ## Merge PGO profile data.
-	@echo "Merging PGO profile data..."
-	@command -v llvm-profdata >/dev/null 2>&1 || { echo "Error: llvm-profdata not found. Please install LLVM tools."; exit 1; }
-	llvm-profdata merge -o $(PGO_DATA_DIR)/merged.profdata $(PGO_DATA_DIR)/*.profraw
+.PHONY: bolt-prepare
+bolt-prepare: pgo-optimize ## Prepare for BOLT optimization by collecting performance data.
+	@test -n "$(BOLT_RUN_CMD)" || { echo "Error: BOLT_RUN_CMD must be set. Example: BOLT_RUN_CMD='timeout 300 ./target/maxperf/reth node --datadir $(CARGO_TARGET_DIR)/bolt-datadir --chain mainnet'"; exit 1; }
+	@echo "Collecting BOLT profile data..."
+	@mkdir -p $(BOLT_DATA_DIR)
+	perf record -e cycles:u -j any,u -o $(BOLT_DATA_DIR)/perf.data -- $(BOLT_RUN_CMD) || echo "BOLT profiling completed"
 
-.PHONY: pgo-build
-pgo-build: ## Build reth using PGO profile data.
-	@echo "Building optimized reth with PGO profile data..."
-	@test -f $(PGO_DATA_DIR)/merged.profdata || { echo "Error: merged.profdata not found. Run 'make pgo-merge' first."; exit 1; }
-	RUSTFLAGS="-C target-cpu=native -C profile-use=$(PGO_DATA_DIR)/merged.profdata -C llvm-args=-pgo-warn-missing-function" \
-		cargo build --profile maxperf --features "$(FEATURES)" --bin reth
+.PHONY: bolt-optimize
+bolt-optimize: bolt-prepare ## Apply BOLT optimization to the PGO-optimized binary.
+	@echo "Converting perf data for BOLT..."
+	perf2bolt $(CARGO_TARGET_DIR)/maxperf/reth -p $(BOLT_DATA_DIR)/perf.data -o $(BOLT_DATA_DIR)/reth.fdata
+	@echo "Applying BOLT optimization..."
+	llvm-bolt $(CARGO_TARGET_DIR)/maxperf/reth \
+		-data $(BOLT_DATA_DIR)/reth.fdata \
+		-reorder-blocks=ext-tsp \
+		-reorder-functions=hfsort+ \
+		-split-functions \
+		-split-all-cold \
+		-split-eh \
+		-dyno-stats \
+		-icf=1 \
+		-use-gnu-stack \
+		-o $(CARGO_TARGET_DIR)/maxperf/reth-bolt
+	@echo "BOLT-optimized binary created: $(CARGO_TARGET_DIR)/maxperf/reth-bolt"
+
+# Example commands for reference:
+# PGO_RUN_CMD="timeout 300 ./target/maxperf/reth node --datadir target/pgo-datadir --chain mainnet"
+# BOLT_RUN_CMD="timeout 300 ./target/maxperf/reth node --datadir target/bolt-datadir --chain mainnet"
+# For better results, specify a recent mainnet block hash to sync heavier blocks:
+# PGO_RUN_CMD="timeout 300 ./target/maxperf/reth node --datadir target/pgo-datadir --debug.tip 0xYOUR_BLOCK_HASH"
 
 .PHONY: pgo-clean
-pgo-clean: ## Clean PGO data and temporary directories.
-	@echo "Cleaning PGO data..."
+pgo-clean: ## Clean PGO and BOLT data and temporary directories.
+	@echo "Cleaning PGO and BOLT data..."
 	rm -rf $(PGO_DATA_DIR)
+	rm -rf $(BOLT_DATA_DIR)
 	rm -rf $(CARGO_TARGET_DIR)/pgo-datadir
+	rm -rf $(CARGO_TARGET_DIR)/bolt-datadir
+	rm -f $(CARGO_TARGET_DIR)/maxperf/reth-bolt
 
-.PHONY: pgo
-pgo: pgo-clean pgo-generate pgo-run pgo-merge pgo-build ## Run full PGO workflow: instrument, collect, and optimize.
+.PHONY: pgo-bolt
+pgo-bolt: pgo-clean pgo-build-instrumented pgo-run pgo-optimize bolt-optimize ## Run full PGO+BOLT workflow: instrument, collect PGO data, optimize with PGO, then optimize with BOLT.
+	@echo "PGO+BOLT build complete!"
+	@echo "PGO-optimized binary: $(CARGO_TARGET_DIR)/maxperf/reth"
+	@echo "BOLT-optimized binary: $(CARGO_TARGET_DIR)/maxperf/reth-bolt"
+
+.PHONY: pgo-only
+pgo-only: pgo-clean pgo-build-instrumented pgo-run pgo-optimize ## Run PGO-only workflow without BOLT.
 	@echo "PGO build complete! Binary location: $(CARGO_TARGET_DIR)/maxperf/reth"
-
-.PHONY: pgo-bench
-pgo-bench: ## Run benchmarks to collect PGO data instead of mainnet sync.
-	@echo "Building reth with PGO instrumentation for benchmarks..."
-	@mkdir -p $(PGO_DATA_DIR)
-	RUSTFLAGS="-C target-cpu=native -C profile-generate=$(PGO_DATA_DIR)" \
-		cargo build --profile maxperf --features "$(FEATURES)" --all
-	@echo "Running benchmarks to collect PGO data..."
-	RUSTFLAGS="-C target-cpu=native -C profile-generate=$(PGO_DATA_DIR)" \
-		cargo bench --profile maxperf --features "$(FEATURES)" -- --warm-up 1 --bench
-	$(MAKE) pgo-merge pgo-build
-
 
 fmt:
 	cargo +nightly fmt
