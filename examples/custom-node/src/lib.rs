@@ -7,14 +7,17 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use crate::{evm::CustomExecutorBuilder, network::CustomNetworkBuilder};
 use chainspec::CustomChainSpec;
 use consensus::CustomConsensusBuilder;
-use engine::CustomPayloadTypes;
 use pool::CustomPoolBuilder;
 use primitives::CustomNodePrimitives;
 use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
-use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
-use reth_op::node::{node::OpStorage, OpNode};
+use reth_node_builder::{
+    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
+    Node,
+};
+use reth_op::node::{node::OpPayloadBuilder, OpNode, OpPayloadTypes};
 
 pub mod chainspec;
 pub mod consensus;
@@ -33,24 +36,21 @@ impl NodeTypes for CustomNode {
     type ChainSpec = CustomChainSpec;
     type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
     type Storage = <OpNode as NodeTypes>::Storage;
-    type Payload = CustomPayloadTypes;
+    type Payload = OpPayloadTypes<CustomNodePrimitives>;
 }
 
 impl<N> Node<N> for CustomNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = CustomPayloadTypes,
-            ChainSpec = CustomChainSpec,
-            Primitives = CustomNodePrimitives,
-            Storage = OpStorage,
-        >,
-    >,
-    ComponentsBuilder<N, CustomPoolBuilder, (), (), (), CustomConsensusBuilder>:
-        NodeComponentsBuilder<N>,
+    N: FullNodeTypes<Types = Self>,
 {
-    type ComponentsBuilder =
-        ComponentsBuilder<N, CustomPoolBuilder, (), (), (), CustomConsensusBuilder>;
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        CustomPoolBuilder,
+        BasicPayloadServiceBuilder<OpPayloadBuilder>,
+        CustomNetworkBuilder,
+        CustomExecutorBuilder,
+        CustomConsensusBuilder,
+    >;
 
     type AddOns = ();
 
@@ -58,6 +58,9 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(CustomPoolBuilder::default())
+            .executor(CustomExecutorBuilder::default())
+            .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
+            .network(CustomNetworkBuilder::default())
             .consensus(CustomConsensusBuilder)
     }
 
