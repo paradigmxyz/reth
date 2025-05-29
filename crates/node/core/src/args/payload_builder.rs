@@ -5,7 +5,7 @@ use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
-use reth_cli_util::{parse_duration_from_secs, parse_duration_from_secs_or_ms};
+use reth_cli_util::parse_duration_from_secs_or_ms;
 use std::{borrow::Cow, ffi::OsStr, time::Duration};
 
 /// Parameters for configuring the Payload Builder
@@ -29,7 +29,7 @@ pub struct PayloadBuilderArgs {
     pub interval: Duration,
 
     /// The deadline for when the payload builder job should resolve.
-    #[arg(long = "builder.deadline", value_parser = parse_duration_from_secs, default_value = "12", value_name = "SECONDS")]
+    #[arg(long = "builder.deadline", value_parser = parse_duration_from_secs_or_ms, default_value = "12s", value_name = "DEADLINE")]
     pub deadline: Duration,
 
     /// Maximum number of tasks to spawn for building a payload.

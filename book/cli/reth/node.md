@@ -565,10 +565,10 @@ Builder:
 
           [default: 1]
 
-      --builder.deadline <SECONDS>
+      --builder.deadline <DEADLINE>
           The deadline for when the payload builder job should resolve
 
-          [default: 12]
+          [default: 12s]
 
       --builder.max-tasks <MAX_PAYLOAD_TASKS>
           Maximum number of tasks to spawn for building a payload
