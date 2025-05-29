@@ -176,7 +176,17 @@ where
             } else {
                 None
             };
-            let ommers = Vec::new(); // Always empty since ommers are no longer used
+            let ommers = if chain_spec.is_paris_active_at_block(header.number()) {
+                Vec::new()
+            } else {
+                // Pre-merge: fetch ommers from database using direct database access
+                provider
+                    .tx_ref()
+                    .cursor_read::<tables::BlockOmmers<H>>()?
+                    .seek_exact(header.number())?
+                    .map(|(_, stored_ommers)| stored_ommers.ommers)
+                    .unwrap_or_default()
+            };
             bodies.push(alloy_consensus::BlockBody { transactions, ommers, withdrawals });
         }
 
