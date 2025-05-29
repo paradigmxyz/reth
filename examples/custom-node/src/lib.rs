@@ -7,17 +7,27 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use crate::{evm::CustomExecutorBuilder, network::CustomNetworkBuilder};
+use crate::{
+    evm::CustomExecutorBuilder, network::CustomNetworkPrimitives,
+    primitives::CustomTransactionEnvelope,
+};
 use chainspec::CustomChainSpec;
 use consensus::CustomConsensusBuilder;
+use op_alloy_consensus::OpPooledTransaction;
 use pool::CustomPoolBuilder;
 use primitives::CustomNodePrimitives;
-use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
+use reth_ethereum::{
+    node::api::{FullNodeTypes, NodeTypes},
+    primitives::Extended,
+};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     Node,
 };
-use reth_op::node::{node::OpPayloadBuilder, OpNode, OpPayloadTypes};
+use reth_op::node::{
+    node::{OpNetworkBuilder, OpPayloadBuilder},
+    OpNode, OpPayloadTypes,
+};
 
 pub mod chainspec;
 pub mod consensus;
@@ -47,7 +57,10 @@ where
         N,
         CustomPoolBuilder,
         BasicPayloadServiceBuilder<OpPayloadBuilder>,
-        CustomNetworkBuilder,
+        OpNetworkBuilder<
+            CustomNetworkPrimitives,
+            Extended<OpPooledTransaction, CustomTransactionEnvelope>,
+        >,
         CustomExecutorBuilder,
         CustomConsensusBuilder,
     >;
@@ -60,7 +73,7 @@ where
             .pool(CustomPoolBuilder::default())
             .executor(CustomExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
-            .network(CustomNetworkBuilder::default())
+            .network(OpNetworkBuilder::new(false, false))
             .consensus(CustomConsensusBuilder)
     }
 
