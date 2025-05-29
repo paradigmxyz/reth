@@ -10,6 +10,9 @@ RUN echo 'Acquire::Retries \"3\";' > /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::http::Timeout \"60\";' >> /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::ftp::Timeout \"60\";' >> /etc/apt/apt.conf.d/80-retries
 
+# configure fallback mirrors
+RUN sed -i 's|URIs: https://archive.ubuntu.com/ubuntu/|URIs: https://mirror.cov.ukservers.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.ox.ac.uk/sites/archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources
+
 RUN apt-get update && apt-get install --assume-yes --no-install-recommends git
 
 RUN git clone https://github.com/cross-rs/cross /cross
