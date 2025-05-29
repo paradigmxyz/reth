@@ -33,7 +33,7 @@ fn main() {
 
             // Install ress & zkress subprotocols.
             if extra_args.ress.enabled || !extra_args.zk_ress.protocols.is_empty() {
-                info!(target: "reth::cli", "Initializing pending state");
+                info!(target: "reth::cli", "Initializing ress pending state");
                 let pending_state = PendingState::default();
 
                 // Spawn maintenance task for pending state.

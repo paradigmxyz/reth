@@ -23,10 +23,7 @@ impl<T> Default for NoopZkRessProtocolProvider<T> {
     }
 }
 
-impl<T> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T>
-where
-    T: ZkRessWitness + Default,
-{
+impl<T: ZkRessWitness> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T> {
     type Witness = T;
 
     fn header(&self, _block_hash: B256) -> ProviderResult<Option<Header>> {
@@ -89,10 +86,7 @@ impl<T> MockRessProtocolProvider<T> {
     }
 }
 
-impl<T> ZkRessProtocolProvider for MockRessProtocolProvider<T>
-where
-    T: ZkRessWitness + Default + Clone,
-{
+impl<T: ZkRessWitness> ZkRessProtocolProvider for MockRessProtocolProvider<T> {
     type Witness = T;
 
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
