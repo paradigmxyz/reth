@@ -236,27 +236,6 @@ where
     )
     .await
     .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_uncles_count_by_hash(client, hash)
-        .await
-        .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::block_uncles_count_by_number(
-        client,
-        block_number,
-    )
-    .await
-    .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::uncle_by_block_hash_and_index(
-        client, hash, index,
-    )
-    .await
-    .unwrap();
-    EthApiClient::<Transaction, Block, Receipt, Header>::uncle_by_block_number_and_index(
-        client,
-        block_number,
-        index,
-    )
-    .await
-    .unwrap();
     EthApiClient::<Transaction, Block, Receipt, Header>::sign(client, address, bytes.clone())
         .await
         .unwrap_err();
