@@ -1228,43 +1228,6 @@ mod tests {
     }
 
     #[test]
-    fn test_block_reader_ommers() -> eyre::Result<()> {
-        // Create a new provider
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        let first_in_mem_block = in_memory_blocks.first().unwrap();
-
-        // If the block is after the Merge, we should have an empty ommers list
-        assert_eq!(
-            provider.ommers(
-                (provider.chain_spec().paris_block_and_final_difficulty.unwrap().0 + 2).into()
-            )?,
-            Some(vec![])
-        );
-
-        // First in memory block ommers should be found
-        assert_eq!(
-            provider.ommers(first_in_mem_block.number.into())?,
-            Some(first_in_mem_block.body().ommers.clone())
-        );
-        assert_eq!(
-            provider.ommers(first_in_mem_block.hash().into())?,
-            Some(first_in_mem_block.body().ommers.clone())
-        );
-
-        // A random hash should return None as the block number is not found
-        assert_eq!(provider.ommers(B256::random().into())?, None);
-
-        Ok(())
-    }
-
-    #[test]
     fn test_block_body_indices() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
@@ -1646,46 +1609,6 @@ mod tests {
         assert_eq!(
             provider.sealed_header_by_id(block_hash.into()).unwrap(),
             Some(in_memory_block.clone_sealed_header())
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_reader_id_ext_ommers_by_id() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        let database_block = database_blocks.first().unwrap().clone();
-        let in_memory_block = in_memory_blocks.last().unwrap().clone();
-
-        let block_number = database_block.number;
-        let block_hash = database_block.hash();
-
-        assert_eq!(
-            provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            database_block.body().ommers
-        );
-        assert_eq!(
-            provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            database_block.body().ommers
-        );
-
-        let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.hash();
-
-        assert_eq!(
-            provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            in_memory_block.body().ommers
-        );
-        assert_eq!(
-            provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            in_memory_block.body().ommers
         );
 
         Ok(())
