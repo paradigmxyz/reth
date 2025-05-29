@@ -152,51 +152,6 @@ pub trait EthBlocks: LoadBlock {
             Ok(None)
         }
     }
-
-    /// Returns uncle headers of given block.
-    ///
-    /// Returns an empty vec if there are none.
-    #[expect(clippy::type_complexity)]
-    fn ommers(
-        &self,
-        block_id: BlockId,
-    ) -> Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error> {
-        self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
-    }
-
-    /// Returns uncle block at given index in given block.
-    ///
-    /// Returns `None` if index out of range.
-    fn ommer_by_block_and_index(
-        &self,
-        block_id: BlockId,
-        index: Index,
-    ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
-    {
-        async move {
-            let uncles = if block_id.is_pending() {
-                // Pending block can be fetched directly without need for caching
-                self.provider()
-                    .pending_block()
-                    .map_err(Self::Error::from_eth_err)?
-                    .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
-            } else {
-                self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)?
-            }
-            .unwrap_or_default();
-
-            Ok(uncles.into_iter().nth(index.into()).map(|header| {
-                let block = alloy_consensus::Block::<alloy_consensus::TxEnvelope, _>::uncle(header);
-                let size = U256::from(block.length());
-                Block {
-                    uncles: vec![],
-                    header: Header::from_consensus(block.header.seal_slow(), None, Some(size)),
-                    transactions: BlockTransactions::Uncle,
-                    withdrawals: None,
-                }
-            }))
-        }
-    }
 }
 
 /// Loads a block from database.

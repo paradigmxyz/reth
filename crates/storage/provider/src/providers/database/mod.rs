@@ -23,7 +23,7 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, OmmersProvider, StateCommitmentProvider,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, StateCommitmentProvider,
     TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
@@ -540,12 +540,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
         timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
         self.provider()?.withdrawals_by_block(id, timestamp)
-    }
-}
-
-impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.provider()?.ommers(id)
     }
 }
 

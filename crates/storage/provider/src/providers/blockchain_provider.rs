@@ -36,8 +36,8 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, OmmersProvider,
-    StateCommitmentProvider, StorageChangeSetReader,
+    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StateCommitmentProvider,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -465,12 +465,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.consistent_provider()?.ommers(id)
-    }
-}
-
 impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
     fn block_body_indices(
         &self,
@@ -696,10 +690,6 @@ where
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
         self.consistent_provider()?.header_by_id(id)
     }
-
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.consistent_provider()?.ommers_by_id(id)
-    }
 }
 
 impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
@@ -807,8 +797,8 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DatabaseProviderFactory, HeaderProvider,
-        OmmersProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
-        TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+        ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, TransactionVariant,
+        TransactionsProvider, WithdrawalsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,

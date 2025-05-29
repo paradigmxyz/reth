@@ -26,8 +26,8 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, OmmersProvider,
-    StateProvider, StorageChangeSetReader,
+    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::states::PlainStorageRevert;
@@ -1165,22 +1165,6 @@ impl<N: ProviderNodeTypes> WithdrawalsProvider for ConsistentProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> OmmersProvider for ConsistentProvider<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<HeaderTy<N>>>> {
-        self.get_in_memory_or_storage_by_block(
-            id,
-            |db_provider| db_provider.ommers(id),
-            |block_state| {
-                if self.chain_spec().is_paris_active_at_block(block_state.number()) {
-                    return Ok(Some(Vec::new()))
-                }
-
-                Ok(block_state.block_ref().recovered_block().body().ommers().map(|o| o.to_vec()))
-            },
-        )
-    }
-}
-
 impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
     fn block_body_indices(
         &self,
@@ -1334,17 +1318,6 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
             BlockId::Number(num) => self.header_by_number_or_tag(num)?,
             BlockId::Hash(hash) => self.header(&hash.block_hash)?,
         })
-    }
-
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<HeaderTy<N>>>> {
-        match id {
-            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
-            BlockId::Hash(hash) => {
-                // TODO: EIP-1898 question, see above
-                // here it is not handled
-                self.ommers(BlockHashOrNumber::Hash(hash.block_hash))
-            }
-        }
     }
 }
 

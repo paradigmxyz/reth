@@ -3,7 +3,7 @@
 use crate::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, HashedPostStateProvider,
-    HeaderProvider, NodePrimitivesProvider, OmmersProvider, PruneCheckpointReader, ReceiptProvider,
+    HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
     StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant, TransactionsProvider, WithdrawalsProvider,
@@ -144,10 +144,6 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReaderIdExt for NoopProvider<C, N> 
     }
 
     fn header_by_id(&self, _id: BlockId) -> ProviderResult<Option<N::BlockHeader>> {
-        Ok(None)
-    }
-
-    fn ommers_by_id(&self, _id: BlockId) -> ProviderResult<Option<Vec<N::BlockHeader>>> {
         Ok(None)
     }
 }
@@ -541,12 +537,6 @@ impl<C: Send + Sync, N: NodePrimitives> WithdrawalsProvider for NoopProvider<C, 
         _id: BlockHashOrNumber,
         _timestamp: u64,
     ) -> ProviderResult<Option<Withdrawals>> {
-        Ok(None)
-    }
-}
-
-impl<C: Send + Sync, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
         Ok(None)
     }
 }

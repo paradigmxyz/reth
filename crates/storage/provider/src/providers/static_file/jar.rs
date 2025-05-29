@@ -11,16 +11,16 @@ use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
-    BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
-    StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
+    BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor,
+    TDWithHashMask, TotalDifficultyMask, TransactionMask, WithdrawalsMask,
 };
 use reth_db_api::{
     models::StoredBlockBodyIndices,
     table::{Decompress, Value},
 };
-use reth_node_types::{FullNodePrimitives, NodePrimitives};
+use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{SealedHeader, SignedTransaction};
-use reth_storage_api::{BlockBodyIndicesProvider, OmmersProvider, WithdrawalsProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, WithdrawalsProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -372,19 +372,6 @@ impl<N: NodePrimitives> WithdrawalsProvider for StaticFileJarProvider<'_, N> {
                 .cursor()?
                 .get_one::<WithdrawalsMask>(num.into())?
                 .and_then(|s| s.withdrawals))
-        }
-        // Only accepts block number queries
-        Err(ProviderError::UnsupportedProvider)
-    }
-}
-
-impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJarProvider<'_, N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        if let Some(num) = id.as_number() {
-            return Ok(self
-                .cursor()?
-                .get_one::<OmmersMask<Self::Header>>(num.into())?
-                .map(|s| s.ommers))
         }
         // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
