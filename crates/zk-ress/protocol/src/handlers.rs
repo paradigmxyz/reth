@@ -92,7 +92,7 @@ pub struct ZkRessProtocolHandler<P: ZkRessProtocolProvider> {
     /// The maximum number of active connections.
     pub max_active_connections: u64,
     /// Current state of the protocol.
-    pub state: ProtocolState<P::Witness>,
+    pub state: ProtocolState<P::Proof>,
 }
 
 impl<P: ZkRessProtocolProvider> fmt::Debug for ZkRessProtocolHandler<P> {
@@ -123,7 +123,7 @@ impl<P: ZkRessProtocolProvider + Clone> Clone for ZkRessProtocolHandler<P> {
 impl<P> ProtocolHandler for ZkRessProtocolHandler<P>
 where
     P: ZkRessProtocolProvider + Clone + Unpin + 'static,
-    P::Witness: Default + fmt::Debug,
+    P::Proof: Default + fmt::Debug,
 {
     type ConnectionHandler = Self;
 
@@ -171,12 +171,12 @@ where
 impl<P> ConnectionHandler for ZkRessProtocolHandler<P>
 where
     P: ZkRessProtocolProvider + Clone + Unpin + 'static,
-    P::Witness: Default + fmt::Debug,
+    P::Proof: Default + fmt::Debug,
 {
     type Connection = ZkRessProtocolConnection<P>;
 
     fn protocol(&self) -> Protocol {
-        ZkRessProtocolMessage::<P::Witness>::protocol(self.protocol_name, self.protocol_version)
+        ZkRessProtocolMessage::<P::Proof>::protocol(self.protocol_name, self.protocol_version)
     }
 
     fn on_unsupported_by_peer(

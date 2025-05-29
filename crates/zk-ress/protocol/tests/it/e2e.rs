@@ -156,20 +156,20 @@ async fn message_exchange() {
     peer0_conn.send(ZkRessPeerRequest::GetBlockBodies { request: Vec::new(), tx }).unwrap();
     assert_eq!(rx.await.unwrap(), Vec::new());
 
-    // send get witness message from peer0 to peer1
+    // send get proof message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
-    peer0_conn.send(ZkRessPeerRequest::GetWitness { block_hash: B256::ZERO, tx }).unwrap();
+    peer0_conn.send(ZkRessPeerRequest::GetProof { block_hash: B256::ZERO, tx }).unwrap();
     assert_eq!(rx.await.unwrap(), Default::default());
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn witness_fetching_does_not_block() {
+async fn proof_fetching_does_not_block() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
 
-    let witness_delay = Duration::from_millis(100);
+    let proof_delay = Duration::from_millis(100);
     let protocol_provider =
-        MockRessProtocolProvider::<ExecutionWitness>::default().with_witness_delay(witness_delay);
+        MockRessProtocolProvider::<ExecutionWitness>::default().with_proof_delay(proof_delay);
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
@@ -220,14 +220,12 @@ async fn witness_fetching_does_not_block() {
         }
     };
 
-    // send get witness message from peer0 to peer1
-    let witness_requested_at = Instant::now();
-    let (witness_tx, witness_rx) = oneshot::channel();
-    peer0_conn
-        .send(ZkRessPeerRequest::GetWitness { block_hash: B256::ZERO, tx: witness_tx })
-        .unwrap();
+    // send get proof message from peer0 to peer1
+    let proof_requested_at = Instant::now();
+    let (proof_tx, proof_rx) = oneshot::channel();
+    peer0_conn.send(ZkRessPeerRequest::GetProof { block_hash: B256::ZERO, tx: proof_tx }).unwrap();
 
-    // send get bytecode message from peer0 to peer1
+    // send get header request from peer0 to peer1
     let headers_requested_at = Instant::now();
     let (tx, rx) = oneshot::channel();
     peer0_conn
@@ -237,11 +235,11 @@ async fn witness_fetching_does_not_block() {
         })
         .unwrap();
     assert_eq!(rx.await.unwrap(), Vec::new());
-    assert!(headers_requested_at.elapsed() < witness_delay);
+    assert!(headers_requested_at.elapsed() < proof_delay);
 
-    // await for witness response
-    assert_eq!(witness_rx.await.unwrap(), Default::default());
-    assert!(witness_requested_at.elapsed() >= witness_delay);
+    // await for proof response
+    assert_eq!(proof_rx.await.unwrap(), Default::default());
+    assert!(proof_requested_at.elapsed() >= proof_delay);
 }
 
 #[tokio::test(flavor = "multi_thread")]

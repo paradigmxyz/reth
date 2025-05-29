@@ -54,13 +54,10 @@ pub struct RethZkRessProtocolProvider<P, E> {
     prover: ZkRessProver,
 }
 
-impl<P,E > RethZkRessProtocolProvider<P,E> {
+impl<P, E> RethZkRessProtocolProvider<P, E> {
     /// Create new provider.
-    pub fn new(
-        ress_provider: RethRessProtocolProvider<P, E>,
-        prover: ZkRessProver,
-    )-> Self {
-        Self {ress_provider,prover}
+    pub fn new(ress_provider: RethRessProtocolProvider<P, E>, prover: ZkRessProver) -> Self {
+        Self { ress_provider, prover }
     }
 }
 
@@ -69,7 +66,7 @@ where
     P: BlockReader<Block = Block> + StateProviderFactory + Clone + 'static,
     E: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
-    type Witness = Bytes;
+    type Proof = Bytes;
 
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         trace!(target: "reth::zk_ress_provider", %block_hash, "Serving header");
@@ -81,7 +78,7 @@ where
         Ok(self.ress_provider.block_by_hash(block_hash)?.map(|b| b.body().clone()))
     }
 
-    async fn witness(&self, block_hash: B256) -> ProviderResult<Self::Witness> {
+    async fn proof(&self, block_hash: B256) -> ProviderResult<Self::Proof> {
         let _witness = self.ress_provider.execution_witness(block_hash);
 
         // TODO: we have the witness, now make the request to the prover

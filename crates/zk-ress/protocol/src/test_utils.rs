@@ -24,7 +24,7 @@ impl<T> Default for NoopZkRessProtocolProvider<T> {
 }
 
 impl<T: ExecutionProof> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T> {
-    type Witness = T;
+    type Proof = T;
 
     fn header(&self, _block_hash: B256) -> ProviderResult<Option<Header>> {
         Ok(None)
@@ -34,7 +34,7 @@ impl<T: ExecutionProof> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T>
         Ok(None)
     }
 
-    async fn witness(&self, _block_hash: B256) -> ProviderResult<Self::Witness> {
+    async fn proof(&self, _block_hash: B256) -> ProviderResult<Self::Proof> {
         Ok(T::default())
     }
 }
@@ -44,14 +44,14 @@ impl<T: ExecutionProof> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T>
 pub struct MockRessProtocolProvider<T> {
     headers: Arc<Mutex<B256HashMap<Header>>>,
     block_bodies: Arc<Mutex<B256HashMap<BlockBody>>>,
-    witnesses: Arc<Mutex<B256HashMap<T>>>,
-    witness_delay: Option<Duration>,
+    proofs: Arc<Mutex<B256HashMap<T>>>,
+    proof_delay: Option<Duration>,
 }
 
 impl<T> MockRessProtocolProvider<T> {
-    /// Configure witness response delay.
-    pub const fn with_witness_delay(mut self, delay: Duration) -> Self {
-        self.witness_delay = Some(delay);
+    /// Configure proof response delay.
+    pub const fn with_proof_delay(mut self, delay: Duration) -> Self {
+        self.proof_delay = Some(delay);
         self
     }
 
@@ -75,19 +75,19 @@ impl<T> MockRessProtocolProvider<T> {
         self.block_bodies.lock().unwrap().extend(bodies);
     }
 
-    /// Insert witness.
-    pub fn add_witness(&self, block_hash: B256, witness: T) {
-        self.witnesses.lock().unwrap().insert(block_hash, witness);
+    /// Insert proof.
+    pub fn add_proof(&self, block_hash: B256, proof: T) {
+        self.proofs.lock().unwrap().insert(block_hash, proof);
     }
 
-    /// Extend witnesses from iterator.
-    pub fn extend_witnesses(&self, witnesses: impl IntoIterator<Item = (B256, T)>) {
-        self.witnesses.lock().unwrap().extend(witnesses);
+    /// Extend proofs from iterator.
+    pub fn extend_proofs(&self, proofs: impl IntoIterator<Item = (B256, T)>) {
+        self.proofs.lock().unwrap().extend(proofs);
     }
 }
 
 impl<T: ExecutionProof> ZkRessProtocolProvider for MockRessProtocolProvider<T> {
-    type Witness = T;
+    type Proof = T;
 
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         Ok(self.headers.lock().unwrap().get(&block_hash).cloned())
@@ -97,10 +97,10 @@ impl<T: ExecutionProof> ZkRessProtocolProvider for MockRessProtocolProvider<T> {
         Ok(self.block_bodies.lock().unwrap().get(&block_hash).cloned())
     }
 
-    async fn witness(&self, block_hash: B256) -> ProviderResult<Self::Witness> {
-        if let Some(delay) = self.witness_delay {
+    async fn proof(&self, block_hash: B256) -> ProviderResult<Self::Proof> {
+        if let Some(delay) = self.proof_delay {
             tokio::time::sleep(delay).await;
         }
-        Ok(self.witnesses.lock().unwrap().get(&block_hash).cloned().unwrap_or_default())
+        Ok(self.proofs.lock().unwrap().get(&block_hash).cloned().unwrap_or_default())
     }
 }

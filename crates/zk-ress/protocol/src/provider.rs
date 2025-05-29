@@ -10,8 +10,8 @@ use std::future::Future;
 
 /// A provider trait for ress protocol.
 pub trait ZkRessProtocolProvider: Send + Sync {
-    /// The zk-ress witness type.
-    type Witness: ExecutionProof;
+    /// The zk-ress proof type.
+    type Proof: ExecutionProof;
 
     /// Return block header by hash.
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>>;
@@ -56,9 +56,6 @@ pub trait ZkRessProtocolProvider: Send + Sync {
         Ok(bodies)
     }
 
-    /// Return witness by block hash.
-    fn witness(
-        &self,
-        block_hash: B256,
-    ) -> impl Future<Output = ProviderResult<Self::Witness>> + Send;
+    /// Return execution proof by block hash.
+    fn proof(&self, block_hash: B256) -> impl Future<Output = ProviderResult<Self::Proof>> + Send;
 }

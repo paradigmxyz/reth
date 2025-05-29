@@ -70,15 +70,15 @@ impl<T: ExecutionProof> ZkRessProtocolMessage<T> {
             .into_protocol_message()
     }
 
-    /// Execution witness request.
-    pub const fn get_witness(request_id: u64, block_hash: BlockHash) -> Self {
-        ZkRessMessage::GetWitness(RequestPair { request_id, message: block_hash })
+    /// Execution proof request.
+    pub const fn get_proof(request_id: u64, block_hash: BlockHash) -> Self {
+        ZkRessMessage::GetProof(RequestPair { request_id, message: block_hash })
             .into_protocol_message()
     }
 
-    /// Execution witness response.
-    pub const fn witness(request_id: u64, witness: T) -> Self {
-        ZkRessMessage::Witness(RequestPair { request_id, message: witness }).into_protocol_message()
+    /// Execution proof response.
+    pub const fn proof(request_id: u64, proof: T) -> Self {
+        ZkRessMessage::Proof(RequestPair { request_id, message: proof }).into_protocol_message()
     }
 
     /// Return RLP encoded message.
@@ -99,8 +99,8 @@ impl<T: ExecutionProof> ZkRessProtocolMessage<T> {
                 ZkRessMessage::GetBlockBodies(RequestPair::decode(buf)?)
             }
             ZkRessMessageID::BlockBodies => ZkRessMessage::BlockBodies(RequestPair::decode(buf)?),
-            ZkRessMessageID::GetWitness => ZkRessMessage::GetWitness(RequestPair::decode(buf)?),
-            ZkRessMessageID::Witness => ZkRessMessage::Witness(RequestPair::decode(buf)?),
+            ZkRessMessageID::GetProof => ZkRessMessage::GetProof(RequestPair::decode(buf)?),
+            ZkRessMessageID::Proof => ZkRessMessage::Proof(RequestPair::decode(buf)?),
         };
         Ok(Self { message_type, message })
     }
@@ -136,10 +136,10 @@ pub enum ZkRessMessageID {
     /// Block bodies response message.
     BlockBodies = 0x04,
 
-    /// Witness request message.
-    GetWitness = 0x05,
-    /// Witness response message.
-    Witness = 0x06,
+    /// Proof request message.
+    GetProof = 0x05,
+    /// Proof response message.
+    Proof = 0x06,
 }
 
 impl Encodable for ZkRessMessageID {
@@ -160,8 +160,8 @@ impl Decodable for ZkRessMessageID {
             0x02 => Self::Headers,
             0x03 => Self::GetBlockBodies,
             0x04 => Self::BlockBodies,
-            0x05 => Self::GetWitness,
-            0x06 => Self::Witness,
+            0x05 => Self::GetProof,
+            0x06 => Self::Proof,
             _ => return Err(alloy_rlp::Error::Custom("Invalid message type")),
         };
         buf.advance(1);
@@ -187,9 +187,9 @@ pub enum ZkRessMessage<T> {
     BlockBodies(RequestPair<Vec<BlockBody>>),
 
     /// Represents a witness request message.
-    GetWitness(RequestPair<BlockHash>),
+    GetProof(RequestPair<BlockHash>),
     /// Represents a witness response message.
-    Witness(RequestPair<T>),
+    Proof(RequestPair<T>),
 }
 
 impl<T> ZkRessMessage<T> {
@@ -201,8 +201,8 @@ impl<T> ZkRessMessage<T> {
             Self::Headers(_) => ZkRessMessageID::Headers,
             Self::GetBlockBodies(_) => ZkRessMessageID::GetBlockBodies,
             Self::BlockBodies(_) => ZkRessMessageID::BlockBodies,
-            Self::GetWitness(_) => ZkRessMessageID::GetWitness,
-            Self::Witness(_) => ZkRessMessageID::Witness,
+            Self::GetProof(_) => ZkRessMessageID::GetProof,
+            Self::Proof(_) => ZkRessMessageID::Proof,
         }
     }
 
@@ -227,8 +227,8 @@ impl<T: Encodable> Encodable for ZkRessMessage<T> {
             Self::Headers(header) => header.encode(out),
             Self::GetBlockBodies(request) => request.encode(out),
             Self::BlockBodies(body) => body.encode(out),
-            Self::GetWitness(request) => request.encode(out),
-            Self::Witness(witness) => witness.encode(out),
+            Self::GetProof(request) => request.encode(out),
+            Self::Proof(witness) => witness.encode(out),
         }
     }
 
@@ -239,8 +239,8 @@ impl<T: Encodable> Encodable for ZkRessMessage<T> {
             Self::Headers(header) => header.length(),
             Self::GetBlockBodies(request) => request.length(),
             Self::BlockBodies(body) => body.length(),
-            Self::GetWitness(request) => request.length(),
-            Self::Witness(witness) => witness.length(),
+            Self::GetProof(request) => request.length(),
+            Self::Proof(witness) => witness.length(),
         }
     }
 }
