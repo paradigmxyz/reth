@@ -23,6 +23,7 @@ use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction, Wit
 
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use reth_optimism_primitives::OpPrimitives;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,7 +155,7 @@ impl<OpTransactionSigned> From<EthPayloadBuilderAttributes>
 
 /// Contains the built payload.
 #[derive(Debug, Clone)]
-pub struct OpBuiltPayload<N: NodePrimitives> {
+pub struct OpBuiltPayload<N: NodePrimitives = OpPrimitives> {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// Sealed block
