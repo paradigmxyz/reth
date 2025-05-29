@@ -67,9 +67,14 @@ pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 5_000;
 pub enum MerkleStage {
     /// The execution portion of the merkle stage.
     Execution {
+        // TODO: make struct for holding incremental settings, for code reuse
         /// The threshold (in number of blocks) for switching from incremental trie building
         /// of changes to whole rebuild.
         clean_threshold: u64,
+        /// The threshold (in number of blocks) to run the stage in incremental mode. The
+        /// incremental mode will calculate the state root by calculating the new state root for
+        /// some number of blocks, repeating until we reach the desired block number.
+        incremental_threshold: u64,
     },
     /// The unwind portion of the merkle stage.
     Unwind,
@@ -79,13 +84,20 @@ pub enum MerkleStage {
         /// The threshold (in number of blocks) for switching from incremental trie building
         /// of changes to whole rebuild.
         clean_threshold: u64,
+        /// The threshold (in number of blocks) to run the stage in incremental mode. The
+        /// incremental mode will calculate the state root by calculating the new state root for
+        /// some number of blocks, repeating until we reach the desired block number.
+        incremental_threshold: u64,
     },
 }
 
 impl MerkleStage {
     /// Stage default for the [`MerkleStage::Execution`].
     pub const fn default_execution() -> Self {
-        Self::Execution { clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD }
+        Self::Execution {
+            clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            incremental_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+        }
     }
 
     /// Stage default for the [`MerkleStage::Unwind`].
@@ -95,7 +107,11 @@ impl MerkleStage {
 
     /// Create new instance of [`MerkleStage::Execution`].
     pub const fn new_execution(clean_threshold: u64) -> Self {
-        Self::Execution { clean_threshold }
+        // TODO: make this configurable
+        Self::Execution {
+            clean_threshold,
+            incremental_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+        }
     }
 
     /// Gets the hashing progress
@@ -154,14 +170,18 @@ where
 
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        let threshold = match self {
+        let (threshold, incremental_threshold) = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-            Self::Execution { clean_threshold } => *clean_threshold,
+            Self::Execution { clean_threshold, incremental_threshold } => {
+                (*clean_threshold, *incremental_threshold)
+            }
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { clean_threshold } => *clean_threshold,
+            Self::Both { clean_threshold, incremental_threshold } => {
+                (*clean_threshold, *incremental_threshold)
+            }
         };
 
         let range = input.next_block_range();
@@ -255,7 +275,7 @@ where
             let mut current = from_block;
             let mut final_root = B256::default();
             while current < to_block {
-                let chunk_to = std::cmp::min(current + threshold - 1, to_block);
+                let chunk_to = std::cmp::min(current + incremental_threshold - 1, to_block);
                 let chunk_range = current..=chunk_to;
                 let (root, updates) =
                 StateRoot::incremental_root_with_updates(provider.tx_ref(), chunk_range)
@@ -478,11 +498,12 @@ mod tests {
     #[tokio::test]
     async fn execute_chunked_merkle() {
         let (previous_stage, stage_progress) = (100, 500);
-        let threshold = 100;
+        let clean_threshold = 100;
+        let incremental_threshold = 10;
 
         // Set up the runner
         let mut runner =
-            MerkleTestRunner { db: TestStageDB::default(), clean_threshold: threshold };
+            MerkleTestRunner { db: TestStageDB::default(), clean_threshold, incremental_threshold };
 
         let input = ExecInput {
             target: Some(previous_stage),
@@ -537,11 +558,16 @@ mod tests {
     struct MerkleTestRunner {
         db: TestStageDB,
         clean_threshold: u64,
+        incremental_threshold: u64,
     }
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), clean_threshold: 10000 }
+            Self {
+                db: TestStageDB::default(),
+                clean_threshold: 10000,
+                incremental_threshold: 10000,
+            }
         }
     }
 
@@ -553,7 +579,10 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S::Both { clean_threshold: self.clean_threshold }
+            Self::S::Both {
+                clean_threshold: self.clean_threshold,
+                incremental_threshold: self.incremental_threshold,
+            }
         }
     }
 
