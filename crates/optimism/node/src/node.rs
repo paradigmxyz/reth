@@ -37,7 +37,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
-    OpPayloadBuilderAttributes, OpPayloadPrimitives,
+    OpBuiltPayload, OpPayloadBuilderAttributes, OpPayloadPrimitives,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
 use reth_optimism_rpc::{
@@ -782,21 +782,18 @@ where
         Types: NodeTypes<
             Primitives: OpPayloadPrimitives,
             Payload: PayloadTypes<
-                BuiltPayload = reth_optimism_payload_builder::OpBuiltPayload<<<Node as FullNodeTypes>::Types as NodeTypes>::Primitives>,
+                BuiltPayload = OpBuiltPayload<PrimitivesTy<Node::Types>>,
                 PayloadAttributes = OpPayloadAttributes,
-                PayloadBuilderAttributes = OpPayloadBuilderAttributes<<<<Node as FullNodeTypes>::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx>,
-            >
+                PayloadBuilderAttributes = OpPayloadBuilderAttributes<TxTy<Node::Types>>,
+            >,
         >,
     >,
     Evm: ConfigureEvm<
             Primitives = PrimitivesTy<Node::Types>,
             NextBlockEnvCtx = OpNextBlockEnvAttributes,
         > + 'static,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
-        + Unpin
-        + 'static,
+    Pool: TransactionPool<Transaction: OpPooledTx<Consensus = TxTy<Node::Types>>> + Unpin + 'static,
     Txs: OpPayloadTransactions<Pool::Transaction>,
-    <Pool as TransactionPool>::Transaction: OpPooledTx,
 {
     type PayloadBuilder =
         reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, Evm, Txs>;

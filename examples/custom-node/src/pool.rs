@@ -22,7 +22,10 @@ use reth_optimism_forks::OpHardforks;
 
 #[derive(Debug, Clone)]
 pub struct CustomPoolBuilder<
-    T = OpPooledTransaction<Extended<OpTxEnvelope, CustomTransactionEnvelope>>,
+    T = OpPooledTransaction<
+        Extended<OpTxEnvelope, CustomTransactionEnvelope>,
+        Extended<op_alloy_consensus::OpPooledTransaction, CustomTransactionEnvelope>,
+    >,
 > {
     /// Enforced overrides that are applied to the pool config.
     pub pool_config_overrides: PoolBuilderConfigOverrides,

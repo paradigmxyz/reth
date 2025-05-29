@@ -17,11 +17,7 @@ use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     Node,
 };
-use reth_op::node::{
-    node::{OpPayloadBuilder, OpStorage},
-    OpNode,
-};
-use reth_optimism_payload_builder::OpPayloadTypes;
+use reth_op::node::{node::OpPayloadBuilder, OpNode, OpPayloadTypes};
 
 pub mod chainspec;
 pub mod consensus;
@@ -45,14 +41,7 @@ impl NodeTypes for CustomNode {
 
 impl<N> Node<N> for CustomNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpPayloadTypes<CustomNodePrimitives>,
-            ChainSpec = CustomChainSpec,
-            Primitives = CustomNodePrimitives,
-            Storage = OpStorage,
-        >,
-    >,
+    N: FullNodeTypes<Types = Self>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -70,8 +59,8 @@ where
             .node_types::<N>()
             .pool(CustomPoolBuilder::default())
             .executor(CustomExecutorBuilder::default())
-            .network(CustomNetworkBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
+            .network(CustomNetworkBuilder::default())
             .consensus(CustomConsensusBuilder)
     }
 

@@ -13,7 +13,6 @@ reth-network-peers.workspace = true
 reth-node-builder.workspace = true
 reth-optimism-forks.workspace = true
 reth-optimism-consensus.workspace = true
-reth-optimism-payload-builder.workspace = true
 reth-op = { workspace = true, features = ["node", "pool"] }
 reth-payload-builder.workspace = true
 reth-rpc-api.workspace = true
