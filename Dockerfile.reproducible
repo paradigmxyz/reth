@@ -1,11 +1,6 @@
 # Use the Rust 1.86 image based on Debian Bookworm
 FROM rust:1.86-bookworm AS builder
 
-# Use HTTPS for package sources
-RUN apt-get update && apt-get install --assume-yes --no-install-recommends ca-certificates
-RUN sed -i 's|http://|https://|g' /etc/apt/sources.list && \
-    find /etc/apt/ -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i 's|http://|https://|g' {} +
-
 # Install specific version of libclang-dev
 RUN apt-get update && apt-get install -y libclang-dev=1:14.0-55.7~deb12u1
 

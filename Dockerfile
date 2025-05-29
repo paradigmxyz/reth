@@ -6,11 +6,6 @@ WORKDIR /app
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
 LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
 
-# Use HTTPS for package sources
-RUN apt-get update && apt-get install --assume-yes --no-install-recommends ca-certificates
-RUN sed -i 's|http://|https://|g' /etc/apt/sources.list && \
-    find /etc/apt/ -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i 's|http://|https://|g' {} +
-
 # Install system dependencies
 RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-config
 
