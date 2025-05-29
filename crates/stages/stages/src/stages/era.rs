@@ -21,6 +21,7 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::ProviderError;
 use std::{
     fmt::{Debug, Formatter},
+    iter,
     path::PathBuf,
     task::{ready, Context, Poll},
 };
@@ -109,6 +110,13 @@ impl EraImportSource {
                 let reader = Era1Reader::new(file);
                 let iter = reader.iter();
                 let iter = iter.map(era::decode);
+                let iter = iter.chain(
+                    iter::once_with(move || match meta.mark_as_processed() {
+                        Ok(..) => None,
+                        Err(e) => Some(Err(e)),
+                    })
+                    .flatten(),
+                );
 
                 Ok(Box::new(iter) as Item<BH, BB>)
             })
