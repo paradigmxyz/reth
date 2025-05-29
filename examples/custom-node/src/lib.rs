@@ -71,7 +71,7 @@ where
             .pool(CustomPoolBuilder::default())
             .executor(CustomExecutorBuilder::default())
             .network(CustomNetworkBuilder::default())
-            .payload(BasicPayloadServiceBuilder::default())
+            .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
             .consensus(CustomConsensusBuilder)
     }
 
