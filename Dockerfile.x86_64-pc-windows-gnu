@@ -1,6 +1,9 @@
 FROM ubuntu:24.04 AS cross-base
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Use HTTPS for package sources
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list && \
+    find /etc/apt/sources.list.d/ -name '*.list' -exec sed -i 's|http://|https://|g' {} +
 RUN apt-get update && apt-get install --assume-yes --no-install-recommends git ca-certificates
 
 RUN git clone https://github.com/cross-rs/cross /cross
@@ -12,6 +15,10 @@ RUN cp cmake.sh / && /cmake.sh
 RUN cp xargo.sh / && /xargo.sh
 
 FROM cross-base AS build
+
+# Use HTTPS for package sources
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list && \
+    find /etc/apt/sources.list.d/ -name '*.list' -exec sed -i 's|http://|https://|g' {} +
 
 RUN apt-get install --assume-yes --no-install-recommends libz-mingw-w64-dev g++-mingw-w64-x86-64 gfortran-mingw-w64-x86-64
 
