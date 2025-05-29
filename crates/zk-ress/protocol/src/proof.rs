@@ -3,7 +3,9 @@ use alloy_rlp::{Decodable, Encodable};
 use reth_ress_protocol::ExecutionWitness;
 
 /// A trait for zk-ress execution proofs.
-pub trait ExecutionProof: Encodable + Decodable + Default + Clone + Send + Sync + 'static {
+pub trait ExecutionProof:
+    Encodable + Decodable + Default + Clone + Unpin + Send + Sync + 'static
+{
     /// Returns `true` if the witness is empty.
     /// Used to identify default responses from peers.
     fn is_empty(&self) -> bool;
