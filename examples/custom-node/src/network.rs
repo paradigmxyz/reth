@@ -1,7 +1,9 @@
-use crate::primitives::{CustomHeader, CustomTransaction, CustomTransactionEnvelope};
+use crate::{
+    pool::CustomPooledTransaction,
+    primitives::{CustomHeader, CustomTransaction},
+};
 use alloy_consensus::{Block, BlockBody};
-use op_alloy_consensus::OpPooledTransaction;
-use reth_ethereum::{network::NetworkPrimitives, primitives::Extended};
+use reth_ethereum::network::NetworkPrimitives;
 use reth_op::OpReceipt;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -13,6 +15,6 @@ impl NetworkPrimitives for CustomNetworkPrimitives {
     type BlockBody = BlockBody<CustomTransaction, CustomHeader>;
     type Block = Block<CustomTransaction, CustomHeader>;
     type BroadcastedTransaction = CustomTransaction;
-    type PooledTransaction = Extended<OpPooledTransaction, CustomTransactionEnvelope>;
+    type PooledTransaction = CustomPooledTransaction;
     type Receipt = OpReceipt;
 }
