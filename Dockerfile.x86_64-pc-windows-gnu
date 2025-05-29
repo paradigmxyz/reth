@@ -1,7 +1,11 @@
 FROM ubuntu:24.04 AS cross-base
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install --assume-yes --no-install-recommends git ca-certificates
+# Use HTTPS for package sources
+RUN apt-get update && apt-get install --assume-yes --no-install-recommends ca-certificates
+RUN sed -i 's|http://|https://|g' /etc/apt/sources.list && \
+    find /etc/apt/ -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i 's|http://|https://|g' {} +
+RUN apt-get update && apt-get install --assume-yes --no-install-recommends git
 
 RUN git clone https://github.com/cross-rs/cross /cross
 WORKDIR /cross/docker
