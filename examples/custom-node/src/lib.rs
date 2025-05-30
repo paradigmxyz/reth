@@ -8,8 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{
-    evm::CustomExecutorBuilder, network::CustomNetworkPrimitives, pool::CustomPooledTransaction,
-    primitives::CustomTransaction,
+    evm::CustomExecutorBuilder, pool::CustomPooledTransaction, primitives::CustomTransaction,
 };
 use chainspec::CustomChainSpec;
 use consensus::CustomConsensusBuilder;
@@ -52,7 +51,7 @@ where
         N,
         OpPoolBuilder<txpool::OpPooledTransaction<CustomTransaction, CustomPooledTransaction>>,
         BasicPayloadServiceBuilder<OpPayloadBuilder>,
-        OpNetworkBuilder<CustomNetworkPrimitives, CustomPooledTransaction>,
+        OpNetworkBuilder,
         CustomExecutorBuilder,
         CustomConsensusBuilder,
     >;
