@@ -78,7 +78,7 @@ pub struct TreeConfig {
     /// Whether to enable the precompile cache
     precompile_cache_enabled: bool,
     /// Whether to use state root fallback for testing
-    test_state_root_fallback: bool,
+    state_root_fallback: bool,
 }
 
 impl Default for TreeConfig {
@@ -98,7 +98,7 @@ impl Default for TreeConfig {
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_enabled: false,
-            test_state_root_fallback: false,
+            state_root_fallback: false,
         }
     }
 }
@@ -121,7 +121,7 @@ impl TreeConfig {
         max_proof_task_concurrency: u64,
         reserved_cpu_cores: usize,
         precompile_cache_enabled: bool,
-        test_state_root_fallback: bool,
+        state_root_fallback: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -138,7 +138,7 @@ impl TreeConfig {
             max_proof_task_concurrency,
             reserved_cpu_cores,
             precompile_cache_enabled,
-            test_state_root_fallback,
+            state_root_fallback,
         }
     }
 
@@ -209,9 +209,9 @@ impl TreeConfig {
         self.precompile_cache_enabled
     }
 
-    /// Returns whether to use state root fallback for testing.
-    pub const fn test_state_root_fallback(&self) -> bool {
-        self.test_state_root_fallback
+    /// Returns whether to use state root fallback.
+    pub const fn state_root_fallback(&self) -> bool {
+        self.state_root_fallback
     }
 
     /// Setter for persistence threshold.
@@ -317,9 +317,9 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to use state root fallback for testing.
-    pub const fn with_test_state_root_fallback(mut self, test_state_root_fallback: bool) -> Self {
-        self.test_state_root_fallback = test_state_root_fallback;
+    /// Setter for whether to use state root fallback, useful for testing.
+    pub const fn with_state_root_fallback(mut self, state_root_fallback: bool) -> Self {
+        self.state_root_fallback = state_root_fallback;
         self
     }
 
