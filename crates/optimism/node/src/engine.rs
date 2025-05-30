@@ -230,7 +230,7 @@ where
 /// Canyon activates the Shanghai EIPs, see the Canyon specs for more details:
 /// <https://github.com/ethereum-optimism/optimism/blob/ab926c5fd1e55b5c864341c44842d6d1ca679d99/specs/superchain-upgrades.md#canyon>
 pub fn validate_withdrawals_presence(
-    chain_spec: &impl OpHardforks,
+    chain_spec: impl OpHardforks,
     version: EngineApiMessageVersion,
     message_validation_kind: MessageValidationKind,
     timestamp: u64,
