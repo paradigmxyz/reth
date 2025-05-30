@@ -8,10 +8,9 @@ use op_alloy_consensus::{
     OpTxEnvelope,
 };
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
-use reth_node_api::NodePrimitives;
-use reth_primitives_traits::TxTy;
-use reth_node_api::FullNodeComponents;
+use reth_node_api::{FullNodeComponents, NodePrimitives};
 use reth_optimism_primitives::{DepositReceipt, OpTransactionSigned};
+use reth_primitives_traits::TxTy;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, TransactionCompat,

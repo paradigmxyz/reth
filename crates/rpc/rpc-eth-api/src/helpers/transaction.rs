@@ -21,7 +21,7 @@ use reth_primitives_traits::{RecoveredBlock, SignedTransaction, TxTy};
 use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
 use reth_rpc_types_compat::transaction::TransactionCompat;
 use reth_storage_api::{
-    BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
+    BlockNumReader, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};

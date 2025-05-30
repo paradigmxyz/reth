@@ -4,9 +4,9 @@ use crate::EthApi;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
+use alloy_signer::Either;
 use reth_chainspec::ChainSpecProvider;
 use reth_ethereum_primitives::EthPrimitives;
-use alloy_signer::Either;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadBlock, LoadState, SpawnBlocking},

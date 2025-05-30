@@ -37,10 +37,6 @@ use reth_consensus::{ConsensusError, FullConsensus};
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{
-    AccountReader, BlockReader, BlockReaderIdExt, CanonStateSubscriptions, ChainSpecProvider,
-    ChangeSetReader, FullRpcProvider, StateProviderFactory,
-};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
     OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
@@ -53,7 +49,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
-    AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider, ProviderBlock,
+    AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider,
     StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
@@ -126,7 +122,7 @@ where
         + ChangeSetReader,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N>,
+    EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     EthApi: FullEthApiServer<Primitives = N, Provider = Provider, Pool = Pool>,
 {
     let module_config = module_config.into();

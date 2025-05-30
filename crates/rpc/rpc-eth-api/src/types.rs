@@ -8,9 +8,8 @@ use reth_chainspec::EthChainSpec;
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_provider::FullRpcProvider;
 use reth_rpc_types_compat::TransactionCompat;
-use reth_storage_api::{ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_storage_api::FullRpcProvider;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
     error::Error,

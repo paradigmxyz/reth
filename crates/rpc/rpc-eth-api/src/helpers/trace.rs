@@ -13,13 +13,11 @@ use reth_evm::{
     InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, BlockTy, RecoveredBlock, SignedTransaction};
-use reth_node_api::NodePrimitives;
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
 };
-use reth_storage_api::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
 use revm::{
     context_interface::result::{ExecutionResult, ResultAndState},
     state::EvmState,
