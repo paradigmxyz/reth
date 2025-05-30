@@ -315,6 +315,7 @@ mod test {
             _,
             _,
         > {
+
             transaction_pool: NoopTransactionPool::default(),
             evm_config: NoopEvmConfig::default(),
             consensus: NoopConsensus::default(),
@@ -331,7 +332,7 @@ mod test {
 
         let node = NodeAdapter { components, task_executor, provider: NoopProvider::default() };
 
-        // test that
+        // test that node implements `FullNodeComponents``
         <NodeAdapter<_, _> as FullNodeComponents>::pool(&node);
     }
 }
