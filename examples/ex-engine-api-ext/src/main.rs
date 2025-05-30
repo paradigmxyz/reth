@@ -8,7 +8,7 @@
 
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_builder::{
-    EngineApiFn, EngineNodeLauncher, FullNodeComponents, NodeBuilder, NodeConfig,
+    EngineApiFn, FullNodeComponents, NodeBuilder, NodeConfig,
 };
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{
@@ -16,7 +16,6 @@ use reth_optimism_node::{
     node::{OpAddOns, OpEngineValidatorBuilder},
     OpEngineApiBuilder, OpNode,
 };
-use reth_tasks::TaskManager;
 use tokio::sync::oneshot;
 
 #[tokio::main]
@@ -26,7 +25,6 @@ async fn main() {
     let db = create_test_rw_db();
     let args = RollupArgs::default();
     let op_node = OpNode::new(args);
-    let tasks = TaskManager::current();
 
     let (engine_api_tx, _engine_api_rx) = oneshot::channel();
 
@@ -49,14 +47,5 @@ async fn main() {
             let _client = handles.rpc.http_client();
             Ok(())
         })
-        .launch_with_fn(|builder| {
-            let launcher = EngineNodeLauncher::new(
-                tasks.executor(),
-                builder.config.datadir(),
-                Default::default(),
-            );
-            builder.launch_with(launcher)
-        })
-        .await
-        .expect("Failed to launch op node");
+        .check_launch();
 }
