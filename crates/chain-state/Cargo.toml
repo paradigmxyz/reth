@@ -41,6 +41,7 @@ derive_more.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
 pin-project.workspace = true
+serde = { workspace = true, optional = true }
 
 # optional deps for test-utils
 alloy-signer = { workspace = true, optional = true }
@@ -56,6 +57,11 @@ alloy-consensus.workspace = true
 rand.workspace = true
 
 [features]
+serde = [
+    "dep:serde",
+    "reth-ethereum-primitives/serde",
+    "reth-execution-types/serde",
+]
 test-utils = [
     "alloy-primitives/getrandom",
     "alloy-signer",
