@@ -1,7 +1,6 @@
 //! `EngineApiBuilder` callback wrapper
 //!
-//! Provides a wrapper around `EngineApiBuilder` that allows executing
-//! callbacks when the Engine API is built.
+//! Wraps an `EngineApiBuilder` to provide access to the built Engine API instance.
 
 use crate::rpc::EngineApiBuilder;
 use eyre::Result;
@@ -18,7 +17,7 @@ pub struct EngineApiExt<B, F> {
 }
 
 impl<B, F> EngineApiExt<B, F> {
-    /// Create a new `EngineApiFn` with the given builder and callback
+    /// Creates a new wrapper that calls `callback` when the API is built.
     pub const fn new(inner: B, callback: F) -> Self {
         Self { inner, callback: Some(callback) }
     }
@@ -33,7 +32,7 @@ where
 {
     type EngineApi = B::EngineApi;
 
-    // Builds the `EngineApi` and executes the callback if present.
+    /// Builds the `EngineApi` and executes the callback if present.
     async fn build_engine_api(mut self, ctx: &AddOnsContext<'_, N>) -> Result<Self::EngineApi> {
         let api = self.inner.build_engine_api(ctx).await?;
 
