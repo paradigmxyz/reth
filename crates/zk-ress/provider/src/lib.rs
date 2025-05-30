@@ -21,6 +21,8 @@ use tracing::*;
 /// Provers supported by zkress.
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub enum ZkRessProver {
+    /// Execution witness.
+    ExecutionWitness,
     /// SP1
     Sp1,
     /// Risc0
@@ -31,6 +33,7 @@ impl ZkRessProver {
     /// Parse prover from CLI arg.
     pub fn try_from_arg(arg: &str) -> eyre::Result<Self> {
         match arg {
+            "execution-witness" => Ok(Self::ExecutionWitness),
             "sp1" => Ok(Self::Sp1),
             "risc0" => Ok(Self::Risc0),
             _ => eyre::bail!("unknown protocol {arg}"),
@@ -40,8 +43,9 @@ impl ZkRessProver {
     /// Returns the name of RLPx subprotocol for the given prover.
     pub fn protocol_name(&self) -> &'static str {
         match self {
-            Self::Sp1 => "zkress-sp1",
-            Self::Risc0 => "zkress-risc0",
+            Self::ExecutionWitness => "zk-ress-execution-witness",
+            Self::Sp1 => "zk-ress-sp1",
+            Self::Risc0 => "zk-ress-risc0",
         }
     }
 }
