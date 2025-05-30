@@ -28,7 +28,7 @@ use reth_node_builder::{
         EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder,
         RethRpcAddOns, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
     },
-    BuilderContext, DebugNode, EngineApiFn, Node, NodeAdapter, NodeComponentsBuilder,
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
@@ -51,7 +51,7 @@ use reth_optimism_txpool::{
     OpPooledTx,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
-use reth_rpc_api::{DebugApiServer, IntoEngineApiRpcModule};
+use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{ext::L2EthApiExtServer, FullEthApiServer};
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
@@ -196,6 +196,8 @@ where
     type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         OpEthApiBuilder,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
@@ -233,12 +235,7 @@ impl NodeTypes for OpNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug)]
-pub struct OpAddOns<
-    N: FullNodeComponents,
-    EthB: EthApiBuilder<N>,
-    EV = OpEngineValidatorBuilder,
-    EB = OpEngineApiBuilder<OpEngineValidatorBuilder>,
-> {
+pub struct OpAddOns<N: FullNodeComponents, EthB: EthApiBuilder<N>, EV, EB> {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
     pub rpc_add_ons: RpcAddOns<N, EthB, EV, EB>,
@@ -253,7 +250,13 @@ pub struct OpAddOns<
     enable_tx_conditional: bool,
 }
 
-impl<N, NetworkT> Default for OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT> Default
+    for OpAddOns<
+        N,
+        OpEthApiBuilder<NetworkT>,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >
 where
     N: FullNodeComponents<Types: NodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
@@ -263,7 +266,13 @@ where
     }
 }
 
-impl<N, NetworkT> OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT>
+    OpAddOns<
+        N,
+        OpEthApiBuilder<NetworkT>,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >
 where
     N: FullNodeComponents<Types: NodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
@@ -336,8 +345,7 @@ where
     }
 }
 
-impl<N, NetworkT, B, F> NodeAddOns<N>
-    for OpAddOns<N, OpEthApiBuilder<NetworkT>, OpEngineValidatorBuilder, EngineApiFn<B, F>>
+impl<N, NetworkT, EV, EB> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -353,152 +361,8 @@ where
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
     OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
     NetworkT: op_alloy_network::Network + Unpin,
-    B: EngineApiBuilder<N>,
-    B::EngineApi: IntoEngineApiRpcModule + Send + Sync + Clone + 'static,
-    F: FnOnce(B::EngineApi) + Send + Sync + 'static,
-{
-    type Handle = RpcHandle<N, OpEthApi<N, NetworkT>>;
-
-    async fn launch_add_ons(
-        self,
-        ctx: reth_node_api::AddOnsContext<'_, N>,
-    ) -> eyre::Result<Self::Handle> {
-        let Self {
-            rpc_add_ons,
-            da_config,
-            sequencer_url,
-            sequencer_headers,
-            enable_tx_conditional,
-        } = self;
-
-        let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
-            ctx.node.pool().clone(),
-            ctx.node.provider().clone(),
-            ctx.node.evm_config().clone(),
-        );
-
-        let debug_ext = OpDebugWitnessApi::new(
-            ctx.node.provider().clone(),
-            Box::new(ctx.node.task_executor().clone()),
-            builder,
-        );
-        let miner_ext = OpMinerExtApi::new(da_config);
-
-        let sequencer_client = if let Some(url) = sequencer_url {
-            Some(SequencerClient::new_with_headers(url, sequencer_headers).await?)
-        } else {
-            None
-        };
-
-        let tx_conditional_ext: OpEthExtApi<N::Pool, N::Provider> = OpEthExtApi::new(
-            sequencer_client,
-            ctx.node.pool().clone(),
-            ctx.node.provider().clone(),
-        );
-
-        rpc_add_ons
-            .launch_add_ons_with(ctx, move |modules, auth_modules, registry| {
-                debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
-                modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
-
-                modules.merge_if_module_configured(
-                    RethRpcModule::Miner,
-                    miner_ext.clone().into_rpc(),
-                )?;
-
-                if modules.module_config().contains_any(&RethRpcModule::Miner) {
-                    debug!(target: "reth::cli", "Installing miner DA rpc endpoint");
-                    auth_modules.merge_auth_methods(miner_ext.into_rpc())?;
-                }
-
-                if modules.module_config().contains_any(&RethRpcModule::Debug) {
-                    debug!(target: "reth::cli", "Installing debug rpc endpoint");
-                    auth_modules.merge_auth_methods(registry.debug_api().into_rpc())?;
-                }
-
-                if enable_tx_conditional {
-                    modules.merge_if_module_configured(
-                        RethRpcModule::Eth,
-                        tx_conditional_ext.into_rpc(),
-                    )?;
-                }
-
-                Ok(())
-            })
-            .await
-    }
-}
-
-impl<N, NetworkT, B, F> EngineValidatorAddOn<N>
-    for OpAddOns<N, OpEthApiBuilder<NetworkT>, OpEngineValidatorBuilder, EngineApiFn<B, F>>
-where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Payload = OpEngineTypes,
-        >,
-    >,
-    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-    B: EngineApiBuilder<N>,
-    B::EngineApi: IntoEngineApiRpcModule + Send + Sync + Clone + 'static,
-    F: FnOnce(B::EngineApi) + Send + 'static,
-{
-    type Validator = OpEngineValidator<
-        N::Provider,
-        <<N::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx,
-        <N::Types as NodeTypes>::ChainSpec,
-    >;
-
-    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
-        OpEngineValidatorBuilder::default().build(ctx).await
-    }
-}
-
-impl<N, NetworkT, B, F> RethRpcAddOns<N>
-    for OpAddOns<N, OpEthApiBuilder<NetworkT>, OpEngineValidatorBuilder, EngineApiFn<B, F>>
-where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Payload = OpEngineTypes,
-        >,
-        Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    >,
-    OpEthApiError: FromEvmError<N::Evm>,
-    <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
-    OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
-    NetworkT: op_alloy_network::Network + Unpin,
-    B: EngineApiBuilder<N>,
-    B::EngineApi: IntoEngineApiRpcModule + Send + Sync + Clone + 'static,
-    F: FnOnce(B::EngineApi) + Send + Sync + 'static,
-{
-    type EthApi = OpEthApi<N, NetworkT>;
-
-    fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
-        self.rpc_add_ons.hooks_mut()
-    }
-}
-
-impl<N, NetworkT> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
-where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec = OpChainSpec,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Payload = OpEngineTypes,
-        >,
-        Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
-    >,
-    OpEthApiError: FromEvmError<N::Evm>,
-    <N::Pool as TransactionPool>::Transaction: OpPooledTx,
-    EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
-    OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
-    NetworkT: op_alloy_network::Network + Unpin,
+    EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     type Handle = RpcHandle<N, OpEthApi<N, NetworkT>>;
 
@@ -576,7 +440,7 @@ where
     }
 }
 
-impl<N, NetworkT> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT, EV, EB> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -592,6 +456,8 @@ where
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
     OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
     NetworkT: op_alloy_network::Network + Unpin,
+    EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     type EthApi = OpEthApi<N, NetworkT>;
 
@@ -600,7 +466,7 @@ where
     }
 }
 
-impl<N, NetworkT> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT, EV, EB> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -610,6 +476,8 @@ where
         >,
     >,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
+    EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     type Validator = OpEngineValidator<
         N::Provider,
@@ -679,7 +547,14 @@ impl<NetworkT> OpAddOnsBuilder<NetworkT> {
 
 impl<NetworkT> OpAddOnsBuilder<NetworkT> {
     /// Builds an instance of [`OpAddOns`].
-    pub fn build<N>(self) -> OpAddOns<N, OpEthApiBuilder<NetworkT>>
+    pub fn build<N>(
+        self,
+    ) -> OpAddOns<
+        N,
+        OpEthApiBuilder<NetworkT>,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >
     where
         N: FullNodeComponents<Types: NodeTypes>,
         OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
