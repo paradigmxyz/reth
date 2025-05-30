@@ -1381,7 +1381,7 @@ where
     /// order is oldest -> newest.
     ///
     /// For those blocks that didn't have the trie updates calculated, runs the state root
-    /// calculaton, and saves the trie updates.
+    /// calculation, and saves the trie updates.
     ///
     /// Returns an error if the state root calculation fails.
     fn get_canonical_blocks_to_persist(
@@ -2329,7 +2329,7 @@ where
         let missing_trie_updates =
             self.has_ancestors_with_missing_trie_updates(block.sealed_header());
         // If the block is a fork or has ancestors with missing trie updates, we don't save the trie
-        // updates, because they may be incorrect. Instead, they will be recomputed on persistance.
+        // updates, because they may be incorrect. Instead, they will be recomputed on persistence.
         let save_trie_updates = !(is_fork || missing_trie_updates);
 
         let trie_updates = if save_trie_updates {

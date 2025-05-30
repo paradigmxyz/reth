@@ -7188,6 +7188,7 @@ dependencies = [
  "reth-trie",
  "revm-database",
  "revm-state",
+ "serde",
  "tokio",
  "tokio-stream",
  "tracing",
