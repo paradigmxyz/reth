@@ -12,7 +12,6 @@ use crate::{
     primitives::CustomTransaction,
 };
 use chainspec::CustomChainSpec;
-use consensus::CustomConsensusBuilder;
 use primitives::CustomNodePrimitives;
 use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
@@ -20,12 +19,11 @@ use reth_node_builder::{
     Node,
 };
 use reth_op::node::{
-    node::{OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder},
+    node::{OpConsensusBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder},
     txpool, OpNode, OpPayloadTypes,
 };
 
 pub mod chainspec;
-pub mod consensus;
 pub mod engine;
 pub mod engine_api;
 pub mod evm;
@@ -54,7 +52,7 @@ where
         BasicPayloadServiceBuilder<OpPayloadBuilder>,
         OpNetworkBuilder<CustomNetworkPrimitives, CustomPooledTransaction>,
         CustomExecutorBuilder,
-        CustomConsensusBuilder,
+        OpConsensusBuilder,
     >;
 
     type AddOns = ();
@@ -66,7 +64,7 @@ where
             .executor(CustomExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
             .network(OpNetworkBuilder::new(false, false))
-            .consensus(CustomConsensusBuilder)
+            .consensus(OpConsensusBuilder::default())
     }
 
     fn add_ons(&self) -> Self::AddOns {}
