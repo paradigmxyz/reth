@@ -81,26 +81,26 @@ pub fn expect_fcu_syncing_or_accepted(response: &ForkchoiceUpdated, context: &st
     }
 }
 
-/// Expects that the `ForkchoiceUpdated` response status is NOT SYNCING and NOT ACCEPTED.
+/// Expects that the `ForkchoiceUpdated` response status is not SYNCING and not ACCEPTED.
 pub fn expect_fcu_not_syncing_or_accepted(
     response: &ForkchoiceUpdated,
     context: &str,
 ) -> Result<()> {
     match &response.payload_status.status {
         PayloadStatusEnum::Valid => {
-            debug!("{}: FCU status is VALID as expected (NOT SYNCING or ACCEPTED).", context);
+            debug!("{}: FCU status is VALID as expected (not SYNCING or ACCEPTED).", context);
             Ok(())
         }
         PayloadStatusEnum::Invalid { validation_error } => {
             debug!(
-                "{}: FCU status is INVALID as expected (NOT SYNCING or ACCEPTED): {:?}",
+                "{}: FCU status is INVALID as expected (not SYNCING or ACCEPTED): {:?}",
                 context, validation_error
             );
             Ok(())
         }
         syncing_or_accepted_status @ (PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted) => {
             Err(eyre::eyre!(
-                "{}: Expected FCU status NOT SYNCING or ACCEPTED (i.e., VALID or INVALID), but got {:?}",
+                "{}: Expected FCU status not SYNCING or ACCEPTED (i.e., VALID or INVALID), but got {:?}",
                 context,
                 syncing_or_accepted_status
             ))
