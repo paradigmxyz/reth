@@ -186,9 +186,9 @@ pub enum ZkRessMessage<T> {
     /// Represents a block bodies response message.
     BlockBodies(RequestPair<Vec<BlockBody>>),
 
-    /// Represents a witness request message.
+    /// Represents a proof request message.
     GetProof(RequestPair<BlockHash>),
-    /// Represents a witness response message.
+    /// Represents a proof response message.
     Proof(RequestPair<T>),
 }
 
@@ -228,7 +228,7 @@ impl<T: Encodable> Encodable for ZkRessMessage<T> {
             Self::GetBlockBodies(request) => request.encode(out),
             Self::BlockBodies(body) => body.encode(out),
             Self::GetProof(request) => request.encode(out),
-            Self::Proof(witness) => witness.encode(out),
+            Self::Proof(proof) => proof.encode(out),
         }
     }
 
@@ -240,7 +240,7 @@ impl<T: Encodable> Encodable for ZkRessMessage<T> {
             Self::GetBlockBodies(request) => request.length(),
             Self::BlockBodies(body) => body.length(),
             Self::GetProof(request) => request.length(),
-            Self::Proof(witness) => witness.length(),
+            Self::Proof(proof) => proof.length(),
         }
     }
 }
