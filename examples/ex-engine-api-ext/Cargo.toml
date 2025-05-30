@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 # reth
 reth-db = { workspace = true, features = ["op", "test-utils"] }
-reth-ethereum = { workspace = true, features = ["node", "pool", "node-api", "cli", "exex"] }
 reth-node-builder.workspace = true
 reth-optimism-consensus.workspace = true
 reth-tasks.workspace = true
@@ -18,9 +17,6 @@ reth-tracing.workspace = true
 reth-provider.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
-reth-op = { workspace = true, features = ["full", "cli"] }
-
-example-custom-node = { path = "../custom-node" }
 
 # alloy
 alloy-rpc-types-engine.workspace = true
