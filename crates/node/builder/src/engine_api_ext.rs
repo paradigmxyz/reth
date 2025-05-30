@@ -10,21 +10,21 @@ use reth_rpc_api::IntoEngineApiRpcModule;
 
 /// Provides access to an `EngineApi` instance with a callback
 #[derive(Debug)]
-pub struct EngineApiFn<B, F> {
+pub struct EngineApiExt<B, F> {
     /// The inner builder that constructs the actual `EngineApi`
     inner: B,
     /// Optional callback function to execute with the built API
     callback: Option<F>,
 }
 
-impl<B, F> EngineApiFn<B, F> {
+impl<B, F> EngineApiExt<B, F> {
     /// Create a new `EngineApiFn` with the given builder and callback
     pub const fn new(inner: B, callback: F) -> Self {
         Self { inner, callback: Some(callback) }
     }
 }
 
-impl<N, B, F> EngineApiBuilder<N> for EngineApiFn<B, F>
+impl<N, B, F> EngineApiBuilder<N> for EngineApiExt<B, F>
 where
     B: EngineApiBuilder<N>,
     N: FullNodeComponents,
