@@ -345,7 +345,7 @@ impl<N, NetworkT> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: OpHardforks + Clone,
+            ChainSpec: OpHardforks,
             Primitives = OpPrimitives,
             Storage = OpStorage,
             Payload = OpEngineTypes,
@@ -438,7 +438,7 @@ impl<N, NetworkT> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: OpHardforks + Clone,
+            ChainSpec: OpHardforks,
             Primitives = OpPrimitives,
             Storage = OpStorage,
             Payload = OpEngineTypes,
@@ -462,7 +462,7 @@ impl<N, NetworkT> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<Networ
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: OpHardforks + Clone,
+            ChainSpec: OpHardforks,
             Primitives = OpPrimitives,
             Payload = OpEngineTypes,
         >,
@@ -997,7 +997,7 @@ impl<Node> ConsensusBuilder<Node> for OpConsensusBuilder
 where
     Node: FullNodeTypes<
         Types: NodeTypes<
-            ChainSpec: OpHardforks + Clone,
+            ChainSpec: OpHardforks,
             Primitives: NodePrimitives<Receipt: DepositReceipt>,
         >,
     >,
@@ -1016,11 +1016,7 @@ pub struct OpEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Types: NodeTypes<
-        ChainSpec: OpHardforks + Clone,
-        Primitives = OpPrimitives,
-        Payload = OpEngineTypes,
-    >,
+    Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives, Payload = OpEngineTypes>,
     Node: FullNodeComponents<Types = Types>,
 {
     type Validator = OpEngineValidator<
