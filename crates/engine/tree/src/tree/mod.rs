@@ -764,26 +764,6 @@ where
         Ok(true)
     }
 
-    /// Check if the given block has any ancestors with missing trie updates.
-    fn has_ancestors_with_missing_trie_updates(
-        &self,
-        target_header: &SealedHeader<N::BlockHeader>,
-    ) -> bool {
-        // Walk back through the chain starting from the parent of the target block
-        let mut current_hash = target_header.parent_hash();
-        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
-            // Check if this block is missing trie updates
-            if block.trie.is_missing() {
-                return true;
-            }
-
-            // Move to the parent block
-            current_hash = block.recovered_block().parent_hash();
-        }
-
-        false
-    }
-
     /// Returns the persisting kind for the input block.
     fn persisting_kind_for(&self, block: &N::BlockHeader) -> PersistingKind {
         // Check that we're currently persisting.
@@ -2326,16 +2306,13 @@ where
         handle.terminate_caching(Some(output.state.clone()));
 
         let is_fork = ensure_ok!(self.is_fork(block.sealed_header()));
-        let missing_trie_updates =
-            self.has_ancestors_with_missing_trie_updates(block.sealed_header());
-        // If the block is a fork or has ancestors with missing trie updates, we don't save the trie
-        // updates, because they may be incorrect. Instead, they will be recomputed on persistence.
-        let save_trie_updates = !(is_fork || missing_trie_updates);
 
-        let trie_updates = if save_trie_updates {
-            ExecutedTrieUpdates::Present(Arc::new(trie_output))
-        } else {
+        // If the block is a fork, we don't save the trie updates, because they may be incorrect.
+        // Instead, they will be recomputed on persistence.
+        let trie_updates = if is_fork {
             ExecutedTrieUpdates::Missing
+        } else {
+            ExecutedTrieUpdates::Present(Arc::new(trie_output))
         };
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
