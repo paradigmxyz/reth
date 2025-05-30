@@ -77,6 +77,8 @@ pub struct TreeConfig {
     reserved_cpu_cores: usize,
     /// Whether to enable the precompile cache
     precompile_cache_enabled: bool,
+    /// Whether to use state root fallback for testing
+    state_root_fallback: bool,
 }
 
 impl Default for TreeConfig {
@@ -96,6 +98,7 @@ impl Default for TreeConfig {
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_enabled: false,
+            state_root_fallback: false,
         }
     }
 }
@@ -118,6 +121,7 @@ impl TreeConfig {
         max_proof_task_concurrency: u64,
         reserved_cpu_cores: usize,
         precompile_cache_enabled: bool,
+        state_root_fallback: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -134,6 +138,7 @@ impl TreeConfig {
             max_proof_task_concurrency,
             reserved_cpu_cores,
             precompile_cache_enabled,
+            state_root_fallback,
         }
     }
 
@@ -202,6 +207,11 @@ impl TreeConfig {
     /// Returns whether precompile cache is enabled.
     pub const fn precompile_cache_enabled(&self) -> bool {
         self.precompile_cache_enabled
+    }
+
+    /// Returns whether to use state root fallback.
+    pub const fn state_root_fallback(&self) -> bool {
+        self.state_root_fallback
     }
 
     /// Setter for persistence threshold.
@@ -304,6 +314,12 @@ impl TreeConfig {
     /// Setter for whether to use the precompile cache.
     pub const fn with_precompile_cache_enabled(mut self, precompile_cache_enabled: bool) -> Self {
         self.precompile_cache_enabled = precompile_cache_enabled;
+        self
+    }
+
+    /// Setter for whether to use state root fallback, useful for testing.
+    pub const fn with_state_root_fallback(mut self, state_root_fallback: bool) -> Self {
+        self.state_root_fallback = state_root_fallback;
         self
     }
 
