@@ -7,15 +7,15 @@
 //! ```
 
 use reth_db::test_utils::create_test_rw_db;
-use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
-use reth_node_builder::{EngineApiFn, EngineNodeLauncher, NodeBuilder, NodeConfig};
+use reth_node_builder::{
+    EngineApiFn, EngineNodeLauncher, FullNodeComponents, NodeBuilder, NodeConfig,
+};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{
     args::RollupArgs,
     node::{OpAddOns, OpEngineValidatorBuilder},
     OpEngineApiBuilder, OpNode,
 };
-use reth_provider::providers::BlockchainProvider;
 use reth_tasks::TaskManager;
 use tokio::sync::oneshot;
 
@@ -37,9 +37,9 @@ async fn main() {
 
     let _builder = NodeBuilder::new(config)
         .with_database(db)
-        .with_types_and_provider::<OpNode, BlockchainProvider<NodeTypesWithDBAdapter<OpNode, _>>>()
+        .with_types::<OpNode>()
         .with_components(op_node.components())
-        .with_add_ons(OpAddOns::default().rpc_add_ons.with_engine_api(engine_api))
+        .with_add_ons(OpAddOns::default().with_engine_api(engine_api))
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())
