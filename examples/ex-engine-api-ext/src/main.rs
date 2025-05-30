@@ -8,7 +8,7 @@
 
 use reth_db::test_utils::create_test_rw_db;
 use reth_node_api::{FullNodeComponents, NodeTypesWithDBAdapter};
-use reth_node_builder::{EngineApiBuilderExt, EngineNodeLauncher, NodeBuilder, NodeConfig};
+use reth_node_builder::{EngineApiFn, EngineNodeLauncher, NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{
     args::RollupArgs,
@@ -28,18 +28,18 @@ async fn main() {
     let op_node = OpNode::new(args);
     let tasks = TaskManager::current();
 
-    let (engine_api_tx, engine_api_rx) = oneshot::channel();
+    let (engine_api_tx, _engine_api_rx) = oneshot::channel();
 
-    let default_builder: OpEngineApiBuilder<OpEngineValidatorBuilder> =
-        OpEngineApiBuilder::default();
-
-    let builder_with_sender = default_builder.with_sender(engine_api_tx);
+    let engine_api =
+        EngineApiFn::new(OpEngineApiBuilder::<OpEngineValidatorBuilder>::default(), move |api| {
+            let _ = engine_api_tx.send(api);
+        });
 
     let _builder = NodeBuilder::new(config)
         .with_database(db)
         .with_types_and_provider::<OpNode, BlockchainProvider<NodeTypesWithDBAdapter<OpNode, _>>>()
         .with_components(op_node.components())
-        .with_add_ons(OpAddOns::default().rpc_add_ons.with_engine_api(builder_with_sender))
+        .with_add_ons(OpAddOns::default().rpc_add_ons.with_engine_api(engine_api))
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())

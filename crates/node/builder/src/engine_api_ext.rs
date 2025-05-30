@@ -7,7 +7,6 @@ use crate::rpc::EngineApiBuilder;
 use eyre::Result;
 use reth_node_api::{AddOnsContext, FullNodeComponents};
 use reth_rpc_api::IntoEngineApiRpcModule;
-use tokio::sync::oneshot;
 
 /// Provides access to an `EngineApi` instance with a callback
 #[derive(Debug)]
@@ -43,46 +42,5 @@ where
         }
 
         Ok(api)
-    }
-}
-
-/// Extension trait providing methods for wrapping `EngineApiBuilder` with callbacks
-pub trait EngineApiBuilderExt<N>: EngineApiBuilder<N> + Sized
-where
-    N: FullNodeComponents,
-    Self::EngineApi: IntoEngineApiRpcModule + Send + Sync + Clone + 'static,
-{
-    /// Wraps this builder to send the built api through a oneshot channel
-    fn with_sender(
-        self,
-        sender: oneshot::Sender<Self::EngineApi>,
-    ) -> EngineApiFn<Self, impl FnOnce(Self::EngineApi) + Send + Sync + 'static>;
-
-    /// Wraps the builder with a custom callback
-    fn with_callback<F>(self, callback: F) -> EngineApiFn<Self, F>
-    where
-        F: FnOnce(Self::EngineApi) + Send + Sync + 'static;
-}
-
-impl<N, B> EngineApiBuilderExt<N> for B
-where
-    B: EngineApiBuilder<N>,
-    N: FullNodeComponents,
-    B::EngineApi: IntoEngineApiRpcModule + Send + Sync + Clone + 'static,
-{
-    fn with_sender(
-        self,
-        sender: oneshot::Sender<Self::EngineApi>,
-    ) -> EngineApiFn<Self, impl FnOnce(Self::EngineApi) + Send + Sync + 'static> {
-        EngineApiFn::new(self, move |api: Self::EngineApi| {
-            let _ = sender.send(api);
-        })
-    }
-
-    fn with_callback<F>(self, callback: F) -> EngineApiFn<Self, F>
-    where
-        F: FnOnce(Self::EngineApi) + Send + Sync + 'static,
-    {
-        EngineApiFn::new(self, callback)
     }
 }
