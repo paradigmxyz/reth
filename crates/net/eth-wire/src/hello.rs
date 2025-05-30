@@ -100,7 +100,7 @@ impl HelloMessageWithProtocols {
 
 // TODO: determine if we should allow for the extra fields at the end like EIP-706 suggests
 /// Raw rlpx protocol message used in the `p2p` handshake, containing information about the
-/// supported RLPx protocol version and capabilities.
+/// supported `RLPx` protocol version and capabilities.
 ///
 /// See also <https://github.com/ethereum/devp2p/blob/master/rlpx.md#hello-0x00>
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]

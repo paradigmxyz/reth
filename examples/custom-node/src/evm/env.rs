@@ -6,14 +6,13 @@ use op_alloy_consensus::OpTxEnvelope;
 use op_revm::OpTransaction;
 use reth_ethereum::evm::{primitives::TransactionEnv, revm::context::TxEnv};
 
-/// An Optimism extended Ethereum transaction that can be fed to [`Evm`] because it contains
-/// [`CustomTxEnv`].
+/// An Optimism transaction extended by [`PaymentTxEnv`] that can be fed to [`Evm`].
 ///
 /// [`Evm`]: alloy_evm::Evm
 #[derive(Clone, Debug)]
-pub enum CustomEvmTransaction {
+pub enum CustomTxEnv {
     Op(OpTransaction<TxEnv>),
-    Payment(CustomTxEnv),
+    Payment(PaymentTxEnv),
 }
 
 /// A transaction environment is a set of information related to an Ethereum transaction that can be
@@ -21,9 +20,9 @@ pub enum CustomEvmTransaction {
 ///
 /// [`Evm`]: alloy_evm::Evm
 #[derive(Clone, Debug, Default)]
-pub struct CustomTxEnv(pub TxEnv);
+pub struct PaymentTxEnv(pub TxEnv);
 
-impl revm::context::Transaction for CustomEvmTransaction {
+impl revm::context::Transaction for CustomTxEnv {
     type AccessListItem<'a>
         = <TxEnv as revm::context::Transaction>::AccessListItem<'a>
     where
@@ -35,111 +34,111 @@ impl revm::context::Transaction for CustomEvmTransaction {
 
     fn tx_type(&self) -> u8 {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.tx_type(),
-            CustomEvmTransaction::Payment(tx) => tx.tx_type(),
+            Self::Op(tx) => tx.tx_type(),
+            Self::Payment(tx) => tx.tx_type(),
         }
     }
 
     fn caller(&self) -> Address {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.caller(),
-            CustomEvmTransaction::Payment(tx) => tx.caller(),
+            Self::Op(tx) => tx.caller(),
+            Self::Payment(tx) => tx.caller(),
         }
     }
 
     fn gas_limit(&self) -> u64 {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.gas_limit(),
-            CustomEvmTransaction::Payment(tx) => tx.gas_limit(),
+            Self::Op(tx) => tx.gas_limit(),
+            Self::Payment(tx) => tx.gas_limit(),
         }
     }
 
     fn value(&self) -> U256 {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.value(),
-            CustomEvmTransaction::Payment(tx) => tx.value(),
+            Self::Op(tx) => tx.value(),
+            Self::Payment(tx) => tx.value(),
         }
     }
 
     fn input(&self) -> &Bytes {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.input(),
-            CustomEvmTransaction::Payment(tx) => tx.input(),
+            Self::Op(tx) => tx.input(),
+            Self::Payment(tx) => tx.input(),
         }
     }
 
     fn nonce(&self) -> u64 {
         match self {
-            CustomEvmTransaction::Op(tx) => revm::context::Transaction::nonce(tx),
-            CustomEvmTransaction::Payment(tx) => revm::context::Transaction::nonce(tx),
+            Self::Op(tx) => revm::context::Transaction::nonce(tx),
+            Self::Payment(tx) => revm::context::Transaction::nonce(tx),
         }
     }
 
     fn kind(&self) -> TxKind {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.kind(),
-            CustomEvmTransaction::Payment(tx) => tx.kind(),
+            Self::Op(tx) => tx.kind(),
+            Self::Payment(tx) => tx.kind(),
         }
     }
 
     fn chain_id(&self) -> Option<u64> {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.chain_id(),
-            CustomEvmTransaction::Payment(tx) => tx.chain_id(),
+            Self::Op(tx) => tx.chain_id(),
+            Self::Payment(tx) => tx.chain_id(),
         }
     }
 
     fn gas_price(&self) -> u128 {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.gas_price(),
-            CustomEvmTransaction::Payment(tx) => tx.gas_price(),
+            Self::Op(tx) => tx.gas_price(),
+            Self::Payment(tx) => tx.gas_price(),
         }
     }
 
     fn access_list(&self) -> Option<impl Iterator<Item = Self::AccessListItem<'_>>> {
         Some(match self {
-            CustomEvmTransaction::Op(tx) => tx.base.access_list.iter(),
-            CustomEvmTransaction::Payment(tx) => tx.0.access_list.iter(),
+            Self::Op(tx) => tx.base.access_list.iter(),
+            Self::Payment(tx) => tx.0.access_list.iter(),
         })
     }
 
     fn blob_versioned_hashes(&self) -> &[B256] {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.blob_versioned_hashes(),
-            CustomEvmTransaction::Payment(tx) => tx.blob_versioned_hashes(),
+            Self::Op(tx) => tx.blob_versioned_hashes(),
+            Self::Payment(tx) => tx.blob_versioned_hashes(),
         }
     }
 
     fn max_fee_per_blob_gas(&self) -> u128 {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.max_fee_per_blob_gas(),
-            CustomEvmTransaction::Payment(tx) => tx.max_fee_per_blob_gas(),
+            Self::Op(tx) => tx.max_fee_per_blob_gas(),
+            Self::Payment(tx) => tx.max_fee_per_blob_gas(),
         }
     }
 
     fn authorization_list_len(&self) -> usize {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.authorization_list_len(),
-            CustomEvmTransaction::Payment(tx) => tx.authorization_list_len(),
+            Self::Op(tx) => tx.authorization_list_len(),
+            Self::Payment(tx) => tx.authorization_list_len(),
         }
     }
 
     fn authorization_list(&self) -> impl Iterator<Item = Self::Authorization<'_>> {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.base.authorization_list.iter(),
-            CustomEvmTransaction::Payment(tx) => tx.0.authorization_list.iter(),
+            Self::Op(tx) => tx.base.authorization_list.iter(),
+            Self::Payment(tx) => tx.0.authorization_list.iter(),
         }
     }
 
     fn max_priority_fee_per_gas(&self) -> Option<u128> {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.max_priority_fee_per_gas(),
-            CustomEvmTransaction::Payment(tx) => tx.max_priority_fee_per_gas(),
+            Self::Op(tx) => tx.max_priority_fee_per_gas(),
+            Self::Payment(tx) => tx.max_priority_fee_per_gas(),
         }
     }
 }
 
-impl revm::context::Transaction for CustomTxEnv {
+impl revm::context::Transaction for PaymentTxEnv {
     type AccessListItem<'a>
         = <TxEnv as revm::context::Transaction>::AccessListItem<'a>
     where
@@ -210,7 +209,7 @@ impl revm::context::Transaction for CustomTxEnv {
     }
 }
 
-impl TransactionEnv for CustomTxEnv {
+impl TransactionEnv for PaymentTxEnv {
     fn set_gas_limit(&mut self, gas_limit: u64) {
         self.0.set_gas_limit(gas_limit);
     }
@@ -228,39 +227,39 @@ impl TransactionEnv for CustomTxEnv {
     }
 }
 
-impl TransactionEnv for CustomEvmTransaction {
+impl TransactionEnv for CustomTxEnv {
     fn set_gas_limit(&mut self, gas_limit: u64) {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.set_gas_limit(gas_limit),
-            CustomEvmTransaction::Payment(tx) => tx.set_gas_limit(gas_limit),
+            Self::Op(tx) => tx.set_gas_limit(gas_limit),
+            Self::Payment(tx) => tx.set_gas_limit(gas_limit),
         }
     }
 
     fn nonce(&self) -> u64 {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.nonce(),
-            CustomEvmTransaction::Payment(tx) => tx.nonce(),
+            Self::Op(tx) => tx.nonce(),
+            Self::Payment(tx) => tx.nonce(),
         }
     }
 
     fn set_nonce(&mut self, nonce: u64) {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.set_nonce(nonce),
-            CustomEvmTransaction::Payment(tx) => tx.set_nonce(nonce),
+            Self::Op(tx) => tx.set_nonce(nonce),
+            Self::Payment(tx) => tx.set_nonce(nonce),
         }
     }
 
     fn set_access_list(&mut self, access_list: AccessList) {
         match self {
-            CustomEvmTransaction::Op(tx) => tx.set_access_list(access_list),
-            CustomEvmTransaction::Payment(tx) => tx.set_access_list(access_list),
+            Self::Op(tx) => tx.set_access_list(access_list),
+            Self::Payment(tx) => tx.set_access_list(access_list),
         }
     }
 }
 
-impl FromRecoveredTx<CustomTransaction> for CustomTxEnv {
+impl FromRecoveredTx<CustomTransaction> for PaymentTxEnv {
     fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
-        CustomTxEnv(match tx {
+        PaymentTxEnv(match tx {
             CustomTransaction::BuiltIn(tx) => {
                 OpTransaction::<TxEnv>::from_recovered_tx(tx, sender).base
             }
@@ -269,9 +268,9 @@ impl FromRecoveredTx<CustomTransaction> for CustomTxEnv {
     }
 }
 
-impl FromTxWithEncoded<CustomTransaction> for CustomTxEnv {
+impl FromTxWithEncoded<CustomTransaction> for PaymentTxEnv {
     fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
-        CustomTxEnv(match tx {
+        PaymentTxEnv(match tx {
             CustomTransaction::BuiltIn(tx) => {
                 OpTransaction::<TxEnv>::from_encoded_tx(tx, sender, encoded).base
             }
@@ -318,41 +317,41 @@ impl FromTxWithEncoded<CustomTransactionEnvelope> for TxEnv {
     }
 }
 
-impl FromRecoveredTx<OpTxEnvelope> for CustomEvmTransaction {
+impl FromRecoveredTx<OpTxEnvelope> for CustomTxEnv {
     fn from_recovered_tx(tx: &OpTxEnvelope, sender: Address) -> Self {
         Self::Op(OpTransaction::from_recovered_tx(tx, sender))
     }
 }
 
-impl FromTxWithEncoded<OpTxEnvelope> for CustomEvmTransaction {
+impl FromTxWithEncoded<OpTxEnvelope> for CustomTxEnv {
     fn from_encoded_tx(tx: &OpTxEnvelope, sender: Address, encoded: Bytes) -> Self {
         Self::Op(OpTransaction::from_encoded_tx(tx, sender, encoded))
     }
 }
 
-impl FromRecoveredTx<CustomTransaction> for CustomEvmTransaction {
+impl FromRecoveredTx<CustomTransaction> for CustomTxEnv {
     fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
         match tx {
             CustomTransaction::BuiltIn(tx) => Self::from_recovered_tx(tx, sender),
             CustomTransaction::Other(tx) => {
-                Self::Payment(CustomTxEnv(TxEnv::from_recovered_tx(tx, sender)))
+                Self::Payment(PaymentTxEnv(TxEnv::from_recovered_tx(tx, sender)))
             }
         }
     }
 }
 
-impl FromTxWithEncoded<CustomTransaction> for CustomEvmTransaction {
+impl FromTxWithEncoded<CustomTransaction> for CustomTxEnv {
     fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
         match tx {
             CustomTransaction::BuiltIn(tx) => Self::from_encoded_tx(tx, sender, encoded),
             CustomTransaction::Other(tx) => {
-                Self::Payment(CustomTxEnv(TxEnv::from_encoded_tx(tx, sender, encoded)))
+                Self::Payment(PaymentTxEnv(TxEnv::from_encoded_tx(tx, sender, encoded)))
             }
         }
     }
 }
 
-impl IntoTxEnv<Self> for CustomEvmTransaction {
+impl IntoTxEnv<Self> for CustomTxEnv {
     fn into_tx_env(self) -> Self {
         self
     }

@@ -31,6 +31,47 @@ impl TrieInput {
         Self { nodes: TrieUpdates::default(), state, prefix_sets }
     }
 
+    /// Create new trie input from the provided blocks, from oldest to newest. See the documentation
+    /// for [`Self::extend_with_blocks`] for details.
+    pub fn from_blocks<'a>(
+        blocks: impl IntoIterator<Item = (&'a HashedPostState, Option<&'a TrieUpdates>)>,
+    ) -> Self {
+        let mut input = Self::default();
+        input.extend_with_blocks(blocks);
+        input
+    }
+
+    /// Extend the trie input with the provided blocks, from oldest to newest.
+    ///
+    /// When encountering the first block with missing trie updates, the trie input will be extended
+    /// with prefix sets constructed from the state of this block and the state itself, **without**
+    /// trie updates. Subsequent blocks will be appended in the same way, i.e. only prefix sets
+    /// constructed from the state and the state itself.
+    pub fn extend_with_blocks<'a>(
+        &mut self,
+        blocks: impl IntoIterator<Item = (&'a HashedPostState, Option<&'a TrieUpdates>)>,
+    ) {
+        let mut extend_trie_updates = true;
+        for (hashed_state, trie_updates) in blocks {
+            if let Some(nodes) = trie_updates.as_ref().filter(|_| extend_trie_updates) {
+                self.append_cached_ref(nodes, hashed_state);
+            } else {
+                self.append_ref(hashed_state);
+                extend_trie_updates = false;
+            }
+        }
+    }
+
+    /// Prepend another trie input to the current one.
+    pub fn prepend_self(&mut self, mut other: Self) {
+        core::mem::swap(&mut self.nodes, &mut other.nodes);
+        self.nodes.extend(other.nodes);
+        core::mem::swap(&mut self.state, &mut other.state);
+        self.state.extend(other.state);
+        // No need to swap prefix sets, as they will be sorted and deduplicated.
+        self.prefix_sets.extend(other.prefix_sets);
+    }
+
     /// Prepend state to the input and extend the prefix sets.
     pub fn prepend(&mut self, mut state: HashedPostState) {
         self.prefix_sets.extend(state.construct_prefix_sets());

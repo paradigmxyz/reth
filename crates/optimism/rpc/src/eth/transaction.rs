@@ -1,11 +1,14 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::{transaction::Recovered, SignableTransaction, Transaction as _};
+use alloy_consensus::{transaction::Recovered, SignableTransaction};
 use alloy_primitives::{Bytes, Signature, B256};
 use alloy_rpc_types_eth::TransactionInfo;
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{
+    transaction::{OpDepositInfo, OpTransactionInfo},
+    OpTxEnvelope,
+};
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{DepositReceipt, OpTransactionSigned};
 use reth_provider::FullRpcProvider;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
@@ -85,7 +88,7 @@ where
 
 impl<N> TransactionCompat<OpTransactionSigned> for OpEthApi<N>
 where
-    N: RpcNodeCore<Provider: FullRpcProvider<Receipt = OpReceipt>>,
+    N: RpcNodeCore<Provider: FullRpcProvider<Receipt: DepositReceipt>>,
 {
     type Transaction = Transaction;
     type Error = OpEthApiError;
@@ -95,11 +98,11 @@ where
         tx: Recovered<OpTransactionSigned>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let mut tx = tx.convert::<OpTxEnvelope>();
+        let tx = tx.convert::<OpTxEnvelope>();
         let mut deposit_receipt_version = None;
         let mut deposit_nonce = None;
 
-        if let OpTxEnvelope::Deposit(tx) = tx.inner_mut() {
+        if tx.is_deposit() {
             // for depost tx we need to fetch the receipt
             self.inner
                 .eth_api
@@ -107,43 +110,19 @@ where
                 .receipt_by_hash(tx.tx_hash())
                 .map_err(Self::Error::from_eth_err)?
                 .inspect(|receipt| {
-                    if let OpReceipt::Deposit(receipt) = receipt {
+                    if let Some(receipt) = receipt.as_deposit_receipt() {
                         deposit_receipt_version = receipt.deposit_receipt_version;
                         deposit_nonce = receipt.deposit_nonce;
                     }
                 });
-
-            tx.inner_mut().mint = tx.mint;
         }
 
-        let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
-        } = tx_info;
+        let tx_info = OpTransactionInfo::new(
+            tx_info,
+            OpDepositInfo { deposit_nonce, deposit_receipt_version },
+        );
 
-        let effective_gas_price = if tx.is_deposit() {
-            // For deposits, we must always set the `gasPrice` field to 0 in rpc
-            // deposit tx don't have a gas price field, but serde of `Transaction` will take care of
-            // it
-            0
-        } else {
-            base_fee
-                .map(|base_fee| {
-                    tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
-                })
-                .unwrap_or_else(|| tx.max_fee_per_gas())
-        };
-
-        Ok(Transaction {
-            inner: alloy_rpc_types_eth::Transaction {
-                inner: tx,
-                block_hash,
-                block_number,
-                transaction_index,
-                effective_gas_price: Some(effective_gas_price),
-            },
-            deposit_nonce,
-            deposit_receipt_version,
-        })
+        Ok(Transaction::from_transaction(tx, tx_info))
     }
 
     fn build_simulate_v1_transaction(
@@ -158,10 +137,5 @@ where
         // Create an empty signature for the transaction.
         let signature = Signature::new(Default::default(), Default::default(), false);
         Ok(tx.into_signed(signature).into())
-    }
-
-    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = tx.inner.inner.inner_mut().input_mut();
-        *input = input.slice(..4);
     }
 }

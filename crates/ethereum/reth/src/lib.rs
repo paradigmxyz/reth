@@ -59,6 +59,12 @@ pub mod evm {
 #[cfg(feature = "exex")]
 pub use reth_exex as exex;
 
+/// Re-exported from `tasks`.
+#[cfg(feature = "tasks")]
+pub mod tasks {
+    pub use reth_tasks::*;
+}
+
 /// Re-exported reth network types
 #[cfg(feature = "network")]
 pub mod network {
@@ -119,10 +125,19 @@ pub mod rpc {
     pub use reth_rpc_builder as builder;
 
     /// Re-exported eth types
+    #[allow(ambiguous_glob_reexports)]
     pub mod eth {
         #[doc(inline)]
         pub use alloy_rpc_types_eth as primitives;
         #[doc(inline)]
         pub use reth_rpc_eth_types::*;
+
+        pub use reth_rpc::eth::*;
+    }
+
+    /// Re-exported types
+    pub mod types {
+        #[doc(inline)]
+        pub use alloy_rpc_types_engine as engine;
     }
 }

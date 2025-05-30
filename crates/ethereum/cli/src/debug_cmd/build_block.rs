@@ -100,7 +100,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(EnvKzgSettings::Default)
     }
 
-    /// Execute `debug in-memory-merkle` command
+    /// Execute `debug build-block` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
