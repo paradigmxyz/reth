@@ -21,7 +21,6 @@ use op_alloy_consensus::EIP1559ParamError;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, EvmEnv};
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
@@ -51,7 +50,7 @@ pub use alloy_op_evm::{OpBlockExecutorFactory, OpEvm, OpEvmFactory};
 /// Optimism-related EVM configuration.
 #[derive(Debug)]
 pub struct OpEvmConfig<
-    ChainSpec = OpChainSpec,
+    ChainSpec: OpHardforks,
     N: NodePrimitives = OpPrimitives,
     R = OpRethReceiptBuilder,
 > {
@@ -62,7 +61,7 @@ pub struct OpEvmConfig<
     _pd: core::marker::PhantomData<N>,
 }
 
-impl<ChainSpec, N: NodePrimitives, R: Clone> Clone for OpEvmConfig<ChainSpec, N, R> {
+impl<ChainSpec: OpHardforks, N: NodePrimitives, R: Clone> Clone for OpEvmConfig<ChainSpec, N, R> {
     fn clone(&self) -> Self {
         Self {
             executor_factory: self.executor_factory.clone(),
@@ -72,14 +71,14 @@ impl<ChainSpec, N: NodePrimitives, R: Clone> Clone for OpEvmConfig<ChainSpec, N,
     }
 }
 
-impl<ChainSpec> OpEvmConfig<ChainSpec> {
+impl<ChainSpec: OpHardforks> OpEvmConfig<ChainSpec> {
     /// Creates a new [`OpEvmConfig`] with the given chain spec for OP chains.
     pub fn optimism(chain_spec: Arc<ChainSpec>) -> Self {
         Self::new(chain_spec, OpRethReceiptBuilder::default())
     }
 }
 
-impl<ChainSpec, N: NodePrimitives, R> OpEvmConfig<ChainSpec, N, R> {
+impl<ChainSpec: OpHardforks, N: NodePrimitives, R> OpEvmConfig<ChainSpec, N, R> {
     /// Creates a new [`OpEvmConfig`] with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>, receipt_builder: R) -> Self {
         Self {
@@ -227,7 +226,7 @@ mod tests {
     use reth_execution_types::{
         AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
     };
-    use reth_optimism_chainspec::BASE_MAINNET;
+    use reth_optimism_chainspec::{OpChainSpec, BASE_MAINNET};
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
     use reth_primitives_traits::{Account, RecoveredBlock};
     use revm::{
@@ -239,7 +238,7 @@ mod tests {
     };
     use std::sync::Arc;
 
-    fn test_evm_config() -> OpEvmConfig {
+    fn test_evm_config() -> OpEvmConfig<OpChainSpec> {
         OpEvmConfig::optimism(BASE_MAINNET.clone())
     }
 

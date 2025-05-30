@@ -1,11 +1,11 @@
 //! Optimism block execution strategy.
 
 /// Helper type with backwards compatible methods to obtain executor providers.
-pub type OpExecutorProvider = crate::OpEvmConfig;
+pub type OpExecutorProvider<ChainSpec> = crate::OpEvmConfig<ChainSpec>;
 
 #[cfg(test)]
 mod tests {
-    use crate::{OpChainSpec, OpEvmConfig, OpRethReceiptBuilder};
+    use crate::{OpEvmConfig, OpRethReceiptBuilder};
     use alloc::sync::Arc;
     use alloy_consensus::{Block, BlockBody, Header, SignableTransaction, TxEip1559};
     use alloy_primitives::{b256, Address, Signature, StorageKey, StorageValue, U256};
@@ -13,7 +13,7 @@ mod tests {
     use op_revm::constants::L1_BLOCK_CONTRACT;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::{execute::Executor, ConfigureEvm};
-    use reth_optimism_chainspec::OpChainSpecBuilder;
+    use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::{Account, RecoveredBlock};
     use reth_revm::{database::StateProviderDatabase, test_utils::StateProviderTest};
@@ -46,7 +46,7 @@ mod tests {
         db
     }
 
-    fn evm_config(chain_spec: Arc<OpChainSpec>) -> OpEvmConfig {
+    fn evm_config(chain_spec: Arc<OpChainSpec>) -> OpEvmConfig<OpChainSpec> {
         OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default())
     }
 

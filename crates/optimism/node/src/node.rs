@@ -580,7 +580,7 @@ impl<ChainSpec, Primitives> Default for OpExecutorBuilder<ChainSpec, Primitives>
 impl<Node, ChainSpec, Primitives> ExecutorBuilder<Node> for OpExecutorBuilder<ChainSpec, Primitives>
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = Primitives>>,
-    ChainSpec: EthChainSpec + OpHardforks,
+    ChainSpec: OpHardforks + Send + Sync,
     Primitives: NodePrimitives,
     OpEvmConfig<ChainSpec, Primitives>: ConfigureEvm<Primitives = Primitives> + 'static,
 {

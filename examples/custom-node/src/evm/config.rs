@@ -11,12 +11,15 @@ use reth_ethereum::{
     node::api::ConfigureEvm,
     primitives::{SealedBlock, SealedHeader},
 };
-use reth_op::node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use reth_op::{
+    chainspec::OpChainSpec,
+    node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder},
+};
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct CustomEvmConfig {
-    pub(super) inner: OpEvmConfig,
+    pub(super) inner: OpEvmConfig<OpChainSpec>,
     pub(super) block_assembler: CustomBlockAssembler,
     pub(super) custom_evm_factory: CustomEvmFactory,
 }
@@ -36,8 +39,8 @@ impl CustomEvmConfig {
 
 impl ConfigureEvm for CustomEvmConfig {
     type Primitives = CustomNodePrimitives;
-    type Error = <OpEvmConfig as ConfigureEvm>::Error;
-    type NextBlockEnvCtx = <OpEvmConfig as ConfigureEvm>::NextBlockEnvCtx;
+    type Error = <OpEvmConfig<OpChainSpec> as ConfigureEvm>::Error;
+    type NextBlockEnvCtx = <OpEvmConfig<OpChainSpec> as ConfigureEvm>::NextBlockEnvCtx;
     type BlockExecutorFactory = Self;
     type BlockAssembler = CustomBlockAssembler;
 
