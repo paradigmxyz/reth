@@ -7680,6 +7680,7 @@ dependencies = [
  "reth-chainspec",
  "reth-db",
  "reth-engine-local",
+ "reth-engine-tree",
  "reth-ethereum-primitives",
  "reth-network-api",
  "reth-network-peers",
