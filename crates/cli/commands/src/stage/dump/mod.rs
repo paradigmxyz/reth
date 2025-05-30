@@ -98,17 +98,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
         let tool = DbTool::new(provider_factory)?;
         let components = components(tool.chain());
-        let executor = components.executor().clone();
+        let evm_config = components.evm_config().clone();
         let consensus = components.consensus().clone();
 
         match &self.command {
             Stages::Execution(cmd) => {
-                handle_stage!(dump_execution_stage, &tool, cmd, executor, consensus)
+                handle_stage!(dump_execution_stage, &tool, cmd, evm_config, consensus)
             }
             Stages::StorageHashing(cmd) => handle_stage!(dump_hashing_storage_stage, &tool, cmd),
             Stages::AccountHashing(cmd) => handle_stage!(dump_hashing_account_stage, &tool, cmd),
             Stages::Merkle(cmd) => {
-                handle_stage!(dump_merkle_stage, &tool, cmd, executor, consensus)
+                handle_stage!(dump_merkle_stage, &tool, cmd, evm_config, consensus)
             }
         }
 

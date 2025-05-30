@@ -13,6 +13,9 @@ use reth_node_api::BlockBody;
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, RecoveredBlock, SealedBlock, TxTy};
 use reth_provider::{BlockIdReader, BlockReader, BlockReaderIdExt};
 use reth_rpc_types_compat::block::from_block;
+use reth_storage_api::{
+    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt, ProviderTx,
+};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 

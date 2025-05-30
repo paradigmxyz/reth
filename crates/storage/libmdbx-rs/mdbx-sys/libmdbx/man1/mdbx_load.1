@@ -1,8 +1,8 @@
-.\" Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>.
 .\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
 .\" Copyright 2014-2015 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_LOAD 1 "2024-03-13" "MDBX 0.12.10"
+.TH MDBX_LOAD 1 "2024-08-29" "MDBX 0.13"
 .SH NAME
 mdbx_load \- MDBX environment import tool
 .SH SYNOPSIS
@@ -16,7 +16,7 @@ mdbx_load \- MDBX environment import tool
 [\c
 .BI \-f \ file\fR]
 [\c
-.BI \-s \ subdb\fR]
+.BI \-s \ table\fR]
 [\c
 .BR \-N ]
 [\c
@@ -71,11 +71,11 @@ on a database that uses custom compare functions.
 .BR \-f \ file
 Read from the specified file instead of from the standard input.
 .TP
-.BR \-s \ subdb
-Load a specific subdatabase. If no database is specified, data is loaded into the main database.
+.BR \-s \ table
+Load a specific table. If no table is specified, data is loaded into the main table.
 .TP
 .BR \-N
-Don't overwrite existing records when loading into an already existing database; just skip them.
+Don't overwrite existing records when loading into an already existing table; just skip them.
 .TP
 .BR \-T
 Load data from simple text files. The input must be paired lines of text, where the first

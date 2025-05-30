@@ -37,7 +37,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use std::{fmt, sync::Arc};
+use std::{fmt, marker::PhantomData, sync::Arc};
 
 use crate::{OpEthApiError, SequencerClient};
 
@@ -86,19 +86,24 @@ impl<T> OpNodeCore for T where
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
-pub struct OpEthApi<N: OpNodeCore> {
+pub struct OpEthApi<N: OpNodeCore, NetworkT = Optimism> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
+    /// Marker for the network types.
+    _nt: PhantomData<NetworkT>,
 }
 
-impl<N> OpEthApi<N>
+impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
+    /// Creates a new `OpEthApi`.
+    pub fn new(eth_api: EthApiNodeBackend<N>, sequencer_client: Option<SequencerClient>) -> Self {
+        Self { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }), _nt: PhantomData }
+    }
+}
+
+impl<N, NetworkT> OpEthApi<N, NetworkT>
 where
     N: OpNodeCore<
-        Provider: BlockReaderIdExt
-                      + ChainSpecProvider
-                      + CanonStateSubscriptions<Primitives = OpPrimitives>
-                      + Clone
-                      + 'static,
+        Provider: BlockReaderIdExt + ChainSpecProvider + CanonStateSubscriptions + Clone + 'static,
     >,
 {
     /// Returns a reference to the [`EthApiNodeBackend`].
@@ -112,18 +117,19 @@ where
     }
 
     /// Build a [`OpEthApi`] using [`OpEthApiBuilder`].
-    pub const fn builder() -> OpEthApiBuilder {
+    pub const fn builder() -> OpEthApiBuilder<NetworkT> {
         OpEthApiBuilder::new()
     }
 }
 
-impl<N> EthApiTypes for OpEthApi<N>
+impl<N, NetworkT> EthApiTypes for OpEthApi<N, NetworkT>
 where
-    Self: Send + Sync,
+    Self: Send + Sync + std::fmt::Debug,
     N: OpNodeCore,
+    NetworkT: op_alloy_network::Network + Clone + std::fmt::Debug,
 {
     type Error = OpEthApiError;
-    type NetworkTypes = Optimism;
+    type NetworkTypes = NetworkT;
     type TransactionCompat = Self;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
@@ -131,9 +137,10 @@ where
     }
 }
 
-impl<N> RpcNodeCore for OpEthApi<N>
+impl<N, NetworkT> RpcNodeCore for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore,
+    NetworkT: op_alloy_network::Network,
 {
     type Primitives = N::Primitives;
     type Provider = N::Provider;
@@ -168,10 +175,11 @@ where
     }
 }
 
-impl<N> RpcNodeCoreExt for OpEthApi<N>
+impl<N, NetworkT> RpcNodeCoreExt for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore,
     Self: RpcNodeCore<Primitives = N::Primitives, Provider = N::Provider, Pool = N::Pool>,
+    NetworkT: op_alloy_network::Network,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<BlockTy<N::Primitives>, ReceiptTy<N::Primitives>> {
@@ -179,7 +187,7 @@ where
     }
 }
 
-impl<N> EthApiSpec for OpEthApi<N>
+impl<N, NetworkT> EthApiSpec for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore<
         Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
@@ -187,6 +195,7 @@ where
                       + StageCheckpointReader,
         Network: NetworkInfo,
     >,
+    NetworkT: op_alloy_network::Network,
 {
     type Transaction = TxTy<Self::Primitives>;
 
@@ -201,10 +210,11 @@ where
     }
 }
 
-impl<N> SpawnBlocking for OpEthApi<N>
+impl<N, NetworkT> SpawnBlocking for OpEthApi<N, NetworkT>
 where
     Self: Send + Sync + Clone + 'static,
     N: OpNodeCore,
+    NetworkT: op_alloy_network::Network,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -222,7 +232,7 @@ where
     }
 }
 
-impl<N> LoadFee for OpEthApi<N>
+impl<N, NetworkT> LoadFee for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore<
         Provider: BlockReaderIdExt
@@ -242,17 +252,18 @@ where
     }
 }
 
-impl<N> LoadState for OpEthApi<N>
+impl<N, NetworkT> LoadState for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
     >,
     Self: RpcNodeCoreExt<Primitives = N::Primitives, Provider = N::Provider, Pool = N::Pool>,
+    NetworkT: op_alloy_network::Network,
 {
 }
 
-impl<N> EthState for OpEthApi<N>
+impl<N, NetworkT> EthState for OpEthApi<N, NetworkT>
 where
     Self: LoadState + SpawnBlocking,
     N: OpNodeCore,
@@ -263,14 +274,14 @@ where
     }
 }
 
-impl<N> EthFees for OpEthApi<N>
+impl<N, NetworkT> EthFees for OpEthApi<N, NetworkT>
 where
     Self: LoadFee,
     N: OpNodeCore,
 {
 }
 
-impl<N> Trace for OpEthApi<N>
+impl<N, NetworkT> Trace for OpEthApi<N, NetworkT>
 where
     Self: RpcNodeCore<Provider: BlockReader>
         + LoadState<Evm: ConfigureEvm<Primitives = Self::Primitives>, Error: FromEvmError<Self::Evm>>,
@@ -278,7 +289,7 @@ where
 {
 }
 
-impl<N> AddDevSigners for OpEthApi<N>
+impl<N, NetworkT> AddDevSigners for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore,
 {
@@ -287,7 +298,7 @@ where
     }
 }
 
-impl<N: OpNodeCore> fmt::Debug for OpEthApi<N> {
+impl<N: OpNodeCore, NetworkT> fmt::Debug for OpEthApi<N, NetworkT> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }
@@ -315,17 +326,27 @@ impl<N: OpNodeCore> OpEthApiInner<N> {
 }
 
 /// Builds [`OpEthApi`] for Optimism.
-#[derive(Debug, Default)]
-pub struct OpEthApiBuilder {
+#[derive(Debug)]
+pub struct OpEthApiBuilder<NetworkT = Optimism> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_url: Option<String>,
+    /// Headers to use for the sequencer client requests.
+    sequencer_headers: Vec<String>,
+    /// Marker for network types.
+    _nt: PhantomData<NetworkT>,
 }
 
-impl OpEthApiBuilder {
+impl<NetworkT> Default for OpEthApiBuilder<NetworkT> {
+    fn default() -> Self {
+        Self { sequencer_url: None, sequencer_headers: Vec::new(), _nt: PhantomData }
+    }
+}
+
+impl<NetworkT> OpEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new() -> Self {
-        Self { sequencer_url: None }
+        Self { sequencer_url: None, sequencer_headers: Vec::new(), _nt: PhantomData }
     }
 
     /// With a [`SequencerClient`].
@@ -333,9 +354,15 @@ impl OpEthApiBuilder {
         self.sequencer_url = sequencer_url;
         self
     }
+
+    /// With headers to use for the sequencer client requests.
+    pub fn with_sequencer_headers(mut self, sequencer_headers: Vec<String>) -> Self {
+        self.sequencer_headers = sequencer_headers;
+        self
+    }
 }
 
-impl<N> EthApiBuilder<N> for OpEthApiBuilder
+impl<N, NetworkT> EthApiBuilder<N> for OpEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<Types: NodeTypes<Primitives = OpPrimitives>>,
     OpEthApi<N>: FullEthApiServer<
@@ -343,11 +370,12 @@ where
         Provider = N::Provider,
         Pool = N::Pool,
     >,
+    NetworkT: op_alloy_network::Network + Unpin,
 {
-    type EthApi = OpEthApi<N>;
+    type EthApi = OpEthApi<N, NetworkT>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let Self { sequencer_url } = self;
+        let Self { sequencer_url, sequencer_headers, .. } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -366,7 +394,7 @@ where
 
         let sequencer_client = if let Some(url) = sequencer_url {
             Some(
-                SequencerClient::new(&url)
+                SequencerClient::new_with_headers(&url, sequencer_headers)
                     .await
                     .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
             )
@@ -374,6 +402,6 @@ where
             None
         };
 
-        Ok(OpEthApi { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }) })
+        Ok(OpEthApi::new(eth_api, sequencer_client))
     }
 }

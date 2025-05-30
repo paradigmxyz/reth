@@ -145,7 +145,7 @@ where
             &hashed_state_sorted,
         );
 
-        let walker = TrieWalker::new(
+        let walker = TrieWalker::state_trie(
             trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
             prefix_sets.account_prefix_set,
         )
@@ -247,6 +247,12 @@ impl From<ParallelStateRootError> for ProviderError {
             }
             ParallelStateRootError::Other(other) => Self::Database(DatabaseError::Other(other)),
         }
+    }
+}
+
+impl From<alloy_rlp::Error> for ParallelStateRootError {
+    fn from(error: alloy_rlp::Error) -> Self {
+        Self::Provider(ProviderError::Rlp(error))
     }
 }
 

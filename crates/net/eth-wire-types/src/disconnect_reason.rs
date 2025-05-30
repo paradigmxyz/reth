@@ -7,7 +7,7 @@ use derive_more::Display;
 use reth_codecs_derive::add_arbitrary_tests;
 use thiserror::Error;
 
-/// RLPx disconnect reason.
+/// `RLPx` disconnect reason.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Display)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]

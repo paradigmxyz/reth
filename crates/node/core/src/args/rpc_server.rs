@@ -54,6 +54,10 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port", default_value_t = constants::DEFAULT_HTTP_RPC_PORT)]
     pub http_port: u16,
 
+    /// Disable compression for HTTP responses
+    #[arg(long = "http.disable-compression", default_value_t = false)]
+    pub http_disable_compression: bool,
+
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub http_api: Option<RpcModuleSelection>,
@@ -170,7 +174,7 @@ pub struct RpcServerArgs {
     )]
     pub rpc_gas_cap: u64,
 
-    /// Maximum eth transaction fee that can be sent via the RPC APIs (0 = no cap)
+    /// Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
     #[arg(
         long = "rpc.txfeecap",
         alias = "rpc-txfeecap",
@@ -316,6 +320,7 @@ impl Default for RpcServerArgs {
             http: false,
             http_addr: Ipv4Addr::LOCALHOST.into(),
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
+            http_disable_compression: false,
             http_api: None,
             http_corsdomain: None,
             ws: false,

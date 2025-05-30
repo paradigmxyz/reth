@@ -115,7 +115,9 @@ where
                 NetworkWallet::<Ethereum>::sign_request(&EthereumWallet::new(signer.clone()), tx)
                     .await?;
 
-            pending.push(provider.send_tx_envelope(tx).await?);
+            if let Ok(res) = provider.send_tx_envelope(tx).await {
+                pending.push(res);
+            }
         }
 
         let payload = node.build_and_submit_payload().await?;

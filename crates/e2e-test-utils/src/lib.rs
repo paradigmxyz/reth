@@ -47,7 +47,7 @@ pub async fn setup<N>(
     attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypes,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
@@ -205,8 +205,7 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
 pub trait NodeBuilderHelper
 where
     Self: Default
-        + NodeTypesForProvider
-        + NodeTypes<
+        + NodeTypesForProvider<
             Payload: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,
@@ -240,8 +239,7 @@ where
 impl<T> NodeBuilderHelper for T
 where
     Self: Default
-        + NodeTypesForProvider
-        + NodeTypes<
+        + NodeTypesForProvider<
             Payload: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,

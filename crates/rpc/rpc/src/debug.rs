@@ -1,4 +1,4 @@
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{Address, Bytes, B256};
@@ -16,10 +16,7 @@ use alloy_rpc_types_trace::geth::{
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_evm::{
-    execute::{BlockExecutorProvider, Executor},
-    ConfigureEvm, EvmEnvFor, TxEnvFor,
-};
+use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
 use reth_primitives_traits::{
     Block as _, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock, SignedTransaction,
 };
@@ -40,6 +37,7 @@ use reth_storage_api::{
     StateProvider, StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
@@ -56,14 +54,10 @@ pub struct DebugApi<Eth, BlockExecutor> {
 
 // === impl DebugApi ===
 
-impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor> {
+impl<Eth, Evm> DebugApi<Eth, Evm> {
     /// Create a new instance of the [`DebugApi`]
-    pub fn new(
-        eth: Eth,
-        blocking_task_guard: BlockingTaskGuard,
-        block_executor: BlockExecutor,
-    ) -> Self {
-        let inner = Arc::new(DebugApiInner { eth_api: eth, blocking_task_guard, block_executor });
+    pub fn new(eth: Eth, blocking_task_guard: BlockingTaskGuard, evm_config: Evm) -> Self {
+        let inner = Arc::new(DebugApiInner { eth_api: eth, blocking_task_guard, evm_config });
         Self { inner }
     }
 
@@ -82,10 +76,10 @@ impl<Eth: RpcNodeCore, BlockExecutor> DebugApi<Eth, BlockExecutor> {
 
 // === impl DebugApi ===
 
-impl<Eth, BlockExecutor> DebugApi<Eth, BlockExecutor>
+impl<Eth, Evm> DebugApi<Eth, Evm>
 where
     Eth: TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider<Primitives = Eth::Primitives>,
+    Evm: ConfigureEvm<Primitives = Eth::Primitives> + 'static,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -294,7 +288,7 @@ where
                                 Ok(inspector)
                             })
                             .await?;
-                        return Ok(FourByteFrame::from(&inspector).into())
+                        Ok(FourByteFrame::from(&inspector).into())
                     }
                     GethDebugBuiltInTracerType::CallTracer => {
                         let call_config = tracer_config
@@ -317,7 +311,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        Ok(frame)
                     }
                     GethDebugBuiltInTracerType::PreStateTracer => {
                         let prestate_config = tracer_config
@@ -348,7 +342,7 @@ where
                                 Ok(frame)
                             })
                             .await?;
-                        return Ok(frame.into())
+                        Ok(frame.into())
                     }
                     GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
                     GethDebugBuiltInTracerType::MuxTracer => {
@@ -387,7 +381,7 @@ where
                                 Ok(frame.into())
                             })
                             .await?;
-                        return Ok(frame)
+                        Ok(frame)
                     }
                     GethDebugBuiltInTracerType::FlatCallTracer => {
                         let flat_call_config = tracer_config
@@ -413,7 +407,7 @@ where
                             })
                             .await?;
 
-                        return Ok(frame.into());
+                        Ok(frame.into())
                     }
                 },
                 #[cfg(not(feature = "js-tracer"))]
@@ -636,7 +630,7 @@ where
             .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
-                let block_executor = this.inner.block_executor.executor(db);
+                let block_executor = this.inner.evm_config.batch_executor(db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 
@@ -869,13 +863,32 @@ where
 
         Ok((frame.into(), res.state))
     }
+
+    /// Returns the state root of the `HashedPostState` on top of the state for the given block with
+    /// trie updates.
+    async fn debug_state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+        block_id: Option<BlockId>,
+    ) -> Result<(B256, TrieUpdates), Eth::Error> {
+        self.inner
+            .eth_api
+            .spawn_blocking_io(move |this| {
+                let state = this
+                    .provider()
+                    .state_by_block_id(block_id.unwrap_or_default())
+                    .map_err(Eth::Error::from_eth_err)?;
+                state.state_root_with_updates(hashed_state).map_err(Eth::Error::from_eth_err)
+            })
+            .await
+    }
 }
 
 #[async_trait]
-impl<Eth, BlockExecutor> DebugApiServer for DebugApi<Eth, BlockExecutor>
+impl<Eth, Evm> DebugApiServer for DebugApi<Eth, Evm>
 where
     Eth: EthTransactions + TraceExt + 'static,
-    BlockExecutor: BlockExecutorProvider<Primitives = Eth::Primitives>,
+    Evm: ConfigureEvm<Primitives = Eth::Primitives> + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -947,7 +960,7 @@ where
 
     /// Handler for `debug_getBadBlocks`
     async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
-        Err(internal_rpc_err("unimplemented"))
+        Ok(vec![])
     }
 
     /// Handler for `debug_traceChain`
@@ -1224,6 +1237,14 @@ where
         Ok(())
     }
 
+    async fn debug_state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<(B256, TrieUpdates)> {
+        Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
+    }
+
     async fn debug_stop_cpu_profile(&self) -> RpcResult<()> {
         Ok(())
     }
@@ -1272,23 +1293,23 @@ where
     }
 }
 
-impl<Eth, BlockExecutor> std::fmt::Debug for DebugApi<Eth, BlockExecutor> {
+impl<Eth, Evm> std::fmt::Debug for DebugApi<Eth, Evm> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Eth, BlockExecutor> Clone for DebugApi<Eth, BlockExecutor> {
+impl<Eth, Evm> Clone for DebugApi<Eth, Evm> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Eth, BlockExecutor> {
+struct DebugApiInner<Eth, Evm> {
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
     /// block executor for debug & trace apis
-    block_executor: BlockExecutor,
+    evm_config: Evm,
 }

@@ -5,6 +5,7 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives_traits::{BlockTy, ReceiptTy, TxTy};
 use reth_provider::BlockReader;
 use reth_rpc_eth_types::EthStateCache;
+use reth_storage_api::{BlockReader, ProviderBlock, ProviderReceipt};
 
 /// Helper trait to relax trait bounds on [`FullNodeComponents`].
 ///

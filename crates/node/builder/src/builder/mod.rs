@@ -240,7 +240,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> NodeBuilderWithTypes<RethFullAdapter<DB, T>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypesForProvider<ChainSpec = ChainSpec>,
     {
         self.with_types_and_provider()
     }
@@ -250,7 +250,7 @@ where
         self,
     ) -> NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypesForProvider<ChainSpec = ChainSpec>,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
         NodeBuilderWithTypes::new(self.config, self.database)
@@ -301,7 +301,7 @@ where
     /// Configures the types of the node.
     pub fn with_types<T>(self) -> WithLaunchContext<NodeBuilderWithTypes<RethFullAdapter<DB, T>>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypesForProvider<ChainSpec = ChainSpec>,
     {
         WithLaunchContext { builder: self.builder.with_types(), task_executor: self.task_executor }
     }
@@ -311,7 +311,7 @@ where
         self,
     ) -> WithLaunchContext<NodeBuilderWithTypes<FullNodeTypesAdapter<T, DB, P>>>
     where
-        T: NodeTypes<ChainSpec = ChainSpec> + NodeTypesForProvider,
+        T: NodeTypesForProvider<ChainSpec = ChainSpec>,
         P: FullProvider<NodeTypesWithDBAdapter<T, DB>>,
     {
         WithLaunchContext {
@@ -550,13 +550,8 @@ where
     where
         EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
-        let Self { builder, task_executor } = self;
-
-        let engine_tree_config = builder.config.engine.tree_config();
-
-        let launcher =
-            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
-        builder.launch_with(launcher).await
+        let launcher = self.engine_api_launcher();
+        self.builder.launch_with(launcher).await
     }
 
     /// Launches the node with the [`DebugNodeLauncher`].
@@ -580,6 +575,17 @@ where
             engine_tree_config,
         ));
         builder.launch_with(launcher).await
+    }
+
+    /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API
+    /// support.
+    pub fn engine_api_launcher(&self) -> EngineNodeLauncher {
+        let engine_tree_config = self.builder.config.engine.tree_config();
+        EngineNodeLauncher::new(
+            self.task_executor.clone(),
+            self.builder.config.datadir(),
+            engine_tree_config,
+        )
     }
 }
 
