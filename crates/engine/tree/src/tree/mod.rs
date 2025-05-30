@@ -1350,18 +1350,6 @@ where
     /// Returns a batch of consecutive canonical blocks to persist in the range
     /// `(last_persisted_number .. canonical_head - threshold]` . The expected
     /// order is oldest -> newest.
-    ///
-    /// For those blocks that didn't have the trie updates calculated, runs the state root
-    /// calculation, and saves the trie updates.
-    ///
-    /// Returns an error if the state root calculation fails.
-    fn get_canonical_blocks_to_persist(
-        &mut self,
-    ) -> Result<Vec<ExecutedBlockWithTrieUpdates<N>>, AdvancePersistenceError> {
-        // We will calculate the state root using the database, so we need to be sure there are no
-        // changes
-        debug_assert!(!self.persistence_state.in_progress());
-
     fn get_canonical_blocks_to_persist(&self) -> Vec<ExecutedBlockWithTrieUpdates<N>> {
         let mut blocks_to_persist = Vec::new();
         let mut current_hash = self.state.tree_state.canonical_block_hash();
@@ -2253,18 +2241,6 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
 
-        let is_fork = ensure_ok!(self.is_fork(block.sealed_header()));
-        let missing_trie_updates =
-            self.has_ancestors_with_missing_trie_updates(block.sealed_header());
-        // If the block is a fork or has ancestors with missing trie updates, we don't save the trie
-        // updates, because they may be incorrect. Instead, they will be recomputed on persistence.
-        let save_trie_updates = !(is_fork || missing_trie_updates);
-
-        let trie_updates = if save_trie_updates {
-            ExecutedTrieUpdates::Present(Arc::new(trie_output))
-        } else {
-            ExecutedTrieUpdates::Missing
-        };
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
                 recovered_block: Arc::new(block),
