@@ -768,8 +768,8 @@ Engine:
       --engine.precompile-cache
           Enable precompile cache
 
-      --engine.test-state-root-fallback
-          Enable state root fallback testing
+      --engine.state-root-fallback
+          Enable state root fallback, useful for testing
 
 Ress:
       --ress.enable
