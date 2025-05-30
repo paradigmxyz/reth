@@ -1981,7 +1981,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
-            "fillOpacity": 25,
+            "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
               "legend": false,
@@ -1999,7 +1999,7 @@
             "spanNulls": false,
             "stacking": {
               "group": "A",
-              "mode": "percent"
+              "mode": "none"
             },
             "thresholdsStyle": {
               "mode": "off"
@@ -3146,6 +3146,125 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "line",
+            "fillOpacity": 24,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "percent"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 71
+      },
+      "id": 1001,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.5.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_sync_block_validation_state_root_duration{job=\"$job\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "State Root Duration",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "reth_sync_execution_execution_duration{job=\"$job\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Execution Duration",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        }
+      ],
+      "title": "Block Processing Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
             "hideFrom": {
@@ -3191,7 +3310,7 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 71
       },
       "id": 251,
@@ -3213,7 +3332,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
           "editorMode": "code",
@@ -3230,7 +3349,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "disableTextWrap": false,
           "editorMode": "code",
@@ -3247,7 +3366,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
           "editorMode": "code",
@@ -3268,7 +3387,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "The time it takes for operations that are part of block validation, but not execution or state root, to complete.",
       "fieldConfig": {
@@ -3329,8 +3448,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 71
+        "x": 0,
+        "y": 79
       },
       "id": 252,
       "options": {
@@ -3351,7 +3470,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
           "editorMode": "code",
@@ -3375,7 +3494,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 79
+        "y": 87
       },
       "id": 214,
       "panels": [],
@@ -3385,7 +3504,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -3445,7 +3564,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 80
+        "y": 88
       },
       "id": 255,
       "options": {
@@ -3465,7 +3584,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_tree_root_proofs_processed_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -3481,7 +3600,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -3542,7 +3661,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 80
+        "y": 88
       },
       "id": 254,
       "options": {
@@ -3562,7 +3681,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_tree_root_proof_calculation_duration_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -3578,7 +3697,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -3639,7 +3758,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 88
+        "y": 96
       },
       "id": 257,
       "options": {
@@ -3659,7 +3778,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_tree_root_pending_multiproofs_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -3675,7 +3794,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -3736,7 +3855,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 88
+        "y": 96
       },
       "id": 256,
       "options": {
@@ -3756,7 +3875,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_tree_root_inflight_multiproofs_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -3772,7 +3891,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -3816,8 +3935,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3833,7 +3951,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 96
+        "y": 104
       },
       "id": 260,
       "options": {
@@ -3853,7 +3971,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_sparse_state_trie_multiproof_skipped_storage_nodes{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -3869,7 +3987,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -3913,8 +4031,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -3930,7 +4047,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 96
+        "y": 104
       },
       "id": 259,
       "options": {
@@ -3950,7 +4067,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_sparse_state_trie_multiproof_skipped_account_nodes{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -3966,7 +4083,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -4010,8 +4127,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4027,7 +4143,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 112
       },
       "id": 262,
       "options": {
@@ -4047,7 +4163,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_sparse_state_trie_multiproof_total_account_nodes{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -4064,7 +4180,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "fieldConfig": {
         "defaults": {
@@ -4108,8 +4224,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4125,7 +4240,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 104
+        "y": 112
       },
       "id": 261,
       "options": {
@@ -4145,7 +4260,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_sparse_state_trie_multiproof_total_storage_nodes{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -4161,7 +4276,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "How much time is spent in the multiproof task",
       "fieldConfig": {
@@ -4206,8 +4321,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4223,7 +4337,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 120
       },
       "id": 263,
       "options": {
@@ -4243,7 +4357,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "expr": "reth_tree_root_multiproof_task_total_duration_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
@@ -4263,7 +4377,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 120
+        "y": 128
       },
       "id": 38,
       "panels": [],
@@ -4274,7 +4388,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "The average commit time for database transactions. Generally, this should not be a limiting factor in syncing.",
       "fieldConfig": {
@@ -4320,8 +4434,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -4333,7 +4446,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 121
+        "y": 129
       },
       "id": 40,
       "options": {
@@ -4354,7 +4467,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -4372,7 +4485,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "",
       "fieldConfig": {
@@ -4394,7 +4507,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 121
+        "y": 129
       },
       "id": 42,
       "maxDataPoints": 25,
@@ -4444,7 +4557,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -4462,7 +4575,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "The average time a database transaction was open.",
       "fieldConfig": {
@@ -4508,8 +4621,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -4521,7 +4633,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 129
+        "y": 137
       },
       "id": 117,
       "options": {
@@ -4542,7 +4654,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -4560,7 +4672,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "The maximum time the database transaction was open.",
       "fieldConfig": {
@@ -4605,8 +4717,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -4618,7 +4729,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 129
+        "y": 137
       },
       "id": 116,
       "options": {
@@ -4639,7 +4750,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -4657,7 +4768,7 @@
     {
       "datasource": {
         "type": "prometheus",
-        "uid": "${DS_PROMETHEUS}"
+        "uid": "${datasource}"
       },
       "description": "",
       "fieldConfig": {
@@ -4705,8 +4816,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4746,7 +4856,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 137
+        "y": 145
       },
       "id": 119,
       "options": {
@@ -4767,7 +4877,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${datasource}"
+            "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
           "editorMode": "code",
@@ -4785,7 +4895,7 @@
         {
           "datasource": {
             "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
+            "uid": "${datasource}"
           },
           "editorMode": "code",
           "exemplar": false,
@@ -4861,8 +4971,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -4902,7 +5011,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 137
+        "y": 145
       },
       "id": 250,
       "options": {
@@ -4997,7 +5106,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 145
+        "y": 153
       },
       "id": 48,
       "options": {
@@ -5086,8 +5195,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5103,7 +5211,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 145
+        "y": 153
       },
       "id": 118,
       "options": {
@@ -5166,7 +5274,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 153
+        "y": 161
       },
       "id": 50,
       "options": {
@@ -5254,8 +5362,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5271,7 +5378,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 153
+        "y": 161
       },
       "id": 52,
       "options": {
@@ -5352,8 +5459,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5369,7 +5475,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 161
+        "y": 169
       },
       "id": 113,
       "options": {
@@ -5424,8 +5530,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5529,7 +5634,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 161
+        "y": 169
       },
       "id": 58,
       "options": {
@@ -5568,7 +5673,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 169
+        "y": 177
       },
       "id": 203,
       "panels": [],
@@ -5602,7 +5707,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 170
+        "y": 178
       },
       "id": 202,
       "options": {
@@ -5665,8 +5770,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5758,7 +5862,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 170
+        "y": 178
       },
       "id": 204,
       "options": {
@@ -5813,8 +5917,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -5906,7 +6009,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 170
+        "y": 178
       },
       "id": 205,
       "options": {
@@ -5987,8 +6090,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6004,7 +6106,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 178
+        "y": 186
       },
       "id": 206,
       "options": {
@@ -6085,8 +6187,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6102,7 +6203,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 178
+        "y": 186
       },
       "id": 207,
       "options": {
@@ -6141,7 +6242,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 186
+        "y": 194
       },
       "id": 79,
       "panels": [],
@@ -6197,8 +6298,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6213,7 +6313,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 187
+        "y": 195
       },
       "id": 74,
       "options": {
@@ -6294,8 +6394,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6310,7 +6409,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 187
+        "y": 195
       },
       "id": 80,
       "options": {
@@ -6390,8 +6489,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6407,7 +6505,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 195
+        "y": 203
       },
       "id": 190,
       "options": {
@@ -6446,7 +6544,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 203
+        "y": 211
       },
       "id": 108,
       "panels": [],
@@ -6501,8 +6599,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6543,7 +6640,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 204
+        "y": 212
       },
       "id": 109,
       "options": {
@@ -6605,7 +6702,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 204
+        "y": 212
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -6717,8 +6814,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6734,7 +6830,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 212
+        "y": 220
       },
       "id": 120,
       "options": {
@@ -6792,7 +6888,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 212
+        "y": 220
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -6904,8 +7000,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -6957,7 +7052,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 220
+        "y": 228
       },
       "id": 198,
       "options": {
@@ -7160,8 +7255,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7177,7 +7271,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 220
+        "y": 228
       },
       "id": 246,
       "options": {
@@ -7216,7 +7310,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 228
+        "y": 236
       },
       "id": 24,
       "panels": [],
@@ -7271,8 +7365,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7312,7 +7405,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 229
+        "y": 237
       },
       "id": 26,
       "options": {
@@ -7430,8 +7523,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7447,7 +7539,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 229
+        "y": 237
       },
       "id": 33,
       "options": {
@@ -7552,8 +7644,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7568,7 +7659,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 237
+        "y": 245
       },
       "id": 36,
       "options": {
@@ -7618,7 +7709,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 245
+        "y": 253
       },
       "id": 32,
       "panels": [],
@@ -7674,8 +7765,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7724,7 +7814,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 246
+        "y": 254
       },
       "id": 30,
       "options": {
@@ -7877,8 +7967,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               }
             ]
           },
@@ -7890,7 +7979,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 246
+        "y": 254
       },
       "id": 28,
       "options": {
@@ -7994,8 +8083,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8010,7 +8098,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 254
+        "y": 262
       },
       "id": 35,
       "options": {
@@ -8102,8 +8190,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8136,7 +8223,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 254
+        "y": 262
       },
       "id": 73,
       "options": {
@@ -8229,8 +8316,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8263,7 +8349,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 262
+        "y": 270
       },
       "id": 102,
       "options": {
@@ -8327,7 +8413,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 270
+        "y": 278
       },
       "id": 226,
       "panels": [],
@@ -8382,8 +8468,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8424,7 +8509,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 271
+        "y": 279
       },
       "id": 225,
       "options": {
@@ -8510,8 +8595,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8552,7 +8636,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 271
+        "y": 279
       },
       "id": 227,
       "options": {
@@ -8638,8 +8722,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8680,7 +8763,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 279
+        "y": 287
       },
       "id": 235,
       "options": {
@@ -8766,8 +8849,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8808,7 +8890,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 279
+        "y": 287
       },
       "id": 234,
       "options": {
@@ -8852,7 +8934,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 287
+        "y": 295
       },
       "id": 68,
       "panels": [],
@@ -8908,8 +8990,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -8924,7 +9005,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 288
+        "y": 296
       },
       "id": 60,
       "options": {
@@ -9004,8 +9085,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9020,7 +9100,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 288
+        "y": 296
       },
       "id": 62,
       "options": {
@@ -9100,8 +9180,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9116,7 +9195,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 296
+        "y": 304
       },
       "id": 64,
       "options": {
@@ -9154,7 +9233,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 304
+        "y": 312
       },
       "id": 105,
       "panels": [],
@@ -9209,8 +9288,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9226,7 +9304,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 305
+        "y": 313
       },
       "id": 106,
       "options": {
@@ -9307,8 +9385,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9324,7 +9401,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 305
+        "y": 313
       },
       "id": 107,
       "options": {
@@ -9404,8 +9481,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9421,7 +9497,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 313
+        "y": 321
       },
       "id": 217,
       "options": {
@@ -9460,7 +9536,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 321
+        "y": 329
       },
       "id": 97,
       "panels": [],
@@ -9514,8 +9590,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9544,7 +9619,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 322
+        "y": 330
       },
       "id": 98,
       "options": {
@@ -9690,8 +9765,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9707,7 +9781,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 322
+        "y": 330
       },
       "id": 101,
       "options": {
@@ -9788,8 +9862,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9805,7 +9878,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 330
+        "y": 338
       },
       "id": 99,
       "options": {
@@ -9886,8 +9959,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -9903,7 +9975,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 330
+        "y": 338
       },
       "id": 100,
       "options": {
@@ -9984,8 +10056,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "semi-dark-red",
@@ -10001,7 +10072,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 338
+        "y": 346
       },
       "id": 248,
       "options": {
@@ -10084,8 +10155,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "semi-dark-red",
@@ -10114,7 +10184,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 338
+        "y": 346
       },
       "id": 247,
       "options": {
@@ -10173,7 +10243,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 346
+        "y": 354
       },
       "id": 236,
       "panels": [
@@ -10225,8 +10295,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -10322,8 +10391,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -10419,8 +10487,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -10528,8 +10595,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -10593,8 +10659,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -10656,7 +10721,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 347
+        "y": 355
       },
       "id": 241,
       "panels": [
@@ -10709,8 +10774,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -10821,8 +10885,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -10933,8 +10996,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -11042,6 +11104,6 @@
   "timezone": "",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 29,
+  "version": 30,
   "weekStart": ""
 }
