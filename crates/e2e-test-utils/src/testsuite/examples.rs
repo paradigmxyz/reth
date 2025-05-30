@@ -9,6 +9,7 @@ use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use std::sync::Arc;
 
@@ -137,7 +138,8 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
                 .cancun_activated()
                 .build(),
         ))
-        .with_network(NetworkSetup::single_node());
+        .with_network(NetworkSetup::single_node())
+        .with_tree_config(TreeConfig::default().with_state_root_fallback(true));
 
     let test = TestBuilder::new()
         .with_setup(setup)
