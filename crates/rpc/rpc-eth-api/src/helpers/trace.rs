@@ -9,22 +9,18 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
 use reth_evm::{
-    evm::EvmFactoryExt, system_calls::SystemCaller, ConfigureEvm, Database, Evm, EvmEnvFor,
-    HaltReasonFor, InspectorFor, TxEnvFor,
+    evm::EvmFactoryExt, system_calls::SystemCaller, tracing::TracingCtx, ConfigureEvm, Database,
+    Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_node_api::NodePrimitives;
-use reth_primitives_traits::{BlockBody, RecoveredBlock, SignedTransaction};
+use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock, SignedTransaction};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
 };
 use reth_storage_api::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
-use revm::{
-    context_interface::result::{ExecutionResult, ResultAndState},
-    state::EvmState,
-    DatabaseCommit,
-};
+use revm::{context_interface::result::ResultAndState, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
@@ -242,10 +238,11 @@ pub trait Trace:
         Self: LoadBlock,
         F: Fn(
                 TransactionInfo,
-                TracingInspector,
-                ExecutionResult<HaltReasonFor<Self::Evm>>,
-                &EvmState,
-                &StateCacheDb<'_>,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_, '_>, TracingInspector>,
+                >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -282,10 +279,11 @@ pub trait Trace:
         Self: LoadBlock,
         F: Fn(
                 TransactionInfo,
-                Insp,
-                ExecutionResult<HaltReasonFor<Self::Evm>>,
-                &EvmState,
-                &StateCacheDb<'_>,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_, '_>, Insp>,
+                >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -341,21 +339,18 @@ pub trait Trace:
                     .evm_config()
                     .evm_factory()
                     .create_tracer(StateCacheDbRefMutWrapper(&mut db), evm_env, inspector_setup())
-                    .try_trace_many(
-                        block.transactions_recovered().take(max_transactions),
-                        |tx, result, state, inspector, db| {
-                            let tx_info = TransactionInfo {
-                                hash: Some(*tx.tx_hash()),
-                                index: Some(idx),
-                                block_hash: Some(block_hash),
-                                block_number: Some(block_number),
-                                base_fee: Some(base_fee),
-                            };
-                            idx += 1;
+                    .try_trace_many(block.transactions_recovered().take(max_transactions), |ctx| {
+                        let tx_info = TransactionInfo {
+                            hash: Some(*ctx.tx.tx_hash()),
+                            index: Some(idx),
+                            block_hash: Some(block_hash),
+                            block_number: Some(block_number),
+                            base_fee: Some(base_fee),
+                        };
+                        idx += 1;
 
-                            f(tx_info, inspector, result, state, &*db.0)
-                        },
-                    )
+                        f(tx_info, ctx)
+                    })
                     .collect::<Result<_, _>>()?;
 
                 Ok(Some(results))
@@ -387,10 +382,11 @@ pub trait Trace:
         // state and db
         F: Fn(
                 TransactionInfo,
-                TracingInspector,
-                ExecutionResult<HaltReasonFor<Self::Evm>>,
-                &EvmState,
-                &StateCacheDb<'_>,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_, '_>, TracingInspector>,
+                >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
@@ -426,10 +422,11 @@ pub trait Trace:
         // state and db
         F: Fn(
                 TransactionInfo,
-                Insp,
-                ExecutionResult<HaltReasonFor<Self::Evm>>,
-                &EvmState,
-                &StateCacheDb<'_>,
+                TracingCtx<
+                    '_,
+                    Recovered<&ProviderTx<Self::Provider>>,
+                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_, '_>, Insp>,
+                >,
             ) -> Result<R, Self::Error>
             + Send
             + 'static,
