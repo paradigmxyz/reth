@@ -2161,7 +2161,8 @@ where
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
         let persisting_kind = self.persisting_kind_for(block.header());
-        let run_parallel_state_root = persisting_kind.can_run_parallel_state_root();
+        let run_parallel_state_root = persisting_kind.can_run_parallel_state_root() &&
+            !self.config.test_state_root_fallback(); // don't run parallel if testing fallback
 
         // use prewarming background task
         let header = block.clone_sealed_header();
@@ -2299,8 +2300,13 @@ where
             maybe_state_root
         } else {
             // fallback is to compute the state root regularly in sync
-            warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
-            self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
+            if self.config.test_state_root_fallback() {
+                debug!(target: "engine::tree", block=?block_num_hash, "Using state root fallback for testing");
+            } else {
+                warn!(target: "engine::tree", block=?block_num_hash, ?persisting_kind, "Failed to compute state root in parallel");
+                self.metrics.block_validation.state_root_parallel_fallback_total.increment(1);
+            }
+
             let (root, updates) =
                 ensure_ok!(state_provider.state_root_with_updates(hashed_state.clone()));
             (root, updates, root_time.elapsed())
