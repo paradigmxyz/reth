@@ -69,7 +69,7 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-trie/serde",
     "revm-database/serde",
-    "revm-state?/serde"
+    "revm-state?/serde",
 ]
 test-utils = [
     "alloy-primitives/getrandom",
