@@ -634,6 +634,7 @@ where
     fn on_new_head(&self, new_head: B256) -> ProviderResult<Option<NewCanonicalChain<N>>> {
         // get the executed new head block
         let Some(new_head_block) = self.state.tree_state.blocks_by_hash.get(&new_head) else {
+            debug!(target: "engine::tree", new_head=?new_head, "New head block not found in inmemory tree state");
             return Ok(None)
         };
 

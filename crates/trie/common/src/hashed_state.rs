@@ -22,6 +22,7 @@ use revm_database::{AccountStatus, BundleAccount};
 
 /// Representation of in-memory hashed state.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostState {
     /// Mapping of hashed address to account info, `None` if destroyed.
     pub accounts: B256Map<Option<Account>>,
@@ -337,6 +338,7 @@ impl HashedPostState {
 
 /// Representation of in-memory hashed storage.
 #[derive(PartialEq, Eq, Clone, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedStorage {
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,

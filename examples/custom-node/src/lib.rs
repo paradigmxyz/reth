@@ -7,17 +7,23 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use crate::{
+    evm::CustomExecutorBuilder, network::CustomNetworkPrimitives, pool::CustomPooledTransaction,
+    primitives::CustomTransaction,
+};
 use chainspec::CustomChainSpec;
-use consensus::CustomConsensusBuilder;
-use engine::CustomPayloadTypes;
-use pool::CustomPoolBuilder;
 use primitives::CustomNodePrimitives;
 use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
-use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
-use reth_op::node::{node::OpStorage, OpNode};
+use reth_node_builder::{
+    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
+    Node,
+};
+use reth_op::node::{
+    node::{OpConsensusBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder},
+    txpool, OpNode, OpPayloadTypes,
+};
 
 pub mod chainspec;
-pub mod consensus;
 pub mod engine;
 pub mod engine_api;
 pub mod evm;
@@ -33,32 +39,32 @@ impl NodeTypes for CustomNode {
     type ChainSpec = CustomChainSpec;
     type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
     type Storage = <OpNode as NodeTypes>::Storage;
-    type Payload = CustomPayloadTypes;
+    type Payload = OpPayloadTypes<CustomNodePrimitives>;
 }
 
 impl<N> Node<N> for CustomNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = CustomPayloadTypes,
-            ChainSpec = CustomChainSpec,
-            Primitives = CustomNodePrimitives,
-            Storage = OpStorage,
-        >,
-    >,
-    ComponentsBuilder<N, CustomPoolBuilder, (), (), (), CustomConsensusBuilder>:
-        NodeComponentsBuilder<N>,
+    N: FullNodeTypes<Types = Self>,
 {
-    type ComponentsBuilder =
-        ComponentsBuilder<N, CustomPoolBuilder, (), (), (), CustomConsensusBuilder>;
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        OpPoolBuilder<txpool::OpPooledTransaction<CustomTransaction, CustomPooledTransaction>>,
+        BasicPayloadServiceBuilder<OpPayloadBuilder>,
+        OpNetworkBuilder<CustomNetworkPrimitives, CustomPooledTransaction>,
+        CustomExecutorBuilder,
+        OpConsensusBuilder,
+    >;
 
     type AddOns = ();
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
-            .pool(CustomPoolBuilder::default())
-            .consensus(CustomConsensusBuilder)
+            .pool(OpPoolBuilder::default())
+            .executor(CustomExecutorBuilder::default())
+            .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
+            .network(OpNetworkBuilder::new(false, false))
+            .consensus(OpConsensusBuilder::default())
     }
 
     fn add_ons(&self) -> Self::AddOns {}
