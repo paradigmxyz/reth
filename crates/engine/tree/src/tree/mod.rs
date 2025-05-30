@@ -2163,10 +2163,18 @@ where
         let persisting_kind = self.persisting_kind_for(block.header());
         let run_parallel_state_root = persisting_kind.can_run_parallel_state_root();
 
+        // Use state root task only if:
+        // 1. No persistence is in progress
+        // 2. Config allows it
+        // 3. No ancestors with missing trie updates
+        let use_state_root_task = run_parallel_state_root &&
+            self.config.use_state_root_task() &&
+            !self.has_ancestors_with_missing_trie_updates(block.sealed_header());
+
         // use prewarming background task
         let header = block.clone_sealed_header();
         let txs = block.clone_transactions_recovered().collect();
-        let mut handle = if run_parallel_state_root && self.config.use_state_root_task() {
+        let mut handle = if run_parallel_state_root && use_state_root_task {
             // use background tasks for state root calc
             let consistent_view =
                 ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
@@ -2249,7 +2257,7 @@ where
         if run_parallel_state_root {
             // if we new payload extends the current canonical change we attempt to use the
             // background task or try to compute it in parallel
-            if self.config.use_state_root_task() {
+            if use_state_root_task {
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = execution_finish.elapsed();
@@ -2326,16 +2334,13 @@ where
         handle.terminate_caching(Some(output.state.clone()));
 
         let is_fork = ensure_ok!(self.is_fork(block.sealed_header()));
-        let missing_trie_updates =
-            self.has_ancestors_with_missing_trie_updates(block.sealed_header());
-        // If the block is a fork or has ancestors with missing trie updates, we don't save the trie
-        // updates, because they may be incorrect. Instead, they will be recomputed on persistence.
-        let save_trie_updates = !(is_fork || missing_trie_updates);
 
-        let trie_updates = if save_trie_updates {
-            ExecutedTrieUpdates::Present(Arc::new(trie_output))
-        } else {
+        // If the block is a fork, we don't save the trie updates, because they may be incorrect.
+        // Instead, they will be recomputed on persistence.
+        let trie_updates = if is_fork {
             ExecutedTrieUpdates::Missing
+        } else {
+            ExecutedTrieUpdates::Present(Arc::new(trie_output))
         };
         let executed: ExecutedBlockWithTrieUpdates<N> = ExecutedBlockWithTrieUpdates {
             block: ExecutedBlock {
