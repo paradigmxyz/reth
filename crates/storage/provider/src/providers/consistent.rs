@@ -1471,9 +1471,7 @@ mod tests {
     use alloy_primitives::B256;
     use itertools::Itertools;
     use rand::Rng;
-    use reth_chain_state::{
-        ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, NewCanonicalChain,
-    };
+    use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, NewCanonicalChain};
     use reth_db_api::models::AccountBeforeTx;
     use reth_ethereum_primitives::Block;
     use reth_execution_types::ExecutionOutcome;
@@ -1583,7 +1581,7 @@ mod tests {
                 )),
                 Default::default(),
                 Default::default(),
-                ExecutedTrieUpdates::empty(),
+                Default::default(),
             )],
         };
         consistent_provider.canonical_in_memory_state.update_chain(chain);
@@ -1627,7 +1625,7 @@ mod tests {
                 execution_output: Default::default(),
                 hashed_state: Default::default(),
             },
-            trie: ExecutedTrieUpdates::empty(),
+            trie: Default::default(),
         });
 
         // Now the last block should be found in memory
@@ -1693,7 +1691,7 @@ mod tests {
                 )),
                 Default::default(),
                 Default::default(),
-                ExecutedTrieUpdates::empty(),
+                Default::default(),
             )],
         };
         consistent_provider.canonical_in_memory_state.update_chain(chain);
@@ -1808,7 +1806,7 @@ mod tests {
                             ..Default::default()
                         }),
                         Default::default(),
-                        ExecutedTrieUpdates::empty(),
+                        Default::default(),
                     )
                 })
                 .unwrap()],
