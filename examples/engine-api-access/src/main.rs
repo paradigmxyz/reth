@@ -1,9 +1,9 @@
-//! Example demonstrating how to access the `EngineApi` instance using callback wrappers.
+//! Example demonstrating how to access the Engine API instance during construction.
 //!
 //! Run with
 //!
 //! ```sh
-//! cargo run -p example-ex-engine-api-ext
+//! cargo run -p engine-api-access
 //! ```
 
 use reth_db::test_utils::create_test_rw_db;

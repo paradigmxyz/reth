@@ -1,5 +1,5 @@
 [package]
-name = "example-ex-engine-api-ext"
+name = "example-engine-api-access"
 version = "0.0.0"
 publish = false
 edition.workspace = true
