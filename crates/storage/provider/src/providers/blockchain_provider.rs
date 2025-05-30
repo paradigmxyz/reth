@@ -785,8 +785,7 @@ mod tests {
     use rand::Rng;
     use reth_chain_state::{
         test_utils::TestBlockBuilder, CanonStateNotification, CanonStateSubscriptions,
-        CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
-        NewCanonicalChain,
+        CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, NewCanonicalChain,
     };
     use reth_chainspec::{
         ChainSpec, ChainSpecBuilder, ChainSpecProvider, EthereumHardfork, MAINNET,
@@ -937,7 +936,7 @@ mod tests {
                         Arc::new(RecoveredBlock::new_sealed(block.clone(), senders)),
                         execution_outcome.into(),
                         Default::default(),
-                        ExecutedTrieUpdates::empty(),
+                        Default::default(),
                     )
                 })
                 .collect(),
@@ -1069,7 +1068,7 @@ mod tests {
                 )),
                 Default::default(),
                 Default::default(),
-                ExecutedTrieUpdates::empty(),
+                Default::default(),
             )],
         };
         provider.canonical_in_memory_state.update_chain(chain);
@@ -1107,7 +1106,7 @@ mod tests {
                 execution_output: Default::default(),
                 hashed_state: Default::default(),
             },
-            trie: ExecutedTrieUpdates::empty(),
+            trie: Default::default(),
         });
 
         // Now the last block should be found in memory
@@ -1165,7 +1164,7 @@ mod tests {
                 )),
                 Default::default(),
                 Default::default(),
-                ExecutedTrieUpdates::empty(),
+                Default::default(),
             )],
         };
         provider.canonical_in_memory_state.update_chain(chain);
@@ -1221,7 +1220,7 @@ mod tests {
                 execution_output: Default::default(),
                 hashed_state: Default::default(),
             },
-            trie: ExecutedTrieUpdates::empty(),
+            trie: Default::default(),
         });
 
         // Assertions related to the pending block
@@ -1301,7 +1300,7 @@ mod tests {
                 )),
                 Default::default(),
                 Default::default(),
-                ExecutedTrieUpdates::empty(),
+                Default::default(),
             )],
         };
         provider.canonical_in_memory_state.update_chain(chain);
@@ -1875,7 +1874,7 @@ mod tests {
                             ..Default::default()
                         }),
                         Default::default(),
-                        ExecutedTrieUpdates::empty(),
+                        Default::default(),
                     )
                 })
                 .unwrap()],
@@ -2004,7 +2003,7 @@ mod tests {
                     execution_output: Default::default(),
                     hashed_state: Default::default(),
                 },
-                trie: ExecutedTrieUpdates::empty(),
+                trie: Default::default(),
             },
         );
 
@@ -2101,7 +2100,7 @@ mod tests {
                 execution_output: Default::default(),
                 hashed_state: Default::default(),
             },
-            trie: ExecutedTrieUpdates::empty(),
+            trie: Default::default(),
         });
 
         // Set the safe block in memory
