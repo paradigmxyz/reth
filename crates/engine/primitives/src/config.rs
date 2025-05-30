@@ -37,7 +37,7 @@ pub fn has_enough_parallelism() -> bool {
 }
 
 /// The configuration of the engine tree.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TreeConfig {
     /// Maximum number of blocks to be kept only in memory without triggering
     /// persistence.
