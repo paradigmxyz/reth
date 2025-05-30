@@ -7,9 +7,7 @@
 //! ```
 
 use reth_db::test_utils::create_test_rw_db;
-use reth_node_builder::{
-    EngineApiFn, FullNodeComponents, NodeBuilder, NodeConfig,
-};
+use reth_node_builder::{EngineApiFn, FullNodeComponents, NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{
     args::RollupArgs,
