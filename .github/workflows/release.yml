@@ -143,6 +143,12 @@ jobs:
           fetch-depth: 0
       - name: Download artifacts
         uses: actions/download-artifact@v4
+      - name: Generate full changelog
+        id: changelog
+        run: |
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 ${{ env.VERSION }}^)..${{ env.VERSION }})" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       - name: Create release draft
         env:
           GITHUB_USER: ${{ github.repository_owner }}
@@ -185,6 +191,10 @@ jobs:
           | Non-Payload Builders | <TODO>    |
 
           *See [Update Priorities](https://paradigmxyz.github.io/reth/installation/priorities.html) for more information about this table.*
+
+          ## All Changes
+
+          ${{ steps.changelog.outputs.CHANGELOG }}
 
           ## Binaries
 
