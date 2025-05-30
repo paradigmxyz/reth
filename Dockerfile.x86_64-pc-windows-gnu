@@ -1,7 +1,19 @@
 FROM ubuntu:24.04 AS cross-base
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install --assume-yes --no-install-recommends git ca-certificates
+# Use HTTPS for package sources
+RUN apt-get update && apt-get install --assume-yes --no-install-recommends ca-certificates
+RUN find /etc/apt/ -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i 's|http://|https://|g' {} +
+
+# Configure APT retries and timeouts to handle network issues
+RUN echo 'Acquire::Retries \"3\";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout \"60\";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::ftp::Timeout \"60\";' >> /etc/apt/apt.conf.d/80-retries
+
+# configure fallback mirrors
+RUN sed -i 's|URIs: https://archive.ubuntu.com/ubuntu/|URIs: https://mirror.cov.ukservers.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://mirror.ox.ac.uk/sites/archive.ubuntu.com/ubuntu/|g' /etc/apt/sources.list.d/ubuntu.sources
+
+RUN apt-get update && apt-get install --assume-yes --no-install-recommends git
 
 RUN git clone https://github.com/cross-rs/cross /cross
 WORKDIR /cross/docker
@@ -15,10 +27,15 @@ FROM cross-base AS build
 
 RUN apt-get install --assume-yes --no-install-recommends libz-mingw-w64-dev g++-mingw-w64-x86-64 gfortran-mingw-w64-x86-64
 
+# Install Wine using OpenSUSE repository because official one is often lagging behind
 RUN dpkg --add-architecture i386 && \
     apt-get install --assume-yes --no-install-recommends wget gpg && \
-    mkdir -pm755 /etc/apt/keyrings && wget -O - https://dl.winehq.org/wine-builds/winehq.key | gpg --dearmor -o /etc/apt/keyrings/winehq-archive.key - && \
-    wget -NP /etc/apt/sources.list.d/ https://dl.winehq.org/wine-builds/ubuntu/dists/noble/winehq-noble.sources && \
+    mkdir -pm755 /etc/apt/keyrings && curl -fsSL \
+    https://download.opensuse.org/repositories/Emulators:/Wine:/Debian/xUbuntu_24.04/Release.key \
+    | tee /etc/apt/keyrings/obs-winehq.key >/dev/null && \
+    echo "deb [arch=amd64,i386 signed-by=/etc/apt/keyrings/obs-winehq.key] \
+    https://download.opensuse.org/repositories/Emulators:/Wine:/Debian/xUbuntu_24.04/ ./" \
+    | tee /etc/apt/sources.list.d/obs-winehq.list && \
     apt-get update && apt-get install --assume-yes --install-recommends winehq-stable
 
 # run-detectors are responsible for calling the correct interpreter for exe

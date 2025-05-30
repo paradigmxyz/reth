@@ -66,7 +66,7 @@ pub(crate) struct MockTransactionSimulator<R: Rng> {
     balances: HashMap<Address, U256>,
     /// represents the on chain nonce of a sender.
     nonces: HashMap<Address, u64>,
-    /// A set of addresses to as senders.
+    /// A set of addresses to use as senders.
     senders: Vec<Address>,
     /// What scenarios to execute.
     scenarios: Vec<ScenarioType>,
@@ -166,7 +166,7 @@ impl MockSimulatorConfig {
     }
 }
 
-/// Represents
+/// Represents the different types of test scenarios.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub(crate) enum ScenarioType {

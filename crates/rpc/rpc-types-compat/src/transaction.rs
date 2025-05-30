@@ -41,9 +41,4 @@ pub trait TransactionCompat<T>: Send + Sync + Unpin + Clone + fmt::Debug {
     /// Builds a fake transaction from a transaction request for inclusion into block built in
     /// `eth_simulateV1`.
     fn build_simulate_v1_transaction(&self, request: TransactionRequest) -> Result<T, Self::Error>;
-
-    /// Truncates the input of a transaction to only the first 4 bytes.
-    // todo: remove in favour of using constructor on `TransactionResponse` or similar
-    // <https://github.com/alloy-rs/alloy/issues/1315>.
-    fn otterscan_api_truncate_input(tx: &mut Self::Transaction);
 }

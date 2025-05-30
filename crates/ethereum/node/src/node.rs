@@ -275,18 +275,7 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
-        let alloy_rpc_types_eth::Block { header, transactions, withdrawals, .. } = rpc_block;
-        reth_ethereum_primitives::Block {
-            header: header.inner,
-            body: reth_ethereum_primitives::BlockBody {
-                transactions: transactions
-                    .into_transactions()
-                    .map(|tx| tx.inner.into_inner().into())
-                    .collect(),
-                ommers: Default::default(),
-                withdrawals,
-            },
-        }
+        rpc_block.into_consensus().convert_transactions()
     }
 }
 
