@@ -21,6 +21,7 @@ use op_alloy_consensus::EIP1559ParamError;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, EvmEnv};
+use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::next_block_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
@@ -50,7 +51,7 @@ pub use alloy_op_evm::{OpBlockExecutorFactory, OpEvm, OpEvmFactory};
 /// Optimism-related EVM configuration.
 #[derive(Debug)]
 pub struct OpEvmConfig<
-    ChainSpec: OpHardforks,
+    ChainSpec = OpChainSpec,
     N: NodePrimitives = OpPrimitives,
     R = OpRethReceiptBuilder,
 > {
@@ -61,7 +62,7 @@ pub struct OpEvmConfig<
     _pd: core::marker::PhantomData<N>,
 }
 
-impl<ChainSpec: OpHardforks, N: NodePrimitives, R: Clone> Clone for OpEvmConfig<ChainSpec, N, R> {
+impl<ChainSpec, N: NodePrimitives, R: Clone> Clone for OpEvmConfig<ChainSpec, N, R> {
     fn clone(&self) -> Self {
         Self {
             executor_factory: self.executor_factory.clone(),
@@ -238,7 +239,7 @@ mod tests {
     };
     use std::sync::Arc;
 
-    fn test_evm_config() -> OpEvmConfig<OpChainSpec> {
+    fn test_evm_config() -> OpEvmConfig {
         OpEvmConfig::optimism(BASE_MAINNET.clone())
     }
 

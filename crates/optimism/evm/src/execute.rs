@@ -46,7 +46,7 @@ mod tests {
         db
     }
 
-    fn evm_config(chain_spec: Arc<OpChainSpec>) -> OpEvmConfig<OpChainSpec> {
+    fn evm_config(chain_spec: Arc<OpChainSpec>) -> OpEvmConfig {
         OpEvmConfig::new(chain_spec, OpRethReceiptBuilder::default())
     }
 
