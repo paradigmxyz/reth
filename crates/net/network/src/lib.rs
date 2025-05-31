@@ -168,7 +168,7 @@ pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
 pub use network::{NetworkHandle, NetworkProtocols};
 pub use swarm::NetworkConnectionState;
-pub use transactions::{FilterAnnouncement, MessageFilter};
+pub use transactions::MessageFilter;
 
 /// re-export p2p interfaces
 pub use reth_network_p2p as p2p;
