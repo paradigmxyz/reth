@@ -152,11 +152,6 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
 
     // Can query the block's ommers/uncles
     let _ommers = provider.ommers(number.into())?;
-
-    // Can query the block's withdrawals (via the `WithdrawalsProvider`)
-    let _withdrawals =
-        provider.withdrawals_by_block(sealed_block.hash().into(), sealed_block.timestamp)?;
-
     Ok(())
 }
 
