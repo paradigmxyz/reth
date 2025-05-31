@@ -185,11 +185,9 @@ pub trait EthBlocks: LoadBlock {
                     .map_err(Self::Error::from_eth_err)?
                     .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
             } else {
-                if let Some(block) = self.recovered_block(block_id).await? {
-                    Some(block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
-                } else {
-                    None
-                }
+                self.recovered_block(block_id)
+                    .await?
+                    .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
             }
             .unwrap_or_default();
 
