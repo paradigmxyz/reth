@@ -461,7 +461,6 @@ where
     async fn block_uncles_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
 
-        // Load the block and get ommers from block.body.ommers instead of trait method
         if let Some(block) = self.block_by_hash(hash, false).await? {
             Ok(Some(U256::from(block.uncles.len())))
         } else {
@@ -476,7 +475,6 @@ where
     ) -> RpcResult<Option<U256>> {
         trace!(target: "rpc::eth", ?number, "Serving eth_getUncleCountByBlockNumber");
 
-        // Load the block and get ommers from block.body.ommers instead of trait method
         if let Some(block) = self.block_by_number(number, false).await? {
             Ok(Some(U256::from(block.uncles.len())))
         } else {
