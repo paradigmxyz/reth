@@ -57,9 +57,6 @@ pub use trie::*;
 mod chain_info;
 pub use chain_info::*;
 
-mod withdrawals;
-pub use withdrawals::*;
-
 #[cfg(feature = "db-api")]
 mod database_provider;
 #[cfg(feature = "db-api")]

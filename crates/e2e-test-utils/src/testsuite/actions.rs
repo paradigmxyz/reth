@@ -36,6 +36,78 @@ fn validate_fcu_response(response: &ForkchoiceUpdated, context: &str) -> Result<
     }
 }
 
+/// Expects that the `ForkchoiceUpdated` response status is VALID.
+pub fn expect_fcu_valid(response: &ForkchoiceUpdated, context: &str) -> Result<()> {
+    match &response.payload_status.status {
+        PayloadStatusEnum::Valid => {
+            debug!("{}: FCU status is VALID as expected.", context);
+            Ok(())
+        }
+        other_status => {
+            Err(eyre::eyre!("{}: Expected FCU status VALID, but got {:?}", context, other_status))
+        }
+    }
+}
+
+/// Expects that the `ForkchoiceUpdated` response status is INVALID.
+pub fn expect_fcu_invalid(response: &ForkchoiceUpdated, context: &str) -> Result<()> {
+    match &response.payload_status.status {
+        PayloadStatusEnum::Invalid { validation_error } => {
+            debug!("{}: FCU status is INVALID as expected: {:?}", context, validation_error);
+            Ok(())
+        }
+        other_status => {
+            Err(eyre::eyre!("{}: Expected FCU status INVALID, but got {:?}", context, other_status))
+        }
+    }
+}
+
+/// Expects that the `ForkchoiceUpdated` response status is either SYNCING or ACCEPTED.
+pub fn expect_fcu_syncing_or_accepted(response: &ForkchoiceUpdated, context: &str) -> Result<()> {
+    match &response.payload_status.status {
+        PayloadStatusEnum::Syncing => {
+            debug!("{}: FCU status is SYNCING as expected (SYNCING or ACCEPTED).", context);
+            Ok(())
+        }
+        PayloadStatusEnum::Accepted => {
+            debug!("{}: FCU status is ACCEPTED as expected (SYNCING or ACCEPTED).", context);
+            Ok(())
+        }
+        other_status => Err(eyre::eyre!(
+            "{}: Expected FCU status SYNCING or ACCEPTED, but got {:?}",
+            context,
+            other_status
+        )),
+    }
+}
+
+/// Expects that the `ForkchoiceUpdated` response status is not SYNCING and not ACCEPTED.
+pub fn expect_fcu_not_syncing_or_accepted(
+    response: &ForkchoiceUpdated,
+    context: &str,
+) -> Result<()> {
+    match &response.payload_status.status {
+        PayloadStatusEnum::Valid => {
+            debug!("{}: FCU status is VALID as expected (not SYNCING or ACCEPTED).", context);
+            Ok(())
+        }
+        PayloadStatusEnum::Invalid { validation_error } => {
+            debug!(
+                "{}: FCU status is INVALID as expected (not SYNCING or ACCEPTED): {:?}",
+                context, validation_error
+            );
+            Ok(())
+        }
+        syncing_or_accepted_status @ (PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted) => {
+            Err(eyre::eyre!(
+                "{}: Expected FCU status not SYNCING or ACCEPTED (i.e., VALID or INVALID), but got {:?}",
+                context,
+                syncing_or_accepted_status
+            ))
+        }
+    }
+}
+
 /// An action that can be performed on an instance.
 ///
 /// Actions execute operations and potentially make assertions in a single step.
