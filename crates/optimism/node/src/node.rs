@@ -25,8 +25,8 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes},
     rpc::{
-        EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, RethRpcAddOns,
-        RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
+        EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder,
+        RethRpcAddOns, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
@@ -196,6 +196,8 @@ where
     type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         OpEthApiBuilder,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
@@ -233,12 +235,7 @@ impl NodeTypes for OpNode {
 
 /// Add-ons w.r.t. optimism.
 #[derive(Debug)]
-pub struct OpAddOns<
-    N: FullNodeComponents,
-    EthB: EthApiBuilder<N>,
-    EV = OpEngineValidatorBuilder,
-    EB = OpEngineApiBuilder<OpEngineValidatorBuilder>,
-> {
+pub struct OpAddOns<N: FullNodeComponents, EthB: EthApiBuilder<N>, EV, EB> {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
     pub rpc_add_ons: RpcAddOns<N, EthB, EV, EB>,
@@ -253,7 +250,13 @@ pub struct OpAddOns<
     enable_tx_conditional: bool,
 }
 
-impl<N, NetworkT> Default for OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT> Default
+    for OpAddOns<
+        N,
+        OpEthApiBuilder<NetworkT>,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >
 where
     N: FullNodeComponents<Types: NodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
@@ -263,7 +266,13 @@ where
     }
 }
 
-impl<N, NetworkT> OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT>
+    OpAddOns<
+        N,
+        OpEthApiBuilder<NetworkT>,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >
 where
     N: FullNodeComponents<Types: NodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
@@ -336,7 +345,7 @@ where
     }
 }
 
-impl<N, NetworkT> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT, EV, EB> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -352,6 +361,8 @@ where
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
     OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
     NetworkT: op_alloy_network::Network + Unpin,
+    EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     type Handle = RpcHandle<N, OpEthApi<N, NetworkT>>;
 
@@ -429,7 +440,7 @@ where
     }
 }
 
-impl<N, NetworkT> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT, EV, EB> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -445,6 +456,8 @@ where
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
     OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
     NetworkT: op_alloy_network::Network + Unpin,
+    EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     type EthApi = OpEthApi<N, NetworkT>;
 
@@ -453,7 +466,7 @@ where
     }
 }
 
-impl<N, NetworkT> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
+impl<N, NetworkT, EV, EB> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -463,6 +476,8 @@ where
         >,
     >,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
+    EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
 {
     type Validator = OpEngineValidator<
         N::Provider,
@@ -532,7 +547,14 @@ impl<NetworkT> OpAddOnsBuilder<NetworkT> {
 
 impl<NetworkT> OpAddOnsBuilder<NetworkT> {
     /// Builds an instance of [`OpAddOns`].
-    pub fn build<N>(self) -> OpAddOns<N, OpEthApiBuilder<NetworkT>>
+    pub fn build<N>(
+        self,
+    ) -> OpAddOns<
+        N,
+        OpEthApiBuilder<NetworkT>,
+        OpEngineValidatorBuilder,
+        OpEngineApiBuilder<OpEngineValidatorBuilder>,
+    >
     where
         N: FullNodeComponents<Types: NodeTypes>,
         OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
