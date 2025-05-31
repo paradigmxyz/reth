@@ -2,8 +2,9 @@ use crate::{BranchNodeCompact, HashBuilder, Nibbles};
 use alloc::vec::Vec;
 use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
-    B256,
+    FixedBytes, B256,
 };
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
@@ -114,6 +115,22 @@ impl TrieUpdates {
             .collect();
         TrieUpdatesSorted { removed_nodes: self.removed_nodes, account_nodes, storage_tries }
     }
+
+    /// Converts trie updates into [`TrieUpdatesSortedRef`].
+    pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
+        let mut account_nodes = Vec::from_iter(self.account_nodes.iter());
+        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        TrieUpdatesSortedRef {
+            removed_nodes: self.removed_nodes.iter().map(|m| m).collect::<BTreeSet<&Nibbles>>(),
+            account_nodes,
+            storage_tries: self
+                .storage_tries
+                .iter()
+                .map(|m| (m.0.clone(), m.1.into_sorted_ref().clone()))
+                .collect(),
+        }
+    }
 }
 
 /// Trie updates for storage trie of a single account.
@@ -223,6 +240,15 @@ impl StorageTrieUpdates {
             is_deleted: self.is_deleted,
             removed_nodes: self.removed_nodes,
             storage_nodes,
+        }
+    }
+
+    /// Convert storage trie updates into [`StorageTrieUpdatesSortedRef`].
+    pub fn into_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
+        StorageTrieUpdatesSortedRef {
+            is_deleted: self.is_deleted,
+            removed_nodes: BTreeSet::from_iter(self.removed_nodes.iter()),
+            storage_nodes: BTreeMap::from_iter(self.storage_nodes.iter()),
         }
     }
 }
@@ -350,6 +376,18 @@ mod serde_nibbles_map {
     }
 }
 
+/// Sorted trie updates reference used for serializing trie to file.
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
+pub struct TrieUpdatesSortedRef<'a> {
+    /// Sorted collection of updated state nodes with corresponding paths.
+    pub account_nodes: Vec<(&'a Nibbles, &'a BranchNodeCompact)>,
+    /// The set of removed state node keys.
+    pub removed_nodes: BTreeSet<&'a Nibbles>,
+    /// Storage tries stored by hashed address of the account the trie belongs to.
+    pub storage_tries: BTreeMap<FixedBytes<32>, StorageTrieUpdatesSortedRef<'a>>,
+}
+
 /// Sorted trie updates used for lookups and insertions.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
@@ -377,6 +415,18 @@ impl TrieUpdatesSorted {
     pub const fn storage_tries_ref(&self) -> &B256Map<StorageTrieUpdatesSorted> {
         &self.storage_tries
     }
+}
+
+/// Sorted storage trie updates reference used for serializing to file.
+#[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
+pub struct StorageTrieUpdatesSortedRef<'a> {
+    /// Flag indicating whether the trie has been deleted/wiped.
+    pub is_deleted: bool,
+    /// Sorted collection of updated storage nodes with corresponding paths.
+    pub storage_nodes: BTreeMap<&'a Nibbles, &'a BranchNodeCompact>,
+    /// The set of removed storage node keys.
+    pub removed_nodes: BTreeSet<&'a Nibbles>,
 }
 
 /// Sorted trie updates used for lookups and insertions.

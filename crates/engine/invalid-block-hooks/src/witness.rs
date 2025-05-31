@@ -315,17 +315,17 @@ where
                 warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root(), ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
             }
 
-            let trie_output_sorted = trie_output.into_sorted();
-            let original_updates_sorted = original_updates.clone().into_sorted();
-            if trie_output_sorted != original_updates_sorted {
+            if &trie_output != original_updates {
                 // Trie updates are too big to diff, so we just save the original and re-executed
+                let trie_output_sorted = &trie_output.into_sorted_ref();
+                let original_updates_sorted = &original_updates.into_sorted_ref();
                 let original_path = self.save_file(
                     format!("{}_{}.trie_updates.original.json", block.number(), block.hash()),
-                    &original_updates_sorted,
+                    original_updates_sorted,
                 )?;
                 let re_executed_path = self.save_file(
                     format!("{}_{}.trie_updates.re_executed.json", block.number(), block.hash()),
-                    &trie_output_sorted,
+                    trie_output_sorted,
                 )?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
