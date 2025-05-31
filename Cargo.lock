@@ -9122,6 +9122,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-optimism-network"
+version = "1.4.4"
+dependencies = [
+ "alloy-consensus",
+ "op-alloy-consensus",
+ "reth-eth-wire-types",
+ "reth-optimism-primitives",
+]
+
+[[package]]
 name = "reth-optimism-node"
 version = "1.4.6"
 dependencies = [
@@ -9153,7 +9163,9 @@ dependencies = [
  "reth-optimism-consensus",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-network",
  "reth-optimism-node",
+ "reth-optimism-node-types",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-rpc",
@@ -9173,11 +9185,26 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-common",
- "reth-trie-db",
  "revm",
  "serde",
  "serde_json",
  "tokio",
+]
+
+[[package]]
+name = "reth-optimism-node-types"
+version = "1.4.4"
+dependencies = [
+ "alloy-rpc-types-engine",
+ "op-alloy-rpc-types-engine",
+ "reth-node-api",
+ "reth-optimism-chainspec",
+ "reth-optimism-payload-builder",
+ "reth-optimism-primitives",
+ "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-trie-db",
+ "serde",
 ]
 
 [[package]]
@@ -9276,6 +9303,10 @@ dependencies = [
  "reqwest",
  "reth-chain-state",
  "reth-chainspec",
+ "reth-consensus",
+ "reth-db",
+ "reth-db-api",
+ "reth-db-common",
  "reth-evm",
  "reth-metrics",
  "reth-network-api",
@@ -9284,10 +9315,14 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-evm",
  "reth-optimism-forks",
+ "reth-optimism-network",
+ "reth-optimism-node",
+ "reth-optimism-node-types",
  "reth-optimism-payload-builder",
  "reth-optimism-primitives",
  "reth-optimism-txpool",
  "reth-primitives-traits",
+ "reth-provider",
  "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-engine-api",

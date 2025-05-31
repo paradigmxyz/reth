@@ -8,8 +8,8 @@ use op_alloy_consensus::{
     OpTxEnvelope,
 };
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
-use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::{DepositReceipt, OpTransactionSigned};
+use reth_provider::FullRpcProvider;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
@@ -88,8 +88,7 @@ where
 
 impl<N> TransactionCompat<OpTransactionSigned> for OpEthApi<N>
 where
-    N: FullNodeComponents,
-    N::Provider: ReceiptProvider<Receipt: DepositReceipt>,
+    N: RpcNodeCore<Provider: FullRpcProvider<Receipt: DepositReceipt>>,
 {
     type Transaction = Transaction;
     type Error = OpEthApiError;
