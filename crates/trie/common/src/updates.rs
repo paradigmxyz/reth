@@ -118,16 +118,16 @@ impl TrieUpdates {
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
     pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
-        let mut account_nodes = Vec::from_iter(self.account_nodes.iter());
-        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
+        account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         TrieUpdatesSortedRef {
-            removed_nodes: self.removed_nodes.iter().map(|m| m).collect::<BTreeSet<&Nibbles>>(),
+            removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
             account_nodes,
             storage_tries: self
                 .storage_tries
                 .iter()
-                .map(|m| (m.0.clone(), m.1.into_sorted_ref().clone()))
+                .map(|m| (*m.0, m.1.into_sorted_ref().clone()))
                 .collect(),
         }
     }
@@ -247,8 +247,8 @@ impl StorageTrieUpdates {
     pub fn into_sorted_ref(&self) -> StorageTrieUpdatesSortedRef<'_> {
         StorageTrieUpdatesSortedRef {
             is_deleted: self.is_deleted,
-            removed_nodes: BTreeSet::from_iter(self.removed_nodes.iter()),
-            storage_nodes: BTreeMap::from_iter(self.storage_nodes.iter()),
+            removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
+            storage_nodes: self.storage_nodes.iter().collect::<BTreeMap<_, _>>(),
         }
     }
 }
