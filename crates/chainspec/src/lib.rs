@@ -43,6 +43,27 @@ pub fn once_cell_set<T>(value: T) -> OnceLock<T> {
     once
 }
 
+pub mod hyperliquid;
+pub use hyperliquid::{HYPERLIQUID, HYPERLIQUID_TESTNET};
+
+/// Known chains enum
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NamedChain {
+    // 既存のチェーン...
+    Hyperliquid,
+    HyperliquidTestnet,
+}
+
+impl NamedChain {
+    pub fn chain_spec(&self) -> Arc<ChainSpec> {
+        match self {
+            // 既存のマッチング...
+            Self::Hyperliquid => HYPERLIQUID.clone(),
+            Self::HyperliquidTestnet => HYPERLIQUID_TESTNET.clone(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
