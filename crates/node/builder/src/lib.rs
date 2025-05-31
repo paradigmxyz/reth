@@ -18,6 +18,10 @@ pub mod hooks;
 pub mod node;
 pub use node::*;
 
+/// Support for accessing the EngineApi outside the RPC server context.
+mod engine_api_ext;
+pub use engine_api_ext::EngineApiExt;
+
 /// Support for configuring the components of a node.
 pub mod components;
 pub use components::{NodeComponents, NodeComponentsBuilder};

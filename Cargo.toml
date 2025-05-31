@@ -147,6 +147,7 @@ members = [
     "examples/custom-rlpx-subprotocol",
     "examples/custom-node",
     "examples/db-access",
+    "examples/engine-api-access",
     "examples/exex-hello-world",
     "examples/exex-subscription",
     "examples/exex-test",
