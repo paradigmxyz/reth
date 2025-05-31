@@ -34,6 +34,7 @@ use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
 use reth_optimism_forks::OpHardforks;
+use reth_optimism_node_types::OpTypes;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
@@ -60,7 +61,6 @@ use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
     TransactionPool, TransactionValidationTaskExecutor,
 };
-use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
 use std::{marker::PhantomData, sync::Arc};
 
@@ -224,11 +224,11 @@ where
 }
 
 impl NodeTypes for OpNode {
-    type Primitives = OpPrimitives;
-    type ChainSpec = OpChainSpec;
-    type StateCommitment = MerklePatriciaTrie;
-    type Storage = OpStorage;
-    type Payload = OpEngineTypes;
+    type Primitives = <OpTypes as NodeTypes>::Primitives;
+    type ChainSpec = <OpTypes as NodeTypes>::ChainSpec;
+    type StateCommitment = <OpTypes as NodeTypes>::StateCommitment;
+    type Storage = <OpTypes as NodeTypes>::Storage;
+    type Payload = OpEngineTypes<<OpTypes as NodeTypes>::Payload>;
 }
 
 /// Add-ons w.r.t. optimism.
