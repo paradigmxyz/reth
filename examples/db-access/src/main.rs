@@ -149,6 +149,7 @@ fn block_provider_example<T: BlockReader<Block = reth_ethereum::Block>>(
         .find_block_by_hash(sealed_block.hash(), BlockSource::Any)?
         .ok_or(eyre::eyre!("block hash not found"))?;
     assert_eq!(block, block_by_hash3);
+    Ok(())
 }
 
 /// The `ReceiptProvider` allows querying the receipts tables.
