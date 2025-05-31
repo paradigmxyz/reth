@@ -92,9 +92,33 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
         number: BlockNumberOrTag,
     ) -> RpcResult<Option<U256>>;
 
+    /// Returns the number of uncles in a block from a block matching the given block hash.
+    #[method(name = "getUncleCountByBlockHash")]
+    async fn block_uncles_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>>;
+
+    /// Returns the number of uncles in a block with given block number.
+    #[method(name = "getUncleCountByBlockNumber")]
+    async fn block_uncles_count_by_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<U256>>;
+
     /// Returns all transaction receipts for a given block.
     #[method(name = "getBlockReceipts")]
     async fn block_receipts(&self, block_id: BlockId) -> RpcResult<Option<Vec<R>>>;
+
+    /// Returns an uncle block of the given block and index.
+    #[method(name = "getUncleByBlockHashAndIndex")]
+    async fn uncle_by_block_hash_and_index(&self, hash: B256, index: Index)
+        -> RpcResult<Option<B>>;
+
+    /// Returns an uncle block of the given block and index.
+    #[method(name = "getUncleByBlockNumberAndIndex")]
+    async fn uncle_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> RpcResult<Option<B>>;
 
     /// Returns the EIP-2718 encoded transaction if it exists.
     ///
@@ -433,6 +457,33 @@ where
         Ok(EthBlocks::block_transaction_count(self, number.into()).await?.map(U256::from))
     }
 
+    /// Handler for: `eth_getUncleCountByBlockHash`
+    async fn block_uncles_count_by_hash(&self, hash: B256) -> RpcResult<Option<U256>> {
+        trace!(target: "rpc::eth", ?hash, "Serving eth_getUncleCountByBlockHash");
+
+        // Load the block and get ommers from block.body.ommers instead of trait method
+        if let Some(block) = self.block_by_hash(hash, false).await? {
+            Ok(Some(U256::from(block.uncles.len())))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Handler for: `eth_getUncleCountByBlockNumber`
+    async fn block_uncles_count_by_number(
+        &self,
+        number: BlockNumberOrTag,
+    ) -> RpcResult<Option<U256>> {
+        trace!(target: "rpc::eth", ?number, "Serving eth_getUncleCountByBlockNumber");
+
+        // Load the block and get ommers from block.body.ommers instead of trait method
+        if let Some(block) = self.block_by_number(number, false).await? {
+            Ok(Some(U256::from(block.uncles.len())))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Handler for: `eth_getBlockReceipts`
     async fn block_receipts(
         &self,
@@ -440,6 +491,26 @@ where
     ) -> RpcResult<Option<Vec<RpcReceipt<T::NetworkTypes>>>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getBlockReceipts");
         Ok(EthBlocks::block_receipts(self, block_id).await?)
+    }
+
+    /// Handler for: `eth_getUncleByBlockHashAndIndex`
+    async fn uncle_by_block_hash_and_index(
+        &self,
+        hash: B256,
+        index: Index,
+    ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
+        trace!(target: "rpc::eth", ?hash, ?index, "Serving eth_getUncleByBlockHashAndIndex");
+        Ok(EthBlocks::ommer_by_block_and_index(self, hash.into(), index).await?)
+    }
+
+    /// Handler for: `eth_getUncleByBlockNumberAndIndex`
+    async fn uncle_by_block_number_and_index(
+        &self,
+        number: BlockNumberOrTag,
+        index: Index,
+    ) -> RpcResult<Option<RpcBlock<T::NetworkTypes>>> {
+        trace!(target: "rpc::eth", ?number, ?index, "Serving eth_getUncleByBlockNumberAndIndex");
+        Ok(EthBlocks::ommer_by_block_and_index(self, number.into(), index).await?)
     }
 
     /// Handler for: `eth_getRawTransactionByHash`

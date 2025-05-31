@@ -6,7 +6,9 @@ use crate::{
     RpcReceipt,
 };
 use alloy_eips::BlockId;
-use alloy_rpc_types_eth::Header;
+use alloy_primitives::{Sealable, U256};
+use alloy_rlp::Encodable;
+use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
@@ -146,6 +148,61 @@ pub trait EthBlocks: LoadBlock {
             }
 
             Ok(None)
+        }
+    }
+
+    /// Returns uncle headers of given block.
+    ///
+    /// Returns an empty vec if there are none.
+    #[expect(clippy::type_complexity)]
+    fn ommers(
+        &self,
+        block_id: BlockId,
+    ) -> impl Future<Output = Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
+    {
+        async move {
+            if let Some(block) = self.recovered_block(block_id).await? {
+                Ok(block.body().ommers().map(|o| o.to_vec()))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    /// Returns uncle block at given index in given block.
+    ///
+    /// Returns `None` if index out of range.
+    fn ommer_by_block_and_index(
+        &self,
+        block_id: BlockId,
+        index: Index,
+    ) -> impl Future<Output = Result<Option<RpcBlock<Self::NetworkTypes>>, Self::Error>> + Send
+    {
+        async move {
+            let uncles = if block_id.is_pending() {
+                self.provider()
+                    .pending_block()
+                    .map_err(Self::Error::from_eth_err)?
+                    .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
+            } else {
+                if let Some(block) = self.recovered_block(block_id).await? {
+                    Some(block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
+                } else {
+                    None
+                }
+            }
+            .unwrap_or_default();
+
+            Ok(uncles.into_iter().nth(index.into()).map(|header| {
+                let block = alloy_consensus::Block::<alloy_consensus::TxEnvelope, _>::uncle(header);
+                let size = U256::from(block.length());
+                Block {
+                    uncles: vec![],
+                    header: Header::from_consensus(block.header.seal_slow(), None, Some(size)),
+                    transactions: BlockTransactions::Uncle,
+                    withdrawals: None,
+                }
+            }))
         }
     }
 }
