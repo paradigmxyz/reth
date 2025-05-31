@@ -123,6 +123,7 @@ pub async fn maintain_pending_state<P>(
             }
             // ignore
             BeaconConsensusEngineEvent::CanonicalChainCommitted(_, _) |
+            BeaconConsensusEngineEvent::BlockReceived(_) |
             BeaconConsensusEngineEvent::LiveSyncProgress(_) => (),
         }
     }

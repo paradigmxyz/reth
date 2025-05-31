@@ -566,6 +566,10 @@ where
             }
         };
 
+        let header = block.clone_sealed_header();
+        let engine_event = BeaconConsensusEngineEvent::BlockReceived(header);
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+
         let block_hash = block.hash();
         let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
         if lowest_buffered_ancestor == block_hash {
@@ -3114,6 +3118,18 @@ mod tests {
                 EngineApiEvent::BeaconConsensus(
                     BeaconConsensusEngineEvent::CanonicalChainCommitted(header, _),
                 ) => {
+                    assert_eq!(header.hash(), hash);
+                }
+                _ => panic!("Unexpected event: {event:#?}"),
+            }
+        }
+
+        async fn check_block_received(&mut self, hash: B256) {
+            let event = self.from_tree_rx.recv().await.unwrap();
+            match event {
+                EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::BlockReceived(
+                    header,
+                )) => {
                     assert_eq!(header.hash(), hash);
                 }
                 _ => panic!("Unexpected event: {event:#?}"),
