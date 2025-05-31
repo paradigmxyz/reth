@@ -445,7 +445,7 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "24.0.0", default-features = false }
+revm = { version = "24.0.1", default-features = false }
 revm-bytecode = { version = "4.0.0", default-features = false }
 revm-database = { version = "4.0.0", default-features = false }
 revm-state = { version = "4.0.0", default-features = false }
