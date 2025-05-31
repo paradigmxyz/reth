@@ -5,4 +5,4 @@
 mod history;
 
 /// Imports history from ERA files.
-pub use history::import;
+pub use history::{build_index, decode, import, open, process, process_iter, ProcessIter};

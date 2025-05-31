@@ -21,6 +21,9 @@ reth-db.workspace = true
 reth-db-api.workspace = true
 reth-etl.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }
+reth-era-downloader.workspace = true
+reth-era-utils.workspace = true
+reth-era.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
 reth-network-p2p.workspace = true
@@ -60,6 +63,7 @@ bincode.workspace = true
 blake3.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
 serde = { workspace = true, features = ["derive"] }
+eyre.workspace = true
 
 [dev-dependencies]
 # reth
