@@ -210,13 +210,20 @@ impl<N: NodePrimitives> TreeState<N> {
         while let Some(executed) = self.blocks_by_hash.get(&current_block) {
             current_block = executed.recovered_block().parent_hash();
             if executed.recovered_block().number() <= upper_bound {
-                debug!(target: "engine::tree", num_hash=?executed.recovered_block().num_hash(), "Attempting to remove block walking back from the head");
-                if let Some((removed, _)) = self.remove_by_hash(executed.recovered_block().hash()) {
-                    debug!(target: "engine::tree", num_hash=?removed.recovered_block().num_hash(), "Removed block walking back from the head");
+                let num_hash = executed.recovered_block().num_hash();
+                debug!(target: "engine::tree", ?num_hash, "Attempting to remove block walking back from the head");
+                if let Some((mut removed, _)) =
+                    self.remove_by_hash(executed.recovered_block().hash())
+                {
+                    debug!(target: "engine::tree", ?num_hash, "Removed block walking back from the head");
                     // finally, move the trie updates
+                    let Some(trie_updates) = removed.trie.take_present() else {
+                        debug!(target: "engine::tree", ?num_hash, "No trie updates found for persisted block");
+                        continue;
+                    };
                     self.persisted_trie_updates.insert(
                         removed.recovered_block().hash(),
-                        (removed.recovered_block().number(), removed.trie),
+                        (removed.recovered_block().number(), trie_updates),
                     );
                 }
             }

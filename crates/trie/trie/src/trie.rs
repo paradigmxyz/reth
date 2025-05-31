@@ -13,7 +13,7 @@ use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
-use tracing::trace;
+use tracing::{trace, trace_span};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::{StateRootMetrics, TrieRootMetrics};
@@ -396,7 +396,10 @@ where
         self,
         retain_updates: bool,
     ) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
-        trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
+        let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_address = ?self.hashed_address);
+        let _enter = span.enter();
+
+        trace!(target: "trie::storage_root", "calculating storage root");
 
         let mut hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;

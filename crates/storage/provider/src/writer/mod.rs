@@ -6,7 +6,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_errors::ProviderResult;
+use reth_errors::{ProviderError, ProviderResult};
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{DBProvider, StageCheckpointWriter, TransactionsProviderExt};
@@ -165,6 +165,7 @@ where
             trie,
         } in blocks
         {
+            let block_hash = recovered_block.hash();
             self.database()
                 .insert_block(Arc::unwrap_or_clone(recovered_block), StorageLocation::Both)?;
 
@@ -179,7 +180,9 @@ where
             // insert hashes and intermediate merkle nodes
             self.database()
                 .write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
-            self.database().write_trie_updates(&trie)?;
+            self.database().write_trie_updates(
+                trie.as_ref().ok_or(ProviderError::MissingTrieUpdates(block_hash))?,
+            )?;
         }
 
         // update history indices
