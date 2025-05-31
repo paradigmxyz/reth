@@ -1,6 +1,6 @@
 use crate::{
     BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, OmmersProvider, ReceiptProvider,
-    ReceiptProviderIdExt, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    ReceiptProviderIdExt, TransactionVariant, TransactionsProvider,
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -53,7 +53,6 @@ pub trait BlockReader:
     + BlockBodyIndicesProvider
     + TransactionsProvider
     + ReceiptProvider
-    + WithdrawalsProvider
     + OmmersProvider
     + Send
     + Sync
