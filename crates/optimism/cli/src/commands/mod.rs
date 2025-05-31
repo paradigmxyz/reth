@@ -5,7 +5,7 @@ use import_receipts::ImportReceiptsOpCommand;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, init_cmd,
+    config_cmd, db, dump_genesis, init_cmd, inspect,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
 };
@@ -55,6 +55,9 @@ pub enum Commands<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + f
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command<Spec>),
+    /// Scripts for node inspection.
+    #[command(name = "inspect")]
+    Inspect(inspect::Command<Spec>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<Spec>),
@@ -81,6 +84,7 @@ impl<
             Self::P2P(cmd) => cmd.chain_spec(),
             Self::Config(_) => None,
             Self::Recover(cmd) => cmd.chain_spec(),
+            Self::Inspect(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ImportOp(cmd) => cmd.chain_spec(),
             Self::ImportReceiptsOp(cmd) => cmd.chain_spec(),
