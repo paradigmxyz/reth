@@ -16,7 +16,7 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
 };
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
-use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};

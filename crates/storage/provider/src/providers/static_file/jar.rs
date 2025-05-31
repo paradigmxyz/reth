@@ -20,7 +20,7 @@ use reth_db_api::{
 };
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{SealedHeader, SignedTransaction};
-use reth_storage_api::{BlockBodyIndicesProvider};
+use reth_storage_api::BlockBodyIndicesProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
