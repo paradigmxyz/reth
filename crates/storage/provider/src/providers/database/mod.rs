@@ -5,10 +5,10 @@ use crate::{
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::ChainInfo;
@@ -530,16 +530,6 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         self.provider()?.receipts_by_block_range(block_range)
-    }
-}
-
-impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
-    fn withdrawals_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        self.provider()?.withdrawals_by_block(id, timestamp)
     }
 }
 

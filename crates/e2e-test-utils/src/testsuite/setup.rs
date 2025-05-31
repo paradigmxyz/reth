@@ -9,7 +9,7 @@ use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
-use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_rpc_api::clients::EthApiClient;
@@ -34,6 +34,8 @@ pub struct Setup<I> {
     pub state: Option<EvmState>,
     /// Network configuration
     pub network: NetworkSetup,
+    /// Engine tree configuration
+    pub tree_config: TreeConfig,
     /// Shutdown channel to stop nodes when setup is dropped
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
@@ -50,6 +52,7 @@ impl<I> Default for Setup<I> {
             blocks: Vec::new(),
             state: None,
             network: NetworkSetup::default(),
+            tree_config: TreeConfig::default(),
             shutdown_tx: None,
             is_dev: true,
             _phantom: Default::default(),
@@ -117,6 +120,12 @@ where
         self
     }
 
+    /// Set the engine tree configuration
+    pub const fn with_tree_config(mut self, tree_config: TreeConfig) -> Self {
+        self.tree_config = tree_config;
+        self
+    }
+
     /// Apply the setup to the environment
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
@@ -152,6 +161,7 @@ where
             node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
             is_dev,
+            self.tree_config.clone(),
             attributes_generator,
         )
         .await;
