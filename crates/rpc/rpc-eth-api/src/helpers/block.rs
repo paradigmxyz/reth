@@ -13,9 +13,7 @@ use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_rpc_types_compat::block::from_block;
-use reth_storage_api::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt, ProviderTx,
-};
+use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 
@@ -160,8 +158,15 @@ pub trait EthBlocks: LoadBlock {
     fn ommers(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error> {
-        self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
+    ) -> impl Future<Output = Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
+    {
+        async move {
+            if let Some(block) = self.recovered_block(block_id).await? {
+                Ok(block.body().ommers().map(|o| o.to_vec()))
+            } else {
+                Ok(None)
+            }
+        }
     }
 
     /// Returns uncle block at given index in given block.
@@ -175,13 +180,16 @@ pub trait EthBlocks: LoadBlock {
     {
         async move {
             let uncles = if block_id.is_pending() {
-                // Pending block can be fetched directly without need for caching
                 self.provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
                     .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
             } else {
-                self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)?
+                if let Some(block) = self.recovered_block(block_id).await? {
+                    Some(block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
+                } else {
+                    None
+                }
             }
             .unwrap_or_default();
 

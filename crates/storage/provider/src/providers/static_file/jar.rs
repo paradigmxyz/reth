@@ -11,16 +11,16 @@ use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use reth_chainspec::ChainInfo;
 use reth_db::static_file::{
-    BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, OmmersMask, ReceiptMask,
-    StaticFileCursor, TDWithHashMask, TotalDifficultyMask, TransactionMask,
+    BlockHashMask, BodyIndicesMask, HeaderMask, HeaderWithHashMask, ReceiptMask, StaticFileCursor,
+    TDWithHashMask, TotalDifficultyMask, TransactionMask,
 };
 use reth_db_api::{
     models::StoredBlockBodyIndices,
     table::{Decompress, Value},
 };
-use reth_node_types::{FullNodePrimitives, NodePrimitives};
+use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{SealedHeader, SignedTransaction};
-use reth_storage_api::{BlockBodyIndicesProvider, OmmersProvider};
+use reth_storage_api::BlockBodyIndicesProvider;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     fmt::Debug,
@@ -357,19 +357,6 @@ impl<N: NodePrimitives<SignedTx: Decompress + SignedTransaction, Receipt: Decomp
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         // Related to indexing tables. StaticFile should get the tx_range and call static file
         // provider with `receipt()` instead for each
-        Err(ProviderError::UnsupportedProvider)
-    }
-}
-
-impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileJarProvider<'_, N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        if let Some(num) = id.as_number() {
-            return Ok(self
-                .cursor()?
-                .get_one::<OmmersMask<Self::Header>>(num.into())?
-                .map(|s| s.ommers))
-        }
-        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 }
