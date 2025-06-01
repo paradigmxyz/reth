@@ -44,10 +44,14 @@ impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig> {
 impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    Provider: NodePrimitivesProvider + BlockReaderIdExt<Header = alloy_consensus::Header>,
+    Provider: NodePrimitivesProvider<Primitives: NodePrimitives<BlockHeader = Provider::Header>>
+        + BlockReaderIdExt,
 {
     /// Fetches the parent header by hash.
-    fn parent_header(&self, parent_block_hash: B256) -> ProviderResult<SealedHeader> {
+    fn parent_header(
+        &self,
+        parent_block_hash: B256,
+    ) -> ProviderResult<SealedHeader<Provider::Header>> {
         self.inner
             .provider
             .sealed_header_by_hash(parent_block_hash)?
@@ -62,7 +66,7 @@ where
     Pool: TransactionPool<
             Transaction: OpPooledTx<Consensus = <Provider::Primitives as NodePrimitives>::SignedTx>,
         > + 'static,
-    Provider: BlockReaderIdExt<Header = alloy_consensus::Header>
+    Provider: BlockReaderIdExt<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + NodePrimitivesProvider<Primitives: OpPayloadPrimitives>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec = OpChainSpec>
