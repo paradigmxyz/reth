@@ -1,5 +1,6 @@
 use crate::PipelineEvent;
 use alloy_eips::eip1898::BlockWithParent;
+use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
@@ -163,4 +164,16 @@ pub enum PipelineError {
     /// The pipeline encountered an unwind when `fail_on_unwind` was set to `true`.
     #[error("unexpected unwind")]
     UnexpectedUnwind,
+    /// Cannot unwind to block as it is beyond the history retention limit.
+    #[error("Cannot unwind to block {target} as it is beyond the {history_type} history limit. Latest block: {latest}, History limit: {history_limit}")]
+    UnwindTargetBeyondHistoryLimit {
+        /// The target block number to unwind to
+        target: BlockNumber,
+        /// The latest block number in the chain
+        latest: BlockNumber,
+        /// Number of blocks from latest block that is retained in history
+        history_limit: BlockNumber,
+        /// The type of history (account or storage)
+        history_type: String,
+    },
 }

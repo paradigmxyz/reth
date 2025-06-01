@@ -7,11 +7,11 @@ pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, ChainStateBlockReader,
-    ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory, StageCheckpointReader,
-    StageCheckpointWriter,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockNumReader,
+    ChainStateBlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
+    StageCheckpointReader, StageCheckpointWriter,
 };
-use reth_prune::PrunerBuilder;
+use reth_prune::{PruneMode, PrunerBuilder};
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::{EventSender, EventStream};
 use std::pin::Pin;
@@ -280,6 +280,51 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
+        // Add validation before starting unwind
+        let provider = self.provider_factory.provider()?;
+        let latest_block = provider.last_block_number()?;
+
+        // Get the actual pruning configuration
+        let prune_modes = provider.prune_modes_ref();
+
+        // Check account history pruning
+        if let Some(PruneMode::Distance(history_limit)) = prune_modes.account_history {
+            if latest_block.saturating_sub(to) > history_limit {
+                warn!(
+                    target: "sync::pipeline",
+                    target_block = to,
+                    latest_block = latest_block,
+                    history_limit = history_limit,
+                    "Cannot unwind: target block is beyond account history limit"
+                );
+                return Err(PipelineError::UnwindTargetBeyondHistoryLimit {
+                    target: to,
+                    latest: latest_block,
+                    history_limit,
+                    history_type: "account".into(),
+                });
+            }
+        }
+
+        // Check storage history pruning
+        if let Some(PruneMode::Distance(history_limit)) = prune_modes.storage_history {
+            if latest_block.saturating_sub(to) > history_limit {
+                warn!(
+                    target: "sync::pipeline",
+                    target_block = to,
+                    latest_block = latest_block,
+                    history_limit = history_limit,
+                    "Cannot unwind: target block is beyond storage history limit"
+                );
+                return Err(PipelineError::UnwindTargetBeyondHistoryLimit {
+                    target: to,
+                    latest: latest_block,
+                    history_limit,
+                    history_type: "storage".into(),
+                });
+            }
+        }
+
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
