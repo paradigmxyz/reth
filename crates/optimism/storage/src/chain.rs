@@ -13,10 +13,15 @@ use reth_storage_api::{
 
 /// Optimism storage implementation.
 #[derive(Debug, Clone, Copy)]
-pub struct OptStorage<T = OpTransactionSigned, H = Header>(PhantomData<(T, H)>);
+pub struct OpStorage<T = OpTransactionSigned, H = Header>(PhantomData<(T, H)>);
 
-impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>>
-    for OptStorage<T, H>
+impl<T, H> Default for OpStorage<T, H> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
+
+impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>> for OpStorage<T, H>
 where
     T: SignedTransaction,
     H: FullBlockHeader,
@@ -42,7 +47,7 @@ where
     }
 }
 
-impl<Provider, T, H> BlockBodyReader<Provider> for OptStorage<T, H>
+impl<Provider, T, H> BlockBodyReader<Provider> for OpStorage<T, H>
 where
     Provider: ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + DBProvider,
     T: SignedTransaction,

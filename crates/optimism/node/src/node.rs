@@ -46,11 +46,12 @@ use reth_optimism_rpc::{
     witness::{DebugExecutionWitnessApiServer, OpDebugWitnessApi},
     OpEthApi, OpEthApiError, SequencerClient,
 };
+use reth_optimism_storage::OpStorage;
 use reth_optimism_txpool::{
     supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
     OpPooledTx,
 };
-use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{ext::L2EthApiExtServer, FullEthApiServer};
 use reth_rpc_eth_types::error::FromEvmError;
@@ -74,8 +75,6 @@ impl<N> OpNodeTypes for N where
     N: NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
 {
 }
-/// Storage implementation for Optimism.
-pub type OpStorage = EthStorage<OpTransactionSigned>;
 
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
