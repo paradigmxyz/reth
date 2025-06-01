@@ -198,17 +198,17 @@ where
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
-    for (index, (result, tx)) in results.iter().zip(block.body().transactions()).enumerate() {
+    for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = T::Error::from_evm_halt(reason.clone(), tx.gas_limit());
+                let error = T::Error::from_evm_halt(reason, tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: error.into().code(),
                     }),
-                    gas_used: *gas_used,
+                    gas_used,
                     logs: Vec::new(),
                     status: false,
                 }
@@ -216,26 +216,26 @@ where
             ExecutionResult::Revert { output, gas_used } => {
                 let error = RevertError::new(output.clone());
                 SimCallResult {
-                    return_data: output.clone(),
+                    return_data: output,
                     error: Some(SimulateError {
                         code: error.error_code(),
                         message: error.to_string(),
                     }),
-                    gas_used: *gas_used,
+                    gas_used,
                     status: false,
                     logs: Vec::new(),
                 }
             }
             ExecutionResult::Success { output, gas_used, logs, .. } => SimCallResult {
-                return_data: output.clone().into_data(),
+                return_data: output.into_data(),
                 error: None,
-                gas_used: *gas_used,
+                gas_used,
                 logs: logs
-                    .iter()
+                    .into_iter()
                     .map(|log| {
                         log_index += 1;
                         alloy_rpc_types_eth::Log {
-                            inner: log.clone(),
+                            inner: log,
                             log_index: Some(log_index - 1),
                             transaction_index: Some(index as u64),
                             transaction_hash: Some(*tx.tx_hash()),
