@@ -64,7 +64,7 @@ pub use engine::EngineArgs;
 mod ress_args;
 pub use ress_args::RessArgs;
 
-/// HardforkOverridesArgs for configuring hardfork overrides
+/// `HardforkOverridesArgs` for configuring hardfork overrides
 mod hardfork_overrides;
 pub use hardfork_overrides::HardforkOverridesArgs;
 

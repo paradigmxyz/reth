@@ -7,7 +7,7 @@ use std::collections::HashMap;
 ///
 /// These arguments allow users to override the default timestamps for various
 /// Ethereum hardforks, enabling custom network configurations and testing scenarios.
-#[derive(Debug, Args, Clone)]
+#[derive(Default, Debug, Args, Clone)]
 #[command(next_help_heading = "Hardfork Overrides")]
 pub struct HardforkOverridesArgs {
     /// Override Frontier hardfork timestamp
@@ -85,32 +85,6 @@ pub struct HardforkOverridesArgs {
     /// Override Osaka hardfork timestamp
     #[arg(long = "override.osaka", value_name = "TIMESTAMP")]
     pub override_osaka: Option<u64>,
-}
-
-impl Default for HardforkOverridesArgs {
-    fn default() -> Self {
-        Self {
-            override_frontier: None,
-            override_homestead: None,
-            override_dao: None,
-            override_tangerine: None,
-            override_spurious: None,
-            override_byzantium: None,
-            override_constantinople: None,
-            override_petersburg: None,
-            override_istanbul: None,
-            override_muir: None,
-            override_berlin: None,
-            override_london: None,
-            override_arrow: None,
-            override_gray: None,
-            override_paris: None,
-            override_shanghai: None,
-            override_cancun: None,
-            override_prague: None,
-            override_osaka: None,
-        }
-    }
 }
 
 impl HardforkOverridesArgs {

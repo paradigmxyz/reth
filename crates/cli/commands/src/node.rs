@@ -186,6 +186,7 @@ where
             dev,
             pruning,
             engine,
+            hardfork_overrides,
         };
 
         let data_dir = node_config.datadir();
