@@ -3,12 +3,18 @@ use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_db_api::transaction::{DbTx, DbTxMut};
+use reth_node_api::{FullNodePrimitives, FullSignedTx, NodePrimitives, NodeTypes};
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::OpTransactionSigned;
+use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
 use reth_primitives_traits::{Block, FullBlockHeader, SignedTransaction};
+use reth_provider::{
+    providers::{ChainStorage, NodeTypesForProvider},
+    DatabaseProvider,
+};
 use reth_storage_api::{
-    errors::ProviderResult, BlockBodyReader, BlockBodyWriter, DBProvider, ReadBodyInput,
-    StorageLocation,
+    errors::ProviderResult, BlockBodyReader, BlockBodyWriter, ChainStorageReader,
+    ChainStorageWriter, DBProvider, ReadBodyInput, StorageLocation,
 };
 
 /// Optimism storage implementation.
@@ -17,12 +23,41 @@ pub struct OpStorage<T = OpTransactionSigned, H = Header>(PhantomData<(T, H)>);
 
 impl<T, H> Default for OpStorage<T, H> {
     fn default() -> Self {
-        Self(PhantomData)
+        Self(Default::default())
+    }
+}
+
+impl<N, T, H> ChainStorage<N> for OpStorage<T, H>
+where
+    T: FullSignedTx,
+    H: FullBlockHeader,
+    N: FullNodePrimitives<
+        Block = alloy_consensus::Block<T, H>,
+        BlockHeader = H,
+        BlockBody = alloy_consensus::BlockBody<T, H>,
+        SignedTx = T,
+    >,
+{
+    fn reader<TX, Types>(&self) -> impl ChainStorageReader<DatabaseProvider<TX, Types>, N>
+    where
+        TX: DbTx + 'static,
+        Types: NodeTypesForProvider<Primitives = N>,
+    {
+        self
+    }
+
+    fn writer<TX, Types>(&self) -> impl ChainStorageWriter<DatabaseProvider<TX, Types>, N>
+    where
+        TX: DbTxMut + DbTx + 'static,
+        Types: NodeTypesForProvider<Primitives = N>,
+    {
+        self
     }
 }
 
 impl<Provider, T, H> BlockBodyWriter<Provider, alloy_consensus::BlockBody<T, H>> for OpStorage<T, H>
 where
+    Provider: DBProvider<Tx: DbTxMut>,
     T: SignedTransaction,
     H: FullBlockHeader,
 {
