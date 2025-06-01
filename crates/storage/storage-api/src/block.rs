@@ -160,9 +160,6 @@ impl<T: BlockReader> BlockReader for Arc<T> {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        T::pending_block(self)
-    }
     fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block_with_senders(self)
     }
@@ -220,9 +217,6 @@ impl<T: BlockReader> BlockReader for &T {
     }
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
-    }
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        T::pending_block(self)
     }
     fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block_with_senders(self)
