@@ -22,6 +22,35 @@ jobs:
     permissions:
       packages: write
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        isRC:
+          - ${{ contains(github.ref, '-rc') }}
+        build:
+          - name: "Build and push reth image"
+            id: reth_image
+            command: "make PROFILE=maxperf docker-build-push"
+          - name: "Build and push reth image, tag as latest"
+            id: reth_image_latest
+            command: "make PROFILE=maxperf docker-build-push-latest"
+          - name: "Build and push op-reth image"
+            id: op_reth_image
+            command: "make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push"
+          - name: "Build and push op-reth image, tag as latest"
+            id: op_reth_image_latest
+            command: "make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-latest"
+        exclude:
+          # For non release candidate runs, exclude items that do not tag as "latest"
+          - isRC: false
+            id: reth_image
+          - isRC: false
+            id: op_reth_image
+          # For release candidate runs, exclude items that tag as "latest"
+          - isRC: true
+            id: reth_image_latest
+          - isRC: true
+            id: op_reth_image_latest
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
@@ -40,19 +69,5 @@ jobs:
         run: |
           docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
           docker buildx create --use --name cross-builder
-
-      # Build and tag the release candidate under the Git tag
-      - name: Build and push reth image
-        if: ${{ contains(github.ref, '-rc') }}
-        run: make IMAGE_NAME=$IMAGE_NAME DOCKER_IMAGE_NAME=$DOCKER_IMAGE_NAME PROFILE=maxperf docker-build-push
-      - name: Build and push op-reth image
-        if: ${{ contains(github.ref, '-rc') }}
-        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push
-
-      # Build and tag the release under the Git tag and "latest" tag
-      - name: Build and push reth image
-        if: ${{ !contains(github.ref, '-rc') }}
-        run: make IMAGE_NAME=$IMAGE_NAME DOCKER_IMAGE_NAME=$DOCKER_IMAGE_NAME PROFILE=maxperf docker-build-push-latest
-      - name: Build and push op-reth image
-        if: ${{ !contains(github.ref, '-rc') }}
-        run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-latest
+      - name: ${{ matrix.build.name }}
+        run: ${{ matrix.build.command }}
