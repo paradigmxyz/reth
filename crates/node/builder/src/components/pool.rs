@@ -3,7 +3,10 @@
 use alloy_primitives::Address;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::TxTy;
-use reth_transaction_pool::{PoolConfig, PoolTransaction, SubPoolLimit, TransactionPool};
+use reth_transaction_pool::{
+    blobstore::DiskFileBlobStore, PoolConfig, PoolTransaction, SubPoolLimit, TransactionPool,
+    TransactionValidationTaskExecutor,
+};
 use std::{collections::HashSet, future::Future};
 
 use crate::{BuilderContext, FullNodeTypes};
@@ -100,56 +103,47 @@ impl PoolBuilderConfigOverrides {
     }
 }
 
-/// Common pool builder setup logic that can be used by different chain implementations
-#[derive(Debug)]
-pub struct PoolSetupHelper;
+/// A builder for creating transaction pools with common configuration options.
+///
+/// This builder provides a fluent API for setting up transaction pools with various
+/// configurations like blob stores, validators, and maintenance tasks.
+pub struct TxPoolBuilder<'a, Node: FullNodeTypes, V = ()> {
+    ctx: &'a BuilderContext<Node>,
+    cache_size: Option<u32>,
+    validator: Option<TransactionValidationTaskExecutor<V>>,
+}
 
-impl PoolSetupHelper {
-    /// Create blob store with default configuration
-    pub fn create_blob_store<Node>(
-        ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<reth_transaction_pool::blobstore::DiskFileBlobStore>
-    where
-        Node: FullNodeTypes,
-    {
-        let data_dir = ctx.config().datadir();
-        Ok(reth_transaction_pool::blobstore::DiskFileBlobStore::open(
-            data_dir.blobstore(),
-            Default::default(),
-        )?)
+impl<'a, Node: FullNodeTypes> TxPoolBuilder<'a, Node> {
+    /// Creates a new `TxPoolBuilder` with the given context.
+    pub const fn new(ctx: &'a BuilderContext<Node>) -> Self {
+        Self { ctx, cache_size: None, validator: None }
     }
 
-    /// Create blob store with custom cache size configuration for Ethereum
-    pub fn create_blob_store_with_cache<Node>(
-        ctx: &BuilderContext<Node>,
-        cache_size: Option<u32>,
-    ) -> eyre::Result<reth_transaction_pool::blobstore::DiskFileBlobStore>
-    where
-        Node: FullNodeTypes,
-    {
-        let data_dir = ctx.config().datadir();
-        let config = if let Some(cache_size) = cache_size {
-            reth_transaction_pool::blobstore::DiskFileBlobStoreConfig::default()
-                .with_max_cached_entries(cache_size)
-        } else {
-            Default::default()
-        };
+    /// Configure the blob store with a specific cache size.
+    pub const fn with_disk_blob_store(mut self, cache_size: Option<u32>) -> Self {
+        self.cache_size = cache_size;
+        self
+    }
+}
 
-        Ok(reth_transaction_pool::blobstore::DiskFileBlobStore::open(data_dir.blobstore(), config)?)
+impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
+    /// Configure the validator for the transaction pool.
+    pub fn with_validator<NewV>(
+        self,
+        validator: TransactionValidationTaskExecutor<NewV>,
+    ) -> TxPoolBuilder<'a, Node, NewV> {
+        TxPoolBuilder { ctx: self.ctx, cache_size: self.cache_size, validator: Some(validator) }
     }
 
-    /// Spawn common local transaction backup task if enabled
-    pub fn spawn_local_backup_task<Node, Pool>(
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-    ) -> eyre::Result<()>
+    /// Spawn local transaction backup task if enabled.
+    fn spawn_local_backup_task<Pool>(&self, pool: Pool) -> eyre::Result<()>
     where
-        Node: FullNodeTypes,
         Pool: TransactionPool + Clone + 'static,
     {
-        if !ctx.config().txpool.disable_transactions_backup {
-            let data_dir = ctx.config().datadir();
-            let transactions_path = ctx
+        if !self.ctx.config().txpool.disable_transactions_backup {
+            let data_dir = self.ctx.config().datadir();
+            let transactions_path = self
+                .ctx
                 .config()
                 .txpool
                 .transactions_backup_path
@@ -159,7 +153,7 @@ impl PoolSetupHelper {
             let transactions_backup_config =
                 reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
 
-            ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+            self.ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
                 "local transactions backup task",
                 |shutdown| {
                     reth_transaction_pool::maintain::backup_local_transactions_task(
@@ -173,29 +167,27 @@ impl PoolSetupHelper {
         Ok(())
     }
 
-    /// Spawn the main maintenance task for transaction pool
-    pub fn spawn_maintenance_task_with_config<Node, Pool>(
-        ctx: &BuilderContext<Node>,
+    /// Spawn the main maintenance task for transaction pool.
+    fn spawn_maintenance_task_with_config<Pool>(
+        &self,
         pool: Pool,
         pool_config: &PoolConfig,
     ) -> eyre::Result<()>
     where
-        Node: FullNodeTypes,
-        Node::Provider: reth_chain_state::CanonStateSubscriptions,
+        Node::Provider: CanonStateSubscriptions,
         Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
-        Pool::Transaction:
-            reth_transaction_pool::PoolTransaction<Consensus = reth_node_api::TxTy<Node::Types>>,
+        Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
     {
-        let chain_events = ctx.provider().canonical_state_stream();
-        let client = ctx.provider().clone();
+        let chain_events = self.ctx.provider().canonical_state_stream();
+        let client = self.ctx.provider().clone();
 
-        ctx.task_executor().spawn_critical(
+        self.ctx.task_executor().spawn_critical(
             "txpool maintenance task",
             reth_transaction_pool::maintain::maintain_transaction_pool_future(
                 client,
                 pool,
                 chain_events,
-                ctx.task_executor().clone(),
+                self.ctx.task_executor().clone(),
                 reth_transaction_pool::maintain::MaintainPoolConfig {
                     max_tx_lifetime: pool_config.max_queued_lifetime,
                     no_local_exemptions: pool_config.local_transactions_config.no_exemptions,
@@ -207,22 +199,92 @@ impl PoolSetupHelper {
         Ok(())
     }
 
-    /// Spawn all common maintenance tasks (backup + main maintenance)
-    pub fn spawn_all_maintenance_tasks_with_config<Node, Pool>(
-        ctx: &BuilderContext<Node>,
+    /// Spawn all maintenance tasks (backup + main maintenance).
+    fn spawn_all_maintenance_tasks_with_config<Pool>(
+        &self,
         pool: Pool,
         pool_config: &PoolConfig,
     ) -> eyre::Result<()>
     where
-        Node: FullNodeTypes,
-        Node::Provider: reth_chain_state::CanonStateSubscriptions,
+        Node::Provider: CanonStateSubscriptions,
         Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
-        Pool::Transaction:
-            reth_transaction_pool::PoolTransaction<Consensus = reth_node_api::TxTy<Node::Types>>,
+        Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
     {
-        Self::spawn_local_backup_task(ctx, pool.clone())?;
-        Self::spawn_maintenance_task_with_config(ctx, pool, pool_config)?;
+        self.spawn_local_backup_task(pool.clone())?;
+        self.spawn_maintenance_task_with_config(pool, pool_config)?;
         Ok(())
+    }
+
+    /// Build the transaction pool and spawn its maintenance tasks.
+    /// This method creates the blob store, builds the pool, and spawns maintenance tasks.
+    pub fn build_and_spawn_maintenance_task<Pool>(
+        self,
+        pool_config: PoolConfig,
+        pool_constructor: impl FnOnce(
+            TransactionValidationTaskExecutor<V>,
+            DiskFileBlobStore,
+            PoolConfig,
+        ) -> Pool,
+    ) -> eyre::Result<Pool>
+    where
+        Pool: TransactionPool + reth_transaction_pool::TransactionPoolExt + Clone + 'static,
+        Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
+        Node::Provider: CanonStateSubscriptions,
+    {
+        // Destructure self to avoid partial move issues
+        let TxPoolBuilder { ctx, cache_size, validator } = self;
+
+        let validator = validator.ok_or_else(|| eyre::eyre!("Validator must be configured"))?;
+
+        // Create blob store
+        let blob_store = create_blob_store_with_cache(ctx, cache_size)?;
+
+        // Build the pool using the provided constructor
+        let transaction_pool = pool_constructor(validator, blob_store, pool_config.clone());
+
+        // Create a temporary builder to access the maintenance methods
+        let temp_builder: TxPoolBuilder<'_, Node, ()> =
+            TxPoolBuilder { ctx, cache_size: None, validator: None };
+        temp_builder
+            .spawn_all_maintenance_tasks_with_config(transaction_pool.clone(), &pool_config)?;
+
+        Ok(transaction_pool)
+    }
+}
+
+/// Create blob store with default configuration.
+pub fn create_blob_store<Node: FullNodeTypes>(
+    ctx: &BuilderContext<Node>,
+) -> eyre::Result<DiskFileBlobStore> {
+    let data_dir = ctx.config().datadir();
+    Ok(reth_transaction_pool::blobstore::DiskFileBlobStore::open(
+        data_dir.blobstore(),
+        Default::default(),
+    )?)
+}
+
+/// Create blob store with custom cache size configuration.
+pub fn create_blob_store_with_cache<Node: FullNodeTypes>(
+    ctx: &BuilderContext<Node>,
+    cache_size: Option<u32>,
+) -> eyre::Result<DiskFileBlobStore> {
+    let data_dir = ctx.config().datadir();
+    let config = if let Some(cache_size) = cache_size {
+        reth_transaction_pool::blobstore::DiskFileBlobStoreConfig::default()
+            .with_max_cached_entries(cache_size)
+    } else {
+        Default::default()
+    };
+
+    Ok(reth_transaction_pool::blobstore::DiskFileBlobStore::open(data_dir.blobstore(), config)?)
+}
+
+impl<Node: FullNodeTypes, V> std::fmt::Debug for TxPoolBuilder<'_, Node, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TxPoolBuilder")
+            .field("cache_size", &self.cache_size)
+            .field("validator", &self.validator.is_some())
+            .finish()
     }
 }
 
@@ -252,13 +314,5 @@ mod tests {
         assert!(overrides.pending_limit.is_none());
         assert!(overrides.max_account_slots.is_none());
         assert!(overrides.local_addresses.is_empty());
-    }
-
-    #[test]
-    fn test_pool_setup_helper_spawn_local_backup_task_compiles() {
-        // this is a compile test to ensure the helper methods have correct signatures
-        // we can't easily test the actual spawning without setting up a full context
-        let helper = PoolSetupHelper;
-        assert!(format!("{helper:?}").contains("PoolSetupHelper"));
     }
 }

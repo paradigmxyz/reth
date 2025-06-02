@@ -22,7 +22,7 @@ use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
         NetworkBuilder, PayloadBuilderBuilder, PoolBuilder, PoolBuilderConfigOverrides,
-        PoolSetupHelper,
+        TxPoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
     rpc::{
@@ -672,7 +672,7 @@ where
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
         let Self { pool_config_overrides, .. } = self;
-        let blob_store = PoolSetupHelper::create_blob_store(ctx)?;
+
         // supervisor used for interop
         if ctx.chain_spec().is_interop_active_at_timestamp(ctx.head().timestamp) &&
             self.supervisor_http == DEFAULT_SUPERVISOR_URL
@@ -687,6 +687,7 @@ where
             .build()
             .await;
 
+        let blob_store = reth_node_builder::components::create_blob_store(ctx)?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .no_eip4844()
             .with_head_timestamp(ctx.head().timestamp)
@@ -697,7 +698,7 @@ where
                     .additional_validation_tasks
                     .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
             )
-            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
+            .build_with_tasks(ctx.task_executor().clone(), blob_store)
             .map(|validator| {
                 OpTransactionValidator::new(validator)
                     // In --dev mode we can't require gas fees because we're unable to decode
@@ -707,20 +708,23 @@ where
             });
 
         let final_pool_config = pool_config_overrides.apply(ctx.pool_config());
-        let transaction_pool = reth_transaction_pool::Pool::new(
-            validator,
-            CoinbaseTipOrdering::default(),
-            blob_store,
-            final_pool_config.clone(),
-        );
-        info!(target: "reth::cli", "Transaction pool initialized");
 
-        // spawn txpool maintenance tasks
-        PoolSetupHelper::spawn_all_maintenance_tasks_with_config(
-            ctx,
-            transaction_pool.clone(),
-            &final_pool_config,
-        )?;
+        let transaction_pool = TxPoolBuilder::new(ctx)
+            .with_disk_blob_store(None)
+            .with_validator(validator)
+            .build_and_spawn_maintenance_task(
+                final_pool_config,
+                |validator, blob_store, pool_config| {
+                    reth_transaction_pool::Pool::new(
+                        validator,
+                        CoinbaseTipOrdering::default(),
+                        blob_store,
+                        pool_config,
+                    )
+                },
+            )?;
+
+        info!(target: "reth::cli", "Transaction pool initialized");
         debug!(target: "reth::cli", "Spawned txpool maintenance task");
 
         // The Op txpool maintenance task is only spawned when interop is active
