@@ -121,7 +121,7 @@ where
         self.consensus.validate_header(block.sealed_header())?;
         self.consensus.validate_block_pre_execution(block.sealed_block())?;
 
-        if !self.disallow.is_empty() && transaction_filter != TransactionFilter::None {
+        if !self.disallow.is_empty() && transaction_filter == TransactionFilter::OFAC {
             if self.disallow.contains(&block.beneficiary()) {
                 return Err(ValidationApiError::Blacklist(block.beneficiary()));
             }
@@ -172,7 +172,9 @@ where
 
         let mut accessed_blacklisted = None;
         let output = executor.execute_with_state_closure(&block, |state| {
-            if !self.disallow.is_empty() {
+            if !self.disallow.is_empty() && transaction_filter == TransactionFilter::OFAC {
+                // Check whether the submission interacted with any blacklisted account by scanning
+                // the `State`'s cache that records everything read from database during execution.
                 for account in state.cache.accounts.keys() {
                     if self.disallow.contains(account) {
                         accessed_blacklisted = Some(*account);
