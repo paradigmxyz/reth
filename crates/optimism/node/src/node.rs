@@ -562,11 +562,7 @@ pub struct OpExecutorBuilder;
 
 impl<Node> ExecutorBuilder<Node> for OpExecutorBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes>,
-    <Node::Types as NodeTypes>::ChainSpec: OpHardforks,
-    <Node::Types as NodeTypes>::Primitives: NodePrimitives,
-    OpEvmConfig<<Node::Types as NodeTypes>::ChainSpec, <Node::Types as NodeTypes>::Primitives>:
-        ConfigureEvm<Primitives = <Node::Types as NodeTypes>::Primitives> + 'static,
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives>>,
 {
     type EVM =
         OpEvmConfig<<Node::Types as NodeTypes>::ChainSpec, <Node::Types as NodeTypes>::Primitives>;
