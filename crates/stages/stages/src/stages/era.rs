@@ -70,7 +70,7 @@ where
                 let client = EraClient::new(Client::new(), url, folder);
 
                 Self::convert(EraStream::new(
-                    client,
+                    client.start_from(input.next_block()),
                     EraStreamConfig::default().start_from(input.next_block()),
                 ))
             }
