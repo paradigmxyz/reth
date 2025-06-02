@@ -135,86 +135,6 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
         TxPoolBuilder { ctx: self.ctx, cache_size: self.cache_size, validator: Some(validator) }
     }
 
-    /// Spawn local transaction backup task if enabled.
-    fn spawn_local_backup_task<Pool>(&self, pool: Pool) -> eyre::Result<()>
-    where
-        Pool: TransactionPool + Clone + 'static,
-    {
-        if !self.ctx.config().txpool.disable_transactions_backup {
-            let data_dir = self.ctx.config().datadir();
-            let transactions_path = self
-                .ctx
-                .config()
-                .txpool
-                .transactions_backup_path
-                .clone()
-                .unwrap_or_else(|| data_dir.txpool_transactions());
-
-            let transactions_backup_config =
-                reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
-
-            self.ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                "local transactions backup task",
-                |shutdown| {
-                    reth_transaction_pool::maintain::backup_local_transactions_task(
-                        shutdown,
-                        pool,
-                        transactions_backup_config,
-                    )
-                },
-            );
-        }
-        Ok(())
-    }
-
-    /// Spawn the main maintenance task for transaction pool.
-    fn spawn_maintenance_task_with_config<Pool>(
-        &self,
-        pool: Pool,
-        pool_config: &PoolConfig,
-    ) -> eyre::Result<()>
-    where
-        Node::Provider: CanonStateSubscriptions,
-        Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
-        Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
-    {
-        let chain_events = self.ctx.provider().canonical_state_stream();
-        let client = self.ctx.provider().clone();
-
-        self.ctx.task_executor().spawn_critical(
-            "txpool maintenance task",
-            reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                client,
-                pool,
-                chain_events,
-                self.ctx.task_executor().clone(),
-                reth_transaction_pool::maintain::MaintainPoolConfig {
-                    max_tx_lifetime: pool_config.max_queued_lifetime,
-                    no_local_exemptions: pool_config.local_transactions_config.no_exemptions,
-                    ..Default::default()
-                },
-            ),
-        );
-
-        Ok(())
-    }
-
-    /// Spawn all maintenance tasks (backup + main maintenance).
-    fn spawn_all_maintenance_tasks_with_config<Pool>(
-        &self,
-        pool: Pool,
-        pool_config: &PoolConfig,
-    ) -> eyre::Result<()>
-    where
-        Node::Provider: CanonStateSubscriptions,
-        Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
-        Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
-    {
-        self.spawn_local_backup_task(pool.clone())?;
-        self.spawn_maintenance_task_with_config(pool, pool_config)?;
-        Ok(())
-    }
-
     /// Build the transaction pool and spawn its maintenance tasks.
     /// This method creates the blob store, builds the pool, and spawns maintenance tasks.
     pub fn build_and_spawn_maintenance_task<Pool>(
@@ -242,11 +162,8 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
         // Build the pool using the provided constructor
         let transaction_pool = pool_constructor(validator, blob_store, pool_config.clone());
 
-        // Create a temporary builder to access the maintenance methods
-        let temp_builder: TxPoolBuilder<'_, Node, ()> =
-            TxPoolBuilder { ctx, cache_size: None, validator: None };
-        temp_builder
-            .spawn_all_maintenance_tasks_with_config(transaction_pool.clone(), &pool_config)?;
+        // Spawn maintenance tasks using standalone functions
+        spawn_maintenance_tasks(ctx, transaction_pool.clone(), &pool_config)?;
 
         Ok(transaction_pool)
     }
@@ -277,6 +194,93 @@ pub fn create_blob_store_with_cache<Node: FullNodeTypes>(
     };
 
     Ok(reth_transaction_pool::blobstore::DiskFileBlobStore::open(data_dir.blobstore(), config)?)
+}
+
+/// Spawn local transaction backup task if enabled.
+pub fn spawn_local_backup_task<Node, Pool>(
+    ctx: &BuilderContext<Node>,
+    pool: Pool,
+) -> eyre::Result<()>
+where
+    Node: FullNodeTypes,
+    Pool: TransactionPool + Clone + 'static,
+{
+    if !ctx.config().txpool.disable_transactions_backup {
+        let data_dir = ctx.config().datadir();
+        let transactions_path = ctx
+            .config()
+            .txpool
+            .transactions_backup_path
+            .clone()
+            .unwrap_or_else(|| data_dir.txpool_transactions());
+
+        let transactions_backup_config =
+            reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(
+                transactions_path,
+            );
+
+        ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+            "local transactions backup task",
+            |shutdown| {
+                reth_transaction_pool::maintain::backup_local_transactions_task(
+                    shutdown,
+                    pool,
+                    transactions_backup_config,
+                )
+            },
+        );
+    }
+    Ok(())
+}
+
+/// Spawn the main maintenance task for transaction pool.
+pub fn spawn_pool_maintenance_task<Node, Pool>(
+    ctx: &BuilderContext<Node>,
+    pool: Pool,
+    pool_config: &PoolConfig,
+) -> eyre::Result<()>
+where
+    Node: FullNodeTypes,
+    Node::Provider: CanonStateSubscriptions,
+    Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
+    Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
+{
+    let chain_events = ctx.provider().canonical_state_stream();
+    let client = ctx.provider().clone();
+
+    ctx.task_executor().spawn_critical(
+        "txpool maintenance task",
+        reth_transaction_pool::maintain::maintain_transaction_pool_future(
+            client,
+            pool,
+            chain_events,
+            ctx.task_executor().clone(),
+            reth_transaction_pool::maintain::MaintainPoolConfig {
+                max_tx_lifetime: pool_config.max_queued_lifetime,
+                no_local_exemptions: pool_config.local_transactions_config.no_exemptions,
+                ..Default::default()
+            },
+        ),
+    );
+
+    Ok(())
+}
+
+/// Spawn all maintenance tasks for a transaction pool (backup + main maintenance).
+pub fn spawn_maintenance_tasks<Node, Pool>(
+    ctx: &BuilderContext<Node>,
+    pool: Pool,
+    pool_config: &PoolConfig,
+) -> eyre::Result<()>
+where
+    Node: FullNodeTypes,
+    Node::Provider: CanonStateSubscriptions,
+    Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
+    Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
+{
+    spawn_local_backup_task(ctx, pool.clone())?;
+    spawn_pool_maintenance_task(ctx, pool, pool_config)?;
+    Ok(())
 }
 
 impl<Node: FullNodeTypes, V> std::fmt::Debug for TxPoolBuilder<'_, Node, V> {
