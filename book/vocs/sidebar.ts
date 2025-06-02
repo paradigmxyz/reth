@@ -6,7 +6,7 @@ export const sidebar: SidebarItem[] = [
         items: [
             {
                 text: "Overview",
-                link: "/intro"
+                link: "/overview"
             }
         ]
     },

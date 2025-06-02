@@ -1,15 +1,10 @@
-# Reth Book
-_Documentation for Reth users and developers._
-
-[![Telegram Chat][tg-badge]][tg-url]
+# Reth [Documentation for Reth users and developers]
 
 Reth (short for Rust Ethereum, [pronunciation](https://twitter.com/kelvinfichter/status/1597653609411268608)) is an **Ethereum full node implementation that is focused on being user-friendly, highly modular, as well as being fast and efficient.**
 
 Reth is production ready, and suitable for usage in mission-critical environments such as staking or high-uptime services. We also actively recommend professional node operators to switch to Reth in production for performance and cost reasons in use cases where high performance with great margins is required such as RPC, MEV, Indexing, Simulations, and P2P activities.
 
-<img src="https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-prod.png" style="border-radius: 20px">
-
-<!-- Add a quick description about Reth, what it is, the goals of the build, and any other quick overview information   -->
+![Reth](https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-prod.png)
 
 ## What is this about?
 
@@ -60,8 +55,9 @@ We envision that Reth will be configurable enough for the tradeoffs that each te
 ## Who is this for?
 
 Reth is a new Ethereum full node that allows users to sync and interact with the entire blockchain, including its historical state if in archive mode.
-- Full node: It can be used as a full node, which stores and processes the entire blockchain, validates blocks and transactions, and participates in the consensus process.
-- Archive node: It can also be used as an archive node, which stores the entire history of the blockchain and is useful for applications that need access to historical data.
+
+-   Full node: It can be used as a full node, which stores and processes the entire blockchain, validates blocks and transactions, and participates in the consensus process.
+-   Archive node: It can also be used as an archive node, which stores the entire history of the blockchain and is useful for applications that need access to historical data.
 
 As a data engineer/analyst, or as a data indexer, you'll want to use Archive mode. For all other use cases where historical access is not needed, you can use Full mode.
 
@@ -79,16 +75,15 @@ We have completed an audit of the [Reth v1.0.0-rc.2](https://github.com/paradigm
 
 [Revm](https://github.com/bluealloy/revm) (the EVM used in Reth) underwent an audit with [Guido Vranken](https://twitter.com/guidovranken) (#1 [Ethereum Bug Bounty](https://ethereum.org/en/bug-bounty)). We will publish the results soon.
 
-
 ## Sections
 
 Here are some useful sections to jump to:
 
-- Install Reth by following the [guide](./installation/installation.md).
-- Sync your node on any [official network](./run/run-a-node.md).
-- View [statistics and metrics](./run/observability.md) about your node.
-- Query the [JSON-RPC](./jsonrpc/intro.md) using Foundry's `cast` or `curl`.
-- Set up your [development environment and contribute](./developers/contribute.md)!
+-   Install Reth by following the [guide](./installation/installation.md).
+-   Sync your node on any [official network](./run/run-a-node.md).
+-   View [statistics and metrics](./run/observability.md) about your node.
+-   Query the [JSON-RPC](./jsonrpc/intro.md) using Foundry's `cast` or `curl`.
+-   Set up your [development environment and contribute](./developers/contribute.md)!
 
 > 📖 **About this book**
 >
