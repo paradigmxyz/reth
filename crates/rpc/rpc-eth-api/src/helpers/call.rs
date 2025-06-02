@@ -134,7 +134,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_state_overrides(state_overrides, &mut db)?;
                     }
 
-                    let block_env = evm_env.block_env.clone();
+                    let block_gas_limit = evm_env.block_env.gas_limit;
                     let chain_id = evm_env.cfg_env.chain_id;
 
                     let default_gas_limit = {
@@ -142,7 +142,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         let txs_without_gas_limit =
                             calls.iter().filter(|tx| tx.gas.is_none()).count();
 
-                        if total_specified_gas > block_env.gas_limit {
+                        if total_specified_gas > block_gas_limit {
                             return Err(EthApiError::Other(Box::new(
                                 EthSimulateError::BlockGasLimitExceeded,
                             ))
@@ -150,8 +150,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         }
 
                         if txs_without_gas_limit > 0 {
-                            (block_env.gas_limit - total_specified_gas) /
-                                txs_without_gas_limit as u64
+                            (block_gas_limit - total_specified_gas) / txs_without_gas_limit as u64
                         } else {
                             0
                         }
