@@ -1,7 +1,7 @@
 //! Optimism block execution strategy.
 
 /// Helper type with backwards compatible methods to obtain executor providers.
-pub type OpExecutorProvider<ChainSpec> = crate::OpEvmConfig<ChainSpec>;
+pub type OpExecutorProvider = crate::OpEvmConfig;
 
 #[cfg(test)]
 mod tests {
