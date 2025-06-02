@@ -1049,6 +1049,71 @@ async fn test_eth_get_block_transaction_count_by_number_rpc_call() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_uncle_count_by_block_hash_rpc_call() {
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting uncle count by block hash with proper fields
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getUncleCountByBlockHash",
+        rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238"],
+    )
+    .await;
+
+    // Requesting uncle count by block hash with additional fields
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getUncleCountByBlockHash",
+        rpc_params!["0xb903239f8543d04b5dc1ba6579132b143087c68db1b2168786408fcbce568238", true],
+    )
+    .await;
+
+    // Requesting uncle count by block hash with missing fields
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockHash", rpc_params![]).await;
+
+    // Requesting uncle count by block hash with wrong field
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockHash", rpc_params![true])
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_uncle_count_by_block_number_rpc_call() {
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting uncle count by block number with proper fields
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getUncleCountByBlockNumber",
+        rpc_params!["0xe8"],
+    )
+    .await;
+
+    // Requesting uncle count by block number with additional fields
+    test_rpc_call_ok::<Option<U256>>(
+        &client,
+        "eth_getUncleCountByBlockNumber",
+        rpc_params!["0xe8", true],
+    )
+    .await;
+
+    // Requesting uncle count by block number with missing fields
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockNumber", rpc_params![])
+        .await;
+
+    // Requesting uncle count by block number with wrong field
+    test_rpc_call_err::<Option<U256>>(&client, "eth_getUncleCountByBlockNumber", rpc_params![true])
+        .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_block_receipts_rpc_call() {
     reth_tracing::init_test_tracing();
 
@@ -1084,6 +1149,84 @@ async fn test_eth_get_block_receipts_rpc_call() {
     test_rpc_call_err::<Option<Vec<TransactionReceipt>>>(
         &client,
         "eth_getBlockReceipts",
+        rpc_params![true],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_uncle_by_block_hash_and_index_rpc_call() {
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting uncle by block hash and index with proper fields
+    test_rpc_call_ok::<Option<Block>>(
+        &client,
+        "eth_getUncleByBlockHashAndIndex",
+        rpc_params!["0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b", "0x0"],
+    )
+    .await;
+
+    // Requesting uncle by block hash and index with additional fields
+    test_rpc_call_ok::<Option<Block>>(
+        &client,
+        "eth_getUncleByBlockHashAndIndex",
+        rpc_params![
+            "0xc6ef2fc5426d6ad6fd9e2a26abeab0aa2411b7ab17f30a99d3cb96aed1d1055b",
+            "0x0",
+            true
+        ],
+    )
+    .await;
+
+    // Requesting uncle by block hash and index with missing fields
+    test_rpc_call_err::<Option<Block>>(&client, "eth_getUncleByBlockHashAndIndex", rpc_params![])
+        .await;
+
+    // Requesting uncle by block hash and index with wrong fields
+    test_rpc_call_err::<Option<Block>>(
+        &client,
+        "eth_getUncleByBlockHashAndIndex",
+        rpc_params![true],
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_eth_get_uncle_by_block_number_and_index_rpc_call() {
+    reth_tracing::init_test_tracing();
+
+    // Launch HTTP server with the specified RPC module
+    let handle = launch_http(vec![RethRpcModule::Eth]).await;
+    let client = handle.http_client().unwrap();
+
+    // Requesting uncle by block number and index with proper fields
+    test_rpc_call_ok::<Option<Block>>(
+        &client,
+        "eth_getUncleByBlockNumberAndIndex",
+        rpc_params!["0x29c", "0x0"],
+    )
+    .await;
+
+    // Requesting uncle by block number and index with additional fields
+    test_rpc_call_ok::<Option<Block>>(
+        &client,
+        "eth_getUncleByBlockNumberAndIndex",
+        rpc_params!["0x29c", "0x0", true],
+    )
+    .await;
+
+    // Requesting uncle by block number and index with missing fields
+    test_rpc_call_err::<Option<Block>>(&client, "eth_getUncleByBlockNumberAndIndex", rpc_params![])
+        .await;
+
+    // Requesting uncle by block number and index with wrong fields
+    test_rpc_call_err::<Option<Block>>(
+        &client,
+        "eth_getUncleByBlockNumberAndIndex",
         rpc_params![true],
     )
     .await;
