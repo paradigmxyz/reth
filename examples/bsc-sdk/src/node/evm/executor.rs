@@ -15,7 +15,7 @@ use alloy_sol_macro::sol;
 use alloy_sol_types::SolCall;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_evm::{
-    block::BlockValidationError,
+    block::{BlockValidationError, CommitChanges},
     eth::{receipt_builder::ReceiptBuilder, EthBlockExecutionCtx},
     execute::{BlockExecutionError, BlockExecutor},
     Database, Evm, FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, OnStateHook, RecoveredTx,
@@ -322,6 +322,14 @@ where
         self.apply_upgrade_contracts_if_before_feynman()?;
 
         Ok(())
+    }
+
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        _tx: impl ExecutableTx<Self>,
+        _f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        Ok(Some(0))
     }
 
     fn execute_transaction_with_result_closure(

@@ -55,11 +55,6 @@ where
         let signature = Signature::new(Default::default(), Default::default(), false);
         Ok(TransactionSigned::new_unhashed(tx.into(), signature))
     }
-
-    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = tx.inner.inner_mut().input_mut();
-        *input = input.slice(..4);
-    }
 }
 
 impl<N> EthTransactions for BscEthApi<N>

@@ -13,7 +13,7 @@ use reth::{
 };
 use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::node::NoArgs;
+use reth_cli_commands::{launcher::FnLauncher, node::NoArgs};
 use reth_db::DatabaseEnv;
 use reth_network::EthNetworkPrimitives;
 use reth_tracing::FileWorkerGuard;
@@ -77,9 +77,9 @@ where
             |spec: Arc<C::ChainSpec>| (BscEvmConfig::new(spec.clone()), BscConsensus::new(spec));
 
         match self.command {
-            Commands::Node(command) => {
-                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
-            }
+            Commands::Node(command) => runner.run_command_until_exit(|ctx| {
+                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+            }),
             Commands::Init(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<BscNode>())
             }
