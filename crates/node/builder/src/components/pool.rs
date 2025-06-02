@@ -197,10 +197,7 @@ pub fn create_blob_store_with_cache<Node: FullNodeTypes>(
 }
 
 /// Spawn local transaction backup task if enabled.
-pub fn spawn_local_backup_task<Node, Pool>(
-    ctx: &BuilderContext<Node>,
-    pool: Pool,
-) -> eyre::Result<()>
+fn spawn_local_backup_task<Node, Pool>(ctx: &BuilderContext<Node>, pool: Pool) -> eyre::Result<()>
 where
     Node: FullNodeTypes,
     Pool: TransactionPool + Clone + 'static,
@@ -234,7 +231,7 @@ where
 }
 
 /// Spawn the main maintenance task for transaction pool.
-pub fn spawn_pool_maintenance_task<Node, Pool>(
+fn spawn_pool_maintenance_task<Node, Pool>(
     ctx: &BuilderContext<Node>,
     pool: Pool,
     pool_config: &PoolConfig,
@@ -267,7 +264,7 @@ where
 }
 
 /// Spawn all maintenance tasks for a transaction pool (backup + main maintenance).
-pub fn spawn_maintenance_tasks<Node, Pool>(
+fn spawn_maintenance_tasks<Node, Pool>(
     ctx: &BuilderContext<Node>,
     pool: Pool,
     pool_config: &PoolConfig,
