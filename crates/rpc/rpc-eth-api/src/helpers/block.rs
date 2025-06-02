@@ -180,6 +180,7 @@ pub trait EthBlocks: LoadBlock {
     {
         async move {
             let uncles = if block_id.is_pending() {
+                // Pending block can be fetched directly without need for caching
                 self.provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
