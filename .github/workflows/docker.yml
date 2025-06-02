@@ -16,8 +16,12 @@ env:
   DOCKER_USERNAME: ${{ github.actor }}
 
 jobs:
-  setup:
+  build:
+    name: build and push
     runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
@@ -37,38 +41,18 @@ jobs:
           docker run --privileged --rm tonistiigi/binfmt --install arm64,amd64
           docker buildx create --use --name cross-builder
 
-  reth:
-    needs: setup
-    runs-on: ubuntu-24.04
-    if: ${{ contains(github.ref, '-rc') }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build and push reth
+      # Build and tag the release candidate under the Git tag
+      - name: Build and push reth image
+        if: ${{ contains(github.ref, '-rc') }}
         run: make IMAGE_NAME=$IMAGE_NAME DOCKER_IMAGE_NAME=$DOCKER_IMAGE_NAME PROFILE=maxperf docker-build-push
-
-  op-reth:
-    needs: setup
-    runs-on: ubuntu-24.04
-    if: ${{ contains(github.ref, '-rc') }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build and push op-reth
+      - name: Build and push op-reth image
+        if: ${{ contains(github.ref, '-rc') }}
         run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push
 
-  reth-latest:
-    needs: setup
-    runs-on: ubuntu-24.04
-    if: ${{ !contains(github.ref, '-rc') }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build and push reth
+      # Build and tag the release under the Git tag and "latest" tag
+      - name: Build and push reth image
+        if: ${{ !contains(github.ref, '-rc') }}
         run: make IMAGE_NAME=$IMAGE_NAME DOCKER_IMAGE_NAME=$DOCKER_IMAGE_NAME PROFILE=maxperf docker-build-push-latest
-
-  op-reth-latest:
-    needs: setup
-    runs-on: ubuntu-24.04
-    if: ${{ !contains(github.ref, '-rc') }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build and push op-reth
+      - name: Build and push op-reth image
+        if: ${{ !contains(github.ref, '-rc') }}
         run: make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-latest
