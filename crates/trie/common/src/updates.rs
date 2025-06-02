@@ -1,10 +1,12 @@
 use crate::{BranchNodeCompact, HashBuilder, Nibbles};
-use alloc::vec::Vec;
+use alloc::{
+    collections::{btree_map::BTreeMap, btree_set::BTreeSet},
+    vec::Vec,
+};
 use alloy_primitives::{
     map::{B256Map, B256Set, HashMap, HashSet},
     FixedBytes, B256,
 };
-use std::collections::{BTreeMap, BTreeSet};
 
 /// The aggregation of trie updates.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
