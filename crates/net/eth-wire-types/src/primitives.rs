@@ -3,6 +3,7 @@
 use alloy_consensus::{RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_rlp::{Decodable, Encodable};
 use core::fmt::Debug;
+use reth_ethereum_primitives::{EthPrimitives, PooledTransactionVariant};
 use reth_primitives_traits::{Block, BlockBody, BlockHeader, NodePrimitives, SignedTransaction};
 
 /// Abstraction over primitive types which might appear in network messages. See
@@ -62,16 +63,23 @@ where
 {
 }
 
-/// Network primitive types used by Ethereum networks.
+/// Basic implementation of [`NetworkPrimitives`] combining [`NodePrimitives`] and a pooled
+/// transaction.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub struct EthNetworkPrimitives;
+pub struct BasicNetworkPrimitives<N, Pooled>(core::marker::PhantomData<(N, Pooled)>);
 
-impl NetworkPrimitives for EthNetworkPrimitives {
-    type BlockHeader = alloy_consensus::Header;
-    type BlockBody = reth_ethereum_primitives::BlockBody;
-    type Block = reth_ethereum_primitives::Block;
-    type BroadcastedTransaction = reth_ethereum_primitives::TransactionSigned;
-    type PooledTransaction = reth_ethereum_primitives::PooledTransactionVariant;
-    type Receipt = reth_ethereum_primitives::Receipt;
+impl<N, Pooled> NetworkPrimitives for BasicNetworkPrimitives<N, Pooled>
+where
+    N: NodePrimitives,
+    Pooled: SignedTransaction + TryFrom<N::SignedTx> + 'static,
+{
+    type BlockHeader = N::BlockHeader;
+    type BlockBody = N::BlockBody;
+    type Block = N::Block;
+    type BroadcastedTransaction = N::SignedTx;
+    type PooledTransaction = Pooled;
+    type Receipt = N::Receipt;
 }
+
+/// Network primitive types used by Ethereum networks.
+pub type EthNetworkPrimitives = BasicNetworkPrimitives<EthPrimitives, PooledTransactionVariant>;
