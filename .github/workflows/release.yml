@@ -157,7 +157,7 @@ jobs:
         # https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/.github/workflows/build.yml
         run: |
           prerelease_flag=""
-          if [[ "${GITHUB_REF}" == *-rc ]]; then
+          if [[ "${GITHUB_REF}" == *-rc* ]]; then
             prerelease_flag="--prerelease"
           fi
 
