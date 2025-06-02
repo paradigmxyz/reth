@@ -225,28 +225,28 @@ where
                 self.hash_collector.clear();
             }
 
+            provider.save_stage_checkpoint(
+                StageId::Headers,
+                StageCheckpoint::new(height).with_headers_stage_checkpoint(HeadersCheckpoint {
+                    block_range: CheckpointBlockRange {
+                        from: input.checkpoint().block_number,
+                        to: height,
+                    },
+                    progress: EntitiesCheckpoint { processed: height, total: input.target() },
+                }),
+            )?;
+            provider.save_stage_checkpoint(
+                StageId::Bodies,
+                StageCheckpoint::new(height).with_entities_stage_checkpoint(EntitiesCheckpoint {
+                    processed: height,
+                    total: input.target(),
+                }),
+            )?;
+
             height
         } else {
             input.target()
         };
-
-        provider.save_stage_checkpoint(
-            StageId::Headers,
-            StageCheckpoint::new(height).with_headers_stage_checkpoint(HeadersCheckpoint {
-                block_range: CheckpointBlockRange {
-                    from: input.checkpoint().block_number,
-                    to: height,
-                },
-                progress: EntitiesCheckpoint { processed: height, total: input.target() },
-            }),
-        )?;
-        provider.save_stage_checkpoint(
-            StageId::Bodies,
-            StageCheckpoint::new(height).with_entities_stage_checkpoint(EntitiesCheckpoint {
-                processed: height,
-                total: input.target(),
-            }),
-        )?;
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(height), done: height == input.target() })
     }
