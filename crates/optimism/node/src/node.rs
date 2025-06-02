@@ -11,7 +11,8 @@ use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{
-    primitives::NetPrimitivesFor, NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
+    types::BasicNetworkPrimitives,
+    NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
     PeersInfo,
 };
 use reth_node_api::{
@@ -39,7 +40,7 @@ use reth_optimism_payload_builder::{
     config::{OpBuilderConfig, OpDAConfig},
     OpBuiltPayload, OpPayloadBuilderAttributes, OpPayloadPrimitives,
 };
-use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpReceipt, OpTransactionSigned};
+use reth_optimism_primitives::{DepositReceipt, OpPrimitives, OpTransactionSigned};
 use reth_optimism_rpc::{
     eth::{ext::OpEthExtApi, OpEthApiBuilder},
     miner::{MinerApiExtServer, OpMinerExtApi},
@@ -57,8 +58,8 @@ use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolTransaction,
-    TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolPooledTx,
+    PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
@@ -66,12 +67,16 @@ use std::{marker::PhantomData, sync::Arc};
 
 /// Marker trait for Optimism node types with standard engine, chain spec, and primitives.
 pub trait OpNodeTypes:
-    NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
+    NodeTypes<Payload = OpEngineTypes, ChainSpec: OpHardforks + Hardforks, Primitives = OpPrimitives>
 {
 }
 /// Blanket impl for all node types that conform to the Optimism spec.
 impl<N> OpNodeTypes for N where
-    N: NodeTypes<Payload = OpEngineTypes, ChainSpec = OpChainSpec, Primitives = OpPrimitives>
+    N: NodeTypes<
+        Payload = OpEngineTypes,
+        ChainSpec: OpHardforks + Hardforks,
+        Primitives = OpPrimitives,
+    >
 {
 }
 /// Storage implementation for Optimism.
@@ -92,6 +97,16 @@ pub struct OpNode {
     pub da_config: OpDAConfig,
 }
 
+/// A [`ComponentsBuilder`] with its generic arguments set to a stack of Optimism specific builders.
+pub type OpNodeComponentBuilder<Node, Payload = OpPayloadBuilder> = ComponentsBuilder<
+    Node,
+    OpPoolBuilder,
+    BasicPayloadServiceBuilder<Payload>,
+    OpNetworkBuilder,
+    OpExecutorBuilder,
+    OpConsensusBuilder,
+>;
+
 impl OpNode {
     /// Creates a new instance of the Optimism node type.
     pub fn new(args: RollupArgs) -> Self {
@@ -105,16 +120,7 @@ impl OpNode {
     }
 
     /// Returns the components for the given [`RollupArgs`].
-    pub fn components<Node>(
-        &self,
-    ) -> ComponentsBuilder<
-        Node,
-        OpPoolBuilder,
-        BasicPayloadServiceBuilder<OpPayloadBuilder>,
-        OpNetworkBuilder,
-        OpExecutorBuilder,
-        OpConsensusBuilder,
-    >
+    pub fn components<Node>(&self) -> OpNodeComponentBuilder<Node>
     where
         Node: FullNodeTypes<Types: OpNodeTypes>,
     {
@@ -178,7 +184,7 @@ where
     N: FullNodeTypes<
         Types: NodeTypes<
             Payload = OpEngineTypes,
-            ChainSpec = OpChainSpec,
+            ChainSpec: OpHardforks + Hardforks,
             Primitives = OpPrimitives,
             Storage = OpStorage,
         >,
@@ -340,7 +346,7 @@ impl<N, NetworkT> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec = OpChainSpec,
+            ChainSpec: OpHardforks,
             Primitives = OpPrimitives,
             Storage = OpStorage,
             Payload = OpEngineTypes,
@@ -433,7 +439,7 @@ impl<N, NetworkT> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec = OpChainSpec,
+            ChainSpec: OpHardforks,
             Primitives = OpPrimitives,
             Storage = OpStorage,
             Payload = OpEngineTypes,
@@ -457,7 +463,7 @@ impl<N, NetworkT> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<Networ
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec = OpChainSpec,
+            ChainSpec: OpHardforks,
             Primitives = OpPrimitives,
             Payload = OpEngineTypes,
         >,
@@ -861,40 +867,37 @@ where
 
 /// A basic optimism network builder.
 #[derive(Debug, Default)]
-pub struct OpNetworkBuilder<NetworkP = OpNetworkPrimitives, PooledTx = OpPooledTransaction> {
+pub struct OpNetworkBuilder {
     /// Disable transaction pool gossip
     pub disable_txpool_gossip: bool,
     /// Disable discovery v4
     pub disable_discovery_v4: bool,
-    /// Marker for the network primitives type
-    _np: PhantomData<NetworkP>,
-    /// Marker for the pooled transaction type
-    _pt: PhantomData<PooledTx>,
 }
 
-impl<NetworkP, PooledTx> Clone for OpNetworkBuilder<NetworkP, PooledTx> {
+impl Clone for OpNetworkBuilder {
     fn clone(&self) -> Self {
         Self::new(self.disable_txpool_gossip, self.disable_discovery_v4)
     }
 }
 
-impl<NetworkP, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
+impl OpNetworkBuilder {
     /// Creates a new `OpNetworkBuilder`.
     pub const fn new(disable_txpool_gossip: bool, disable_discovery_v4: bool) -> Self {
-        Self { disable_txpool_gossip, disable_discovery_v4, _np: PhantomData, _pt: PhantomData }
+        Self { disable_txpool_gossip, disable_discovery_v4 }
     }
 }
 
-impl<NetworkP: NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkP, PooledTx> {
+impl OpNetworkBuilder {
     /// Returns the [`NetworkConfig`] that contains the settings to launch the p2p network.
     ///
     /// This applies the configured [`OpNetworkBuilder`] settings.
-    pub fn network_config<Node>(
+    pub fn network_config<Node, NetworkP>(
         &self,
         ctx: &BuilderContext<Node>,
-    ) -> eyre::Result<NetworkConfig<<Node as FullNodeTypes>::Provider, NetworkP>>
+    ) -> eyre::Result<NetworkConfig<Node::Provider, NetworkP>>
     where
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
+        NetworkP: NetworkPrimitives,
     {
         let Self { disable_txpool_gossip, disable_discovery_v4, .. } = self.clone();
         let args = &ctx.config().network;
@@ -933,22 +936,15 @@ impl<NetworkP: NetworkPrimitives, PooledTx> OpNetworkBuilder<NetworkP, PooledTx>
     }
 }
 
-impl<Node, Pool, NetworkP, PooledTx> NetworkBuilder<Node, Pool>
-    for OpNetworkBuilder<NetworkP, PooledTx>
+impl<Node, Pool> NetworkBuilder<Node, Pool> for OpNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTx>,
-        > + Unpin
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
         + 'static,
-    NetworkP: NetworkPrimitives<
-            PooledTransaction = PooledTx,
-            BroadcastedTransaction = <<Node::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx
-        >
-        + NetPrimitivesFor<PrimitivesTy<Node::Types>>,
-    PooledTx: Send,
 {
-    type Network = NetworkHandle<NetworkP>;
+    type Network =
+        NetworkHandle<BasicNetworkPrimitives<PrimitivesTy<Node::Types>, PoolPooledTx<Pool>>>;
 
     async fn build_network(
         self,
@@ -992,7 +988,7 @@ pub struct OpEngineValidatorBuilder;
 
 impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Types: NodeTypes<ChainSpec = OpChainSpec, Primitives = OpPrimitives, Payload = OpEngineTypes>,
+    Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives, Payload = OpEngineTypes>,
     Node: FullNodeComponents<Types = Types>,
 {
     type Validator = OpEngineValidator<
@@ -1010,15 +1006,4 @@ where
 }
 
 /// Network primitive types used by Optimism networks.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub struct OpNetworkPrimitives;
-
-impl NetworkPrimitives for OpNetworkPrimitives {
-    type BlockHeader = alloy_consensus::Header;
-    type BlockBody = alloy_consensus::BlockBody<OpTransactionSigned>;
-    type Block = alloy_consensus::Block<OpTransactionSigned>;
-    type BroadcastedTransaction = OpTransactionSigned;
-    type PooledTransaction = OpPooledTransaction;
-    type Receipt = OpReceipt;
-}
+pub type OpNetworkPrimitives = BasicNetworkPrimitives<OpPrimitives, OpPooledTransaction>;
