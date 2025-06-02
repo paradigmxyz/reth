@@ -30,10 +30,10 @@ jobs:
         build:
           - name: "Build and push reth image"
             id: reth_image
-            command: "make PROFILE=maxperf docker-build-push"
+            command: "make IMAGE_NAME=$IMAGE_NAME DOCKER_IMAGE_NAME=$DOCKER_IMAGE_NAME PROFILE=maxperf docker-build-push"
           - name: "Build and push reth image, tag as latest"
             id: reth_image_latest
-            command: "make PROFILE=maxperf docker-build-push-latest"
+            command: "make IMAGE_NAME=$IMAGE_NAME DOCKER_IMAGE_NAME=$DOCKER_IMAGE_NAME PROFILE=maxperf docker-build-push-latest"
           - name: "Build and push op-reth image"
             id: op_reth_image
             command: "make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push"
