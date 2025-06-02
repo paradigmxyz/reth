@@ -252,4 +252,3 @@ pub fn expect_fcu_not_syncing_or_accepted(
         }
     }
 }
-
