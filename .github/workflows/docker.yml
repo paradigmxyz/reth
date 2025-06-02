@@ -8,7 +8,6 @@ on:
       - v*
 
 env:
-  REPO_NAME: ${{ github.repository_owner }}/reth
   IMAGE_NAME: ${{ github.repository_owner }}/reth
   OP_IMAGE_NAME: ${{ github.repository_owner }}/op-reth
   CARGO_TERM_COLOR: always
@@ -27,14 +26,10 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - name: 'Build and push reth image'
-            command: 'make PROFILE=maxperf docker-build-push'
-          - name: 'Build and push reth image, tag as "latest"'
-            command: 'make PROFILE=maxperf docker-build-push-latest'
-          - name: 'Build and push op-reth image'
-            command: 'make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push'
-          - name: 'Build and push op-reth image, tag as "latest"'
-            command: 'make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-latest'
+          - name: 'Build and push reth images for git tag and "latest"'
+            command: "make IMAGE_NAME=$IMAGE_NAME DOCKER_IMAGE_NAME=$DOCKER_IMAGE_NAME PROFILE=maxperf docker-build-push-latest"
+          - name: 'Build and push op-reth images for git tag and "latest"'
+            command: "make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME PROFILE=maxperf op-docker-build-push-latest"
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
