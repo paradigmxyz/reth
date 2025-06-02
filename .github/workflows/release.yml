@@ -156,6 +156,11 @@ jobs:
         # The formatting here is borrowed from Lighthouse (which is borrowed from OpenEthereum):
         # https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/.github/workflows/build.yml
         run: |
+          prerelease_flag=""
+          if [[ "${GITHUB_REF}" == *-rc* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+
           body=$(cat <<- "ENDBODY"
           ![image](https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-prod.png)
 
@@ -230,7 +235,7 @@ jobs:
               assets+=("$asset/$asset")
           done
           tag_name="${{ env.VERSION }}"
-          echo "$body" | gh release create --draft -t "Reth $tag_name" -F "-" "$tag_name" "${assets[@]}"
+          echo "$body" | gh release create --draft $prerelease_flag -t "Reth $tag_name" -F "-" "$tag_name" "${assets[@]}"
 
   dry-run-summary:
     name: dry run summary
