@@ -8,9 +8,10 @@ There are two ways to obtain a Reth Docker image:
 Once you have obtained the Docker image, proceed to [Using the Docker
 image](#using-the-docker-image).
 
-> **Note**
->
-> Reth requires Docker Engine version 20.10.10 or higher due to [missing support](https://docs.docker.com/engine/release-notes/20.10/#201010) for the `clone3` syscall in previous versions.
+:::note
+Reth requires Docker Engine version 20.10.10 or higher due to [missing support](https://docs.docker.com/engine/release-notes/20.10/#201010) for the `clone3` syscall in previous versions.
+:::
+
 ## GitHub
 
 Reth docker images for both x86_64 and ARM64 machines are published with every release of reth on GitHub Container Registry.
@@ -52,6 +53,7 @@ docker run reth:local --version
 ## Using the Docker image
 
 There are two ways to use the Docker image:
+
 1. [Using Docker](#using-plain-docker)
 2. [Using Docker Compose](#using-docker-compose)
 
@@ -86,12 +88,12 @@ To run Reth with Docker Compose, run the following command from a shell inside t
 docker compose -f etc/docker-compose.yml -f etc/lighthouse.yml up -d
 ```
 
-> **Note**
->
-> If you want to run Reth with a CL that is not Lighthouse:
->
-> - The JWT for the consensus client can be found at `etc/jwttoken/jwt.hex` in this repository, after the `etc/generate-jwt.sh` script is run
-> - The Reth Engine API is accessible on `localhost:8551`
+:::note
+If you want to run Reth with a CL that is not Lighthouse:
+
+-   The JWT for the consensus client can be found at `etc/jwttoken/jwt.hex` in this repository, after the `etc/generate-jwt.sh` script is run
+-   The Reth Engine API is accessible on `localhost:8551`
+:::
 
 To check if Reth is running correctly, run:
 
@@ -101,18 +103,19 @@ docker compose -f etc/docker-compose.yml -f etc/lighthouse.yml logs -f reth
 
 The default `docker-compose.yml` file will create three containers:
 
-- Reth
-- Prometheus
-- Grafana
+-   Reth
+-   Prometheus
+-   Grafana
 
 The optional `lighthouse.yml` file will create two containers:
 
-- Lighthouse
-- [`ethereum-metrics-exporter`](https://github.com/ethpandaops/ethereum-metrics-exporter)
+-   Lighthouse
+-   [`ethereum-metrics-exporter`](https://github.com/ethpandaops/ethereum-metrics-exporter)
 
 Grafana will be exposed on `localhost:3000` and accessible via default credentials (username and password is `admin`), with two available dashboards:
-- reth
-- Ethereum Metrics Exporter (works only if Lighthouse is also running)
+
+-   reth
+-   Ethereum Metrics Exporter (works only if Lighthouse is also running)
 
 ## Interacting with Reth inside Docker
 

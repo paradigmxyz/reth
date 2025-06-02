@@ -12,8 +12,11 @@ export const sidebar: SidebarItem[] = [
     },
     {
         text: "Installation",
-        link: "/installation/installation",
         items: [
+            {
+                text: "Overview",
+                link: "/installation/overview"
+            },
             {
                 text: "Pre-Built Binaries",
                 link: "/installation/binaries"
