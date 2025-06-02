@@ -43,14 +43,14 @@ jobs:
         exclude:
           # For non release candidate runs, exclude items that do not tag as "latest"
           - isRC: false
-            id: reth_image
+            build: { id: reth_image }
           - isRC: false
-            id: op_reth_image
+            build: { id: op_reth_image }
           # For release candidate runs, exclude items that tag as "latest"
           - isRC: true
-            id: reth_image_latest
+            build: { id: reth_image_latest }
           - isRC: true
-            id: op_reth_image_latest
+            build: { id: op_reth_image_latest }
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
