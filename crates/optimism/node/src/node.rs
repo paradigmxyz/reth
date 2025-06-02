@@ -11,8 +11,7 @@ use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{
-    types::BasicNetworkPrimitives,
-    NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
+    types::BasicNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
     PeersInfo,
 };
 use reth_node_api::{
