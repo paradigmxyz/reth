@@ -21,6 +21,7 @@ use reth_evm::{
     Database, Evm, FromRecoveredTx, FromTxWithEncoded, IntoTxEnv, OnStateHook, RecoveredTx,
 };
 use reth_primitives::TransactionSigned;
+use reth_primitives_traits::SignerRecoverable;
 use reth_provider::BlockExecutionResult;
 use reth_revm::State;
 use revm::{

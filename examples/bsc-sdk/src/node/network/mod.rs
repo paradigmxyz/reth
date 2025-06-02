@@ -7,9 +7,9 @@ use reth::{
 };
 use reth_chainspec::Hardforks;
 use reth_discv4::{Discv4Config, NodeRecord};
+use reth_ethereum_primitives::{EthPrimitives, PooledTransactionVariant};
 use reth_network::{EthNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager};
 use reth_network_api::PeersInfo;
-use reth_primitives::{EthPrimitives, PooledTransaction};
 use std::{sync::Arc, time::Duration};
 use tracing::info;
 
@@ -54,7 +54,10 @@ impl<Node, Pool> NetworkBuilder<Node, Pool> for BscNetworkBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = BscChainSpec, Primitives = EthPrimitives>>,
     Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
+            Transaction: PoolTransaction<
+                Consensus = TxTy<Node::Types>,
+                Pooled = PooledTransactionVariant,
+            >,
         > + Unpin
         + 'static,
 {
