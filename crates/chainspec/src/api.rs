@@ -6,7 +6,7 @@ use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 use core::fmt::{Debug, Display};
-use reth_ethereum_forks::EthereumHardforks;
+use reth_ethereum_forks::{ChainHardforks, EthereumHardforks};
 use reth_network_peers::NodeRecord;
 
 /// Trait representing type configuring a chain spec.
@@ -130,5 +130,24 @@ impl EthChainSpec for ChainSpec {
 
     fn final_paris_total_difficulty(&self) -> Option<U256> {
         self.paris_block_and_final_difficulty.map(|(_, final_difficulty)| final_difficulty)
+    }
+}
+
+/// Trait representing type overriding hardforks for a chain.
+pub trait HardforkOverride {
+    /// Returns the hardforks for the chain.
+    fn hardforks(&self) -> ChainHardforks;
+
+    /// Overrides the hardforks for the chain.
+    fn override_hardforks(&self, hardforks: ChainHardforks) -> Self;
+}
+
+impl HardforkOverride for ChainSpec {
+    fn hardforks(&self) -> ChainHardforks {
+        self.hardforks.clone()
+    }
+
+    fn override_hardforks(&self, hardforks: ChainHardforks) -> Self {
+        self.override_hardforks(hardforks)
     }
 }

@@ -25,7 +25,7 @@ pub use alloy_chains::{Chain, ChainKind, NamedChain};
 /// Re-export for convenience
 pub use reth_ethereum_forks::*;
 
-pub use api::EthChainSpec;
+pub use api::{EthChainSpec, HardforkOverride};
 pub use info::ChainInfo;
 #[cfg(any(test, feature = "test-utils"))]
 pub use spec::test_fork_ids;

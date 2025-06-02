@@ -2,7 +2,7 @@
 
 use crate::launcher::Launcher;
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, HardforkOverride};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
@@ -137,7 +137,7 @@ impl<C: ChainSpecParser> NodeCommand<C> {
 impl<C, Ext> NodeCommand<C, Ext>
 where
     C: ChainSpecParser,
-    C::ChainSpec: EthChainSpec + EthereumHardforks + Clone,
+    C::ChainSpec: EthChainSpec + EthereumHardforks + Clone + HardforkOverride,
     Ext: clap::Args + fmt::Debug,
 {
     /// Launches the node
@@ -169,6 +169,10 @@ where
             engine,
             hardfork_overrides,
         } = self;
+
+        let chain = chain
+            .override_hardforks(hardfork_overrides.apply_overrides_to_hardforks(chain.hardforks()))
+            .into();
 
         // set up node config
         let mut node_config = NodeConfig {

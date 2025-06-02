@@ -1,7 +1,6 @@
 use clap::Args;
-use reth_chainspec::{ChainHardforks, ChainSpec};
+use reth_chainspec::ChainHardforks;
 use reth_ethereum_forks::{EthereumHardfork, ForkCondition};
-use std::collections::HashMap;
 
 /// Command line arguments for overriding Ethereum hardfork configurations.
 ///
@@ -10,152 +9,154 @@ use std::collections::HashMap;
 #[derive(Default, Debug, Args, Clone)]
 #[command(next_help_heading = "Hardfork Overrides")]
 pub struct HardforkOverridesArgs {
-    /// Override Frontier hardfork timestamp
-    #[arg(long = "override.frontier", value_name = "TIMESTAMP")]
+    /// Override Frontier hardfork block number
+    #[arg(long = "override.frontier")]
     pub override_frontier: Option<u64>,
 
-    /// Override Homestead hardfork timestamp
-    #[arg(long = "override.homestead", value_name = "TIMESTAMP")]
+    /// Override Homestead hardfork block number
+    #[arg(long = "override.homestead")]
     pub override_homestead: Option<u64>,
 
-    /// Override DAO hardfork timestamp
-    #[arg(long = "override.dao", value_name = "TIMESTAMP")]
+    /// Override DAO hardfork block number
+    #[arg(long = "override.dao")]
     pub override_dao: Option<u64>,
 
-    /// Override Tangerine Whistle hardfork timestamp
-    #[arg(long = "override.tangerine", value_name = "TIMESTAMP")]
+    /// Override Tangerine Whistle hardfork block number
+    #[arg(long = "override.tangerine")]
     pub override_tangerine: Option<u64>,
 
-    /// Override Spurious Dragon hardfork timestamp
-    #[arg(long = "override.spurious", value_name = "TIMESTAMP")]
+    /// Override Spurious Dragon hardfork block number
+    #[arg(long = "override.spuriousdragon")]
     pub override_spurious: Option<u64>,
 
-    /// Override Byzantium hardfork timestamp
-    #[arg(long = "override.byzantium", value_name = "TIMESTAMP")]
+    /// Override Byzantium hardfork block number
+    #[arg(long = "override.byzantium")]
     pub override_byzantium: Option<u64>,
 
-    /// Override Constantinople hardfork timestamp
-    #[arg(long = "override.constantinople", value_name = "TIMESTAMP")]
+    /// Override Constantinople hardfork block number
+    #[arg(long = "override.constantinople")]
     pub override_constantinople: Option<u64>,
 
-    /// Override Petersburg hardfork timestamp
-    #[arg(long = "override.petersburg", value_name = "TIMESTAMP")]
+    /// Override Petersburg hardfork block number
+    #[arg(long = "override.petersburg")]
     pub override_petersburg: Option<u64>,
 
-    /// Override Istanbul hardfork timestamp
-    #[arg(long = "override.istanbul", value_name = "TIMESTAMP")]
+    /// Override Istanbul hardfork block number
+    #[arg(long = "override.istanbul")]
     pub override_istanbul: Option<u64>,
 
-    /// Override Muir Glacier hardfork timestamp
-    #[arg(long = "override.muir", value_name = "TIMESTAMP")]
+    /// Override Muir Glacier hardfork block number
+    #[arg(long = "override.muirglacier")]
     pub override_muir: Option<u64>,
 
-    /// Override Berlin hardfork timestamp
-    #[arg(long = "override.berlin", value_name = "TIMESTAMP")]
+    /// Override Berlin hardfork block number
+    #[arg(long = "override.berlin")]
     pub override_berlin: Option<u64>,
 
-    /// Override London hardfork timestamp
-    #[arg(long = "override.london", value_name = "TIMESTAMP")]
+    /// Override London hardfork block number
+    #[arg(long = "override.london")]
     pub override_london: Option<u64>,
 
-    /// Override Arrow Glacier hardfork timestamp
-    #[arg(long = "override.arrow", value_name = "TIMESTAMP")]
+    /// Override Arrow Glacier hardfork block number
+    #[arg(long = "override.arrowglacier")]
     pub override_arrow: Option<u64>,
 
-    /// Override Gray Glacier hardfork timestamp
-    #[arg(long = "override.gray", value_name = "TIMESTAMP")]
+    /// Override Gray Glacier hardfork block number
+    #[arg(long = "override.grayglacier")]
     pub override_gray: Option<u64>,
 
     /// Override Paris (The Merge) hardfork timestamp
-    #[arg(long = "override.paris", value_name = "TIMESTAMP")]
+    #[arg(long = "override.paris")]
     pub override_paris: Option<u64>,
 
     /// Override Shanghai hardfork timestamp
-    #[arg(long = "override.shanghai", value_name = "TIMESTAMP")]
+    #[arg(long = "override.shanghai")]
     pub override_shanghai: Option<u64>,
 
     /// Override Cancun hardfork timestamp
-    #[arg(long = "override.cancun", value_name = "TIMESTAMP")]
+    #[arg(long = "override.cancun")]
     pub override_cancun: Option<u64>,
 
     /// Override Prague hardfork timestamp
-    #[arg(long = "override.prague", value_name = "TIMESTAMP")]
+    #[arg(long = "override.prague")]
     pub override_prague: Option<u64>,
 
     /// Override Osaka hardfork timestamp
-    #[arg(long = "override.osaka", value_name = "TIMESTAMP")]
+    #[arg(long = "override.osaka")]
     pub override_osaka: Option<u64>,
 }
 
 impl HardforkOverridesArgs {
-    /// Returns a mapping of hardfork names to their override timestamps.
+    /// Gets the override condition for a specific hardfork (by name).
     ///
-    /// All hardfork names (as strings) are mapped to the corresponding
-    /// `Option<u64>` stored in this struct. If a field is `None`, it means
-    /// no override was provided for that hardfork.
-    pub fn get_overrides_map(&self) -> HashMap<&'static str, Option<u64>> {
-        let mut map = HashMap::new();
-
-        // Gather (key, value) pairs into a small array, then insert them.
-        let pairs: [(&'static str, Option<u64>); 19] = [
-            ("frontier", self.override_frontier),
-            ("homestead", self.override_homestead),
-            ("dao", self.override_dao),
-            ("tangerine", self.override_tangerine),
-            ("spurious", self.override_spurious),
-            ("byzantium", self.override_byzantium),
-            ("constantinople", self.override_constantinople),
-            ("petersburg", self.override_petersburg),
-            ("istanbul", self.override_istanbul),
-            ("muir", self.override_muir),
-            ("berlin", self.override_berlin),
-            ("london", self.override_london),
-            ("arrow", self.override_arrow),
-            ("gray", self.override_gray),
-            ("paris", self.override_paris),
-            ("shanghai", self.override_shanghai),
-            ("cancun", self.override_cancun),
-            ("prague", self.override_prague),
-            ("osaka", self.override_osaka),
-        ];
-
-        for (name, ts_opt) in pairs {
-            map.insert(name, ts_opt);
-        }
-
-        map
-    }
-
-    /// Gets the override timestamp for a specific hardfork (by name).
-    ///
-    /// Returns `Some(timestamp)` if the user provided `--override.<name>=<timestamp>`,
+    /// Returns `Some(timestamp/block)` if the user provided `--override.<name>=<timestamp/block>`,
     /// or `None` otherwise.
     pub fn get_override(&self, hardfork: &str) -> Option<u64> {
-        self.get_overrides_map().get(hardfork).copied().flatten()
+        match hardfork {
+            "frontier" => self.override_frontier,
+            "homestead" => self.override_homestead,
+            "dao" => self.override_dao,
+            "tangerine" => self.override_tangerine,
+            "spuriousdragon" => self.override_spurious,
+            "byzantium" => self.override_byzantium,
+            "constantinople" => self.override_constantinople,
+            "petersburg" => self.override_petersburg,
+            "istanbul" => self.override_istanbul,
+            "muirglacier" => self.override_muir,
+            "berlin" => self.override_berlin,
+            "london" => self.override_london,
+            "arrowglacier" => self.override_arrow,
+            "grayglacier" => self.override_gray,
+            "paris" => self.override_paris,
+            "shanghai" => self.override_shanghai,
+            "cancun" => self.override_cancun,
+            "prague" => self.override_prague,
+            "osaka" => self.override_osaka,
+            _ => None,
+        }
     }
 
     /// Applies all non‐None overrides in this struct to the given `ChainHardforks`.
     ///
-    /// Any hardfork for which the user passed `--override.<name>=<ts>` will
-    /// be inserted (or replaced) with `ForkCondition::Timestamp(ts)`.
-    pub fn apply_overrides_to_hardforks(&self, hardforks: &mut ChainHardforks) {
-        let overrides = self.get_overrides_map();
-
-        for (name, timestamp_opt) in overrides {
-            if let Some(ts) = timestamp_opt {
-                if let Ok(hf) = name.parse::<EthereumHardfork>() {
-                    hardforks.insert(hf, ForkCondition::Timestamp(ts));
+    /// Any hardfork for which the user passed `--override.<name>=<block/timestamp>` will
+    /// be inserted (or replaced) with `ForkCondition::Block(block)` or
+    /// `ForkCondition::Timestamp(timestamp)`.
+    pub fn apply_overrides_to_hardforks(&self, mut hardforks: ChainHardforks) -> ChainHardforks {
+        macro_rules! apply {
+            ($field:ident, $hf:ident) => {
+                if let Some(ts) = self.$field {
+                    let original_condition = hardforks.fork(EthereumHardfork::$hf);
+                    let new_condition = match original_condition {
+                        ForkCondition::Block(_) => ForkCondition::Block(ts),
+                        ForkCondition::Timestamp(_) => ForkCondition::Timestamp(ts),
+                        _ => original_condition,
+                    };
+                    hardforks.insert(EthereumHardfork::$hf, new_condition);
                 }
-            }
+            };
         }
-    }
 
-    /// Clones the given `ChainSpec`, applies all overrides to its `.hardforks`,
-    /// and returns the modified clone. The original `spec` remains untouched.
-    pub fn apply_overrides_to_chainspec(&self, spec: &ChainSpec) -> ChainSpec {
-        let mut cloned = spec.clone();
-        self.apply_overrides_to_hardforks(&mut cloned.hardforks);
-        cloned
+        apply!(override_frontier, Frontier);
+        apply!(override_homestead, Homestead);
+        apply!(override_dao, Dao);
+        apply!(override_tangerine, Tangerine);
+        apply!(override_spurious, SpuriousDragon);
+        apply!(override_byzantium, Byzantium);
+        apply!(override_constantinople, Constantinople);
+        apply!(override_petersburg, Petersburg);
+        apply!(override_istanbul, Istanbul);
+        apply!(override_muir, MuirGlacier);
+        apply!(override_berlin, Berlin);
+        apply!(override_london, London);
+        apply!(override_arrow, ArrowGlacier);
+        apply!(override_gray, GrayGlacier);
+        apply!(override_paris, Paris);
+        apply!(override_shanghai, Shanghai);
+        apply!(override_cancun, Cancun);
+        apply!(override_prague, Prague);
+        apply!(override_osaka, Osaka);
+
+        hardforks
     }
 }
 
@@ -223,37 +224,7 @@ mod tests {
         ])
         .args;
 
-        let updated = args.apply_overrides_to_chainspec(&MAINNET);
+        let updated = args.apply_overrides_to_hardforks(MAINNET.hardforks.clone());
         assert_eq!(updated.fork(EthereumHardfork::Prague), ForkCondition::Timestamp(1720000000));
-    }
-
-    #[test]
-    fn test_overrides_map_contains_all_hardforks() {
-        let args = HardforkOverridesArgs::default();
-        let overrides = args.get_overrides_map();
-
-        for &hf_name in &[
-            "frontier",
-            "homestead",
-            "dao",
-            "tangerine",
-            "spurious",
-            "byzantium",
-            "constantinople",
-            "petersburg",
-            "istanbul",
-            "muir",
-            "berlin",
-            "london",
-            "arrow",
-            "gray",
-            "paris",
-            "shanghai",
-            "cancun",
-            "prague",
-            "osaka",
-        ] {
-            assert!(overrides.contains_key(hf_name));
-        }
     }
 }
