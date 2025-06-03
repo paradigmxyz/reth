@@ -420,8 +420,12 @@ where
             self.pool.write().update_accounts(changed_senders);
         let mut listener = self.event_listener.write();
 
-        promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-        discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &promoted {
+            listener.pending(tx.hash(), None);
+        }
+        for tx in &discarded {
+            listener.discarded(tx.hash());
+        }
 
         // This deletes outdated blob txs from the blob store, based on the account's nonce. This is
         // called during txpool maintenance when the pool drifted.
@@ -570,7 +574,9 @@ where
 
             {
                 let mut listener = self.event_listener.write();
-                discarded_hashes.iter().for_each(|hash| listener.discarded(hash));
+                for hash in &discarded_hashes {
+                    listener.discarded(hash);
+                }
             }
 
             // A newly added transaction may be immediately discarded, so we need to
@@ -665,9 +671,15 @@ where
         // broadcast specific transaction events
         let mut listener = self.event_listener.write();
 
-        mined.iter().for_each(|tx| listener.mined(tx, block_hash));
-        promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-        discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &mined {
+            listener.mined(tx, block_hash);
+        }
+        for tx in &promoted {
+            listener.pending(tx.hash(), None);
+        }
+        for tx in &discarded {
+            listener.discarded(tx.hash());
+        }
     }
 
     /// Fire events for the newly added transaction if there are any.
@@ -679,8 +691,12 @@ where
                 let AddedPendingTransaction { transaction, promoted, discarded, replaced } = tx;
 
                 listener.pending(transaction.hash(), replaced.clone());
-                promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-                discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+                for tx in promoted {
+                    listener.pending(tx.hash(), None);
+                }
+                for tx in discarded {
+                    listener.discarded(tx.hash());
+                }
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
@@ -748,7 +764,9 @@ where
 
         let mut listener = self.event_listener.write();
 
-        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &removed {
+            listener.discarded(tx.hash());
+        }
 
         removed
     }
@@ -766,7 +784,9 @@ where
 
         let mut listener = self.event_listener.write();
 
-        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &removed {
+            listener.discarded(tx.hash());
+        }
 
         removed
     }
@@ -781,7 +801,9 @@ where
 
         let mut listener = self.event_listener.write();
 
-        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &removed {
+            listener.discarded(tx.hash());
+        }
 
         removed
     }

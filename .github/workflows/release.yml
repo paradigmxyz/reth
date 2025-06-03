@@ -143,6 +143,12 @@ jobs:
           fetch-depth: 0
       - name: Download artifacts
         uses: actions/download-artifact@v4
+      - name: Generate full changelog
+        id: changelog
+        run: |
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 ${{ env.VERSION }}^)..${{ env.VERSION }})" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       - name: Create release draft
         env:
           GITHUB_USER: ${{ github.repository_owner }}
@@ -150,6 +156,11 @@ jobs:
         # The formatting here is borrowed from Lighthouse (which is borrowed from OpenEthereum):
         # https://github.com/openethereum/openethereum/blob/6c2d392d867b058ff867c4373e40850ca3f96969/.github/workflows/build.yml
         run: |
+          prerelease_flag=""
+          if [[ "${GITHUB_REF}" == *-rc* ]]; then
+            prerelease_flag="--prerelease"
+          fi
+
           body=$(cat <<- "ENDBODY"
           ![image](https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-prod.png)
 
@@ -186,6 +197,10 @@ jobs:
 
           *See [Update Priorities](https://paradigmxyz.github.io/reth/installation/priorities.html) for more information about this table.*
 
+          ## All Changes
+
+          ${{ steps.changelog.outputs.CHANGELOG }}
+
           ## Binaries
 
           [See pre-built binaries documentation.](https://paradigmxyz.github.io/reth/installation/binaries.html)
@@ -220,7 +235,7 @@ jobs:
               assets+=("$asset/$asset")
           done
           tag_name="${{ env.VERSION }}"
-          echo "$body" | gh release create --draft -t "Reth $tag_name" -F "-" "$tag_name" "${assets[@]}"
+          echo "$body" | gh release create --draft $prerelease_flag -t "Reth $tag_name" -F "-" "$tag_name" "${assets[@]}"
 
   dry-run-summary:
     name: dry run summary
