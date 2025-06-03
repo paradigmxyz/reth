@@ -3,7 +3,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p engine-api-access
+//! cargo run -p example-engine-api-access
 //! ```
 
 use reth_db::test_utils::create_test_rw_db;
