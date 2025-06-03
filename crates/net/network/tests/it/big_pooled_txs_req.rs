@@ -78,7 +78,9 @@ async fn test_large_tx_req() {
     // check all txs have been received
     match receive.await.unwrap() {
         Ok(PooledTransactions(txs)) => {
-            txs.into_iter().for_each(|tx| assert!(txs_hashes.contains(tx.hash())));
+            for tx in txs {
+                assert!(txs_hashes.contains(tx.hash()));
+            }
         }
         Err(e) => {
             panic!("error: {e:?}");
