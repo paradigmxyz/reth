@@ -40,10 +40,10 @@ Importing OP mainnet Bedrock datadir requires exported data:
 
 ### Manual Export Steps
 
-The `op-geth` Bedrock datadir can be downloaded from <https://datadirs.optimism.io>.
+The `op-geth` Bedrock datadir can be downloaded from [https://datadirs.optimism.io](https://datadirs.optimism.io).
 
 To export the OVM chain from `op-geth`, clone the `testinprod-io/op-geth` repo and checkout
-<https://github.com/testinprod-io/op-geth/pull/1>. Commands to export blocks, receipts and state dump can be
+[testinprod-io/op-geth#1](https://github.com/testinprod-io/op-geth/pull/1). Commands to export blocks, receipts and state dump can be
 found in `op-geth/migrate.sh`.
 
 ### Manual Import Steps
@@ -64,7 +64,7 @@ This step is optional. To run a full node, skip this step. If however receipts a
 corresponding transactions must already be imported (see [step 1](#1-import-blocks)).
 
 Imports a `.rlp` file of receipts, that has been exported with command specified in
-<https://github.com/testinprod-io/op-geth/pull/1> (command for exporting receipts uses custom RLP-encoding). 
+[testinprod-io/op-geth#1](https://github.com/testinprod-io/op-geth/pull/1) (command for exporting receipts uses custom RLP-encoding). 
 
 Import of >100 million OVM receipts, from genesis to Bedrock, completes in 30 minutes.
 
@@ -86,7 +86,7 @@ $ op-reth init-state --chain optimism <state-dump>
 ## Sync from Bedrock to tip
 
 Running the node with `--debug.tip <block-hash>`syncs the node without help from CL until a fixed tip. The
-block hash can be taken from the latest block on <https://optimistic.etherscan.io>.
+block hash can be taken from the latest block on [https://optimistic.etherscan.io](https://optimistic.etherscan.io).
 
 Use `op-node` to track the tip. Start `op-node` with `--syncmode=execution-layer` and `--l2.enginekind=reth`. If `op-node`'s RPC
 connection to L1 is over localhost, `--l1.trustrpc` can be set to improve performance.
