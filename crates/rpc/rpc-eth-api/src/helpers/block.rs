@@ -10,8 +10,9 @@ use alloy_primitives::{Sealable, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
+use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_rpc_types_compat::block::from_block;
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -214,6 +215,8 @@ pub trait LoadBlock:
     + SpawnBlocking
     + RpcNodeCoreExt<
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
+        Primitives: NodePrimitives<SignedTx = ProviderTx<Self::Provider>>,
+        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
     >
 {
     /// Returns the block object for the given block id.
