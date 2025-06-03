@@ -352,13 +352,7 @@ where
         let transaction_pool = TxPoolBuilder::new(ctx)
             .with_disk_blob_store(blob_cache_size)
             .with_validator(validator)
-            .build_and_spawn_maintenance_task(
-                blob_store,
-                pool_config,
-                |validator, blob_store, pool_config| {
-                    reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config)
-                },
-            )?;
+            .build_and_spawn_maintenance_task(blob_store, pool_config)?;
 
         info!(target: "reth::cli", "Transaction pool initialized");
         debug!(target: "reth::cli", "Spawned txpool maintenance task");

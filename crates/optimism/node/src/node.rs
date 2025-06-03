@@ -58,7 +58,7 @@ use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction, PoolPooledTx,
+    blobstore::DiskFileBlobStore, EthPoolTransaction, PoolPooledTx,
     PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
@@ -712,18 +712,7 @@ where
         let transaction_pool = TxPoolBuilder::new(ctx)
             .with_disk_blob_store(None)
             .with_validator(validator)
-            .build_and_spawn_maintenance_task(
-                blob_store,
-                final_pool_config,
-                |validator, blob_store, pool_config| {
-                    reth_transaction_pool::Pool::new(
-                        validator,
-                        CoinbaseTipOrdering::default(),
-                        blob_store,
-                        pool_config,
-                    )
-                },
-            )?;
+            .build_and_spawn_maintenance_task(blob_store, final_pool_config)?;
 
         info!(target: "reth::cli", "Transaction pool initialized");
         debug!(target: "reth::cli", "Spawned txpool maintenance task");

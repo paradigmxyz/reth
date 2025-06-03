@@ -4,8 +4,8 @@ use alloy_primitives::Address;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::TxTy;
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, PoolConfig, PoolTransaction, SubPoolLimit, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction, SubPoolLimit,
+    TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use std::{collections::HashSet, future::Future};
 
@@ -133,29 +133,37 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
     }
 }
 
-impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, TransactionValidationTaskExecutor<V>> {
+impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, TransactionValidationTaskExecutor<V>>
+where
+    V: TransactionValidator + Clone + 'static,
+    V::Transaction:
+        PoolTransaction<Consensus = TxTy<Node::Types>> + reth_transaction_pool::EthPoolTransaction,
+{
     /// Build the transaction pool and spawn its maintenance tasks.
     /// This method creates the blob store, builds the pool, and spawns maintenance tasks.
-    pub fn build_and_spawn_maintenance_task<Pool>(
+    pub fn build_and_spawn_maintenance_task(
         self,
         blob_store: DiskFileBlobStore,
         pool_config: PoolConfig,
-        pool_constructor: impl FnOnce(
+    ) -> eyre::Result<
+        reth_transaction_pool::Pool<
             TransactionValidationTaskExecutor<V>,
+            CoinbaseTipOrdering<V::Transaction>,
             DiskFileBlobStore,
-            PoolConfig,
-        ) -> Pool,
-    ) -> eyre::Result<Pool>
+        >,
+    >
     where
-        Pool: TransactionPool + reth_transaction_pool::TransactionPoolExt + Clone + 'static,
-        Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
         Node::Provider: CanonStateSubscriptions,
     {
         // Destructure self to avoid partial move issues
         let TxPoolBuilder { ctx, validator, .. } = self;
 
-        // Build the pool using the provided constructor
-        let transaction_pool = pool_constructor(validator, blob_store, pool_config.clone());
+        let transaction_pool = reth_transaction_pool::Pool::new(
+            validator,
+            CoinbaseTipOrdering::default(),
+            blob_store,
+            pool_config.clone(),
+        );
 
         // Spawn maintenance tasks using standalone functions
         spawn_maintenance_tasks(ctx, transaction_pool.clone(), &pool_config)?;
