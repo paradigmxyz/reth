@@ -2081,10 +2081,12 @@ where
         let run_parallel_state_root =
             persisting_kind.can_run_parallel_state_root() && !self.config.state_root_fallback();
 
+        let mut use_state_root_task = self.config.use_state_root_task();
+
         // use prewarming background task
         let header = block.clone_sealed_header();
         let txs = block.clone_transactions_recovered().collect();
-        let mut handle = if run_parallel_state_root && self.config.use_state_root_task() {
+        let mut handle = if run_parallel_state_root && use_state_root_task {
             // use background tasks for state root calc
             let consistent_view =
                 ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
@@ -2106,14 +2108,22 @@ where
                 .trie_input_duration
                 .record(trie_input_start.elapsed().as_secs_f64());
 
-            self.payload_processor.spawn(
-                header,
-                txs,
-                provider_builder,
-                consistent_view,
-                trie_input,
-                &self.config,
-            )
+            // Use state root task only if prefix sets are empty, otherwise proof generation is too
+            // expensive because it requires walking over the paths in the prefix set in every
+            // proof.
+            if trie_input.prefix_sets.is_empty() {
+                self.payload_processor.spawn(
+                    header,
+                    txs,
+                    provider_builder,
+                    consistent_view,
+                    trie_input,
+                    &self.config,
+                )
+            } else {
+                use_state_root_task = false;
+                self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
+            }
         } else {
             self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };
@@ -2167,7 +2177,7 @@ where
         if run_parallel_state_root {
             // if we new payload extends the current canonical change we attempt to use the
             // background task or try to compute it in parallel
-            if self.config.use_state_root_task() {
+            if use_state_root_task {
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = execution_finish.elapsed();
