@@ -350,7 +350,6 @@ where
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         let transaction_pool = TxPoolBuilder::new(ctx)
-            .with_disk_blob_store(blob_cache_size)
             .with_validator(validator)
             .build_and_spawn_maintenance_task(blob_store, pool_config)?;
 

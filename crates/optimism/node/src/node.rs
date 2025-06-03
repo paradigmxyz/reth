@@ -710,7 +710,6 @@ where
         let final_pool_config = pool_config_overrides.apply(ctx.pool_config());
 
         let transaction_pool = TxPoolBuilder::new(ctx)
-            .with_disk_blob_store(None)
             .with_validator(validator)
             .build_and_spawn_maintenance_task(blob_store, final_pool_config)?;
 

@@ -109,27 +109,20 @@ impl PoolBuilderConfigOverrides {
 /// configurations like blob stores, validators, and maintenance tasks.
 pub struct TxPoolBuilder<'a, Node: FullNodeTypes, V = ()> {
     ctx: &'a BuilderContext<Node>,
-    cache_size: Option<u32>,
     validator: V,
 }
 
 impl<'a, Node: FullNodeTypes> TxPoolBuilder<'a, Node> {
     /// Creates a new `TxPoolBuilder` with the given context.
     pub const fn new(ctx: &'a BuilderContext<Node>) -> Self {
-        Self { ctx, cache_size: None, validator: () }
-    }
-
-    /// Configure the blob store with a specific cache size.
-    pub const fn with_disk_blob_store(mut self, cache_size: Option<u32>) -> Self {
-        self.cache_size = cache_size;
-        self
+        Self { ctx, validator: () }
     }
 }
 
 impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
     /// Configure the validator for the transaction pool.
     pub fn with_validator<NewV>(self, validator: NewV) -> TxPoolBuilder<'a, Node, NewV> {
-        TxPoolBuilder { ctx: self.ctx, cache_size: self.cache_size, validator }
+        TxPoolBuilder { ctx: self.ctx, validator }
     }
 }
 
@@ -280,10 +273,7 @@ where
 
 impl<Node: FullNodeTypes, V: std::fmt::Debug> std::fmt::Debug for TxPoolBuilder<'_, Node, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TxPoolBuilder")
-            .field("cache_size", &self.cache_size)
-            .field("validator", &self.validator)
-            .finish()
+        f.debug_struct("TxPoolBuilder").field("validator", &self.validator).finish()
     }
 }
 
