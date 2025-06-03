@@ -12,6 +12,7 @@ reth-codecs.workspace = true
 reth-network-peers.workspace = true
 reth-node-builder.workspace = true
 reth-optimism-forks.workspace = true
+reth-db-api.workspace = true
 reth-op = { workspace = true, features = ["node", "pool"] }
 reth-payload-builder.workspace = true
 reth-rpc-api.workspace = true
@@ -62,5 +63,6 @@ arbitrary = [
     "revm/arbitrary",
     "reth-ethereum/arbitrary",
     "alloy-rpc-types-engine/arbitrary",
+    "reth-db-api/arbitrary",
 ]
 default = []
