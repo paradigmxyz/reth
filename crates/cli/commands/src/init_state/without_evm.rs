@@ -38,7 +38,7 @@ where
     info!(target: "reth::cli", new_tip = ?header.num_hash(), "Setting up dummy EVM chain before importing state.");
 
     let static_file_provider = provider_rw.static_file_provider();
-    // Write EVM dummy data up to header - 1 block
+    // Write EVM dummy data up to `header - 1` block
     append_dummy_chain(&static_file_provider, header.number() - 1, |number| Header {
         number,
         ..Default::default()
@@ -95,7 +95,7 @@ where
     Ok(())
 }
 
-/// Creates a dummy chain with no transactions/receipts up to target_height block inclusive.
+/// Creates a dummy chain with no transactions/receipts up to `target_height` block inclusive.
 ///
 /// * Headers: It will push an empty block.
 /// * Transactions: It will not push any tx, only increments the end block range.
