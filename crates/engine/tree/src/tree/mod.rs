@@ -2168,7 +2168,10 @@ where
         // Use state root task only if:
         // 1. No persistence is in progress
         // 2. Config allows it
-        // 3. No ancestors with missing trie updates
+        // 3. No ancestors with missing trie updates. If any exist, it will mean that every state
+        //    root task proof calculation will include a lot of unrelated paths in the prefix sets.
+        //    It's cheaper to run a parallel state root that does one walk over trie tables while
+        //    accounting for the prefix sets.
         let use_state_root_task = run_parallel_state_root &&
             self.config.use_state_root_task() &&
             !self.has_ancestors_with_missing_trie_updates(block.sealed_header());
