@@ -208,7 +208,9 @@ impl Subcommands {
             Self::NumBlocks { amount } => last.saturating_sub(*amount),
         };
         if target > last {
-            eyre::bail!("Target block number {target} is higher than the latest block number {last}")
+            eyre::bail!(
+                "Target block number {target} is higher than the latest block number {last}"
+            )
         }
         Ok(target)
     }
