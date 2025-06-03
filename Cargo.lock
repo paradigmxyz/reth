@@ -3369,6 +3369,7 @@ dependencies = [
  "op-revm",
  "reth-chain-state",
  "reth-codecs",
+ "reth-db-api",
  "reth-ethereum",
  "reth-network-peers",
  "reth-node-builder",
