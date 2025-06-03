@@ -272,11 +272,10 @@ where
             }
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
-            let mut current = from_block;
-            let mut final_root = B256::default();
-            while current < to_block {
-                let chunk_to = std::cmp::min(current + incremental_threshold - 1, to_block);
-                let chunk_range = current..=chunk_to;
+            let mut final_root = None;
+            for start_block in range.step_by(incremental_threshold as usize) {
+                let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
+                let chunk_range = start_block..=chunk_to;
                 let (root, updates) =
                 StateRoot::incremental_root_with_updates(provider.tx_ref(), chunk_range)
                     .map_err(|e| {
@@ -284,9 +283,13 @@ where
                         StageError::Fatal(Box::new(e))
                     })?;
                 provider.write_trie_updates(&updates)?;
-                final_root = root;
-                current = chunk_to + 1;
+                final_root = Some(root);
             }
+
+            // if we had no final root, we must have not looped above, which should not be possible
+            let final_root = final_root.ok_or(StageError::Fatal(
+                "Incremental merkle hashing did not produce a final root".into(),
+            ))?;
 
             let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
                 provider.count_entries::<tables::HashedStorages>()?)
@@ -497,7 +500,7 @@ mod tests {
 
     #[tokio::test]
     async fn execute_chunked_merkle() {
-        let (previous_stage, stage_progress) = (100, 500);
+        let (previous_stage, stage_progress) = (200, 100);
         let clean_threshold = 100;
         let incremental_threshold = 10;
 
