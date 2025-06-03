@@ -62,8 +62,11 @@ where
             Provider: BlockNumReader + CanonStateSubscriptions,
             Pool: TransactionPool,
             Network: NetworkInfo,
-        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>
-        + 'static,
+        > + EthApiTypes<
+            TransactionCompat: TransactionCompat<
+                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
+            >,
+        > + 'static,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -94,7 +97,11 @@ where
             Provider: BlockNumReader + CanonStateSubscriptions,
             Pool: TransactionPool,
             Network: NetworkInfo,
-        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>,
+        > + EthApiTypes<
+            TransactionCompat: TransactionCompat<
+                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
+            >,
+        >,
 {
     match kind {
         SubscriptionKind::NewHeads => {
