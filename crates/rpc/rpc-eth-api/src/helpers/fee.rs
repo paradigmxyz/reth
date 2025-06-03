@@ -338,13 +338,9 @@ where
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
     fn gas_price(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        let header = self.provider().latest_header();
-        let suggested_tip = self.suggested_priority_fee();
         async move {
-            let (header, suggested_tip) = futures::try_join!(
-                async { header.map_err(Self::Error::from_eth_err) },
-                suggested_tip
-            )?;
+            let header = self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+            let suggested_tip = self.suggested_priority_fee().await?;
             let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
             Ok(suggested_tip + U256::from(base_fee))
         }
