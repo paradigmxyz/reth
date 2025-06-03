@@ -1241,9 +1241,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     ///
     /// If no server is configured, no server will be launched on [`RpcServerConfig::start`].
     pub const fn has_server(&self) -> bool {
-        self.http_server_config.is_some() ||
-            self.ws_server_config.is_some() ||
-            self.ipc_server_config.is_some()
+        self.http_server_config.is_some()
+            || self.ws_server_config.is_some()
+            || self.ipc_server_config.is_some()
     }
 
     /// Returns the [`SocketAddr`] of the http server
@@ -1325,9 +1325,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         }
 
         // If both are configured on the same port, we combine them into one server.
-        if self.http_addr == self.ws_addr &&
-            self.http_server_config.is_some() &&
-            self.ws_server_config.is_some()
+        if self.http_addr == self.ws_addr
+            && self.http_server_config.is_some()
+            && self.ws_server_config.is_some()
         {
             let cors = match (self.ws_cors_domains.as_ref(), self.http_cors_domains.as_ref()) {
                 (Some(ws_cors), Some(http_cors)) => {
@@ -1696,7 +1696,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no http transport is configured.
     pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true)
+            return http.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1708,7 +1708,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ws transport is configured.
     pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true)
+            return ws.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1720,7 +1720,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ipc transport is configured.
     pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true)
+            return ipc.merge(other.into()).map(|_| true);
         }
         Ok(false)
     }
@@ -1942,6 +1942,60 @@ impl TransportRpcModules {
         self.replace_ipc(other)?;
         Ok(true)
     }
+
+    /// Adds or replaces given [`Methods`] in http module.
+    ///
+    /// Returns `true` if the methods were replaced or added, `false` otherwise
+    pub fn add_or_replace_http(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        if let Some(http) = self.http.as_mut() {
+            let names: Vec<&str> = http.method_names().collect();
+            let _: Vec<_> = names.into_iter().map(|name| http.remove_method(name)).collect();
+            return http.merge(other.into()).map(|_| true);
+        }
+        Ok(false)
+    }
+
+    /// Adds or replaces given [`Methods`] in ws module.
+    ///
+    /// Returns `true` if the methods were replaced or added, `false` otherwise
+    pub fn add_or_replace_ws(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        if let Some(ws) = self.ws.as_mut() {
+            let names: Vec<&str> = ws.method_names().collect();
+            let _: Vec<_> = names.into_iter().map(|name| ws.remove_method(name)).collect();
+            return ws.merge(other.into()).map(|_| true);
+        }
+        Ok(false)
+    }
+
+    /// Adds or replaces given [`Methods`] in ipc module.
+    ///
+    /// Returns `true` if the methods were replaced or added, `false` otherwise
+    pub fn add_or_replace_ipc(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        if let Some(ipc) = self.ipc.as_mut() {
+            let names: Vec<&str> = ipc.method_names().collect();
+            let _: Vec<_> = names.into_iter().map(|name| ipc.remove_method(name)).collect();
+            return ipc.merge(other.into()).map(|_| true);
+        }
+        Ok(false)
+    }
+
+    /// Adds or replaces given [`Methods`] in all configured network modules.
+    pub fn add_or_replace(&mut self, other: impl Into<Methods>) -> Result<(), RegisterMethodError> {
+        let other = other.into();
+        self.add_or_replace_http(other.clone())?;
+        self.add_or_replace_ws(other.clone())?;
+        self.add_or_replace_ipc(other)?;
+        Ok(())
+    }
 }
 
 /// Returns the methods installed in the given module that match the given filter.
@@ -1988,8 +2042,8 @@ impl RpcServerHandle {
                 "Bearer {}",
                 secret
                     .encode(&Claims {
-                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap() +
-                            Duration::from_secs(60))
+                        iat: (SystemTime::now().duration_since(UNIX_EPOCH).unwrap()
+                            + Duration::from_secs(60))
                         .as_secs(),
                         exp: None,
                     })
