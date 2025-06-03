@@ -1942,6 +1942,28 @@ impl TransportRpcModules {
         self.replace_ipc(other)?;
         Ok(true)
     }
+
+    /// Merges or replaces the method with the given name from all configured transports.
+    /// Only replaces a method if the method is already configured.
+    ///
+    /// Returns `true` if successful
+    pub fn merge_or_replace_configured(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        // Try to merge the methods first and replace if it fails.
+        if self.merge_http(other.clone()).is_err() {
+            self.replace_http(other.clone())?;
+        }
+        if self.merge_ws(other.clone()).is_err() {
+            self.replace_ws(other.clone())?;
+        }
+        if self.merge_ipc(other.clone()).is_err() {
+            self.replace_ipc(other)?;
+        }
+        Ok(true)
+    }
 }
 
 /// Returns the methods installed in the given module that match the given filter.
@@ -2464,5 +2486,19 @@ mod tests {
         assert!(modules.http.as_ref().unwrap().method("anything").is_some());
         assert!(modules.ipc.as_ref().unwrap().method("anything").is_some());
         assert!(modules.ws.as_ref().unwrap().method("anything").is_some());
+    }
+
+    #[test]
+    fn test_merge_or_replace_configured() {
+        let mut modules = TransportRpcModules {
+            http: Some(create_test_module()),
+            ws: Some(create_test_module()),
+            ipc: Some(create_test_module()),
+            ..Default::default()
+        };
+        let mut other_module = RpcModule::new(());
+        other_module.register_method("something", |_, _, _| "fails").unwrap();
+
+        //WIP
     }
 }
