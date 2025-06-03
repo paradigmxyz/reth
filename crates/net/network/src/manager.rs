@@ -37,6 +37,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
+use reth_chainspec::EnrForkIdEntry;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
@@ -268,7 +269,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         if let Some(disc_config) = discovery_v4_config.as_mut() {
             // merge configured boot nodes
             disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
-            disc_config.add_eip868_pair("eth", status.forkid);
+            // add the forkid entry for EIP-868, but wrap it in an `EnrForkIdEntry` for proper
+            // encoding
+            disc_config.add_eip868_pair("eth", EnrForkIdEntry::from(status.forkid));
         }
 
         if let Some(discv5) = discovery_v5_config.as_mut() {
