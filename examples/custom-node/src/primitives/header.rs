@@ -7,8 +7,6 @@ use reth_codecs::Compact;
 use reth_ethereum::primitives::{BlockHeader, InMemorySize};
 use revm_primitives::keccak256;
 use serde::{Deserialize, Serialize};
-use reth_db_api::DatabaseError;
-use reth_db_api::table::Decompress;
 
 /// The header type of this node
 ///
@@ -168,7 +166,7 @@ impl reth_codecs::Compact for CustomHeader {
     }
 }
 
-impl Compress for CustomHeader {
+impl reth_db_api::table::Compress for CustomHeader {
     type Compressed = Vec<u8>;
 
     fn compress_to_buf<B: alloy_primitives::bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
@@ -176,8 +174,8 @@ impl Compress for CustomHeader {
     }
 }
 
-impl Decompress for CustomHeader {
-    fn decompress(value: &[u8]) -> Result<Self, DatabaseError> {
+impl reth_db_api::table::Decompress for CustomHeader {
+    fn decompress(value: &[u8]) -> Result<Self, reth_db_api::DatabaseError> {
         let (obj, _) = Compact::from_compact(value, value.len());
         Ok(obj)
     }
