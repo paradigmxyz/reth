@@ -110,13 +110,13 @@ impl PoolBuilderConfigOverrides {
 pub struct TxPoolBuilder<'a, Node: FullNodeTypes, V = ()> {
     ctx: &'a BuilderContext<Node>,
     cache_size: Option<u32>,
-    validator: Option<TransactionValidationTaskExecutor<V>>,
+    validator: V,
 }
 
 impl<'a, Node: FullNodeTypes> TxPoolBuilder<'a, Node> {
     /// Creates a new `TxPoolBuilder` with the given context.
     pub const fn new(ctx: &'a BuilderContext<Node>) -> Self {
-        Self { ctx, cache_size: None, validator: None }
+        Self { ctx, cache_size: None, validator: () }
     }
 
     /// Configure the blob store with a specific cache size.
@@ -128,13 +128,12 @@ impl<'a, Node: FullNodeTypes> TxPoolBuilder<'a, Node> {
 
 impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
     /// Configure the validator for the transaction pool.
-    pub fn with_validator<NewV>(
-        self,
-        validator: TransactionValidationTaskExecutor<NewV>,
-    ) -> TxPoolBuilder<'a, Node, NewV> {
-        TxPoolBuilder { ctx: self.ctx, cache_size: self.cache_size, validator: Some(validator) }
+    pub fn with_validator<NewV>(self, validator: NewV) -> TxPoolBuilder<'a, Node, NewV> {
+        TxPoolBuilder { ctx: self.ctx, cache_size: self.cache_size, validator }
     }
+}
 
+impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, TransactionValidationTaskExecutor<V>> {
     /// Build the transaction pool and spawn its maintenance tasks.
     /// This method creates the blob store, builds the pool, and spawns maintenance tasks.
     pub fn build_and_spawn_maintenance_task<Pool>(
@@ -154,8 +153,6 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
     {
         // Destructure self to avoid partial move issues
         let TxPoolBuilder { ctx, validator, .. } = self;
-
-        let validator = validator.ok_or_else(|| eyre::eyre!("Validator must be configured"))?;
 
         // Build the pool using the provided constructor
         let transaction_pool = pool_constructor(validator, blob_store, pool_config.clone());
@@ -276,11 +273,11 @@ where
     Ok(())
 }
 
-impl<Node: FullNodeTypes, V> std::fmt::Debug for TxPoolBuilder<'_, Node, V> {
+impl<Node: FullNodeTypes, V: std::fmt::Debug> std::fmt::Debug for TxPoolBuilder<'_, Node, V> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TxPoolBuilder")
             .field("cache_size", &self.cache_size)
-            .field("validator", &self.validator.is_some())
+            .field("validator", &self.validator)
             .finish()
     }
 }
