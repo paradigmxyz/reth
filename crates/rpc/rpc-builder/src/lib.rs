@@ -1952,15 +1952,27 @@ impl TransportRpcModules {
         other: impl Into<Methods>,
     ) -> Result<bool, RegisterMethodError> {
         let other = other.into();
-        // Try to merge the methods first and replace if it fails.
-        if self.merge_http(other.clone()).is_err() {
-            self.replace_http(other.clone())?;
+        // Try to merge the methods first and only replace if it fails with `AlreadyRegistered`.
+        match self.merge_http(other.clone()) {
+            Ok(true) | Ok(false) => {},
+            Err(RegisterMethodError::AlreadyRegistered(_)) => {
+                self.replace_http(other.clone())?;
+            }
+            Err(e) => return Err(e),
         }
-        if self.merge_ws(other.clone()).is_err() {
-            self.replace_ws(other.clone())?;
+        match self.merge_ws(other.clone()) {
+            Ok(true) | Ok(false) => {},
+            Err(RegisterMethodError::AlreadyRegistered(_)) => {
+                self.replace_ws(other.clone())?;
+            }
+            Err(e) => return Err(e),
         }
-        if self.merge_ipc(other.clone()).is_err() {
-            self.replace_ipc(other)?;
+        match self.merge_ipc(other.clone()) {
+            Ok(true) | Ok(false) => {},
+            Err(RegisterMethodError::AlreadyRegistered(_)) => {
+                self.replace_ipc(other)?;
+            }
+            Err(e) => return Err(e),
         }
         Ok(true)
     }
