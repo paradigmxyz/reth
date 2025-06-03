@@ -61,7 +61,7 @@ pub struct EngineArgs {
     pub reserved_cpu_cores: usize,
 
     /// Enable precompile cache
-    #[arg(long = "engine.precompile-cache", default_value = "false")]
+    #[arg(long = "engine.precompile-cache", default_value = "true")]
     pub precompile_cache_enabled: bool,
 
     /// Enable state root fallback, useful for testing
