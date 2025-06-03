@@ -36,8 +36,8 @@ use reth_primitives_traits::{
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, OmmersProvider,
-    StateCommitmentProvider, StorageChangeSetReader,
+    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StateCommitmentProvider,
+    StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -455,12 +455,6 @@ impl<N: ProviderNodeTypes> ReceiptProviderIdExt for BlockchainProvider<N> {
     }
 }
 
-impl<N: ProviderNodeTypes> OmmersProvider for BlockchainProvider<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.consistent_provider()?.ommers(id)
-    }
-}
-
 impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for BlockchainProvider<N> {
     fn block_body_indices(
         &self,
@@ -686,10 +680,6 @@ where
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
         self.consistent_provider()?.header_by_id(id)
     }
-
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.consistent_provider()?.ommers_by_id(id)
-    }
 }
 
 impl<N: ProviderNodeTypes> CanonStateSubscriptions for BlockchainProvider<N> {
@@ -796,8 +786,8 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DatabaseProviderFactory, HeaderProvider,
-        OmmersProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
-        TransactionVariant, TransactionsProvider,
+        ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, TransactionVariant,
+        TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -1227,43 +1217,6 @@ mod tests {
     }
 
     #[test]
-    fn test_block_reader_ommers() -> eyre::Result<()> {
-        // Create a new provider
-        let mut rng = generators::rng();
-        let (provider, _, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        let first_in_mem_block = in_memory_blocks.first().unwrap();
-
-        // If the block is after the Merge, we should have an empty ommers list
-        assert_eq!(
-            provider.ommers(
-                (provider.chain_spec().paris_block_and_final_difficulty.unwrap().0 + 2).into()
-            )?,
-            Some(vec![])
-        );
-
-        // First in memory block ommers should be found
-        assert_eq!(
-            provider.ommers(first_in_mem_block.number.into())?,
-            Some(first_in_mem_block.body().ommers.clone())
-        );
-        assert_eq!(
-            provider.ommers(first_in_mem_block.hash().into())?,
-            Some(first_in_mem_block.body().ommers.clone())
-        );
-
-        // A random hash should return None as the block number is not found
-        assert_eq!(provider.ommers(B256::random().into())?, None);
-
-        Ok(())
-    }
-
-    #[test]
     fn test_block_body_indices() -> eyre::Result<()> {
         // Create a new provider
         let mut rng = generators::rng();
@@ -1601,46 +1554,6 @@ mod tests {
         assert_eq!(
             provider.sealed_header_by_id(block_hash.into()).unwrap(),
             Some(in_memory_block.clone_sealed_header())
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_block_reader_id_ext_ommers_by_id() -> eyre::Result<()> {
-        let mut rng = generators::rng();
-        let (provider, database_blocks, in_memory_blocks, _) = provider_with_random_blocks(
-            &mut rng,
-            TEST_BLOCKS_COUNT,
-            TEST_BLOCKS_COUNT,
-            BlockRangeParams::default(),
-        )?;
-
-        let database_block = database_blocks.first().unwrap().clone();
-        let in_memory_block = in_memory_blocks.last().unwrap().clone();
-
-        let block_number = database_block.number;
-        let block_hash = database_block.hash();
-
-        assert_eq!(
-            provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            database_block.body().ommers
-        );
-        assert_eq!(
-            provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            database_block.body().ommers
-        );
-
-        let block_number = in_memory_block.number;
-        let block_hash = in_memory_block.hash();
-
-        assert_eq!(
-            provider.ommers_by_id(block_number.into()).unwrap().unwrap_or_default(),
-            in_memory_block.body().ommers
-        );
-        assert_eq!(
-            provider.ommers_by_id(block_hash.into()).unwrap().unwrap_or_default(),
-            in_memory_block.body().ommers
         );
 
         Ok(())
