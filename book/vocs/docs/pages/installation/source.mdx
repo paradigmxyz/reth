@@ -1,3 +1,7 @@
+---
+description: How to build, update, and troubleshoot Reth from source.
+---
+
 # Build from Source
 
 You can build Reth on Linux, macOS, Windows, and Windows WSL2.
@@ -8,7 +12,7 @@ You can build Reth on Linux, macOS, Windows, and Windows WSL2.
 
 ## Dependencies
 
-First, **install Rust** using [rustup](https://rustup.rs/)： 
+First, **install Rust** using [rustup](https://rustup.rs/)：
 
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -16,20 +20,20 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 The rustup installer provides an easy way to update the Rust compiler, and works on all platforms.
 
-
 :::tip
-- During installation, when prompted, enter `1` for the default installation.
-- After Rust installation completes, try running `cargo version` . If it cannot
-  be found, run `source $HOME/.cargo/env`. After that, running `cargo version` should return the version, for example `cargo 1.68.2`.
-- It's generally advisable to append `source $HOME/.cargo/env` to `~/.bashrc`.
-:::
+
+-   During installation, when prompted, enter `1` for the default installation.
+-   After Rust installation completes, try running `cargo version` . If it cannot
+    be found, run `source $HOME/.cargo/env`. After that, running `cargo version` should return the version, for example `cargo 1.68.2`.
+-   It's generally advisable to append `source $HOME/.cargo/env` to `~/.bashrc`.
+    :::
 
 With Rust installed, follow the instructions below to install dependencies relevant to your
 operating system:
 
-- **Ubuntu**: `apt-get install libclang-dev pkg-config build-essential`
-- **macOS**: `brew install llvm pkg-config`
-- **Windows**: `choco install llvm` or `winget install LLVM.LLVM`
+-   **Ubuntu**: `apt-get install libclang-dev pkg-config build-essential`
+-   **macOS**: `brew install llvm pkg-config`
+-   **Windows**: `choco install llvm` or `winget install LLVM.LLVM`
 
 These are needed to build bindings for Reth's database.
 
@@ -89,11 +93,11 @@ You can customise the compiler settings used to compile Reth via
 
 Reth includes several profiles which can be selected via the Cargo flag `--profile`.
 
-* `release`: default for source builds, enables most optimisations while not taking too long to
-  compile.
-* `maxperf`: default for binary releases, enables aggressive optimisations including full LTO.
-  Although compiling with this profile improves some benchmarks by around 20% compared to `release`,
-  it imposes a _significant_ cost at compile time and is only recommended if you have a fast CPU.
+-   `release`: default for source builds, enables most optimisations while not taking too long to
+    compile.
+-   `maxperf`: default for binary releases, enables aggressive optimisations including full LTO.
+    Although compiling with this profile improves some benchmarks by around 20% compared to `release`,
+    it imposes a _significant_ cost at compile time and is only recommended if you have a fast CPU.
 
 **Rust compiler flags**
 
@@ -108,9 +112,10 @@ RUSTFLAGS="-C target-cpu=native" cargo build --profile maxperf
 
 Finally, some optional features are present that may improve performance, but may not very portable,
 and as such might not compile on your particular system. These are currently:
-- `jemalloc`: replaces the default system memory allocator with [`jemalloc`](https://jemalloc.net/); this feature is unstable on Windows
-- `asm-keccak`: replaces the default, pure-Rust implementation of Keccak256 with one implemented in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more details and supported targets
-- `min-LEVEL-logs`, where `LEVEL` is one of `error`, `warn`, `info`, `debug`, `trace`: disables compilation of logs of lower level than the given one; this in general isn't that significant, and is not recommended due to the loss of debugging that the logs would provide
+
+-   `jemalloc`: replaces the default system memory allocator with [`jemalloc`](https://jemalloc.net/); this feature is unstable on Windows
+-   `asm-keccak`: replaces the default, pure-Rust implementation of Keccak256 with one implemented in assembly; see [the `keccak-asm` crate](https://github.com/DaniPopes/keccak-asm) for more details and supported targets
+-   `min-LEVEL-logs`, where `LEVEL` is one of `error`, `warn`, `info`, `debug`, `trace`: disables compilation of logs of lower level than the given one; this in general isn't that significant, and is not recommended due to the loss of debugging that the logs would provide
 
 You can activate features by passing them to the `--features` or `-F` Cargo flag;
 multiple features can be activated with a space- or comma-separated list to the flag:
@@ -148,7 +153,7 @@ _(Thanks to Sigma Prime for this section from [their Lighthouse book](https://li
 
 ### Bus error (WSL2)
 
-In WSL 2 on Windows, the default virtual disk size is set to 1TB. 
+In WSL 2 on Windows, the default virtual disk size is set to 1TB.
 
 You must increase the allocated disk size for your WSL2 instance before syncing reth.
 

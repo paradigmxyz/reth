@@ -1,3 +1,7 @@
+---
+description: Building and troubleshooting Reth on ARM devices.
+---
+
 # Building for ARM devices
 
 Reth can be built for and run on ARM devices, but there are a few things to take into consideration before.
@@ -37,8 +41,8 @@ Some newer versions of ARM architecture offer support for Large Virtual Address 
 
 ### Additional Resources
 
-- [ARM developer documentation](https://developer.arm.com/documentation/ddi0406/cb/Appendixes/ARMv4-and-ARMv5-Differences/System-level-memory-model/Virtual-memory-support)
-- [ARM Community Forums](https://community.arm.com)
+-   [ARM developer documentation](https://developer.arm.com/documentation/ddi0406/cb/Appendixes/ARMv4-and-ARMv5-Differences/System-level-memory-model/Virtual-memory-support)
+-   [ARM Community Forums](https://community.arm.com)
 
 ## Build Reth
 
@@ -57,16 +61,21 @@ This error is raised whenever MDBX can not open a database due to the limitation
 You will need to recompile the Linux Kernel to fix the issue.
 
 A simple and safe approach to achieve this is to use the Armbian build framework to create a new image of the OS that will be flashed to a storage device of your choice - an SD card for example - with the following kernel feature values:
-- **Page Size**: 64 KB
-- **Virtual Address Space Size**: 48 Bits
+
+-   **Page Size**: 64 KB
+-   **Virtual Address Space Size**: 48 Bits
 
 To be able to build an Armbian image and set those values, you will need to:
-- Clone the Armbian build framework repository
+
+-   Clone the Armbian build framework repository
+
 ```bash
 git clone https://github.com/armbian/build
 cd build
 ```
-- Run the compile script with the following parameters:
+
+-   Run the compile script with the following parameters:
+
 ```bash
 ./compile.sh \
 BUILD_MINIMAL=yes \
@@ -74,5 +83,6 @@ BUILD_DESKTOP=no \
 KERNEL_CONFIGURE=yes \
 CARD_DEVICE="/dev/sdX" # Replace sdX with your own storage device
 ```
-- From there, you will be able to select the target board, the OS release and branch. Then, once you get in the **Kernel Configuration** screen, select the **Kernel Features options** and set the previous values accordingly.
-- Wait for the process to finish, plug your storage device into your board and start it. You can now download or install Reth and it should work properly.
+
+-   From there, you will be able to select the target board, the OS release and branch. Then, once you get in the **Kernel Configuration** screen, select the **Kernel Features options** and set the previous values accordingly.
+-   Wait for the process to finish, plug your storage device into your board and start it. You can now download or install Reth and it should work properly.
