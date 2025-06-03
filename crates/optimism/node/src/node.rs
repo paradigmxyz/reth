@@ -58,8 +58,8 @@ use reth_rpc_eth_types::error::FromEvmError;
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthPoolTransaction, PoolPooledTx,
-    PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, EthPoolTransaction, PoolPooledTx, PoolTransaction,
+    TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
