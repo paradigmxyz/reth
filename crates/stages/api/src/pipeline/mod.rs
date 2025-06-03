@@ -658,7 +658,9 @@ mod tests {
 
     use super::*;
     use crate::{test_utils::TestStage, UnwindOutput};
+    use assert_matches::assert_matches;
     use reth_consensus::ConsensusError;
+    use reth_errors::ProviderError;
     use reth_provider::test_utils::{create_test_provider_factory, MockNodeTypesWithDB};
     use reth_prune::PruneModes;
     use reth_testing_utils::generators::{self, random_block_with_parent};
@@ -1136,6 +1138,44 @@ mod tests {
                     result: ExecOutput { checkpoint: StageCheckpoint::new(10), done: true },
                 },
             ]
+        );
+    }
+
+    /// Checks that the pipeline re-runs stages on non-fatal errors and stops on fatal ones.
+    #[tokio::test]
+    async fn pipeline_error_handling() {
+        // Non-fatal
+        let provider_factory = create_test_provider_factory();
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(
+                TestStage::new(StageId::Other("NonFatal"))
+                    .add_exec(Err(StageError::Recoverable(Box::new(std::fmt::Error))))
+                    .add_exec(Ok(ExecOutput { checkpoint: StageCheckpoint::new(10), done: true })),
+            )
+            .with_max_block(10)
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            );
+        let result = pipeline.run().await;
+        assert_matches!(result, Ok(()));
+
+        // Fatal
+        let provider_factory = create_test_provider_factory();
+        let mut pipeline = Pipeline::<MockNodeTypesWithDB>::builder()
+            .add_stage(TestStage::new(StageId::Other("Fatal")).add_exec(Err(
+                StageError::DatabaseIntegrity(ProviderError::BlockBodyIndicesNotFound(5)),
+            )))
+            .build(
+                provider_factory.clone(),
+                StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            );
+        let result = pipeline.run().await;
+        assert_matches!(
+            result,
+            Err(PipelineError::Stage(StageError::DatabaseIntegrity(
+                ProviderError::BlockBodyIndicesNotFound(5)
+            )))
         );
     }
 }
