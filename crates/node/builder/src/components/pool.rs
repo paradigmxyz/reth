@@ -238,7 +238,6 @@ fn spawn_pool_maintenance_task<Node, Pool>(
 ) -> eyre::Result<()>
 where
     Node: FullNodeTypes,
-    Node::Provider: CanonStateSubscriptions,
     Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
@@ -271,7 +270,6 @@ fn spawn_maintenance_tasks<Node, Pool>(
 ) -> eyre::Result<()>
 where
     Node: FullNodeTypes,
-    Node::Provider: CanonStateSubscriptions,
     Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
