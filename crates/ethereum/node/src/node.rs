@@ -338,21 +338,22 @@ where
             Some((blob_params.target_blob_count * EPOCH_SLOTS * 2) as u32)
         };
 
+        let blob_store =
+            reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?;
+
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
             .with_local_transactions_config(pool_config.local_transactions_config.clone())
             .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
-            .build_with_tasks(
-                ctx.task_executor().clone(),
-                reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?,
-            );
+            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
         let transaction_pool = TxPoolBuilder::new(ctx)
             .with_disk_blob_store(blob_cache_size)
             .with_validator(validator)
             .build_and_spawn_maintenance_task(
+                blob_store,
                 pool_config,
                 |validator, blob_store, pool_config| {
                     reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config)

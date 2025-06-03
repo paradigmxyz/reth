@@ -698,7 +698,7 @@ where
                     .additional_validation_tasks
                     .unwrap_or_else(|| ctx.config().txpool.additional_validation_tasks),
             )
-            .build_with_tasks(ctx.task_executor().clone(), blob_store)
+            .build_with_tasks(ctx.task_executor().clone(), blob_store.clone())
             .map(|validator| {
                 OpTransactionValidator::new(validator)
                     // In --dev mode we can't require gas fees because we're unable to decode
@@ -713,6 +713,7 @@ where
             .with_disk_blob_store(None)
             .with_validator(validator)
             .build_and_spawn_maintenance_task(
+                blob_store,
                 final_pool_config,
                 |validator, blob_store, pool_config| {
                     reth_transaction_pool::Pool::new(

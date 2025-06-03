@@ -139,6 +139,7 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
     /// This method creates the blob store, builds the pool, and spawns maintenance tasks.
     pub fn build_and_spawn_maintenance_task<Pool>(
         self,
+        blob_store: DiskFileBlobStore,
         pool_config: PoolConfig,
         pool_constructor: impl FnOnce(
             TransactionValidationTaskExecutor<V>,
@@ -152,12 +153,9 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
         Node::Provider: CanonStateSubscriptions,
     {
         // Destructure self to avoid partial move issues
-        let TxPoolBuilder { ctx, cache_size, validator } = self;
+        let TxPoolBuilder { ctx, validator, .. } = self;
 
         let validator = validator.ok_or_else(|| eyre::eyre!("Validator must be configured"))?;
-
-        // Create blob store
-        let blob_store = create_blob_store_with_cache(ctx, cache_size)?;
 
         // Build the pool using the provided constructor
         let transaction_pool = pool_constructor(validator, blob_store, pool_config.clone());
