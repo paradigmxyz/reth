@@ -358,6 +358,7 @@ mod tests {
             block_receipts[0].0,
             BlockReceipts {
                 block: block1.num_hash(),
+                timestamp: block1.timestamp,
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
                     b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
@@ -443,6 +444,7 @@ mod tests {
             block_receipts[0].0,
             BlockReceipts {
                 block: old_block1.num_hash(),
+                timestamp: old_block1.timestamp,
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
                     b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),
@@ -459,6 +461,7 @@ mod tests {
             block_receipts[1].0,
             BlockReceipts {
                 block: new_block1.num_hash(),
+                timestamp: new_block1.timestamp,
                 tx_receipts: vec![(
                     // Transaction hash of a Transaction::default()
                     b256!("0x20b5378c6fe992c118b557d2f8e8bbe0b7567f6fe5483a8f0f1c51e93a9d91ab"),

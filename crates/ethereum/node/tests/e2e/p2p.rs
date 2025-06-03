@@ -66,8 +66,14 @@ async fn e2e_test_send_transactions() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) =
-        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+        2,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new().connect_http(node.rpc_url());
 
@@ -102,8 +108,14 @@ async fn test_long_reorg() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) =
-        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+        2,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();
@@ -152,8 +164,14 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, _) =
-        setup_engine::<EthereumNode>(2, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, _) = setup_engine::<EthereumNode>(
+        2,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
 
     let mut first_node = nodes.pop().unwrap();
     let mut second_node = nodes.pop().unwrap();

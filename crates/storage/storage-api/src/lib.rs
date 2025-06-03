@@ -57,9 +57,6 @@ pub use trie::*;
 mod chain_info;
 pub use chain_info::*;
 
-mod withdrawals;
-pub use withdrawals::*;
-
 mod ommers;
 pub use ommers::*;
 
