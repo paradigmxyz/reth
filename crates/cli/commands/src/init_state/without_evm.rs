@@ -10,7 +10,7 @@ use reth_provider::{
 };
 use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
-use std::{fs::File, io::Read, path::PathBuf, sync::Arc};
+use std::{fs::File, io::Read, path::PathBuf};
 use tracing::info;
 
 /// Reads the header RLP from a file and returns the Header.
@@ -110,7 +110,6 @@ where
     F: Fn(BlockNumber) -> N::BlockHeader + Send + Sync + 'static,
 {
     let (tx, rx) = std::sync::mpsc::channel();
-    let header_factory = Arc::new(header_factory);
 
     // Spawn jobs for incrementing the block end range of transactions and receipts
     for segment in [StaticFileSegment::Transactions, StaticFileSegment::Receipts] {
