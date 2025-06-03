@@ -3430,6 +3430,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-engine-api-access"
+version = "0.0.0"
+dependencies = [
+ "alloy-rpc-types-engine",
+ "async-trait",
+ "clap",
+ "eyre",
+ "futures",
+ "jsonrpsee",
+ "reth-db",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-optimism-chainspec",
+ "reth-optimism-consensus",
+ "reth-optimism-node",
+ "reth-provider",
+ "reth-rpc-api",
+ "reth-tasks",
+ "reth-tracing",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "example-exex-hello-world"
 version = "0.0.0"
 dependencies = [
