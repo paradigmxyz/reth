@@ -12,7 +12,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-static-file.workspace = true
 reth-network-p2p.workspace = true
@@ -32,7 +31,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # async
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "rt-multi-thread"] }
 futures-util.workspace = true
 
 # misc
@@ -51,7 +50,6 @@ reth-testing-utils.workspace = true
 test-utils = [
     "reth-consensus/test-utils",
     "reth-network-p2p/test-utils",
-    "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-stages-types/test-utils",
 ]

@@ -1,5 +1,6 @@
 use crate::PipelineEvent;
 use alloy_eips::eip1898::BlockWithParent;
+use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
@@ -58,6 +59,8 @@ pub enum StageError {
         /// The error that occurred when attempting to attach the header.
         #[source]
         error: Box<ConsensusError>,
+        /// Optional hint suggesting a specific block number to unwind to.
+        unwind_hint: Option<BlockNumber>,
     },
     /// The headers stage is missing sync gap.
     #[error("missing sync gap")]

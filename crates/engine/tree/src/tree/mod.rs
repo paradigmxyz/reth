@@ -1167,8 +1167,8 @@ where
         let mut backfill_height = ctrl.block_number();
 
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
-        if let ControlFlow::Unwind { bad_block, target } = &ctrl {
-            warn!(target: "engine::tree", invalid_block=?bad_block, "Bad block detected in unwind");
+        if let ControlFlow::Unwind { bad_block, target, reason } = &ctrl {
+            warn!(target: "engine::tree", invalid_block=?bad_block, unwind_reason=?reason, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
             self.state.invalid_headers.insert(**bad_block);
 

@@ -90,6 +90,8 @@ impl<Provider> PipelineBuilder<Provider> {
             progress: Default::default(),
             metrics_tx,
             fail_on_unwind,
+            last_detached_bad_block: None,
+            detached_head_attempts: 0,
         }
     }
 }

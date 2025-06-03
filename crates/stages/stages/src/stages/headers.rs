@@ -267,6 +267,7 @@ where
                         local_head: Box::new(local_head.block_with_parent()),
                         header: Box::new(header.block_with_parent()),
                         error,
+                        unwind_hint: None,
                     }))
                 }
                 None => return Poll::Ready(Err(StageError::ChannelClosed)),
