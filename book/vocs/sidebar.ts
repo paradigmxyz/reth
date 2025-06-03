@@ -355,8 +355,12 @@ export const sidebar: SidebarItem[] = [
         items: [
             {
                 text: "Execution Extensions",
-                link: "/developers/exex/exex",
+                
                 items: [
+                    {
+                        text: "Overview",
+                        link: "/developers/exex/overview",
+                    },
                     {
                         text: "How do ExExes work?",
                         link: "/developers/exex/how-it-works"
