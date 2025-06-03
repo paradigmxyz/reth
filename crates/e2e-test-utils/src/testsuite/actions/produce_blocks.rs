@@ -1,159 +1,21 @@
-//! Actions that can be performed in tests.
+//! Block production actions for the e2e testing framework.
 
-use crate::testsuite::{Environment, LatestBlockInfo};
-use alloy_primitives::{Bytes, B256, U256};
+use crate::testsuite::{
+    actions::{validate_fcu_response, Action, Sequence},
+    Environment, LatestBlockInfo,
+};
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, ForkchoiceUpdated, PayloadAttributes,
-    PayloadStatusEnum,
+    payload::ExecutionPayloadEnvelopeV3, ForkchoiceState, PayloadAttributes, PayloadStatusEnum,
 };
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
-use std::{future::Future, marker::PhantomData, time::Duration};
+use std::{marker::PhantomData, time::Duration};
 use tokio::time::sleep;
 use tracing::debug;
-
-/// Validates a forkchoice update response and returns an error if invalid
-fn validate_fcu_response(response: &ForkchoiceUpdated, context: &str) -> Result<()> {
-    match &response.payload_status.status {
-        PayloadStatusEnum::Valid => {
-            debug!("{}: FCU accepted as valid", context);
-            Ok(())
-        }
-        PayloadStatusEnum::Invalid { validation_error } => {
-            Err(eyre::eyre!("{}: FCU rejected as invalid: {:?}", context, validation_error))
-        }
-        PayloadStatusEnum::Syncing => {
-            debug!("{}: FCU accepted, node is syncing", context);
-            Ok(())
-        }
-        PayloadStatusEnum::Accepted => {
-            debug!("{}: FCU accepted for processing", context);
-            Ok(())
-        }
-    }
-}
-
-/// Expects that the `ForkchoiceUpdated` response status is VALID.
-pub fn expect_fcu_valid(response: &ForkchoiceUpdated, context: &str) -> Result<()> {
-    match &response.payload_status.status {
-        PayloadStatusEnum::Valid => {
-            debug!("{}: FCU status is VALID as expected.", context);
-            Ok(())
-        }
-        other_status => {
-            Err(eyre::eyre!("{}: Expected FCU status VALID, but got {:?}", context, other_status))
-        }
-    }
-}
-
-/// Expects that the `ForkchoiceUpdated` response status is INVALID.
-pub fn expect_fcu_invalid(response: &ForkchoiceUpdated, context: &str) -> Result<()> {
-    match &response.payload_status.status {
-        PayloadStatusEnum::Invalid { validation_error } => {
-            debug!("{}: FCU status is INVALID as expected: {:?}", context, validation_error);
-            Ok(())
-        }
-        other_status => {
-            Err(eyre::eyre!("{}: Expected FCU status INVALID, but got {:?}", context, other_status))
-        }
-    }
-}
-
-/// Expects that the `ForkchoiceUpdated` response status is either SYNCING or ACCEPTED.
-pub fn expect_fcu_syncing_or_accepted(response: &ForkchoiceUpdated, context: &str) -> Result<()> {
-    match &response.payload_status.status {
-        PayloadStatusEnum::Syncing => {
-            debug!("{}: FCU status is SYNCING as expected (SYNCING or ACCEPTED).", context);
-            Ok(())
-        }
-        PayloadStatusEnum::Accepted => {
-            debug!("{}: FCU status is ACCEPTED as expected (SYNCING or ACCEPTED).", context);
-            Ok(())
-        }
-        other_status => Err(eyre::eyre!(
-            "{}: Expected FCU status SYNCING or ACCEPTED, but got {:?}",
-            context,
-            other_status
-        )),
-    }
-}
-
-/// Expects that the `ForkchoiceUpdated` response status is not SYNCING and not ACCEPTED.
-pub fn expect_fcu_not_syncing_or_accepted(
-    response: &ForkchoiceUpdated,
-    context: &str,
-) -> Result<()> {
-    match &response.payload_status.status {
-        PayloadStatusEnum::Valid => {
-            debug!("{}: FCU status is VALID as expected (not SYNCING or ACCEPTED).", context);
-            Ok(())
-        }
-        PayloadStatusEnum::Invalid { validation_error } => {
-            debug!(
-                "{}: FCU status is INVALID as expected (not SYNCING or ACCEPTED): {:?}",
-                context, validation_error
-            );
-            Ok(())
-        }
-        syncing_or_accepted_status @ (PayloadStatusEnum::Syncing | PayloadStatusEnum::Accepted) => {
-            Err(eyre::eyre!(
-                "{}: Expected FCU status not SYNCING or ACCEPTED (i.e., VALID or INVALID), but got {:?}",
-                context,
-                syncing_or_accepted_status
-            ))
-        }
-    }
-}
-
-/// An action that can be performed on an instance.
-///
-/// Actions execute operations and potentially make assertions in a single step.
-/// The action name indicates what it does (e.g., `AssertMineBlock` would both
-/// mine a block and assert it worked).
-pub trait Action<I>: Send + 'static
-where
-    I: EngineTypes,
-{
-    /// Executes the action
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>>;
-}
-
-/// Simplified action container for storage in tests
-#[expect(missing_debug_implementations)]
-pub struct ActionBox<I>(Box<dyn Action<I>>);
-
-impl<I> ActionBox<I>
-where
-    I: EngineTypes + 'static,
-{
-    /// Constructor for [`ActionBox`].
-    pub fn new<A: Action<I>>(action: A) -> Self {
-        Self(Box::new(action))
-    }
-
-    /// Executes an [`ActionBox`] with the given [`Environment`] reference.
-    pub async fn execute(mut self, env: &mut Environment<I>) -> Result<()> {
-        self.0.execute(env).await
-    }
-}
-
-/// Implementation of `Action` for any function/closure that takes an Environment
-/// reference and returns a Future resolving to Result<()>.
-///
-/// This allows using closures directly as actions with `.with_action(async move |env| {...})`.
-impl<I, F, Fut> Action<I> for F
-where
-    I: EngineTypes,
-    F: FnMut(&Environment<I>) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<()>> + Send + 'static,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(self(env))
-    }
-}
 
 /// Mine a single block with the given transactions and verify the block was created
 /// successfully.
@@ -260,6 +122,7 @@ where
         })
     }
 }
+
 /// Pick the next block producer based on the latest block information.
 #[derive(Debug, Default)]
 pub struct PickNextBlockProducer {}
@@ -333,6 +196,7 @@ where
         })
     }
 }
+
 /// Action that generates the next payload
 #[derive(Debug, Default)]
 pub struct GenerateNextPayload {}
@@ -434,7 +298,7 @@ where
     }
 }
 
-///Action that broadcasts the latest fork choice state to all clients
+/// Action that broadcasts the latest fork choice state to all clients
 #[derive(Debug, Default)]
 pub struct BroadcastLatestForkchoice {}
 
@@ -620,7 +484,7 @@ where
                     continue;
                 }
 
-                if rpc_latest_header.inner.difficulty != U256::ZERO {
+                if rpc_latest_header.inner.difficulty != alloy_primitives::U256::ZERO {
                     debug!(
                         "Client {}: difficulty != 0: {:?}",
                         idx, rpc_latest_header.inner.difficulty
@@ -660,260 +524,6 @@ where
             } else {
                 Err(eyre::eyre!("No clients passed payload acceptance checks"))
             }
-        })
-    }
-}
-
-/// Action that produces a sequence of blocks using the available clients
-#[derive(Debug)]
-pub struct ProduceBlocks<Engine> {
-    /// Number of blocks to produce
-    pub num_blocks: u64,
-    /// Tracks engine type
-    _phantom: PhantomData<Engine>,
-}
-
-impl<Engine> ProduceBlocks<Engine> {
-    /// Create a new `ProduceBlocks` action
-    pub fn new(num_blocks: u64) -> Self {
-        Self { num_blocks, _phantom: Default::default() }
-    }
-}
-
-impl<Engine> Default for ProduceBlocks<Engine> {
-    fn default() -> Self {
-        Self::new(0)
-    }
-}
-
-impl<Engine> Action<Engine> for ProduceBlocks<Engine>
-where
-    Engine: EngineTypes + PayloadTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            for _ in 0..self.num_blocks {
-                // create a fresh sequence for each block to avoid state pollution
-                // Note: This produces blocks but does NOT make them canonical
-                // Use MakeCanonical action explicitly if canonicalization is needed
-                let mut sequence = Sequence::new(vec![
-                    Box::new(PickNextBlockProducer::default()),
-                    Box::new(GeneratePayloadAttributes::default()),
-                    Box::new(GenerateNextPayload::default()),
-                    Box::new(BroadcastNextNewPayload::default()),
-                    Box::new(UpdateBlockInfo::default()),
-                ]);
-                sequence.execute(env).await?;
-            }
-            Ok(())
-        })
-    }
-}
-
-/// Run a sequence of actions in series.
-#[expect(missing_debug_implementations)]
-pub struct Sequence<I> {
-    /// Actions to execute in sequence
-    pub actions: Vec<Box<dyn Action<I>>>,
-}
-
-impl<I> Sequence<I> {
-    /// Create a new sequence of actions
-    pub fn new(actions: Vec<Box<dyn Action<I>>>) -> Self {
-        Self { actions }
-    }
-}
-
-impl<I> Action<I> for Sequence<I>
-where
-    I: EngineTypes + Sync + Send + 'static,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<I>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            // Execute each action in sequence
-            for action in &mut self.actions {
-                action.execute(env).await?;
-            }
-
-            Ok(())
-        })
-    }
-}
-
-/// Action to create a fork from a specified block number and produce blocks on top
-#[derive(Debug)]
-pub struct CreateFork<Engine> {
-    /// Block number to use as the base of the fork
-    pub fork_base_block: u64,
-    /// Number of blocks to produce on top of the fork base
-    pub num_blocks: u64,
-    /// Tracks engine type
-    _phantom: PhantomData<Engine>,
-}
-
-impl<Engine> CreateFork<Engine> {
-    /// Create a new `CreateFork` action
-    pub fn new(fork_base_block: u64, num_blocks: u64) -> Self {
-        Self { fork_base_block, num_blocks, _phantom: Default::default() }
-    }
-}
-
-impl<Engine> Action<Engine> for CreateFork<Engine>
-where
-    Engine: EngineTypes + PayloadTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut sequence = Sequence::new(vec![
-                Box::new(SetForkBase::new(self.fork_base_block)),
-                Box::new(ProduceBlocks::new(self.num_blocks)),
-                Box::new(ValidateFork::new(self.fork_base_block)),
-            ]);
-
-            sequence.execute(env).await
-        })
-    }
-}
-
-/// Sub-action to set the fork base block in the environment
-#[derive(Debug)]
-pub struct SetForkBase {
-    /// Block number to use as the base of the fork
-    pub fork_base_block: u64,
-}
-
-impl SetForkBase {
-    /// Create a new `SetForkBase` action
-    pub const fn new(fork_base_block: u64) -> Self {
-        Self { fork_base_block }
-    }
-}
-
-impl<Engine> Action<Engine> for SetForkBase
-where
-    Engine: EngineTypes,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            if env.node_clients.is_empty() {
-                return Err(eyre::eyre!("No node clients available"));
-            }
-
-            // get the block at the fork base number to establish the fork point
-            let rpc_client = &env.node_clients[0].rpc;
-            let fork_base_block =
-                EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
-                    rpc_client,
-                    alloy_eips::BlockNumberOrTag::Number(self.fork_base_block),
-                    false,
-                )
-                .await?
-                .ok_or_else(|| eyre::eyre!("Fork base block {} not found", self.fork_base_block))?;
-
-            // update environment to point to the fork base block
-            env.latest_block_info = Some(LatestBlockInfo {
-                hash: fork_base_block.header.hash,
-                number: fork_base_block.header.number,
-            });
-
-            env.latest_header_time = fork_base_block.header.timestamp;
-
-            // update fork choice state to the fork base
-            env.latest_fork_choice_state = ForkchoiceState {
-                head_block_hash: fork_base_block.header.hash,
-                safe_block_hash: fork_base_block.header.hash,
-                finalized_block_hash: fork_base_block.header.hash,
-            };
-
-            debug!(
-                "Set fork base to block {} (hash: {})",
-                self.fork_base_block, fork_base_block.header.hash
-            );
-
-            Ok(())
-        })
-    }
-}
-
-/// Sub-action to validate that a fork was created correctly
-#[derive(Debug)]
-pub struct ValidateFork {
-    /// Number of the fork base block (stored here since we need it for validation)
-    pub fork_base_number: u64,
-}
-
-impl ValidateFork {
-    /// Create a new `ValidateFork` action
-    pub const fn new(fork_base_number: u64) -> Self {
-        Self { fork_base_number }
-    }
-}
-
-impl<Engine> Action<Engine> for ValidateFork
-where
-    Engine: EngineTypes,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let current_block_info = env
-                .latest_block_info
-                .as_ref()
-                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
-
-            // verify that the current tip is at or ahead of the fork base
-            if current_block_info.number < self.fork_base_number {
-                return Err(eyre::eyre!(
-                    "Fork validation failed: current block number {} is behind fork base {}",
-                    current_block_info.number,
-                    self.fork_base_number
-                ));
-            }
-
-            // get the fork base hash from the environment's fork choice state
-            // we assume the fork choice state was set correctly by SetForkBase
-            let fork_base_hash = env.latest_fork_choice_state.finalized_block_hash;
-
-            // trace back from current tip to verify it's a descendant of the fork base
-            let rpc_client = &env.node_clients[0].rpc;
-            let mut current_hash = current_block_info.hash;
-            let mut current_number = current_block_info.number;
-
-            // walk backwards through the chain until we reach the fork base
-            while current_number > self.fork_base_number {
-                let block = EthApiClient::<Transaction, Block, Receipt, Header>::block_by_hash(
-                    rpc_client,
-                    current_hash,
-                    false,
-                )
-                .await?
-                .ok_or_else(|| {
-                    eyre::eyre!("Block with hash {} not found during fork validation", current_hash)
-                })?;
-
-                current_hash = block.header.parent_hash;
-                current_number = block.header.number.saturating_sub(1);
-            }
-
-            // verify we reached the expected fork base
-            if current_hash != fork_base_hash {
-                return Err(eyre::eyre!(
-                    "Fork validation failed: expected fork base hash {}, but found {} at block {}",
-                    fork_base_hash,
-                    current_hash,
-                    current_number
-                ));
-            }
-
-            debug!(
-                "Fork validation successful: tip block {} is descendant of fork base {} ({})",
-                current_block_info.number, self.fork_base_number, fork_base_hash
-            );
-
-            Ok(())
         })
     }
 }
@@ -987,37 +597,29 @@ where
     }
 }
 
-/// Target for reorg operation
-#[derive(Debug, Clone)]
-pub enum ReorgTarget {
-    /// Direct block hash
-    Hash(B256),
-    /// Tagged block reference
-    Tag(String),
-}
-
-/// Action that performs a reorg by setting a new head block as canonical
+/// Action that produces a sequence of blocks using the available clients
 #[derive(Debug)]
-pub struct ReorgTo<Engine> {
-    /// Target for the reorg operation
-    pub target: ReorgTarget,
+pub struct ProduceBlocks<Engine> {
+    /// Number of blocks to produce
+    pub num_blocks: u64,
     /// Tracks engine type
     _phantom: PhantomData<Engine>,
 }
 
-impl<Engine> ReorgTo<Engine> {
-    /// Create a new `ReorgTo` action with a direct block hash
-    pub const fn new(target_hash: B256) -> Self {
-        Self { target: ReorgTarget::Hash(target_hash), _phantom: PhantomData }
-    }
-
-    /// Create a new `ReorgTo` action with a tagged block reference
-    pub fn new_from_tag(tag: impl Into<String>) -> Self {
-        Self { target: ReorgTarget::Tag(tag.into()), _phantom: PhantomData }
+impl<Engine> ProduceBlocks<Engine> {
+    /// Create a new `ProduceBlocks` action
+    pub fn new(num_blocks: u64) -> Self {
+        Self { num_blocks, _phantom: Default::default() }
     }
 }
 
-impl<Engine> Action<Engine> for ReorgTo<Engine>
+impl<Engine> Default for ProduceBlocks<Engine> {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+impl<Engine> Action<Engine> for ProduceBlocks<Engine>
 where
     Engine: EngineTypes + PayloadTypes,
     Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
@@ -1025,145 +627,19 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            // resolve the target hash from either direct hash or tag
-            let target_hash = match &self.target {
-                ReorgTarget::Hash(hash) => *hash,
-                ReorgTarget::Tag(tag) => env
-                    .block_registry
-                    .get(tag)
-                    .copied()
-                    .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", tag))?,
-            };
-
-            let mut sequence = Sequence::new(vec![
-                Box::new(SetReorgTarget::new(target_hash)),
-                Box::new(BroadcastLatestForkchoice::default()),
-                Box::new(UpdateBlockInfo::default()),
-            ]);
-
-            sequence.execute(env).await
-        })
-    }
-}
-
-/// Sub-action to set the reorg target block in the environment
-#[derive(Debug)]
-pub struct SetReorgTarget {
-    /// Hash of the block to reorg to
-    pub target_hash: B256,
-}
-
-impl SetReorgTarget {
-    /// Create a new `SetReorgTarget` action
-    pub const fn new(target_hash: B256) -> Self {
-        Self { target_hash }
-    }
-}
-
-impl<Engine> Action<Engine> for SetReorgTarget
-where
-    Engine: EngineTypes,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            if env.node_clients.is_empty() {
-                return Err(eyre::eyre!("No node clients available"));
+            for _ in 0..self.num_blocks {
+                // create a fresh sequence for each block to avoid state pollution
+                // Note: This produces blocks but does NOT make them canonical
+                // Use MakeCanonical action explicitly if canonicalization is needed
+                let mut sequence = Sequence::new(vec![
+                    Box::new(PickNextBlockProducer::default()),
+                    Box::new(GeneratePayloadAttributes::default()),
+                    Box::new(GenerateNextPayload::default()),
+                    Box::new(BroadcastNextNewPayload::default()),
+                    Box::new(UpdateBlockInfo::default()),
+                ]);
+                sequence.execute(env).await?;
             }
-
-            // verify the target block exists
-            let rpc_client = &env.node_clients[0].rpc;
-            let target_block = EthApiClient::<Transaction, Block, Receipt, Header>::block_by_hash(
-                rpc_client,
-                self.target_hash,
-                false,
-            )
-            .await?
-            .ok_or_else(|| eyre::eyre!("Target reorg block {} not found", self.target_hash))?;
-
-            debug!(
-                "Setting reorg target to block {} (hash: {})",
-                target_block.header.number, self.target_hash
-            );
-
-            // update environment to point to the target block
-            env.latest_block_info = Some(LatestBlockInfo {
-                hash: target_block.header.hash,
-                number: target_block.header.number,
-            });
-
-            env.latest_header_time = target_block.header.timestamp;
-
-            // update fork choice state to make the target block canonical
-            env.latest_fork_choice_state = ForkchoiceState {
-                head_block_hash: self.target_hash,
-                safe_block_hash: self.target_hash, // Simplified - in practice might be different
-                finalized_block_hash: self.target_hash, /* Simplified - in practice might be
-                                                    * different */
-            };
-
-            debug!("Set reorg target to block {}", self.target_hash);
-            Ok(())
-        })
-    }
-}
-
-/// Action that makes the current latest block canonical by broadcasting a forkchoice update
-#[derive(Debug, Default)]
-pub struct MakeCanonical {}
-
-impl MakeCanonical {
-    /// Create a new `MakeCanonical` action
-    pub const fn new() -> Self {
-        Self {}
-    }
-}
-
-impl<Engine> Action<Engine> for MakeCanonical
-where
-    Engine: EngineTypes + PayloadTypes,
-    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
-    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let mut broadcast_action = BroadcastLatestForkchoice::default();
-            broadcast_action.execute(env).await
-        })
-    }
-}
-
-/// Action that captures the current block and tags it with a name for later reference
-#[derive(Debug)]
-pub struct CaptureBlock {
-    /// Tag name to associate with the current block
-    pub tag: String,
-}
-
-impl CaptureBlock {
-    /// Create a new `CaptureBlock` action
-    pub fn new(tag: impl Into<String>) -> Self {
-        Self { tag: tag.into() }
-    }
-}
-
-impl<Engine> Action<Engine> for CaptureBlock
-where
-    Engine: EngineTypes,
-{
-    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
-        Box::pin(async move {
-            let current_block = env
-                .latest_block_info
-                .as_ref()
-                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
-
-            env.block_registry.insert(self.tag.clone(), current_block.hash);
-
-            debug!(
-                "Captured block {} (hash: {}) with tag '{}'",
-                current_block.number, current_block.hash, self.tag
-            );
-
             Ok(())
         })
     }
