@@ -151,10 +151,7 @@ where
             CoinbaseTipOrdering<V::Transaction>,
             DiskFileBlobStore,
         >,
-    >
-    where
-        Node::Provider: CanonStateSubscriptions,
-    {
+    > {
         // Destructure self to avoid partial move issues
         let TxPoolBuilder { ctx, validator, .. } = self;
 
