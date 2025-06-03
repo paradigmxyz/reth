@@ -109,7 +109,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage<N>>,
     /// Handles block imports according to the `eth` protocol.
-    block_import: Box<dyn BlockImport<N::Block>>,
+    block_import: Box<dyn BlockImport<N::NewBlockPayload>>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
@@ -523,7 +523,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Invoked after a `NewBlock` message from the peer was validated
-    fn on_block_import_result(&mut self, event: BlockImportEvent<N::Block>) {
+    fn on_block_import_result(&mut self, event: BlockImportEvent<N::NewBlockPayload>) {
         match event {
             BlockImportEvent::Announcement(validation) => match validation {
                 BlockValidation::ValidHeader { block } => {

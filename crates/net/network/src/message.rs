@@ -10,12 +10,13 @@ use futures::FutureExt;
 use reth_eth_wire::{
     message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
     EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
-    NewBlockHashes, NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts,
-    SharedTransactions, Transactions,
+    NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions,
+    Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_primitives_traits::Block;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -24,19 +25,19 @@ use tokio::sync::oneshot;
 
 /// Internal form of a `NewBlock` message
 #[derive(Debug, Clone)]
-pub struct NewBlockMessage<B = reth_ethereum_primitives::Block> {
+pub struct NewBlockMessage<P = NewBlock<reth_ethereum_primitives::Block>> {
     /// Hash of the block
     pub hash: B256,
     /// Raw received message
-    pub block: Arc<NewBlock<B>>,
+    pub block: Arc<P>,
 }
 
 // === impl NewBlockMessage ===
 
-impl<B: reth_primitives_traits::Block> NewBlockMessage<B> {
+impl<P: NewBlockPayload> NewBlockMessage<P> {
     /// Returns the block number of the block
     pub fn number(&self) -> u64 {
-        self.block.block.header().number()
+        self.block.block().header().number()
     }
 }
 
@@ -47,7 +48,7 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Announce new block hashes
     NewBlockHashes(NewBlockHashes),
     /// Broadcast new block.
-    NewBlock(NewBlockMessage<N::Block>),
+    NewBlock(NewBlockMessage<N::NewBlockPayload>),
     /// Received transactions _from_ the peer
     ReceivedTransaction(Transactions<N::BroadcastedTransaction>),
     /// Broadcast transactions _from_ local _to_ a peer.
