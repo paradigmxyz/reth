@@ -239,7 +239,7 @@ where
                 expected: header.gas_limit(),
             }))
         } else if header.gas_used() != message.gas_used {
-            return Err(ValidationApiError::GasUsedMismatch(GotExpected {
+            Err(ValidationApiError::GasUsedMismatch(GotExpected {
                 got: message.gas_used,
                 expected: header.gas_used(),
             }))
