@@ -406,7 +406,7 @@ tables! {
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
     /// * If max block number is 200 and we ask for N=250 we would fetch last shard and
-    ///     know that needed entry is in `AccountPlainState`.
+    ///   know that needed entry is in `AccountPlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
@@ -429,7 +429,7 @@ tables! {
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
     /// * If max block number is 200 and we ask for N=250 we would fetch last shard and
-    ///     know that needed entry is in `StoragePlainState`.
+    ///   know that needed entry is in `StoragePlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
