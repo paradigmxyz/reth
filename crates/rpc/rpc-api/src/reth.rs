@@ -15,7 +15,7 @@ pub trait RethApi {
         block_id: BlockId,
     ) -> RpcResult<HashMap<Address, U256>>;
 
-    /// Subscribe to json `ChainNotifications``
+    /// Subscribe to json `ChainNotifications`
     #[subscription(
         name = "subscribeChainNotifications",
         unsubscribe = "unsubscribeChainNotifications",
