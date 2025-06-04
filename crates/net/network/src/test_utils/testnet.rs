@@ -6,8 +6,9 @@ use crate::{
     eth_requests::EthRequestHandler,
     protocol::IntoRlpxSubProtocol,
     transactions::{
-        config::TransactionPropagationKind, TransactionsHandle, TransactionsManager,
-        TransactionsManagerConfig,
+        config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
+        policy::NetworkPolicies,
+        TransactionsHandle, TransactionsManager, TransactionsManagerConfig,
     },
     NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
 };
@@ -398,7 +399,13 @@ pub struct Peer<C, Pool = TestPool> {
     #[pin]
     request_handler: Option<EthRequestHandler<C, EthNetworkPrimitives>>,
     #[pin]
-    transactions_manager: Option<TransactionsManager<Pool, EthNetworkPrimitives>>,
+    transactions_manager: Option<
+        TransactionsManager<
+            Pool,
+            EthNetworkPrimitives,
+            NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
+        >,
+    >,
     pool: Option<Pool>,
     client: C,
     secret_key: SecretKey,
@@ -528,12 +535,15 @@ where
         let (tx, rx) = unbounded_channel();
         network.set_transactions(tx);
 
+        let announcement_policy = StrictEthAnnouncementFilter::default();
+        let policies = NetworkPolicies::new(policy, announcement_policy);
+
         let transactions_manager = TransactionsManager::with_policy(
             network.handle().clone(),
             pool.clone(),
             rx,
             config,
-            policy,
+            policies,
         );
 
         Peer {
