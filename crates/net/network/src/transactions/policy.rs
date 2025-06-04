@@ -1,7 +1,4 @@
-use crate::transactions::config::{
-    AnnouncementFilteringPolicy, StrictEthAnnouncementFilter, TransactionPropagationKind,
-    TransactionPropagationPolicy,
-};
+use crate::transactions::config::{AnnouncementFilteringPolicy, TransactionPropagationPolicy};
 use std::fmt::Debug;
 
 /// A bundle of policies that control the behavior of network components like
@@ -30,7 +27,7 @@ pub trait TransactionPolicies: Send + Sync + Debug + 'static {
 /// policies required by components like the [`TransactionsManager`](super::TransactionsManager).
 /// It holds a specific [`TransactionPropagationPolicy`] and an
 /// [`AnnouncementFilteringPolicy`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NetworkPolicies<P, A> {
     propagation: P,
     announcement: A,
@@ -77,14 +74,5 @@ where
 
     fn announcement_filter(&self) -> &Self::Announcement {
         &self.announcement
-    }
-}
-
-impl Default for NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter> {
-    fn default() -> Self {
-        Self {
-            propagation: TransactionPropagationKind::default(),
-            announcement: StrictEthAnnouncementFilter::default(),
-        }
     }
 }

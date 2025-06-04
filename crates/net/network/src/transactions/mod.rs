@@ -241,6 +241,9 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 ///
 /// It is directly connected to the [`TransactionPool`] to retrieve requested transactions and
 /// propagate new transactions over the network.
+///
+/// It can be configured with different policies for transaction propagation and announcement
+/// filtering. See [`NetworkPolicies`] and [`TransactionPolicies`] for more details.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
 pub struct TransactionsManager<
@@ -330,16 +333,12 @@ impl<Pool: TransactionPool, N: NetworkPrimitives>
         from_network: mpsc::UnboundedReceiver<NetworkTransactionEvent<N>>,
         transactions_manager_config: TransactionsManagerConfig,
     ) -> Self {
-        let propagation_policy = TransactionPropagationKind::default();
-        let announcement_policy = StrictEthAnnouncementFilter::default();
-        let default_policies = NetworkPolicies::new(propagation_policy, announcement_policy);
-
         Self::with_policy(
             network,
             pool,
             from_network,
             transactions_manager_config,
-            default_policies,
+            NetworkPolicies::default(),
         )
     }
 }
@@ -633,7 +632,6 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
         //
         // validates messages with respect to the given network, e.g. allowed tx types
         //
-        let announcement_policy = &self.policies.announcement_filter();
         let mut should_report_peer = false;
         let mut tx_types_counter = TxTypesCounter::default();
 
@@ -667,7 +665,10 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
                 }
             }
 
-            let decision = announcement_policy.decide_on_announcement(ty_byte, tx_hash, size_val);
+            let decision = self
+                .policies
+                .announcement_filter()
+                .decide_on_announcement(ty_byte, tx_hash, size_val);
 
             match decision {
                 AnnouncementAcceptance::Accept => true,
