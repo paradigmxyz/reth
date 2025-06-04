@@ -351,8 +351,8 @@ mod tests {
             output,
             Ok(ExecOutput {
                 checkpoint: StageCheckpoint { block_number, stage_checkpoint: None },
-                done: true
-            }) if block_number == 2
+                done: false
+            }) if block_number == era_cap
         );
 
         let output = output.unwrap();
