@@ -2,7 +2,10 @@ use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::Header;
-use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
+use alloy_eips::{
+    eip1559::BaseFeeParams,
+    eip7840::{BlobParams, BLOB_BASE_COST},
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 use core::fmt::{Debug, Display};
@@ -83,9 +86,12 @@ impl EthChainSpec for ChainSpec {
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
-        if let Some(blob_param) = self.blob_params.active_scheduled_params_at_timestamp(timestamp) {
+        let is_osaka_activated = self.is_osaka_active_at_timestamp(timestamp);
+        let mut params = if let Some(blob_param) =
+            self.blob_params.active_scheduled_params_at_timestamp(timestamp)
+        {
             Some(*blob_param)
-        } else if self.is_osaka_active_at_timestamp(timestamp) {
+        } else if is_osaka_activated {
             Some(self.blob_params.osaka)
         } else if self.is_prague_active_at_timestamp(timestamp) {
             Some(self.blob_params.prague)
@@ -93,6 +99,12 @@ impl EthChainSpec for ChainSpec {
             Some(self.blob_params.cancun)
         } else {
             None
+        };
+
+        if is_osaka_activated {
+            params.map(|params| params.with_blob_base_cost(BLOB_BASE_COST))
+        } else {
+            params
         }
     }
 
