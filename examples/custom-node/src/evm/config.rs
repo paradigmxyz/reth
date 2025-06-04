@@ -1,4 +1,5 @@
 use crate::{
+    chainspec::CustomChainSpec,
     evm::{alloy::CustomEvmFactory, CustomBlockAssembler},
     primitives::{Block, CustomHeader, CustomNodePrimitives},
 };
@@ -10,13 +11,27 @@ use reth_ethereum::{
     node::api::ConfigureEvm,
     primitives::{SealedBlock, SealedHeader},
 };
-use reth_op::node::{OpEvmConfig, OpNextBlockEnvAttributes};
+use reth_op::node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct CustomEvmConfig {
     pub(super) inner: OpEvmConfig,
     pub(super) block_assembler: CustomBlockAssembler,
     pub(super) custom_evm_factory: CustomEvmFactory,
+}
+
+impl CustomEvmConfig {
+    pub fn new(chain_spec: Arc<CustomChainSpec>) -> Self {
+        Self {
+            inner: OpEvmConfig::new(
+                Arc::new(chain_spec.inner().clone()),
+                OpRethReceiptBuilder::default(),
+            ),
+            block_assembler: CustomBlockAssembler::new(chain_spec),
+            custom_evm_factory: CustomEvmFactory::new(),
+        }
+    }
 }
 
 impl ConfigureEvm for CustomEvmConfig {

@@ -1,12 +1,16 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::{transaction::Recovered, SignableTransaction, Transaction as _};
+use alloy_consensus::{transaction::Recovered, SignableTransaction};
 use alloy_primitives::{Bytes, Signature, B256};
 use alloy_rpc_types_eth::TransactionInfo;
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{
+    transaction::{OpDepositInfo, OpTransactionInfo},
+    OpTxEnvelope,
+};
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
-use reth_node_api::FullNodeComponents;
-use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
+use reth_optimism_primitives::DepositReceipt;
+use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
@@ -83,19 +87,22 @@ where
     }
 }
 
-impl<N> TransactionCompat<OpTransactionSigned> for OpEthApi<N>
+impl<N> TransactionCompat for OpEthApi<N>
 where
-    N: FullNodeComponents<Provider: ReceiptProvider<Receipt = OpReceipt>>,
+    N: FullNodeComponents,
+    N::Provider: ReceiptProvider<Receipt: DepositReceipt>,
+    <<N as FullNodeTypes>::Types as NodeTypes>::Primitives: NodePrimitives<SignedTx = OpTxEnvelope>,
 {
+    type Primitives = <<N as FullNodeTypes>::Types as NodeTypes>::Primitives;
     type Transaction = Transaction;
     type Error = OpEthApiError;
 
     fn fill(
         &self,
-        tx: Recovered<OpTransactionSigned>,
+        tx: Recovered<TxTy<Self::Primitives>>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
-        let tx = tx.convert::<OpTxEnvelope>();
+        let tx = tx.convert::<TxTy<Self::Primitives>>();
         let mut deposit_receipt_version = None;
         let mut deposit_nonce = None;
 
@@ -107,47 +114,25 @@ where
                 .receipt_by_hash(tx.tx_hash())
                 .map_err(Self::Error::from_eth_err)?
                 .inspect(|receipt| {
-                    if let OpReceipt::Deposit(receipt) = receipt {
+                    if let Some(receipt) = receipt.as_deposit_receipt() {
                         deposit_receipt_version = receipt.deposit_receipt_version;
                         deposit_nonce = receipt.deposit_nonce;
                     }
                 });
         }
 
-        let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
-        } = tx_info;
+        let tx_info = OpTransactionInfo::new(
+            tx_info,
+            OpDepositInfo { deposit_nonce, deposit_receipt_version },
+        );
 
-        let effective_gas_price = if tx.is_deposit() {
-            // For deposits, we must always set the `gasPrice` field to 0 in rpc
-            // deposit tx don't have a gas price field, but serde of `Transaction` will take care of
-            // it
-            0
-        } else {
-            base_fee
-                .map(|base_fee| {
-                    tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
-                })
-                .unwrap_or_else(|| tx.max_fee_per_gas())
-        };
-
-        Ok(Transaction {
-            inner: alloy_rpc_types_eth::Transaction {
-                inner: tx,
-                block_hash,
-                block_number,
-                transaction_index,
-                effective_gas_price: Some(effective_gas_price),
-            },
-            deposit_nonce,
-            deposit_receipt_version,
-        })
+        Ok(Transaction::from_transaction(tx, tx_info))
     }
 
     fn build_simulate_v1_transaction(
         &self,
         request: alloy_rpc_types_eth::TransactionRequest,
-    ) -> Result<OpTransactionSigned, Self::Error> {
+    ) -> Result<TxTy<Self::Primitives>, Self::Error> {
         let request: OpTransactionRequest = request.into();
         let Ok(tx) = request.build_typed_tx() else {
             return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError))
@@ -156,10 +141,5 @@ where
         // Create an empty signature for the transaction.
         let signature = Signature::new(Default::default(), Default::default(), false);
         Ok(tx.into_signed(signature).into())
-    }
-
-    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = tx.inner.inner.inner_mut().input_mut();
-        *input = input.slice(..4);
     }
 }

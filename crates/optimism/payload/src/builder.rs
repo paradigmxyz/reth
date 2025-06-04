@@ -6,13 +6,13 @@ use crate::{
     payload::{OpBuiltPayload, OpPayloadBuilderAttributes},
     OpPayloadPrimitives,
 };
-use alloy_consensus::{Transaction, Typed2718};
+use alloy_consensus::{BlockHeader, Transaction, Typed2718};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
 use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_basic_payload_builder::*;
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates};
+use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{
     execute::{
@@ -32,7 +32,9 @@ use reth_optimism_txpool::{
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
-use reth_primitives_traits::{NodePrimitives, SealedHeader, SignedTransaction, TxTy};
+use reth_primitives_traits::{
+    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, SignedTransaction, TxTy,
+};
 use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, db::State,
     witness::ExecutionWitnessRecord,
@@ -126,7 +128,7 @@ impl<Pool, Client, Evm, Txs> OpPayloadBuilder<Pool, Client, Evm, Txs> {
 impl<Pool, Client, Evm, N, T> OpPayloadBuilder<Pool, Client, Evm, T>
 where
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks>,
     N: OpPayloadPrimitives,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
 {
@@ -175,7 +177,7 @@ where
     /// Computes the witness for the payload.
     pub fn payload_witness(
         &self,
-        parent: SealedHeader,
+        parent: SealedHeader<N::BlockHeader>,
         attributes: OpPayloadAttributes,
     ) -> Result<ExecutionWitness, PayloadBuilderError> {
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
@@ -201,8 +203,8 @@ where
 /// Implementation of the [`PayloadBuilder`] trait for [`OpPayloadBuilder`].
 impl<Pool, Client, Evm, N, Txs> PayloadBuilder for OpPayloadBuilder<Pool, Client, Evm, Txs>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + Clone,
     N: OpPayloadPrimitives,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + Clone,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
     Evm: ConfigureEvm<Primitives = N, NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     Txs: OpPayloadTransactions<Pool::Transaction>,
@@ -231,7 +233,7 @@ where
     // system txs, hence on_missing_payload we return [MissingPayloadBehaviour::AwaitInProgress].
     fn build_empty_payload(
         &self,
-        config: PayloadConfig<Self::Attributes>,
+        config: PayloadConfig<Self::Attributes, N::BlockHeader>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
         let args = BuildArguments {
             config,
@@ -290,7 +292,7 @@ impl<Txs> OpBuilder<'_, Txs> {
             PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx>,
     {
         let Self { best } = self;
-        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
+        debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number(), "building new payload");
 
         let mut db = State::builder().with_database(db).with_bundle_update().build();
 
@@ -328,7 +330,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         let execution_outcome = ExecutionOutcome::new(
             db.take_bundle(),
             vec![execution_result.receipts],
-            block.number,
+            block.number(),
             Vec::new(),
         );
 
@@ -339,7 +341,7 @@ impl<Txs> OpBuilder<'_, Txs> {
                 execution_output: Arc::new(execution_outcome),
                 hashed_state: Arc::new(hashed_state),
             },
-            trie: Arc::new(trie_updates),
+            trie: ExecutedTrieUpdates::Present(Arc::new(trie_updates)),
         };
 
         let no_tx_pool = ctx.attributes().no_tx_pool;
@@ -486,7 +488,8 @@ pub struct OpPayloadBuilderCtx<Evm: ConfigureEvm, ChainSpec> {
     /// The chainspec
     pub chain_spec: Arc<ChainSpec>,
     /// How to build the payload.
-    pub config: PayloadConfig<OpPayloadBuilderAttributes<TxTy<Evm::Primitives>>>,
+    pub config:
+        PayloadConfig<OpPayloadBuilderAttributes<TxTy<Evm::Primitives>>, HeaderTy<Evm::Primitives>>,
     /// Marker to check whether the job has been cancelled.
     pub cancel: CancelOnDrop,
     /// The currently best payload.
@@ -499,8 +502,8 @@ where
     ChainSpec: EthChainSpec + OpHardforks,
 {
     /// Returns the parent block the payload will be build on.
-    pub fn parent(&self) -> &SealedHeader {
-        &self.config.parent_header
+    pub fn parent(&self) -> &SealedHeaderFor<Evm::Primitives> {
+        self.config.parent_header.as_ref()
     }
 
     /// Returns the builder attributes.
@@ -561,7 +564,10 @@ where
                     timestamp: self.attributes().timestamp(),
                     suggested_fee_recipient: self.attributes().suggested_fee_recipient(),
                     prev_randao: self.attributes().prev_randao(),
-                    gas_limit: self.attributes().gas_limit.unwrap_or(self.parent().gas_limit),
+                    gas_limit: self
+                        .attributes()
+                        .gas_limit
+                        .unwrap_or_else(|| self.parent().gas_limit()),
                     parent_beacon_block_root: self.attributes().parent_beacon_block_root(),
                     extra_data: self.extra_data()?,
                 },

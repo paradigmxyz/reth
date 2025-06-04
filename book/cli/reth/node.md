@@ -768,6 +768,9 @@ Engine:
       --engine.precompile-cache
           Enable precompile cache
 
+      --engine.state-root-fallback
+          Enable state root fallback, useful for testing
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol

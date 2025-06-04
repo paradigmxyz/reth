@@ -694,7 +694,8 @@ where
             Receipt = N::Receipt,
             Transaction = N::SignedTx,
         > + AccountReader
-        + ChangeSetReader,
+        + ChangeSetReader
+        + CanonStateSubscriptions,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: EthApiServer<
             RpcTransaction<EthApi::NetworkTypes>,

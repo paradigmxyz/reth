@@ -15,7 +15,7 @@ use reth_ethereum::node::api::{
     NodeTypes,
 };
 use reth_node_builder::rpc::EngineApiBuilder;
-use reth_op::node::node::OpStorage;
+use reth_op::node::OpStorage;
 use reth_payload_builder::PayloadStore;
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApiError;
