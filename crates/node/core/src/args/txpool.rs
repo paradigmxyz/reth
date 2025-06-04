@@ -69,6 +69,10 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT_30M)]
     pub enforced_gas_limit: u64,
 
+    /// Maximum gas limit for individual transactions (0 = no limit). Transactions exceeding this limit will be rejected by the transaction pool
+    #[arg(long = "txpool.max-tx-gas", default_value_t = 0)]
+    pub max_tx_gas_limit: u64,
+
     /// Price bump percentage to replace an already existing blob transaction
     #[arg(long = "blobpool.pricebump", default_value_t = REPLACE_BLOB_PRICE_BUMP)]
     pub blob_transaction_price_bump: u128,
@@ -140,6 +144,7 @@ impl Default for TxPoolArgs {
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
             enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            max_tx_gas_limit: 0,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             max_cached_entries: DEFAULT_MAX_CACHED_BLOBS,
@@ -190,6 +195,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             },
             minimal_protocol_basefee: self.minimal_protocol_basefee,
             gas_limit: self.enforced_gas_limit,
+            max_tx_gas_limit: self.max_tx_gas_limit,
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
