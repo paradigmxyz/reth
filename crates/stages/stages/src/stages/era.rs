@@ -1,17 +1,17 @@
-use crate::{stages, StageCheckpoint, StageId};
+use crate::{StageCheckpoint, StageId};
 use alloy_primitives::{BlockHash, BlockNumber};
 use futures_util::{Stream, StreamExt};
 use reqwest::{Client, Url};
 use reth_config::config::EtlConfig;
-use reth_db_api::{table::Value, tables, transaction::DbTxMut, DbTxUnwindExt};
+use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_era::era1_file::Era1Reader;
 use reth_era_downloader::{read_dir, EraClient, EraMeta, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_primitives_traits::{FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    BlockHashReader, BlockReader, BlockWriter, DBProvider, HeaderProvider, StageCheckpointWriter,
-    StaticFileProviderFactory, StaticFileWriter, StorageLocation,
+    BlockReader, BlockWriter, DBProvider, HeaderProvider, StageCheckpointWriter,
+    StaticFileProviderFactory, StaticFileWriter,
 };
 use reth_stages_api::{
     CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput, HeadersCheckpoint, Stage,
@@ -49,9 +49,8 @@ pub struct EraStage<Header, Body, StreamFactory> {
     last_block_height: Option<BlockNumber>,
 }
 
-trait EraStreamFactory<BH, BB> {
-    fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<BH, BB>, StageError>;
-    fn cleanup(&self) {}
+trait EraStreamFactory<Header, Body> {
+    fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<Header, Body>, StageError>;
 }
 
 impl<BH, BB> EraStreamFactory<BH, BB> for EraImportSource
@@ -72,20 +71,6 @@ where
                     client.start_from(input.next_block()),
                     EraStreamConfig::default().start_from(input.next_block()),
                 ))
-            }
-        }
-    }
-
-    fn cleanup(&self) {
-        if let Self::Url(_, path) = self {
-            if let Ok(dir) = path.read_dir() {
-                for entry in dir.flatten() {
-                    let path = entry.path();
-
-                    if path.is_file() {
-                        let _ = reth_fs_util::remove_file(path);
-                    }
-                }
             }
         }
     }
@@ -252,61 +237,9 @@ where
 
     fn unwind(
         &mut self,
-        provider: &Provider,
+        _provider: &Provider,
         input: UnwindInput,
     ) -> Result<UnwindOutput, StageError> {
-        self.hash_collector.clear();
-        self.item.take();
-        self.last_block_height.take();
-        self.stream.take();
-
-        if let Some(source) = &self.source {
-            // Bodies
-            stages::ensure_consistency(provider, Some(input.unwind_to))?;
-            provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
-
-            // Wipe any unprocessed era files in the download temp directory
-            source.cleanup();
-
-            // First unwind the db tables, until the unwind_to block number. use the walker to
-            // unwind HeaderNumbers based on the index in CanonicalHeaders
-            // unwind from the next block number since the unwind_to block is exclusive
-            provider
-                .tx_ref()
-                .unwind_table_by_walker::<tables::CanonicalHeaders, tables::HeaderNumbers>(
-                    (input.unwind_to + 1)..,
-                )?;
-            provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-            provider
-                .tx_ref()
-                .unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
-
-            // determine how many headers to unwind from the static files based on the highest block
-            // and the unwind_to block
-            let static_file_provider = provider.static_file_provider();
-            let highest_block = static_file_provider
-                .get_highest_static_file_block(StaticFileSegment::Headers)
-                .unwrap_or_default();
-            let static_file_headers_to_unwind = highest_block - input.unwind_to;
-            for block_number in (input.unwind_to + 1)..=highest_block {
-                let hash = static_file_provider.block_hash(block_number)?;
-                // we have to delete from HeaderNumbers here as well as in the above unwind, since
-                // that mapping contains entries for both headers in the db and
-                // headers in static files
-                //
-                // so if we are unwinding past the lowest block in the db, we have to iterate
-                // through the HeaderNumbers entries that we'll delete in static
-                // files below
-                if let Some(header_hash) = hash {
-                    provider.tx_ref().delete::<tables::HeaderNumbers>(header_hash, None)?;
-                }
-            }
-
-            // Now unwind the static files until the unwind_to block number
-            let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-            writer.prune_headers(static_file_headers_to_unwind)?;
-        }
-
         Ok(UnwindOutput { checkpoint: input.checkpoint.with_block_number(input.unwind_to) })
     }
 }
@@ -350,6 +283,8 @@ mod tests {
     };
     use alloy_primitives::B256;
     use assert_matches::assert_matches;
+    use reth_db_api::tables;
+    use reth_provider::BlockHashReader;
     use reth_testing_utils::generators::{self, random_header};
     use test_runner::EraTestRunner;
 
@@ -405,7 +340,6 @@ mod tests {
         use super::*;
         use crate::test_utils::{TestRunnerError, TestStageDB};
         use alloy_consensus::{BlockBody, Header};
-        use alloy_primitives::TxNumber;
         use futures_util::stream;
         use reth_db_api::{
             cursor::DbCursorRO,
@@ -566,7 +500,7 @@ mod tests {
             async fn after_execution(&self, headers: Self::Seed) -> Result<(), TestRunnerError> {
                 let tip = if headers.is_empty() {
                     let tip = random_header(&mut generators::rng(), 0, None);
-                    self.db.insert_headers(std::iter::once(&tip))?;
+                    self.db.insert_headers(iter::once(&tip))?;
                     tip.hash()
                 } else {
                     headers.last().unwrap().hash()
@@ -577,24 +511,7 @@ mod tests {
         }
 
         impl UnwindStageTestRunner for EraTestRunner {
-            fn validate_unwind(&self, input: UnwindInput) -> Result<(), TestRunnerError> {
-                self.check_no_header_entry_above(input.unwind_to)?;
-
-                self.db.ensure_no_entry_above::<tables::BlockBodyIndices, _>(
-                    input.unwind_to,
-                    |key| key,
-                )?;
-                self.db
-                    .ensure_no_entry_above::<tables::BlockOmmers, _>(input.unwind_to, |key| key)?;
-                if let Some(last_tx_id) = self.last_tx_id()? {
-                    self.db
-                        .ensure_no_entry_above::<tables::Transactions, _>(last_tx_id, |key| key)?;
-                    self.db.ensure_no_entry_above::<tables::TransactionBlocks, _>(
-                        last_tx_id,
-                        |key| key,
-                    )?;
-                }
-
+            fn validate_unwind(&self, _input: UnwindInput) -> Result<(), TestRunnerError> {
                 Ok(())
             }
         }
@@ -683,20 +600,6 @@ mod tests {
                     Ok(())
                 })?;
                 Ok(())
-            }
-
-            /// Get the last available tx id if any
-            pub(crate) fn last_tx_id(&self) -> Result<Option<TxNumber>, TestRunnerError> {
-                let last_body = self.db.query(|tx| {
-                    let v = tx.cursor_read::<tables::BlockBodyIndices>()?.last()?;
-                    Ok(v)
-                })?;
-                Ok(match last_body {
-                    Some((_, body)) if body.tx_count != 0 => {
-                        Some(body.first_tx_num + body.tx_count - 1)
-                    }
-                    _ => None,
-                })
             }
 
             pub(crate) fn take_responses(&mut self) {
