@@ -5,7 +5,7 @@ use alloy_primitives::{TxHash, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use eyre::OptionExt;
 use futures_util::{stream::Fuse, StreamExt};
-use reth_engine_primitives::BeaconEngineMessage;
+use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, PayloadAttributesBuilder, PayloadKind, PayloadTypes,
@@ -18,10 +18,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, UNIX_EPOCH},
 };
-use tokio::{
-    sync::{mpsc::UnboundedSender, oneshot},
-    time::Interval,
-};
+use tokio::time::Interval;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::error;
 
@@ -78,7 +75,7 @@ pub struct LocalMiner<T: PayloadTypes, B> {
     /// The payload attribute builder for the engine
     payload_attributes_builder: B,
     /// Sender for events to engine.
-    to_engine: UnboundedSender<BeaconEngineMessage<T>>,
+    to_engine: BeaconConsensusEngineHandle<T>,
     /// The mining mode for the engine
     mode: MiningMode,
     /// The payload builder for the engine
@@ -95,31 +92,28 @@ where
     B: PayloadAttributesBuilder<<T as PayloadTypes>::PayloadAttributes>,
 {
     /// Spawns a new [`LocalMiner`] with the given parameters.
-    pub fn spawn_new(
+    pub fn new(
         provider: impl BlockReader,
         payload_attributes_builder: B,
-        to_engine: UnboundedSender<BeaconEngineMessage<T>>,
+        to_engine: BeaconConsensusEngineHandle<T>,
         mode: MiningMode,
         payload_builder: PayloadBuilderHandle<T>,
-    ) {
+    ) -> Self {
         let latest_header =
             provider.sealed_header(provider.best_block_number().unwrap()).unwrap().unwrap();
 
-        let miner = Self {
+        Self {
             payload_attributes_builder,
             to_engine,
             mode,
             payload_builder,
             last_timestamp: latest_header.timestamp(),
             last_block_hashes: vec![latest_header.hash()],
-        };
-
-        // Spawn the miner
-        tokio::spawn(miner.run());
+        }
     }
 
     /// Runs the [`LocalMiner`] in a loop, polling the miner and building payloads.
-    async fn run(mut self) {
+    pub async fn run(mut self) {
         let mut fcu_interval = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
@@ -156,16 +150,12 @@ where
 
     /// Sends a FCU to the engine.
     async fn update_forkchoice_state(&self) -> eyre::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
-            state: self.forkchoice_state(),
-            payload_attrs: None,
-            tx,
-            version: EngineApiMessageVersion::default(),
-        })?;
+        let res = self
+            .to_engine
+            .fork_choice_updated(self.forkchoice_state(), None, EngineApiMessageVersion::default())
+            .await?;
 
-        let res = rx.await??;
-        if !res.forkchoice_status().is_valid() {
+        if !res.is_valid() {
             eyre::bail!("Invalid fork choice update")
         }
 
@@ -183,16 +173,16 @@ where
                 .as_secs(),
         );
 
-        let (tx, rx) = oneshot::channel();
-        self.to_engine.send(BeaconEngineMessage::ForkchoiceUpdated {
-            state: self.forkchoice_state(),
-            payload_attrs: Some(self.payload_attributes_builder.build(timestamp)),
-            tx,
-            version: EngineApiMessageVersion::default(),
-        })?;
+        let res = self
+            .to_engine
+            .fork_choice_updated(
+                self.forkchoice_state(),
+                Some(self.payload_attributes_builder.build(timestamp)),
+                EngineApiMessageVersion::default(),
+            )
+            .await?;
 
-        let res = rx.await??.await?;
-        if !res.payload_status.is_valid() {
+        if !res.is_valid() {
             eyre::bail!("Invalid payload status")
         }
 
@@ -206,11 +196,8 @@ where
 
         let block = payload.block();
 
-        let (tx, rx) = oneshot::channel();
         let payload = T::block_to_payload(payload.block().clone());
-        self.to_engine.send(BeaconEngineMessage::NewPayload { payload, tx })?;
-
-        let res = rx.await??;
+        let res = self.to_engine.new_payload(payload).await?;
 
         if !res.is_valid() {
             eyre::bail!("Invalid payload")
