@@ -356,8 +356,8 @@ pub struct RpcServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Notification channel for engine API events
     pub engine_events:
         EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
-    /// Handle to the beacon consensus engine.
-    pub beacon_engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    /// Handle to the consensus engine.
+    pub engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 /// Handle returned when only the authenticated Engine API server is launched.
@@ -374,8 +374,8 @@ pub struct AuthServerOnlyHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Notification channel for engine API events
     pub engine_events:
         EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
-    /// Handle to the beacon consensus engine.
-    pub beacon_engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    /// Handle to the consensus engine.
+    pub engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 /// Internal context struct for RPC setup shared between different launch methods
@@ -388,7 +388,7 @@ struct RpcSetupContext<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
     registry: RpcRegistry<Node, EthApi>,
     on_rpc_started: Box<dyn OnRpcStarted<Node, EthApi>>,
     engine_events: EventSender<BeaconConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
-    beacon_engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    engine_handle: BeaconConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
 }
 
 /// Node add-ons containing RPC server configuration, with customizable eth API handler.
@@ -536,7 +536,7 @@ where
             mut registry,
             on_rpc_started,
             engine_events,
-            beacon_engine_handle,
+            engine_handle,
         } = setup_ctx;
 
         let server_config = config.rpc.rpc_server_config();
@@ -558,7 +558,7 @@ where
             rpc_server_handle,
             rpc_registry: registry,
             engine_events,
-            beacon_engine_handle,
+            engine_handle,
         })
     }
 
@@ -588,7 +588,7 @@ where
             auth_server_handle,
             rpc_registry: setup_ctx.registry,
             engine_events: setup_ctx.engine_events,
-            beacon_engine_handle: setup_ctx.beacon_engine_handle,
+            engine_handle: setup_ctx.engine_handle,
         })
     }
 
@@ -616,7 +616,7 @@ where
             mut registry,
             on_rpc_started,
             engine_events,
-            beacon_engine_handle,
+            engine_handle,
         } = setup_ctx;
 
         let server_config = config.rpc.rpc_server_config();
@@ -645,7 +645,7 @@ where
             rpc_server_handles: handles,
             rpc_registry: registry,
             engine_events,
-            beacon_engine_handle,
+            beacon_engine_handle: engine_handle,
         })
     }
 
@@ -728,7 +728,7 @@ where
             registry,
             on_rpc_started,
             engine_events,
-            beacon_engine_handle,
+            engine_handle: beacon_engine_handle,
         })
     }
 
