@@ -197,3 +197,12 @@ use aquamarine as _;
 // used in main
 use clap as _;
 use reth_cli_util as _;
+
+#[derive(clap::Args, Debug)]
+pub struct ExtraArgs {
+    #[clap(flatten)]
+    pub ress: args::RessArgs,
+
+    #[clap(flatten)]
+    pub zk_ress: args::ZkRessArgs,
+}

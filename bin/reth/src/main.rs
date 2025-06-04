@@ -5,10 +5,7 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 
 use clap::Parser;
 use reth::{
-    args::{RessArgs, ZkRessArgs},
-    cli::Cli,
-    ress::install_ress_subprotocol,
-    zk_ress::install_zk_ress_subprotocol,
+    cli::Cli, ress::install_ress_subprotocol, zk_ress::install_zk_ress_subprotocol, ExtraArgs,
 };
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_node_builder::NodeHandle;
@@ -83,13 +80,4 @@ fn main() {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }
-}
-
-#[derive(clap::Args, Debug)]
-struct ExtraArgs {
-    #[clap(flatten)]
-    ress: RessArgs,
-
-    #[clap(flatten)]
-    zk_ress: ZkRessArgs,
 }
