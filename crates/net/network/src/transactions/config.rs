@@ -163,7 +163,7 @@ pub enum AnnouncementAcceptance {
     Ignore,
     /// Reject
     Reject {
-        /// If true, the peer sending this annoucement should be penalized.
+        /// If true, the peer sending this announcement should be penalized.
         penalize_peer: bool,
     },
 }
