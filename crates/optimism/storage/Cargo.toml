@@ -13,7 +13,6 @@ workspace = true
 [dependencies]
 # reth
 reth-node-api.workspace = true
-
 reth-chainspec.workspace = true
 reth-primitives-traits.workspace = true
 reth-optimism-forks.workspace = true
