@@ -586,7 +586,8 @@ impl PeersManager {
             }
 
             if peer.is_trusted() && is_connection_failed_reputation(peer.reputation) {
-                // trigger resolution task for trusted peer since multiple connection failures occurred
+                // trigger resolution task for trusted peer since multiple connection failures
+                // occurred
                 self.trusted_peers_resolver.interval.reset_immediately();
             }
         }
