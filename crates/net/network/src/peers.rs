@@ -103,6 +103,7 @@ impl PeersManager {
             backoff_durations,
             trusted_nodes,
             trusted_nodes_only,
+            trusted_nodes_resolution_interval,
             basic_nodes,
             max_backoff_count,
             incoming_ip_throttle_duration,
@@ -141,7 +142,7 @@ impl PeersManager {
             trusted_peer_ids,
             trusted_peers_resolver: TrustedPeersResolver::new(
                 trusted_nodes,
-                tokio::time::interval(Duration::from_secs(60 * 60)), // 1 hour
+                tokio::time::interval(trusted_nodes_resolution_interval), // 1 hour
             ),
             manager_tx,
             handle_rx: UnboundedReceiverStream::new(handle_rx),

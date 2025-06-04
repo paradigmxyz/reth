@@ -131,6 +131,9 @@ pub struct PeersConfig {
     /// Connect to or accept from trusted nodes only?
     #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
     pub trusted_nodes_only: bool,
+    /// Interval to update trusted nodes DNS resolution
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    pub trusted_nodes_resolution_interval: Duration,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     ///
     /// The max time spent of a peer before it's removed from the set is determined by the
@@ -177,6 +180,7 @@ impl Default for PeersConfig {
             backoff_durations: Default::default(),
             trusted_nodes: Default::default(),
             trusted_nodes_only: false,
+            trusted_nodes_resolution_interval: Duration::from_secs(60 * 60),
             basic_nodes: Default::default(),
             max_backoff_count: 5,
             incoming_ip_throttle_duration: INBOUND_IP_THROTTLE_DURATION,
