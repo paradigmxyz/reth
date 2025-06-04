@@ -14,6 +14,7 @@ use reth_net_banlist::BanList;
 use reth_network_api::test_utils::{PeerCommand, PeersHandle};
 use reth_network_peers::{NodeRecord, PeerId};
 use reth_network_types::{
+    is_connection_failed_reputation,
     peers::{
         config::PeerBackoffDurations,
         reputation::{DEFAULT_REPUTATION, MAX_TRUSTED_PEER_REPUTATION_CHANGE},
@@ -582,6 +583,12 @@ impl PeersManager {
             if peer.state.is_incoming() {
                 // we already have an active connection to the peer, so we can ignore this error
                 return
+            }
+
+            if peer.is_trusted() && is_connection_failed_reputation(peer.reputation) {
+                // trigger resolution task for trusted peer since multiple connection failures
+                // occurred
+                self.trusted_peers_resolver.interval.reset_immediately();
             }
         }
 
