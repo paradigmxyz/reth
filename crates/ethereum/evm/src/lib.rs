@@ -26,13 +26,13 @@ use alloy_evm::{
 };
 use alloy_primitives::{Bytes, U256};
 use core::{convert::Infallible, fmt::Debug};
-use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, MAINNET};
 use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_evm::{
     precompiles::PrecompilesMap, ConfigureEvm, EvmEnv, EvmFactory, NextBlockEnvAttributes,
     TransactionEnv,
 };
-use reth_primitives_traits::{SealedBlock, SealedHeader};
+use reth_primitives_traits::{constants::MAX_TX_GAS_LIMIT_OSAKA, SealedBlock, SealedHeader};
 use revm::{
     context::{BlockEnv, CfgEnv},
     context_interface::block::BlobExcessGasAndPrice,
@@ -157,6 +157,10 @@ where
             cfg_env.set_blob_max_count(blob_params.max_blob_count);
         }
 
+        if self.chain_spec().is_osaka_active_at_timestamp(header.timestamp) {
+            cfg_env.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
+        }
+
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
         let blob_excess_gas_and_price =
@@ -199,6 +203,10 @@ where
 
         if let Some(blob_params) = &blob_params {
             cfg.set_blob_max_count(blob_params.max_blob_count);
+        }
+
+        if self.chain_spec().is_osaka_active_at_timestamp(attributes.timestamp) {
+            cfg.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
         }
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is

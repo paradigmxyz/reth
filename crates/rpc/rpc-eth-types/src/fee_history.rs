@@ -418,7 +418,11 @@ impl FeeHistoryEntry {
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
         self.excess_blob_gas.and_then(|excess_blob_gas| {
-            Some(self.blob_params?.next_block_excess_blob_gas(excess_blob_gas, self.blob_gas_used?))
+            Some(self.blob_params?.next_block_excess_blob_gas(
+                excess_blob_gas,
+                self.blob_gas_used?,
+                self.base_fee_per_gas,
+            ))
         })
     }
 }
