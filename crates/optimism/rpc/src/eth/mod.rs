@@ -36,7 +36,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use std::{fmt, future::Future, marker::PhantomData, sync::Arc};
+use std::{fmt, marker::PhantomData, sync::Arc};
 
 use crate::{OpEthApiError, SequencerClient};
 
@@ -238,14 +238,10 @@ where
         self.inner.eth_api.fee_history_cache()
     }
 
-    fn suggested_priority_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        let api = self.clone();
-        async move {
-            let base_tip = api.inner.eth_api.gas_oracle().suggest_tip_cap().await?;
-
-            let min_tip = U256::from(api.inner.min_suggested_priority_fee);
-            Ok(base_tip.max(min_tip))
-        }
+    async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
+        let base_tip = self.inner.eth_api.gas_oracle().suggest_tip_cap().await?;
+        let min_tip = U256::from(self.inner.min_suggested_priority_fee);
+        Ok(base_tip.max(min_tip))
     }
 }
 
@@ -315,7 +311,9 @@ struct OpEthApiInner<N: OpNodeCore> {
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
-    /// Minimum priority fee enforced by OP-specific logic
+    /// Minimum priority fee enforced by OP-specific logic.
+    ///
+    /// See also <https://github.com/ethereum-optimism/op-geth/blob/d4e0fe9bb0c2075a9bff269fb975464dd8498f75/eth/gasprice/optimism-gasprice.go#L38-L38>
     min_suggested_priority_fee: U256,
 }
 
@@ -339,10 +337,10 @@ pub struct OpEthApiBuilder<NetworkT = Optimism> {
     sequencer_url: Option<String>,
     /// Headers to use for the sequencer client requests.
     sequencer_headers: Vec<String>,
-    /// Marker for network types.
-    _nt: PhantomData<NetworkT>,
     /// Minimum suggested priority fee (tip)
     min_suggested_priority_fee: u64,
+    /// Marker for network types.
+    _nt: PhantomData<NetworkT>,
 }
 
 impl<NetworkT> Default for OpEthApiBuilder<NetworkT> {
