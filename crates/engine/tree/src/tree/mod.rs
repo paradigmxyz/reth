@@ -2172,14 +2172,14 @@ where
         //    root task proof calculation will include a lot of unrelated paths in the prefix sets.
         //    It's cheaper to run a parallel state root that does one walk over trie tables while
         //    accounting for the prefix sets.
-        let use_state_root_task = run_parallel_state_root &&
+        let mut use_state_root_task = run_parallel_state_root &&
             self.config.use_state_root_task() &&
             !self.has_ancestors_with_missing_trie_updates(block.sealed_header());
 
         // use prewarming background task
         let header = block.clone_sealed_header();
         let txs = block.clone_transactions_recovered().collect();
-        let mut handle = if run_parallel_state_root && use_state_root_task {
+        let mut handle = if use_state_root_task {
             // use background tasks for state root calc
             let consistent_view =
                 ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
@@ -2201,14 +2201,22 @@ where
                 .trie_input_duration
                 .record(trie_input_start.elapsed().as_secs_f64());
 
-            self.payload_processor.spawn(
-                header,
-                txs,
-                provider_builder,
-                consistent_view,
-                trie_input,
-                &self.config,
-            )
+            // Use state root task only if prefix sets are empty, otherwise proof generation is too
+            // expensive because it requires walking over the paths in the prefix set in every
+            // proof.
+            if trie_input.prefix_sets.is_empty() {
+                self.payload_processor.spawn(
+                    header,
+                    txs,
+                    provider_builder,
+                    consistent_view,
+                    trie_input,
+                    &self.config,
+                )
+            } else {
+                use_state_root_task = false;
+                self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
+            }
         } else {
             self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
         };
