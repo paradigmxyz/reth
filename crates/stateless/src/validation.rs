@@ -1,4 +1,4 @@
-use crate::{witness_db::WitnessDatabase, ExecutionWitness};
+use crate::{trie::StatelessTrie, witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
@@ -8,7 +8,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::B256;
 use alloy_rlp::Decodable;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
@@ -17,9 +17,7 @@ use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus}
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{block::error::BlockRecoveryError, Block as _, RecoveredBlock};
-use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
-use reth_trie_sparse::{blinded::DefaultBlindedProviderFactory, SparseStateTrie};
 
 /// Errors that can occur during stateless validation.
 #[derive(Debug, thiserror::Error)]
@@ -107,8 +105,8 @@ pub enum StatelessValidationError {
 ///    the pre state reads.
 ///
 /// 2. **Pre-State Verification:** Retrieves the expected `pre_state_root` from the parent header
-///    from `ancestor_headers`. Verifies the provided [`ExecutionWitness`] against this root using
-///    [`verify_execution_witness`].
+///    from `ancestor_headers`. Verifies the provided [`ExecutionWitness`] against the
+///    `pre_state_root`.
 ///
 /// 3. **Chain Verification:** The code currently does not verify the [`EthChainSpec`] and expects a
 ///    higher level function to assert that this is correct by, for example, asserting that it is
@@ -171,10 +169,10 @@ where
     };
 
     // First verify that the pre-state reads are correct
-    let (mut sparse_trie, bytecode) = verify_execution_witness(&witness, pre_state_root)?;
+    let (mut trie, bytecode) = StatelessTrie::new(&witness, pre_state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
-    let db = WitnessDatabase::new(&sparse_trie, bytecode, ancestor_hashes);
+    let db = WitnessDatabase::new(&trie, bytecode, ancestor_hashes);
 
     // Execute the block
     let executor = evm_config.executor(db);
@@ -188,8 +186,7 @@ where
 
     // Compute and check the post state root
     let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
-    let state_root = crate::root::calculate_state_root(&mut sparse_trie, hashed_state)
-        .map_err(|_e| StatelessValidationError::StatelessStateRootCalculationFailed)?;
+    let state_root = trie.calculate_state_root(hashed_state)?;
     if state_root != current_block.state_root {
         return Err(StatelessValidationError::PostStateRootMismatch {
             got: state_root,
@@ -234,67 +231,6 @@ where
     consensus.validate_block_pre_execution(block)?;
 
     Ok(())
-}
-
-/// Verifies execution witness [`ExecutionWitness`] against an expected pre-state root.
-///
-/// This function takes the RLP-encoded values provided in [`ExecutionWitness`]
-/// (which includes state trie nodes, storage trie nodes, and contract bytecode)
-/// and uses it to populate a new [`SparseStateTrie`].
-///
-/// If the computed root hash matches the `pre_state_root`, it signifies that the
-/// provided execution witness is consistent with that pre-state root. In this case, the function
-/// returns the populated [`SparseStateTrie`] and a [`B256Map`] containing the
-/// contract bytecode (mapping code hash to [`Bytecode`]).
-///
-/// The bytecode has a separate mapping because the [`SparseStateTrie`] does not store the
-/// contract bytecode, only the hash of it (code hash).
-///
-/// If the roots do not match, it returns `None`, indicating the witness is invalid
-/// for the given `pre_state_root`.
-// Note: This approach might be inefficient for ZKVMs requiring minimal memory operations, which
-// would explain why they have for the most part re-implemented this function.
-pub fn verify_execution_witness(
-    witness: &ExecutionWitness,
-    pre_state_root: B256,
-) -> Result<(SparseStateTrie, B256Map<Bytecode>), StatelessValidationError> {
-    let mut trie = SparseStateTrie::new(DefaultBlindedProviderFactory);
-    let mut state_witness = B256Map::default();
-    let mut bytecode = B256Map::default();
-
-    for rlp_encoded in &witness.state {
-        let hash = keccak256(rlp_encoded);
-        state_witness.insert(hash, rlp_encoded.clone());
-    }
-    for rlp_encoded in &witness.codes {
-        let hash = keccak256(rlp_encoded);
-        bytecode.insert(hash, Bytecode::new_raw(rlp_encoded.clone()));
-    }
-
-    // Reveal the witness with our state root
-    // This method builds a trie using the sparse trie using the state_witness with
-    // the root being the pre_state_root.
-    // Here are some things to note:
-    // - You can pass in more witnesses than is needed for the block execution.
-    // - If you try to get an account and it has not been seen. This means that the account
-    // was not inserted into the Trie. It does not mean that the account does not exist.
-    // In order to determine an account not existing, we must do an exclusion proof.
-    trie.reveal_witness(pre_state_root, &state_witness)
-        .map_err(|_e| StatelessValidationError::WitnessRevealFailed { pre_state_root })?;
-
-    // Calculate the root
-    let computed_root = trie
-        .root()
-        .map_err(|_e| StatelessValidationError::StatelessPreStateRootCalculationFailed)?;
-
-    if computed_root == pre_state_root {
-        Ok((trie, bytecode))
-    } else {
-        Err(StatelessValidationError::PreStateRootMismatch {
-            got: computed_root,
-            expected: pre_state_root,
-        })
-    }
 }
 
 /// Verifies the contiguity, number of ancestor headers and extracts their hashes.

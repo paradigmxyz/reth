@@ -206,6 +206,18 @@ $(EF_TESTS_DIR):
 ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
 	cargo nextest run -p ef-tests --features ef-tests
 
+##@ reth-bench
+
+.PHONY: reth-bench
+reth-bench: ## Build the reth-bench binary into the `target` directory.
+	cargo build --manifest-path bin/reth-bench/Cargo.toml --features "$(FEATURES)" --profile "$(PROFILE)"
+
+.PHONY: install-reth-bech
+install-reth-bench: ## Build and install the reth binary under `~/.cargo/bin`.
+	cargo install --path bin/reth-bench --bin reth-bench --force --locked \
+		--features "$(FEATURES)" \
+		--profile "$(PROFILE)"
+
 ##@ Docker
 
 # Note: This requires a buildx builder with emulation support. For example:

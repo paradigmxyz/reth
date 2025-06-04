@@ -36,7 +36,11 @@ pub struct CustomHeader {
     pub extension: u64,
 }
 
-impl CustomHeader {}
+impl From<Header> for CustomHeader {
+    fn from(value: Header) -> Self {
+        CustomHeader { inner: value, extension: 0 }
+    }
+}
 
 impl AsRef<Self> for CustomHeader {
     fn as_ref(&self) -> &Self {
@@ -159,6 +163,21 @@ impl reth_codecs::Compact for CustomHeader {
         let (eth_header, buf) = Compact::from_compact(buf, identifier);
         let (extension, buf) = Compact::from_compact(buf, buf.len());
         (Self { inner: eth_header, extension }, buf)
+    }
+}
+
+impl reth_db_api::table::Compress for CustomHeader {
+    type Compressed = Vec<u8>;
+
+    fn compress_to_buf<B: alloy_primitives::bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+        let _ = Compact::to_compact(self, buf);
+    }
+}
+
+impl reth_db_api::table::Decompress for CustomHeader {
+    fn decompress(value: &[u8]) -> Result<Self, reth_db_api::DatabaseError> {
+        let (obj, _) = Compact::from_compact(value, value.len());
+        Ok(obj)
     }
 }
 

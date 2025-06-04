@@ -63,6 +63,10 @@ pub struct EngineArgs {
     /// Enable precompile cache
     #[arg(long = "engine.precompile-cache", default_value = "false")]
     pub precompile_cache_enabled: bool,
+
+    /// Enable state root fallback, useful for testing
+    #[arg(long = "engine.state-root-fallback", default_value = "false")]
+    pub state_root_fallback: bool,
 }
 
 impl Default for EngineArgs {
@@ -80,6 +84,7 @@ impl Default for EngineArgs {
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_enabled: false,
+            state_root_fallback: false,
         }
     }
 }
@@ -98,6 +103,7 @@ impl EngineArgs {
             .with_max_proof_task_concurrency(self.max_proof_task_concurrency)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
             .with_precompile_cache_enabled(self.precompile_cache_enabled)
+            .with_state_root_fallback(self.state_root_fallback)
     }
 }
 

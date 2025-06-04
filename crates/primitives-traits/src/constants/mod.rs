@@ -17,6 +17,9 @@ pub const MAXIMUM_GAS_LIMIT_BLOCK: u64 = 2u64.pow(63) - 1;
 /// The bound divisor of the gas limit, used in update calculations.
 pub const GAS_LIMIT_BOUND_DIVISOR: u64 = 1024;
 
+/// Maximum transaction gas limit as defined by [EIP-7825](https://eips.ethereum.org/EIPS/eip-7825) activated in `Osaka` hardfork.
+pub const MAX_TX_GAS_LIMIT_OSAKA: u64 = 30_000_000;
+
 /// The number of blocks to unwind during a reorg that already became a part of canonical chain.
 ///
 /// In reality, the node can end up in this particular situation very rarely. It would happen only
