@@ -272,8 +272,6 @@ where
         hash_collector.insert(hash, number)?;
     }
 
-    info!(target: "era::history::import", "Processed era file");
-
     Ok(last_header_number)
 }
 
