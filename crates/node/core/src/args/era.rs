@@ -1,17 +1,49 @@
+use clap::Args;
 use eyre::eyre;
 use reth_chainspec::{ChainKind, NamedChain};
+use std::path::Path;
 use url::Url;
 
-/// Conversion to [`Url`] from a reference.
-pub trait TryToUrl {
-    /// Converts `self` into [`Url`].
-    ///
-    /// Returns `Err` if the conversion is not possible.
-    fn try_to_url(&self) -> eyre::Result<Url>;
+/// Syncs ERA1 encoded blocks from a local or remote source.
+#[derive(Clone, Debug, Default, Args)]
+pub struct EraArgs {
+    /// Enable import from ERA1 files.
+    #[arg(long = "era.enable", value_name = "ERA_ENABLE", default_value_t = false)]
+    pub enable: bool,
+
+    /// Describes where to get the ERA files to import from.
+    #[clap(flatten)]
+    pub source: EraSourceArgs,
 }
 
-impl TryToUrl for ChainKind {
-    fn try_to_url(&self) -> eyre::Result<Url> {
+/// Arguments for the block history import based on ERA1 encoded files.
+#[derive(Clone, Debug, Default, Args)]
+#[group(required = false, multiple = false)]
+pub struct EraSourceArgs {
+    /// The path to a directory for import.
+    ///
+    /// The ERA1 files are read from the local directory parsing headers and bodies.
+    #[arg(long = "era.path", value_name = "ERA_PATH", verbatim_doc_comment)]
+    pub path: Option<Box<Path>>,
+
+    /// The URL to a remote host where the ERA1 files are hosted.
+    ///
+    /// The ERA1 files are read from the remote host using HTTP GET requests parsing headers
+    /// and bodies.
+    #[arg(long = "era.url", value_name = "ERA_URL", verbatim_doc_comment)]
+    pub url: Option<Url>,
+}
+
+/// The `ExtractEraHost` trait allows to derive a default URL host for ERA files.
+pub trait DefaultEraHost {
+    /// Converts `self` into [`Url`] index page of the ERA host.
+    ///
+    /// Returns `Err` if the conversion is not possible.
+    fn default_era_host(&self) -> eyre::Result<Url>;
+}
+
+impl DefaultEraHost for ChainKind {
+    fn default_era_host(&self) -> eyre::Result<Url> {
         Ok(match self {
             Self::Named(NamedChain::Mainnet) => {
                 Url::parse("https://era.ithaca.xyz/era1/index.html").expect("URL should be valid")

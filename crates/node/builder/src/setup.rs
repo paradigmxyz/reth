@@ -17,7 +17,7 @@ use reth_network_p2p::{
     bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader, BlockClient,
 };
 use reth_node_api::HeaderTy;
-use reth_node_core::args::TryToUrl;
+use reth_node_core::args::DefaultEraHost;
 use reth_provider::{providers::ProviderNodeTypes, ProviderFactory};
 use reth_stages::{
     prelude::DefaultStages,
@@ -58,20 +58,6 @@ where
         .build(client, consensus.clone(), provider_factory.clone())
         .into_task_with(task_executor);
 
-    let era_import_source = if let Some(path) = config.era.path.clone() {
-        Some(EraImportSource::Path(path))
-    } else if let Some((url, folder)) = config
-        .era
-        .url
-        .clone()
-        .or_else(|| provider_factory.chain_spec().chain().kind().try_to_url().ok())
-        .zip(config.era.folder.clone())
-    {
-        Some(EraImportSource::Url(url, folder))
-    } else {
-        None
-    };
-
     let pipeline = build_pipeline(
         provider_factory,
         config,
@@ -84,7 +70,6 @@ where
         static_file_producer,
         evm_config,
         exex_manager_handle,
-        era_import_source,
     )?;
 
     Ok(pipeline)
@@ -104,7 +89,6 @@ pub fn build_pipeline<N, H, B, Evm>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     evm_config: Evm,
     exex_manager_handle: ExExManagerHandle<N::Primitives>,
-    era_import_source: Option<EraImportSource>,
 ) -> eyre::Result<Pipeline<N>>
 where
     N: ProviderNodeTypes,
@@ -122,6 +106,20 @@ where
     let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
     let prune_modes = prune_config.map(|prune| prune.segments).unwrap_or_default();
+
+    let era_import_source = if let Some(path) = stage_config.era.path.clone() {
+        Some(EraImportSource::Path(path))
+    } else if let Some((url, folder)) = stage_config
+        .era
+        .url
+        .clone()
+        .or_else(|| provider_factory.chain_spec().chain().kind().default_era_host().ok())
+        .zip(stage_config.era.folder.clone())
+    {
+        Some(EraImportSource::Url(url, folder))
+    } else {
+        None
+    };
 
     let stages = DefaultStages::new(
         provider_factory.clone(),

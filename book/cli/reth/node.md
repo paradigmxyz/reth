@@ -771,6 +771,21 @@ Engine:
       --engine.state-root-fallback
           Enable state root fallback, useful for testing
 
+ERA:
+      --era.enable
+          Enable import from ERA1 files
+
+      --era.path <ERA_PATH>
+          The path to a directory for import.
+
+          The ERA1 files are read from the local directory parsing headers and bodies.
+
+      --era.url <ERA_URL>
+          The URL to a remote host where the ERA1 files are hosted.
+
+          The ERA1 files are read from the remote host using HTTP GET requests parsing headers
+          and bodies.
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol
