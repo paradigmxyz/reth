@@ -10,12 +10,11 @@ use alloy_primitives::{Sealable, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
+use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_rpc_types_compat::block::from_block;
-use reth_storage_api::{
-    BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt, ProviderTx,
-};
+use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 
@@ -160,8 +159,15 @@ pub trait EthBlocks: LoadBlock {
     fn ommers(
         &self,
         block_id: BlockId,
-    ) -> Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error> {
-        self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)
+    ) -> impl Future<Output = Result<Option<Vec<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
+    {
+        async move {
+            if let Some(block) = self.recovered_block(block_id).await? {
+                Ok(block.body().ommers().map(|o| o.to_vec()))
+            } else {
+                Ok(None)
+            }
+        }
     }
 
     /// Returns uncle block at given index in given block.
@@ -181,7 +187,9 @@ pub trait EthBlocks: LoadBlock {
                     .map_err(Self::Error::from_eth_err)?
                     .and_then(|block| block.body().ommers().map(|o| o.to_vec()))
             } else {
-                self.provider().ommers_by_id(block_id).map_err(Self::Error::from_eth_err)?
+                self.recovered_block(block_id)
+                    .await?
+                    .map(|block| block.body().ommers().map(|o| o.to_vec()).unwrap_or_default())
             }
             .unwrap_or_default();
 
@@ -207,6 +215,8 @@ pub trait LoadBlock:
     + SpawnBlocking
     + RpcNodeCoreExt<
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
+        Primitives: NodePrimitives<SignedTx = ProviderTx<Self::Provider>>,
+        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
     >
 {
     /// Returns the block object for the given block id.

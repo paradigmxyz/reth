@@ -3,19 +3,17 @@
 use alloy_consensus::transaction::Recovered;
 use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInfo};
 use core::error;
+use reth_primitives_traits::{NodePrimitives, TxTy};
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use std::fmt::Debug;
 
 /// Builds RPC transaction w.r.t. network.
-pub trait TransactionCompat<T>: Send + Sync + Unpin + Clone + fmt::Debug {
+pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
+    /// The lower layer consensus types to convert from.
+    type Primitives: NodePrimitives;
+
     /// RPC transaction response type.
-    type Transaction: Serialize
-        + for<'de> Deserialize<'de>
-        + Send
-        + Sync
-        + Unpin
-        + Clone
-        + fmt::Debug;
+    type Transaction: Serialize + for<'de> Deserialize<'de> + Send + Sync + Unpin + Clone + Debug;
 
     /// RPC transaction error type.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
@@ -23,7 +21,10 @@ pub trait TransactionCompat<T>: Send + Sync + Unpin + Clone + fmt::Debug {
     /// Wrapper for `fill()` with default `TransactionInfo`
     /// Create a new rpc transaction result for a _pending_ signed transaction, setting block
     /// environment related fields to `None`.
-    fn fill_pending(&self, tx: Recovered<T>) -> Result<Self::Transaction, Self::Error> {
+    fn fill_pending(
+        &self,
+        tx: Recovered<TxTy<Self::Primitives>>,
+    ) -> Result<Self::Transaction, Self::Error> {
         self.fill(tx, TransactionInfo::default())
     }
 
@@ -34,11 +35,14 @@ pub trait TransactionCompat<T>: Send + Sync + Unpin + Clone + fmt::Debug {
     /// transaction was mined.
     fn fill(
         &self,
-        tx: Recovered<T>,
+        tx: Recovered<TxTy<Self::Primitives>>,
         tx_inf: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error>;
 
     /// Builds a fake transaction from a transaction request for inclusion into block built in
     /// `eth_simulateV1`.
-    fn build_simulate_v1_transaction(&self, request: TransactionRequest) -> Result<T, Self::Error>;
+    fn build_simulate_v1_transaction(
+        &self,
+        request: TransactionRequest,
+    ) -> Result<TxTy<Self::Primitives>, Self::Error>;
 }

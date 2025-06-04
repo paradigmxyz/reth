@@ -45,13 +45,12 @@ pub trait LoadPendingBlock:
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-                Block = ProviderBlock<Self::Provider>,
-            >,
+        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
+        Primitives: NodePrimitives<
+            BlockHeader = ProviderHeader<Self::Provider>,
+            SignedTx = ProviderTx<Self::Provider>,
+            Receipt = ProviderReceipt<Self::Provider>,
+            Block = ProviderBlock<Self::Provider>,
         >,
     >
 {
