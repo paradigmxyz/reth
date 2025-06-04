@@ -200,16 +200,10 @@ where
         trace!(target: "sync::stages::bodies", bodies_len = buffer.len(), "Writing blocks");
         let highest_block = buffer.last().map(|r| r.block_number()).unwrap_or(from_block);
 
-        let next_block_number = provider
-            .static_file_provider()
-            .latest_writer(StaticFileSegment::Transactions)?
-            .next_block_number();
-
         // Write bodies to database.
         provider.append_block_bodies(
             buffer
                 .into_iter()
-                .filter(|response| response.block_number() >= next_block_number)
                 .map(|response| (response.block_number(), response.into_body()))
                 .collect(),
             // We are writing transactions directly to static files.
