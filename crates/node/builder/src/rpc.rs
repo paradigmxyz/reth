@@ -227,6 +227,17 @@ where
     }
 }
 
+/// Helper container for the parameters commonly passed to RPC module extension functions.
+#[expect(missing_debug_implementations)]
+pub struct RpcModuleContainer<'a, Node: FullNodeComponents, EthApi: EthApiTypes> {
+    /// Holds installed modules per transport type.
+    pub modules: &'a mut TransportRpcModules,
+    /// Holds jwt authenticated rpc module.
+    pub auth_module: &'a mut AuthRpcModule,
+    /// A Helper type the holds instances of the configured modules.
+    pub registry: &'a mut RpcRegistry<Node, EthApi>,
+}
+
 /// Helper container to encapsulate [`RpcRegistryInner`], [`TransportRpcModules`] and
 /// [`AuthRpcModule`].
 ///
@@ -520,11 +531,7 @@ where
         ext: F,
     ) -> eyre::Result<RpcServerOnlyHandle<N, EthB::EthApi>>
     where
-        F: FnOnce(
-            &mut TransportRpcModules,
-            &mut AuthRpcModule,
-            &mut RpcRegistry<N, EthB::EthApi>,
-        ) -> eyre::Result<()>,
+        F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
@@ -570,11 +577,7 @@ where
         ext: F,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
-        F: FnOnce(
-            &mut TransportRpcModules,
-            &mut AuthRpcModule,
-            &mut RpcRegistry<N, EthB::EthApi>,
-        ) -> eyre::Result<()>,
+        F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
@@ -626,11 +629,7 @@ where
         ext: F,
     ) -> eyre::Result<RpcSetupContext<'a, N, EthB::EthApi>>
     where
-        F: FnOnce(
-            &mut TransportRpcModules,
-            &mut AuthRpcModule,
-            &mut RpcRegistry<N, EthB::EthApi>,
-        ) -> eyre::Result<()>,
+        F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let Self { eth_api_builder, engine_api_builder, hooks, .. } = self;
 
@@ -686,7 +685,11 @@ where
 
         let RpcHooks { on_rpc_started, extend_rpc_modules } = hooks;
 
-        ext(ctx.modules, ctx.auth_module, ctx.registry)?;
+        ext(RpcModuleContainer {
+            modules: ctx.modules,
+            auth_module: ctx.auth_module,
+            registry: ctx.registry,
+        })?;
         extend_rpc_modules.extend_rpc_modules(ctx)?;
 
         Ok(RpcSetupContext {
@@ -768,7 +771,7 @@ where
     type Handle = RpcHandle<N, EthB::EthApi>;
 
     async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
-        self.launch_add_ons_with(ctx, |_, _, _| Ok(())).await
+        self.launch_add_ons_with(ctx, |_| Ok(())).await
     }
 }
 
