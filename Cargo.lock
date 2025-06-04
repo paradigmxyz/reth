@@ -9336,7 +9336,6 @@ dependencies = [
  "reth-codecs",
  "reth-db-api",
  "reth-node-api",
- "reth-optimism-forks",
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-provider",

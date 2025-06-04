@@ -4,9 +4,8 @@ use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_db_api::transaction::{DbTx, DbTxMut};
-use reth_node_api::{FullNodePrimitives, FullSignedTx, NodePrimitives, NodeTypes};
-use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
+use reth_node_api::{FullNodePrimitives, FullSignedTx};
+use reth_optimism_primitives::OpTransactionSigned;
 use reth_primitives_traits::{Block, FullBlockHeader, SignedTransaction};
 use reth_provider::{
     providers::{ChainStorage, NodeTypesForProvider},
@@ -84,7 +83,7 @@ where
 
 impl<Provider, T, H> BlockBodyReader<Provider> for OpStorage<T, H>
 where
-    Provider: ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks> + DBProvider,
+    Provider: ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks> + DBProvider,
     T: SignedTransaction,
     H: FullBlockHeader,
 {
