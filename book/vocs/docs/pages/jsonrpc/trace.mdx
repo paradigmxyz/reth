@@ -1,3 +1,6 @@
+---
+description: Trace API for inspecting Ethereum state and transactions.
+---
 # `trace` Namespace
 
 {/* TODO: We should probably document the format of the traces themselves, OE does not do that */}
@@ -10,24 +13,24 @@ The `trace` API gives deeper insight into transaction processing.
 
 There are two types of methods in this API:
 
-- **Ad-hoc tracing APIs** for performing diagnostics on calls or transactions (historical or hypothetical).
-- **Transaction-trace filtering APIs** for getting full externality traces on any transaction executed by reth.
+-   **Ad-hoc tracing APIs** for performing diagnostics on calls or transactions (historical or hypothetical).
+-   **Transaction-trace filtering APIs** for getting full externality traces on any transaction executed by reth.
 
 ## Ad-hoc tracing APIs
 
 Ad-hoc tracing APIs allow you to perform diagnostics on calls or transactions (historical or hypothetical), including:
 
-- Transaction traces (`trace`)
-- VM traces (`vmTrace`)
-- State difference traces (`stateDiff`)
+-   Transaction traces (`trace`)
+-   VM traces (`vmTrace`)
+-   State difference traces (`stateDiff`)
 
 The ad-hoc tracing APIs are:
 
-- [`trace_call`](#trace_call)
-- [`trace_callMany`](#trace_callmany)
-- [`trace_rawTransaction`](#trace_rawtransaction)
-- [`trace_replayBlockTransactions`](#trace_replayblocktransactions)
-- [`trace_replayTransaction`](#trace_replaytransaction)
+-   [`trace_call`](#trace_call)
+-   [`trace_callMany`](#trace_callmany)
+-   [`trace_rawTransaction`](#trace_rawtransaction)
+-   [`trace_replayBlockTransactions`](#trace_replayblocktransactions)
+-   [`trace_replayTransaction`](#trace_replaytransaction)
 
 ## Transaction-trace filtering APIs
 
@@ -37,10 +40,10 @@ Information returned includes the execution of all contract creations, destructi
 
 The transaction trace filtering APIs are:
 
-- [`trace_block`](#trace_block)
-- [`trace_filter`](#trace_filter)
-- [`trace_get`](#trace_get)
-- [`trace_transaction`](#trace_transaction)
+-   [`trace_block`](#trace_block)
+-   [`trace_filter`](#trace_filter)
+-   [`trace_get`](#trace_get)
+-   [`trace_transaction`](#trace_transaction)
 
 ## `trace_call`
 
@@ -53,7 +56,7 @@ The second parameter is an array of one or more trace types (`vmTrace`, `trace`,
 The third and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
 | Client | Method invocation                                         |
-|--------|-----------------------------------------------------------|
+| ------ | --------------------------------------------------------- |
 | RPC    | `{"method": "trace_call", "params": [tx, type[], block]}` |
 
 ### Example
@@ -90,7 +93,7 @@ The first parameter is a list of call traces, where each call trace is of the fo
 The second and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
 | Client | Method invocation                                      |
-|--------|--------------------------------------------------------|
+| ------ | ------------------------------------------------------ |
 | RPC    | `{"method": "trace_call", "params": [trace[], block]}` |
 
 ### Example
@@ -154,7 +157,7 @@ The second and optional parameter is a block number, block hash, or a block tag 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
 
 | Client | Method invocation                                      |
-|--------|--------------------------------------------------------|
+| ------ | ------------------------------------------------------ |
 | RPC    | `{"method": "trace_call", "params": [raw_tx, type[]]}` |
 
 ### Example
@@ -187,7 +190,7 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
 Replays all transactions in a block returning the requested traces for each transaction.
 
 | Client | Method invocation                                                        |
-|--------|--------------------------------------------------------------------------|
+| ------ | ------------------------------------------------------------------------ |
 | RPC    | `{"method": "trace_replayBlockTransactions", "params": [block, type[]]}` |
 
 ### Example
@@ -224,7 +227,7 @@ Replays all transactions in a block returning the requested traces for each tran
 Replays a transaction, returning the traces.
 
 | Client | Method invocation                                                    |
-|--------|----------------------------------------------------------------------|
+| ------ | -------------------------------------------------------------------- |
 | RPC    | `{"method": "trace_replayTransaction", "params": [tx_hash, type[]]}` |
 
 ### Example
@@ -257,7 +260,7 @@ Replays a transaction, returning the traces.
 Returns traces created at given block.
 
 | Client | Method invocation                              |
-|--------|------------------------------------------------|
+| ------ | ---------------------------------------------- |
 | RPC    | `{"method": "trace_block", "params": [block]}` |
 
 ### Example
@@ -300,17 +303,17 @@ Returns traces matching given filter.
 
 Filters are objects with the following properties:
 
-- `fromBlock`: Returns traces from the given block (a number, hash, or a tag like `latest`).
-- `toBlock`: Returns traces to the given block.
-- `fromAddress`: Sent from these addresses
-- `toAddress`: Sent to these addresses
-- `after`: The offset trace number
-- `count`: The number of traces to display in a batch
+-   `fromBlock`: Returns traces from the given block (a number, hash, or a tag like `latest`).
+-   `toBlock`: Returns traces to the given block.
+-   `fromAddress`: Sent from these addresses
+-   `toAddress`: Sent to these addresses
+-   `after`: The offset trace number
+-   `count`: The number of traces to display in a batch
 
 All properties are optional.
 
 | Client | Method invocation                                |
-|--------|--------------------------------------------------|
+| ------ | ------------------------------------------------ |
 | RPC    | `{"method": "trace_filter", "params": [filter]}` |
 
 ### Example
@@ -352,7 +355,7 @@ All properties are optional.
 Returns trace at given position.
 
 | Client | Method invocation                                        |
-|--------|----------------------------------------------------------|
+| ------ | -------------------------------------------------------- |
 | RPC    | `{"method": "trace_get", "params": [tx_hash,indices[]]}` |
 
 ### Example
@@ -393,7 +396,7 @@ Returns trace at given position.
 Returns all traces of given transaction
 
 | Client | Method invocation                                      |
-|--------|--------------------------------------------------------|
+| ------ | ------------------------------------------------------ |
 | RPC    | `{"method": "trace_transaction", "params": [tx_hash]}` |
 
 ### Example

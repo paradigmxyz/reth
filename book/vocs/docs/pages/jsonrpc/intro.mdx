@@ -1,3 +1,6 @@
+---
+description: Overview of Reth's JSON-RPC API and namespaces.
+---
 # JSON-RPC
 
 You can interact with Reth over JSON-RPC. Reth supports all standard Ethereum JSON-RPC API methods.
@@ -13,7 +16,7 @@ Each namespace must be explicitly enabled.
 The methods are grouped into namespaces, which are listed below:
 
 | Namespace               | Description                                                                                            | Sensitive |
-|-------------------------|--------------------------------------------------------------------------------------------------------|-----------|
+| ----------------------- | ------------------------------------------------------------------------------------------------------ | --------- |
 | [`eth`](./eth.md)       | The `eth` API allows you to interact with Ethereum.                                                    | Maybe     |
 | [`web3`](./web3.md)     | The `web3` API provides utility functions for the web3 client.                                         | No        |
 | [`net`](./net.md)       | The `net` API provides access to network information of the node.                                      | No        |
@@ -26,7 +29,6 @@ The methods are grouped into namespaces, which are listed below:
 Note that some APIs are sensitive, since they can be used to configure your node (`admin`), or access accounts stored on the node (`eth`).
 
 Generally, it is advisable to not expose any JSONRPC namespace publicly, unless you know what you are doing.
-
 
 ## Transports
 
@@ -90,10 +92,10 @@ Because WebSockets are bidirectional, nodes can push events to clients, which en
 
 The configuration of the WebSocket server follows the same pattern as the HTTP server:
 
-- Enable it using `--ws`
-- Configure the server address by passing `--ws.addr` and `--ws.port` (default `8546`)
-- Configure cross-origin requests using `--ws.origins`
-- Enable APIs using `--ws.api`
+-   Enable it using `--ws`
+-   Configure the server address by passing `--ws.addr` and `--ws.port` (default `8546`)
+-   Configure cross-origin requests using `--ws.origins`
+-   Enable APIs using `--ws.api`
 
 ### IPC
 

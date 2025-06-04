@@ -1,3 +1,7 @@
+---
+description: Pruning and full node options in Reth.
+---
+
 # Pruning & Full Node
 
 :::info
@@ -14,11 +18,11 @@ the steps for running Reth as a full node, what caveats to expect and how to con
 
 ## Basic concepts
 
-- Archive node – Reth node that has all historical data from genesis.
-- Pruned node – Reth node that has its historical data pruned partially or fully through
-  a [custom configuration](./config.md#the-prune-section).
-- Full Node – Reth node that has the latest state and historical data for only the last 10064 blocks available
-  for querying in the same way as an archive node.
+-   Archive node – Reth node that has all historical data from genesis.
+-   Pruned node – Reth node that has its historical data pruned partially or fully through
+    a [custom configuration](./config.md#the-prune-section).
+-   Full Node – Reth node that has the latest state and historical data for only the last 10064 blocks available
+    for querying in the same way as an archive node.
 
 The node type that was chosen when first [running a node](./run-a-node.md) **cannot** be changed after
 the initial sync. Turning Archive into Pruned, or Pruned into Full is not supported.
@@ -97,21 +101,21 @@ storage_history = { distance = 10_064 }
 
 Meaning, it prunes:
 
-- Account History and Storage History up to the last 10064 blocks
-- All of Sender Recovery data. The caveat is that it's pruned gradually after the initial sync
-  is completed, so the disk space is reclaimed slowly.
-- Receipts up to the last 10064 blocks, preserving all receipts with the logs from Beacon Deposit Contract
+-   Account History and Storage History up to the last 10064 blocks
+-   All of Sender Recovery data. The caveat is that it's pruned gradually after the initial sync
+    is completed, so the disk space is reclaimed slowly.
+-   Receipts up to the last 10064 blocks, preserving all receipts with the logs from Beacon Deposit Contract
 
 ## RPC support
 
 As it was mentioned in the [pruning configuration chapter](./config.md#the-prune-section), there are several segments which can be pruned
 independently of each other:
 
-- Sender Recovery
-- Transaction Lookup
-- Receipts
-- Account History
-- Storage History
+-   Sender Recovery
+-   Transaction Lookup
+-   Receipts
+-   Account History
+-   Storage History
 
 Pruning of each of these segments disables different RPC methods, because the historical data or lookup indexes
 become unavailable.
@@ -217,8 +221,8 @@ The following tables describe RPC methods available in the full node.
 
 The following tables describe the requirements for prune segments, per RPC method:
 
-- ✅ – if the segment is pruned, the RPC method still works
-- ❌ - if the segment is pruned, the RPC method doesn't work anymore
+-   ✅ – if the segment is pruned, the RPC method still works
+-   ❌ - if the segment is pruned, the RPC method doesn't work anymore
 
 #### `debug` namespace
 

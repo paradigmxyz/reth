@@ -1,9 +1,13 @@
+---
+description: Syncing Reth with OP Mainnet and Bedrock state.
+---
+
 # Sync OP Mainnet
 
 To sync OP mainnet, Bedrock state needs to be imported as a starting point. There are currently two ways:
 
-* Minimal bootstrap **(recommended)**: only state snapshot at Bedrock block is imported without any OVM historical data.
-* Full bootstrap **(not recommended)**: state, blocks and receipts are imported. *Not recommended for now: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node
+-   Minimal bootstrap **(recommended)**: only state snapshot at Bedrock block is imported without any OVM historical data.
+-   Full bootstrap **(not recommended)**: state, blocks and receipts are imported. \*Not recommended for now: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node
 
 ## Minimal bootstrap (recommended)
 
@@ -21,12 +25,11 @@ Sync the node to a recent finalized block (e.g. 125200000) to catch up close to 
 $ op-reth node --chain optimism --datadir op-mainnet --debug.tip 0x098f87b75c8b861c775984f9d5dbe7b70cbbbc30fc15adb03a5044de0144f2d0 # block #125200000
 ```
 
-
 ## Full bootstrap (not recommended)
 
 **Not recommended for now**: [storage consistency issue](https://github.com/paradigmxyz/reth/pull/11099) tldr: sudden crash may break the node.
 
-### Import state 
+### Import state
 
 To sync OP mainnet, the Bedrock datadir needs to be imported to use as starting point.
 Blocks lower than the OP mainnet Bedrock fork, are built on the OVM and cannot be executed on the EVM.
@@ -35,8 +38,8 @@ execution in reth's sync pipeline.
 
 Importing OP mainnet Bedrock datadir requires exported data:
 
-- Blocks [and receipts] below Bedrock
-- State snapshot at first Bedrock block
+-   Blocks [and receipts] below Bedrock
+-   State snapshot at first Bedrock block
 
 ### Manual Export Steps
 
@@ -64,7 +67,7 @@ This step is optional. To run a full node, skip this step. If however receipts a
 corresponding transactions must already be imported (see [step 1](#1-import-blocks)).
 
 Imports a `.rlp` file of receipts, that has been exported with command specified in
-[testinprod-io/op-geth#1](https://github.com/testinprod-io/op-geth/pull/1) (command for exporting receipts uses custom RLP-encoding). 
+[testinprod-io/op-geth#1](https://github.com/testinprod-io/op-geth/pull/1) (command for exporting receipts uses custom RLP-encoding).
 
 Import of >100 million OVM receipts, from genesis to Bedrock, completes in 30 minutes.
 

@@ -1,7 +1,9 @@
+---
+description: Admin API for node configuration and peer management.
+---
 # `admin` Namespace
 
 The `admin` API allows you to configure your node, including adding and removing peers.
-
 
 :::note
 As this namespace can configure your node at runtime, it is generally **not advised** to expose it publicly.
@@ -14,7 +16,7 @@ Add the given peer to the current peer set of the node.
 The method accepts a single argument, the [`enode`][enode] URL of the remote peer to connect to, and returns a `bool` indicating whether the peer was accepted or not.
 
 | Client | Method invocation                              |
-|--------|------------------------------------------------|
+| ------ | ---------------------------------------------- |
 | RPC    | `{"method": "admin_addPeer", "params": [url]}` |
 
 ### Example
@@ -28,9 +30,9 @@ The method accepts a single argument, the [`enode`][enode] URL of the remote pee
 
 Disconnects from a peer if the connection exists. Returns a `bool` indicating whether the peer was successfully removed or not.
 
-| Client | Method invocation                                  |
-|--------|----------------------------------------------------|
-| RPC    | `{"method": "admin_removePeer", "params": [url]}`  |
+| Client | Method invocation                                 |
+| ------ | ------------------------------------------------- |
+| RPC    | `{"method": "admin_removePeer", "params": [url]}` |
 
 ### Example
 
@@ -46,7 +48,7 @@ Adds the given peer to a list of trusted peers, which allows the peer to always 
 It returns a `bool` indicating whether the peer was added to the list or not.
 
 | Client | Method invocation                                     |
-|--------|-------------------------------------------------------|
+| ------ | ----------------------------------------------------- |
 | RPC    | `{"method": "admin_addTrustedPeer", "params": [url]}` |
 
 ### Example
@@ -63,7 +65,7 @@ Removes a remote node from the trusted peer set, but it does not disconnect it a
 Returns true if the peer was successfully removed.
 
 | Client | Method invocation                                        |
-|--------|----------------------------------------------------------|
+| ------ | -------------------------------------------------------- |
 | RPC    | `{"method": "admin_removeTrustedPeer", "params": [url]}` |
 
 ### Example
@@ -80,7 +82,7 @@ Returns all information known about the running node.
 These include general information about the node itself, as well as what protocols it participates in, its IP and ports.
 
 | Client | Method invocation              |
-|--------|--------------------------------|
+| ------ | ------------------------------ |
 | RPC    | `{"method": "admin_nodeInfo"}` |
 
 ### Example
@@ -122,9 +124,9 @@ Like other subscription methods, this returns the ID of the subscription, which 
 
 To unsubscribe from peer events, call `admin_peerEvents_unsubscribe` with the subscription ID.
 
-| Client | Method invocation                                     |
-|--------|-------------------------------------------------------|
-| RPC    | `{"method": "admin_peerEvents", "params": []}`        |
+| Client | Method invocation                                            |
+| ------ | ------------------------------------------------------------ |
+| RPC    | `{"method": "admin_peerEvents", "params": []}`               |
 | RPC    | `{"method": "admin_peerEvents_unsubscribe", "params": [id]}` |
 
 ### Event Types
@@ -133,20 +135,20 @@ The subscription emits events with the following structure:
 
 ```json
 {
-  "jsonrpc": "2.0",
-  "method": "admin_subscription",
-  "params": {
-    "subscription": "0xcd0c3e8af590364c09d0fa6a1210faf5",
-    "result": {
-      "type": "add", // or "drop", "error"
-      "peer": {
-        "id": "44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d",
-        "enode": "enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303",
-        "addr": "192.168.1.1:30303"
-      },
-      "error": "reason for disconnect or error" // only present for "drop" and "error" events
+    "jsonrpc": "2.0",
+    "method": "admin_subscription",
+    "params": {
+        "subscription": "0xcd0c3e8af590364c09d0fa6a1210faf5",
+        "result": {
+            "type": "add", // or "drop", "error"
+            "peer": {
+                "id": "44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d",
+                "enode": "enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303",
+                "addr": "192.168.1.1:30303"
+            },
+            "error": "reason for disconnect or error" // only present for "drop" and "error" events
+        }
     }
-  }
 }
 ```
 

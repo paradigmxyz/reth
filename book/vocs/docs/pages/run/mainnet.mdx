@@ -1,3 +1,7 @@
+---
+description: How to run Reth on Ethereum mainnet and testnets.
+---
+
 # Running Reth on Ethereum Mainnet or testnets
 
 Reth is an [_execution client_](https://ethereum.org/en/developers/docs/nodes-and-clients/#execution-clients). After Ethereum's transition to Proof of Stake (aka the Merge) it became required to run a [_consensus client_](https://ethereum.org/en/developers/docs/nodes-and-clients/#consensus-clients) along your execution client in order to sync into any "post-Merge" network. This is because the Ethereum execution layer now outsources consensus to a separate component, known as the consensus client.
@@ -6,12 +10,12 @@ Consensus clients decide what blocks are part of the chain, while execution clie
 
 By running both an execution client like Reth and a consensus client, such as Lighthouse 🦀 (which we will assume for this guide), you can effectively contribute to the Ethereum network and participate in the consensus process, even if you don't intend to run validators.
 
-| Client      | Role                                             |
-|-------------|--------------------------------------------------|
-| Execution   | Validates transactions and blocks                |
-|             | (checks their validity and global state)         |
-| Consensus   | Determines which blocks are part of the chain    |
-|             | (makes consensus decisions)                      |
+| Client    | Role                                          |
+| --------- | --------------------------------------------- |
+| Execution | Validates transactions and blocks             |
+|           | (checks their validity and global state)      |
+| Consensus | Determines which blocks are part of the chain |
+|           | (makes consensus decisions)                   |
 
 ## Running the Reth Node
 
@@ -24,6 +28,7 @@ reth node
 ```
 
 And to start the full node, run:
+
 ```bash
 reth node --full
 ```
@@ -62,11 +67,11 @@ lighthouse bn \
 
 If you don't intend on running validators on your node you can add:
 
-``` bash
+```bash
   --disable-deposit-contract-sync
 ```
 
-The `--checkpoint-sync-url` argument value can be replaced with any checkpoint sync endpoint from a [community maintained list](https://eth-clients.github.io/checkpoint-sync-endpoints/#mainnet). 
+The `--checkpoint-sync-url` argument value can be replaced with any checkpoint sync endpoint from a [community maintained list](https://eth-clients.github.io/checkpoint-sync-endpoints/#mainnet).
 
 Your Reth node should start receiving "fork choice updated" messages, and begin syncing the chain.
 
@@ -90,6 +95,7 @@ We provide a method for running Reth without a Consensus Layer via the `--debug.
 You can use `--debug.etherscan` to run Reth with a fake consensus client that advances the chain using recent blocks on Etherscan. This requires an Etherscan API key (set via `ETHERSCAN_API_KEY` environment variable). Optionally, specify a custom API URL with `--debug.etherscan <URL>`.
 
 Example:
+
 ```bash
 export ETHERSCAN_API_KEY=your_api_key_here
 reth node --debug.etherscan

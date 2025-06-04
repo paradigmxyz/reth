@@ -1,3 +1,7 @@
+---
+description: Reth observability and metrics with Prometheus and Grafana.
+---
+
 # Observability with Prometheus & Grafana
 
 Reth exposes a number of metrics which can be enabled by adding the `--metrics` flag:
@@ -41,6 +45,7 @@ brew install grafana
 ### Linux
 
 #### Debian/Ubuntu
+
 ```bash
 # Install Prometheus
 # Visit https://prometheus.io/download/ for the latest version
@@ -58,6 +63,7 @@ sudo apt-get install grafana
 ```
 
 #### Fedora/RHEL/CentOS
+
 ```bash
 # Install Prometheus
 # Visit https://prometheus.io/download/ for the latest version
@@ -74,16 +80,18 @@ sudo dnf install -y https://dl.grafana.com/oss/release/grafana-latest-1.x86_64.r
 ### Windows
 
 #### Using Chocolatey
+
 ```powershell
 choco install prometheus
 choco install grafana
 ```
 
 #### Manual installation
+
 1. Download the latest Prometheus from [prometheus.io/download](https://prometheus.io/download/)
-   - Select the Windows binary (.zip) for your architecture (typically windows-amd64)
+    - Select the Windows binary (.zip) for your architecture (typically windows-amd64)
 2. Download the latest Grafana from [grafana.com/grafana/download](https://grafana.com/grafana/download)
-   - Choose the Windows installer (.msi) or standalone version
+    - Choose the Windows installer (.msi) or standalone version
 3. Extract Prometheus to a location of your choice (e.g., `C:\prometheus`)
 4. Install Grafana by running the installer or extracting the standalone version
 5. Configure Prometheus and Grafana to run as services if needed
@@ -110,9 +118,9 @@ You can find an example config for the Prometheus service in the repo here: [`et
 
 Depending on your installation you may find the config for your Prometheus service at:
 
-- OSX: `/opt/homebrew/etc/prometheus.yml`
-- Linuxbrew: `/home/linuxbrew/.linuxbrew/etc/prometheus.yml`
-- Others: `/usr/local/etc/prometheus/prometheus.yml`
+-   OSX: `/opt/homebrew/etc/prometheus.yml`
+-   Linuxbrew: `/home/linuxbrew/.linuxbrew/etc/prometheus.yml`
+-   Others: `/usr/local/etc/prometheus/prometheus.yml`
 
 Next, open up "localhost:3000" in your browser, which is the default URL for Grafana. Here, "admin" is the default for both the username and password.
 
