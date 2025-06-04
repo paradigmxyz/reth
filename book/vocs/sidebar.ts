@@ -124,12 +124,50 @@ export const sidebar: SidebarItem[] = [
         ]
     },
     {
+        text: "Developers",
+        link: "/developers/developers",
+        items: [
+            {
+                text: "Execution Extensions",
+                
+                items: [
+                    {
+                        text: "Overview",
+                        link: "/developers/exex/overview",
+                    },
+                    {
+                        text: "How do ExExes work?",
+                        link: "/developers/exex/how-it-works"
+                    },
+                    {
+                        text: "Hello World",
+                        link: "/developers/exex/hello-world"
+                    },
+                    {
+                        text: "Tracking State",
+                        link: "/developers/exex/tracking-state"
+                    },
+                    {
+                        text: "Remote",
+                        link: "/developers/exex/remote"
+                    }
+                ]
+            },
+            {
+                text: "Contribute",
+                link: "/developers/contribute"
+            }
+        ]
+    },
+    {
         text: "CLI Reference",
         link: "/cli/cli",
+        collapsed: false,
         items: [
             {
                 text: "reth",
                 link: "/cli/reth",
+                collapsed: false,
                 items: [
                     {
                         text: "reth node",
@@ -349,40 +387,4 @@ export const sidebar: SidebarItem[] = [
             }
         ]
     },
-    {
-        text: "Developers",
-        link: "/developers/developers",
-        items: [
-            {
-                text: "Execution Extensions",
-                
-                items: [
-                    {
-                        text: "Overview",
-                        link: "/developers/exex/overview",
-                    },
-                    {
-                        text: "How do ExExes work?",
-                        link: "/developers/exex/how-it-works"
-                    },
-                    {
-                        text: "Hello World",
-                        link: "/developers/exex/hello-world"
-                    },
-                    {
-                        text: "Tracking State",
-                        link: "/developers/exex/tracking-state"
-                    },
-                    {
-                        text: "Remote",
-                        link: "/developers/exex/remote"
-                    }
-                ]
-            },
-            {
-                text: "Contribute",
-                link: "/developers/contribute"
-            }
-        ]
-    }
 ]
