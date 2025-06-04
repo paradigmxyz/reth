@@ -28,9 +28,6 @@ jobs:
           - target: x86_64-pc-windows-gnu
             os: ubuntu-24.04
             profile: maxperf
-          - target: riscv64gc-unknown-linux-gnu
-            os: ubuntu-24.04
-            profile: maxperf
         build:
           - command: build
             binary: reth
