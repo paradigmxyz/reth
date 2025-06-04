@@ -8,12 +8,12 @@ Reth runs on Linux and macOS (Windows tracked).
 
 There are three core methods to obtain Reth:
 
--   [Pre-built binaries](./binaries.md)
--   [Docker images](./docker.md)
--   [Building from source.](./source.md)
+-   [Pre-built binaries](./binaries)
+-   [Docker images](./docker)
+-   [Building from source.](./source)
 
 :::note
-If you have Docker installed, we recommend using the [Docker Compose](./docker.md#using-docker-compose) configuration
+If you have Docker installed, we recommend using the [Docker Compose](./docker#using-docker-compose) configuration
 that will get you Reth, Lighthouse (Consensus Client), Prometheus and Grafana running and syncing with just one command.
 :::
 
@@ -60,7 +60,7 @@ It is highly recommended to choose a TLC drive when using an NVMe drive, and not
 
 Most of the time during syncing is spent executing transactions, which is a single-threaded operation due to potential state dependencies of a transaction on previous ones.
 
-As a result, the number of cores matters less, but in general higher clock speeds are better. More cores are better for parallelizable [stages](https://github.com/paradigmxyz/reth/blob/main/docs/crates/stages.md) (like sender recovery or bodies downloading), but these stages are not the primary bottleneck for syncing.
+As a result, the number of cores matters less, but in general higher clock speeds are better. More cores are better for parallelizable [stages](https://github.com/paradigmxyz/reth/blob/main/docs/crates/stages) (like sender recovery or bodies downloading), but these stages are not the primary bottleneck for syncing.
 
 ### Memory
 

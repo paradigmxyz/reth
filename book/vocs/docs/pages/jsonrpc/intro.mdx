@@ -1,6 +1,7 @@
 ---
 description: Overview of Reth's JSON-RPC API and namespaces.
 ---
+
 # JSON-RPC
 
 You can interact with Reth over JSON-RPC. Reth supports all standard Ethereum JSON-RPC API methods.
@@ -15,16 +16,16 @@ Each namespace must be explicitly enabled.
 
 The methods are grouped into namespaces, which are listed below:
 
-| Namespace               | Description                                                                                            | Sensitive |
-| ----------------------- | ------------------------------------------------------------------------------------------------------ | --------- |
-| [`eth`](./eth.md)       | The `eth` API allows you to interact with Ethereum.                                                    | Maybe     |
-| [`web3`](./web3.md)     | The `web3` API provides utility functions for the web3 client.                                         | No        |
-| [`net`](./net.md)       | The `net` API provides access to network information of the node.                                      | No        |
-| [`txpool`](./txpool.md) | The `txpool` API allows you to inspect the transaction pool.                                           | No        |
-| [`debug`](./debug.md)   | The `debug` API provides several methods to inspect the Ethereum state, including Geth-style traces.   | No        |
-| [`trace`](./trace.md)   | The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces. | No        |
-| [`admin`](./admin.md)   | The `admin` API allows you to configure your node.                                                     | **Yes**   |
-| [`rpc`](./rpc.md)       | The `rpc` API provides information about the RPC server and its modules.                               | No        |
+| Namespace            | Description                                                                                            | Sensitive |
+| -------------------- | ------------------------------------------------------------------------------------------------------ | --------- |
+| [`eth`](./eth)       | The `eth` API allows you to interact with Ethereum.                                                    | Maybe     |
+| [`web3`](./web3)     | The `web3` API provides utility functions for the web3 client.                                         | No        |
+| [`net`](./net)       | The `net` API provides access to network information of the node.                                      | No        |
+| [`txpool`](./txpool) | The `txpool` API allows you to inspect the transaction pool.                                           | No        |
+| [`debug`](./debug)   | The `debug` API provides several methods to inspect the Ethereum state, including Geth-style traces.   | No        |
+| [`trace`](./trace)   | The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces. | No        |
+| [`admin`](./admin)   | The `admin` API allows you to configure your node.                                                     | **Yes**   |
+| [`rpc`](./rpc)       | The `rpc` API provides information about the RPC server and its modules.                               | No        |
 
 Note that some APIs are sensitive, since they can be used to configure your node (`admin`), or access accounts stored on the node (`eth`).
 

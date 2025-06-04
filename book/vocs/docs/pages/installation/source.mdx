@@ -6,9 +6,9 @@ description: How to build, update, and troubleshoot Reth from source.
 
 You can build Reth on Linux, macOS, Windows, and Windows WSL2.
 
-> **Note**
->
-> Reth does **not** work on Windows WSL1.
+:::note
+Reth does **not** work on Windows WSL1.
+:::
 
 ## Dependencies
 
@@ -65,7 +65,7 @@ cargo build --release
 
 This will place the reth binary under `./target/release/reth`, and you can copy it to your directory of preference after that.
 
-Compilation may take around 10 minutes. Installation was successful if `reth --help` displays the [command-line documentation](../cli/cli.md).
+Compilation may take around 10 minutes. Installation was successful if `reth --help` displays the [command-line documentation](/cli/cli).
 
 If you run into any issues, please check the [Troubleshooting](#troubleshooting) section, or reach out to us on [Telegram](https://t.me/paradigm_reth).
 
@@ -142,7 +142,7 @@ Rust Version (MSRV) which is listed under the `rust-version` key in Reth's
 
 If compilation fails with `(signal: 9, SIGKILL: kill)`, this could mean your machine ran out of
 memory during compilation. If you are on Docker, consider increasing the memory of the container, or use a [pre-built
-binary](../installation/binaries.md).
+binary](/installation/binaries).
 
 If compilation fails in either the `keccak-asm` or `sha3-asm` crates, it is likely that your current
 system configuration is not supported. See the [`keccak-asm` target table](https://github.com/DaniPopes/keccak-asm?tab=readme-ov-file#support) for supported targets.
