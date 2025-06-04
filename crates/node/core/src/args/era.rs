@@ -7,7 +7,12 @@ use url::Url;
 #[derive(Clone, Debug, Default, Args)]
 pub struct EraArgs {
     /// Enable import from ERA1 files.
-    #[arg(long = "era.enable", value_name = "ERA_ENABLE", default_value_t = false)]
+    #[arg(
+        id = "era.enable",
+        long = "era.enable",
+        value_name = "ERA_ENABLE",
+        default_value_t = false
+    )]
     pub enabled: bool,
 
     /// Describes where to get the ERA files to import from.
