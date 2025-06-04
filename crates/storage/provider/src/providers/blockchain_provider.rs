@@ -295,11 +295,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
         self.consistent_provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(self.canonical_in_memory_state.pending_block())
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(self.canonical_in_memory_state.pending_recovered_block())
     }
 
@@ -1205,10 +1201,9 @@ mod tests {
         });
 
         // Assertions related to the pending block
-        assert_eq!(provider.pending_block()?, Some(block.clone()));
 
         assert_eq!(
-            provider.pending_block_with_senders()?,
+            provider.pending_block()?,
             Some(RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()))
         );
 
