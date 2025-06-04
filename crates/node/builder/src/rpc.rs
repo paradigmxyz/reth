@@ -562,36 +562,6 @@ where
         })
     }
 
-    /// Launches only the authenticated Engine API server, without the regular RPC server.
-    ///
-    /// This is useful for specialized setups where you only need the Engine API functionality
-    /// for consensus layer communication.
-    pub async fn launch_auth_server<F>(
-        self,
-        ctx: AddOnsContext<'_, N>,
-        ext: F,
-    ) -> eyre::Result<AuthServerOnlyHandle<N, EthB::EthApi>>
-    where
-        F: FnOnce(
-            &mut TransportRpcModules,
-            &mut AuthRpcModule,
-            &mut RpcRegistry<N, EthB::EthApi>,
-        ) -> eyre::Result<()>,
-    {
-        let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
-
-        let auth_server_handle =
-            Self::launch_auth_server_internal(setup_ctx.auth_module.clone(), setup_ctx.auth_config)
-                .await?;
-
-        Ok(AuthServerOnlyHandle {
-            auth_server_handle,
-            rpc_registry: setup_ctx.registry,
-            engine_events: setup_ctx.engine_events,
-            engine_handle: setup_ctx.engine_handle,
-        })
-    }
-
     /// Launches the RPC servers with the given context and an additional hook for extending
     /// modules.
     pub async fn launch_add_ons_with<F>(
