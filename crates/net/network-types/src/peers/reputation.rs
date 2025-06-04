@@ -13,7 +13,7 @@ pub const BANNED_REPUTATION: i32 = 50 * REPUTATION_UNIT;
 const REMOTE_DISCONNECT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that we failed to connect to.
-const FAILED_TO_CONNECT_REPUTATION_CHANGE: i32 = 25 * REPUTATION_UNIT;
+pub const FAILED_TO_CONNECT_REPUTATION_CHANGE: i32 = 25 * REPUTATION_UNIT;
 
 /// The reputation change to apply to a peer that failed to respond in time.
 const TIMEOUT_REPUTATION_CHANGE: i32 = 4 * REPUTATION_UNIT;
