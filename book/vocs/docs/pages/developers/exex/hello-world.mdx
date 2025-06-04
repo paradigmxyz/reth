@@ -18,15 +18,15 @@ cd my-exex
 And add Reth as a dependency in `Cargo.toml`
 
 ```toml
-{{#include ../../sources/exex/hello-world/Cargo.toml}}
+// [!include ~/snippets/sources/exex/hello-world/Cargo.toml]
 ```
 
 ### Default Reth node
 
 Now, let's jump to our `main.rs` and start by initializing and launching a default Reth node
 
-```rust,norun,noplayground,ignore
-{{#include ../../sources/exex/hello-world/src/bin/1.rs}}
+```rust
+// [!include ~/snippets/sources/exex/hello-world/src/bin/1.rs]
 ```
 
 You can already test that it works by running the binary and initializing the Holesky node in a custom datadir
@@ -46,8 +46,8 @@ $ cargo run -- init --chain holesky --datadir data
 
 The simplest ExEx is just an async function that never returns. We need to install it into our node
 
-```rust,norun,noplayground,ignore
-{{#include ../../sources/exex/hello-world/src/bin/2.rs}}
+```rust
+// [!include ~/snippets/sources/exex/hello-world/src/bin/2.rs]
 ```
 
 See that unused `_ctx`? That's the context that we'll use to listen to new notifications coming from the main node,
@@ -67,8 +67,8 @@ If you try running a node with an ExEx that exits, the node will exit as well.
 
 Now, let's extend our simplest ExEx and start actually listening to new notifications, log them, and send events back to the main node
 
-```rust,norun,noplayground,ignore
-{{#include ../../sources/exex/hello-world/src/bin/3.rs}}
+```rust
+// [!include ~/snippets/sources/exex/hello-world/src/bin/3.rs]
 ```
 
 Woah, there's a lot of new stuff here! Let's go through it step by step:

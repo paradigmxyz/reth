@@ -22,8 +22,8 @@ because you can't access variables inside the function to assert the state of yo
 
 </div>
 
-```rust,norun,noplayground,ignore
-{{#include ../../sources/exex/tracking-state/src/bin/1.rs}}
+```rust
+// [!include ~/snippets/sources/exex/tracking-state/src/bin/1.rs]
 ```
 
 For those who are not familiar with how async Rust works on a lower level, that may seem scary,
@@ -43,8 +43,8 @@ With all that done, we're now free to add more fields to our `MyExEx` struct, an
 
 Our ExEx will count the number of transactions in each block and log it to the console.
 
-```rust,norun,noplayground,ignore
-{{#include ../../sources/exex/tracking-state/src/bin/2.rs}}
+```rust
+// [!include ~/snippets/sources/exex/tracking-state/src/bin/2.rs]
 ```
 
 As you can see, we added two fields to our ExEx struct:
