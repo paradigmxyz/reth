@@ -310,13 +310,13 @@ where
         }
     }
 
-    let interval = (total_headers / 10).max(1);
+    let interval = (total_headers / 10).max(8192);
 
     // Build block hash to block number index
     for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
         let (hash, number) = hash_to_number?;
 
-        if index > 0 && index % interval == 0 && total_headers > 100 {
+        if index != 0 && index % interval == 0 {
             info!(target: "era::history::import", progress = %format!("{:.2}%", (index as f64 / total_headers as f64) * 100.0), "Writing headers hash index");
         }
 
