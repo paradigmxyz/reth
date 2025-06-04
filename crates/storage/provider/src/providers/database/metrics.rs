@@ -80,7 +80,8 @@ struct DatabaseProviderMetrics {
     insert_headers: Histogram,
     /// Duration of insert header numbers
     insert_header_numbers: Histogram,
-    /// Duration of insert header TD
+    /// Duration of insert header TD (deprecated after Paris/Merge)
+    #[deprecated(note = "No longer used after Paris/Merge")]
     insert_header_td: Histogram,
     /// Duration of insert block body indices
     insert_block_body_indices: Histogram,

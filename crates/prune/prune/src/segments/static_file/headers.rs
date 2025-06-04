@@ -19,7 +19,8 @@ use std::num::NonZeroUsize;
 use tracing::trace;
 
 /// Number of header tables to prune in one step
-const HEADER_TABLES_TO_PRUNE: usize = 3;
+/// Note: HeaderTerminalDifficulties is no longer pruned after Paris/Merge as it's read-only
+const HEADER_TABLES_TO_PRUNE: usize = 2;
 
 #[derive(Debug)]
 pub struct Headers<N> {
@@ -64,10 +65,11 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
         let range = last_pruned_block.map_or(0, |block| block + 1)..=block_range_end;
 
         let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
-        let mut header_tds_cursor =
-            provider.tx_ref().cursor_write::<tables::HeaderTerminalDifficulties>()?;
         let mut canonical_headers_cursor =
             provider.tx_ref().cursor_write::<tables::CanonicalHeaders>()?;
+
+        // Note: We no longer prune HeaderTerminalDifficulties table after Paris/Merge
+        // as it's read-only and kept for backward compatibility
 
         let mut limiter = input.limiter.floor_deleted_entries_limit_to_multiple_of(
             NonZeroUsize::new(HEADER_TABLES_TO_PRUNE).unwrap(),
@@ -77,7 +79,6 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
             provider,
             &mut limiter,
             headers_cursor.walk_range(range.clone())?,
-            header_tds_cursor.walk_range(range.clone())?,
             canonical_headers_cursor.walk_range(range)?,
         );
 
@@ -102,6 +103,7 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
         })
     }
 }
+
 type Walker<'a, Provider, T> =
     RangeWalker<'a, T, <<Provider as DBProvider>::Tx as DbTxMut>::CursorMut<T>>;
 
@@ -113,7 +115,6 @@ where
     provider: &'a Provider,
     limiter: &'a mut PruneLimiter,
     headers_walker: Walker<'a, Provider, tables::Headers>,
-    header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
     canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
 }
 
@@ -130,10 +131,9 @@ where
         provider: &'a Provider,
         limiter: &'a mut PruneLimiter,
         headers_walker: Walker<'a, Provider, tables::Headers>,
-        header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
         canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
     ) -> Self {
-        Self { provider, limiter, headers_walker, header_tds_walker, canonical_headers_walker }
+        Self { provider, limiter, headers_walker, canonical_headers_walker }
     }
 }
 
@@ -148,7 +148,6 @@ where
         }
 
         let mut pruned_block_headers = None;
-        let mut pruned_block_td = None;
         let mut pruned_block_canonical = None;
 
         if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
@@ -156,15 +155,6 @@ where
             self.limiter,
             &mut |_| false,
             &mut |row| pruned_block_headers = Some(row.0),
-        ) {
-            return Some(Err(err.into()))
-        }
-
-        if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
-            &mut self.header_tds_walker,
-            self.limiter,
-            &mut |_| false,
-            &mut |row| pruned_block_td = Some(row.0),
         ) {
             return Some(Err(err.into()))
         }
@@ -178,7 +168,7 @@ where
             return Some(Err(err.into()))
         }
 
-        if ![pruned_block_headers, pruned_block_td, pruned_block_canonical].iter().all_equal() {
+        if ![pruned_block_headers, pruned_block_canonical].iter().all_equal() {
             return Some(Err(PrunerError::InconsistentData(
                 "All headers-related tables should be pruned up to the same height",
             )))
@@ -227,7 +217,8 @@ mod tests {
 
         assert_eq!(db.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
         assert_eq!(db.table::<tables::Headers>().unwrap().len(), headers.len());
-        assert_eq!(db.table::<tables::HeaderTerminalDifficulties>().unwrap().len(), headers.len());
+        // Note: HeaderTerminalDifficulties table is read-only in live database after Paris/Merge
+        // so we don't check its length as it's not being written to
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let segment = super::Headers::new(db.factory.static_file_provider());
@@ -291,10 +282,8 @@ mod tests {
                 db.table::<tables::Headers>().unwrap().len(),
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
-            assert_eq!(
-                db.table::<tables::HeaderTerminalDifficulties>().unwrap().len(),
-                headers.len() - (last_pruned_block_number + 1) as usize
-            );
+            // Note: HeaderTerminalDifficulties table is read-only in live database after
+            // Paris/Merge so we don't check its length as it's not being written to
             assert_eq!(
                 db.factory.provider().unwrap().get_prune_checkpoint(PruneSegment::Headers).unwrap(),
                 Some(PruneCheckpoint {

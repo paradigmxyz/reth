@@ -336,9 +336,8 @@ where
                 (input.unwind_to + 1)..,
             )?;
         provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        provider
-            .tx_ref()
-            .unwind_table_by_num::<tables::HeaderTerminalDifficulties>(input.unwind_to)?;
+        // Note: We no longer prune HeaderTerminalDifficulties table after Paris/Merge
+        // as it's read-only and kept for backward compatibility
         let unfinalized_headers_unwound =
             provider.tx_ref().unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 

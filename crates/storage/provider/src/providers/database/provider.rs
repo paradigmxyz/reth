@@ -2842,9 +2842,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             // Put header with canonical hashes.
             self.tx.put::<tables::Headers<HeaderTy<N>>>(block_number, block.header().clone())?;
             durations_recorder.record_relative(metrics::Action::InsertHeaders);
-
-            self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
-            durations_recorder.record_relative(metrics::Action::InsertHeaderTerminalDifficulties);
         }
 
         if write_to.static_files() {
@@ -2983,7 +2980,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         // this table in `canonical_hashes_range`.
         self.remove::<tables::CanonicalHeaders>(block + 1..)?;
         self.remove::<tables::Headers<HeaderTy<N>>>(block + 1..)?;
-        self.remove::<tables::HeaderTerminalDifficulties>(block + 1..)?;
+        // Note: HeaderTerminalDifficulties table is read-only in the live database after
+        // Paris/Merge, so we do not remove entries from it here.
 
         // First transaction to be removed
         let unwind_tx_from = self
