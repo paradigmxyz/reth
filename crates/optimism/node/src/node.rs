@@ -411,7 +411,8 @@ where
 
         rpc_add_ons
             .launch_add_ons_with(ctx, move |container| {
-                let reth_node_builder::rpc::RpcModuleContainer { modules, auth_module, registry } = container;
+                let reth_node_builder::rpc::RpcModuleContainer { modules, auth_module, registry } =
+                    container;
 
                 debug!(target: "reth::cli", "Installing debug payload witness rpc endpoint");
                 modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
