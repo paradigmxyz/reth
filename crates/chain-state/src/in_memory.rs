@@ -838,7 +838,7 @@ impl ExecutedTrieUpdates {
     }
 
     /// Returns a reference to the trie updates if present.
-    #[allow(clippy::missing_const_for_fn)]
+    #[allow(clippy::missing_const_for_fn)] // false positive
     pub fn as_ref(&self) -> Option<&TrieUpdates> {
         match self {
             Self::Present(updates) => Some(updates),
