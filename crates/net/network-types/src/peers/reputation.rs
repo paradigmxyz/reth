@@ -48,6 +48,13 @@ pub const fn is_banned_reputation(reputation: i32) -> bool {
     reputation < BANNED_REPUTATION
 }
 
+/// Returns `true` if the given reputation is below the [`FAILED_TO_CONNECT_REPUTATION_CHANGE`]
+/// threshold
+#[inline]
+pub const fn is_connection_failed_reputation(reputation: i32) -> bool {
+    reputation < FAILED_TO_CONNECT_REPUTATION_CHANGE
+}
+
 /// The type that tracks the reputation score.
 pub type Reputation = i32;
 
