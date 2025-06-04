@@ -82,6 +82,7 @@ impl<N: NodePrimitives> Stream for CanonStateNotificationStream<N> {
 /// reverted (e.g. during a reorg), the old chain is also returned.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(bound = ""))]
 pub enum CanonStateNotification<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// The canonical chain was extended.
     Commit {
