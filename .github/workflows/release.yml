@@ -63,7 +63,7 @@ jobs:
     name: build release
     runs-on: ${{ matrix.configs.os }}
     needs: extract-version
-    continue-on-error: ${{ matrix.allow_fail }}
+    continue-on-error: ${{ matrix.configs.allow_fail }}
     strategy:
       fail-fast: true
       matrix:
