@@ -1,6 +1,6 @@
 use clap::Args;
 use reth_chainspec::{ChainKind, NamedChain};
-use std::path::PathBuf;
+use std::path::Path;
 use url::Url;
 
 /// Syncs ERA1 encoded blocks from a local or remote source.
@@ -23,7 +23,7 @@ pub struct EraSourceArgs {
     ///
     /// The ERA1 files are read from the local directory parsing headers and bodies.
     #[arg(long = "era.path", value_name = "ERA_PATH", verbatim_doc_comment)]
-    pub path: Option<PathBuf>,
+    pub path: Option<Box<Path>>,
 
     /// The URL to a remote host where the ERA1 files are hosted.
     ///

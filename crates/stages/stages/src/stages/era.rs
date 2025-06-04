@@ -22,7 +22,7 @@ use reth_storage_errors::ProviderError;
 use std::{
     fmt::{Debug, Formatter},
     iter,
-    path::PathBuf,
+    path::Path,
     task::{ready, Context, Poll},
 };
 
@@ -64,8 +64,7 @@ where
             Self::Path(path) => Self::convert(
                 read_dir(path, input.next_block()).map_err(|e| StageError::Fatal(e.into()))?,
             ),
-            Self::Url(url, era_dir) => {
-                let folder = era_dir.into_boxed_path();
+            Self::Url(url, folder) => {
                 let _ = reth_fs_util::create_dir_all(&folder);
                 let client = EraClient::new(Client::new(), url, folder);
 
@@ -316,9 +315,9 @@ where
 #[derive(Debug, Clone)]
 pub enum EraImportSource {
     /// Remote HTTP accessible host.
-    Url(Url, PathBuf),
+    Url(Url, Box<Path>),
     /// Local directory.
-    Path(PathBuf),
+    Path(Box<Path>),
 }
 
 impl EraImportSource {
@@ -334,10 +333,10 @@ impl EraImportSource {
     /// * For any [`Url`] the `folder` is used as the download directory for storing files
     ///   temporarily. It and its contents must be readable and writable.
     pub fn maybe_new(
-        path: Option<PathBuf>,
+        path: Option<Box<Path>>,
         url: Option<Url>,
         default: impl FnOnce() -> Option<Url>,
-        folder: impl FnOnce() -> PathBuf,
+        folder: impl FnOnce() -> Box<Path>,
     ) -> Option<Self> {
         path.map(Self::Path).or_else(|| url.or_else(default).map(|url| Self::Url(url, folder())))
     }

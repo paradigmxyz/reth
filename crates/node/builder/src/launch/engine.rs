@@ -160,7 +160,7 @@ where
                 node_config.era.source.path.clone(),
                 node_config.era.source.url.clone(),
                 || node_config.chain.chain().kind().default_era_host(),
-                || node_config.datadir().data_dir().join("era"),
+                || node_config.datadir().data_dir().join("era").into(),
             )
         } else {
             None
