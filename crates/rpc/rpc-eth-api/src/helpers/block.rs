@@ -233,10 +233,8 @@ pub trait LoadBlock:
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
-                if let Some(pending_block) = self
-                    .provider()
-                    .pending_block_with_senders()
-                    .map_err(Self::Error::from_eth_err)?
+                if let Some(pending_block) =
+                    self.provider().pending_block().map_err(Self::Error::from_eth_err)?
                 {
                     return Ok(Some(Arc::new(pending_block)));
                 }

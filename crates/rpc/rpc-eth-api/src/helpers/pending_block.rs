@@ -76,9 +76,7 @@ pub trait LoadPendingBlock:
         >,
         Self::Error,
     > {
-        if let Some(block) =
-            self.provider().pending_block_with_senders().map_err(Self::Error::from_eth_err)?
-        {
+        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? {
             if let Some(receipts) = self
                 .provider()
                 .receipts_by_block(block.hash().into())
