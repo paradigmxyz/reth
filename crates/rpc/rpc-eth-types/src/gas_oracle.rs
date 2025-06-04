@@ -2,15 +2,12 @@
 //! previous blocks.
 
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
-use alloy_consensus::{
-    constants::GWEI_TO_WEI, transaction::SignerRecoverable, BlockHeader, Transaction,
-};
+use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
-use reth_primitives_traits::BlockBody;
 use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
@@ -234,7 +231,7 @@ where
         let parent_hash = block.parent_hash();
 
         // sort the functions by ascending effective tip first
-        let sorted_transactions = block.body().transactions_iter().sorted_by_cached_key(|tx| {
+        let sorted_transactions = block.transactions_recovered().sorted_by_cached_key(|tx| {
             if let Some(base_fee) = base_fee_per_gas {
                 (*tx).effective_tip_per_gas(base_fee)
             } else {
@@ -259,10 +256,8 @@ where
             }
 
             // check if the sender was the coinbase, if so, ignore
-            if let Ok(sender) = tx.recover_signer() {
-                if sender == block.beneficiary() {
-                    continue
-                }
+            if tx.signer() == block.beneficiary() {
+                continue
             }
 
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
