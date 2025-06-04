@@ -277,7 +277,7 @@ where
     /// tips when a block is at capacity.
     ///
     /// If the block cannot be found or has no transactions, this will return `None`.
-    async fn get_block_median_tip(&self, block_hash: B256) -> EthResult<Option<U256>> {
+    pub async fn get_block_median_tip(&self, block_hash: B256) -> EthResult<Option<U256>> {
         // check the cache (this will hit the disk if the block is not cached)
         let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
             return Ok(None)
