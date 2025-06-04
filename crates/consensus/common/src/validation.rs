@@ -325,8 +325,12 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     }
     let excess_blob_gas = header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
 
-    let expected_excess_blob_gas =
-        blob_params.next_block_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
+    let parent_base_fee_per_gas = parent.base_fee_per_gas().unwrap_or(0);
+    let expected_excess_blob_gas = blob_params.next_block_excess_blob_gas(
+        parent_excess_blob_gas,
+        parent_blob_gas_used,
+        parent_base_fee_per_gas,
+    );
     if expected_excess_blob_gas != excess_blob_gas {
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },

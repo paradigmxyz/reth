@@ -562,6 +562,7 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
                 // the tx's calldata
                 Self::GasTooLow
             }
+            InvalidTransaction::TxGasLimitGreaterThanCap { .. } => Self::GasLimitTooHigh,
             InvalidTransaction::RejectCallerWithCode => Self::SenderNoEOA,
             InvalidTransaction::LackOfFundForMaxFee { fee, balance } => {
                 Self::InsufficientFunds { cost: *fee, balance: *balance }
