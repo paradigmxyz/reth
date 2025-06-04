@@ -272,6 +272,69 @@ where
 
         Ok(Some((parent_hash, prices)))
     }
+
+    /// Get the median tip value for the given block. This is useful for determining
+    /// tips when a block is at capacity.
+    ///
+    /// If the oracle has a configured `ignore_price` threshold, then tip values under that
+    /// threshold will be ignored in median calculation.
+    ///
+    /// If the block cannot be found or has no transactions, this will return `None`.
+    async fn get_block_median_tip(&self, block_hash: B256) -> EthResult<Option<U256>> {
+        // check the cache (this will hit the disk if the block is not cached)
+        let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
+            return Ok(None)
+        };
+
+        let base_fee_per_gas = block.base_fee_per_gas();
+
+        // sort the functions by ascending effective tip first
+        let sorted_transactions = block.transactions_recovered().sorted_by_cached_key(|tx| {
+            if let Some(base_fee) = base_fee_per_gas {
+                (*tx).effective_tip_per_gas(base_fee)
+            } else {
+                Some((*tx).priority_fee_or_price())
+            }
+        });
+
+        let mut prices = Vec::new();
+
+        for tx in sorted_transactions {
+            let effective_tip = if let Some(base_fee) = base_fee_per_gas {
+                tx.effective_tip_per_gas(base_fee)
+            } else {
+                Some(tx.priority_fee_or_price())
+            };
+
+            // ignore transactions with a tip under the configured threshold
+            if let Some(ignore_under) = self.ignore_price {
+                if effective_tip < Some(ignore_under) {
+                    continue
+                }
+            }
+
+            // check if the sender was the coinbase, if so, ignore
+            if tx.signer() == block.beneficiary() {
+                continue
+            }
+
+            // a `None` effective_tip represents a transaction where the max_fee_per_gas is less
+            // than the base fee which would be invalid
+            prices.push(U256::from(effective_tip.ok_or(RpcInvalidTransactionError::FeeCapTooLow)?));
+        }
+
+        if prices.is_empty() {
+            return Ok(None)
+        }
+
+        let median = if prices.len() % 2 == 1 {
+            prices[prices.len() / 2]
+        } else {
+            (prices[prices.len() / 2 - 1] + prices[prices.len() / 2]) / U256::from(2)
+        };
+
+        Ok(Some(median))
+    }
 }
 
 /// Container type for mutable inner state of the [`GasPriceOracle`]
