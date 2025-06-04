@@ -167,6 +167,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     NoopEvmConfig::<N::Evm>::default(),
                     config.stages.clone(),
                     prune_modes.clone(),
+                    None,
                 ))
                 .build(factory.clone(), StaticFileProducer::new(factory.clone(), prune_modes));
 

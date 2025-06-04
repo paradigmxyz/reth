@@ -1,7 +1,6 @@
 use clap::Args;
-use eyre::eyre;
 use reth_chainspec::{ChainKind, NamedChain};
-use std::path::Path;
+use std::path::PathBuf;
 use url::Url;
 
 /// Syncs ERA1 encoded blocks from a local or remote source.
@@ -9,7 +8,7 @@ use url::Url;
 pub struct EraArgs {
     /// Enable import from ERA1 files.
     #[arg(long = "era.enable", value_name = "ERA_ENABLE", default_value_t = false)]
-    pub enable: bool,
+    pub enabled: bool,
 
     /// Describes where to get the ERA files to import from.
     #[clap(flatten)]
@@ -24,7 +23,7 @@ pub struct EraSourceArgs {
     ///
     /// The ERA1 files are read from the local directory parsing headers and bodies.
     #[arg(long = "era.path", value_name = "ERA_PATH", verbatim_doc_comment)]
-    pub path: Option<Box<Path>>,
+    pub path: Option<PathBuf>,
 
     /// The URL to a remote host where the ERA1 files are hosted.
     ///
@@ -39,12 +38,12 @@ pub trait DefaultEraHost {
     /// Converts `self` into [`Url`] index page of the ERA host.
     ///
     /// Returns `Err` if the conversion is not possible.
-    fn default_era_host(&self) -> eyre::Result<Url>;
+    fn default_era_host(&self) -> Option<Url>;
 }
 
 impl DefaultEraHost for ChainKind {
-    fn default_era_host(&self) -> eyre::Result<Url> {
-        Ok(match self {
+    fn default_era_host(&self) -> Option<Url> {
+        Some(match self {
             Self::Named(NamedChain::Mainnet) => {
                 Url::parse("https://era.ithaca.xyz/era1/index.html").expect("URL should be valid")
             }
@@ -52,7 +51,7 @@ impl DefaultEraHost for ChainKind {
                 Url::parse("https://era.ithaca.xyz/sepolia-era1/index.html")
                     .expect("URL should be valid")
             }
-            chain => return Err(eyre!("No known host for ERA files on chain {chain:?}")),
+            _ => return None,
         })
     }
 }
