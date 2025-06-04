@@ -556,7 +556,7 @@ impl<NetworkT> OpAddOnsBuilder<NetworkT> {
         self
     }
 
-    /// Configure the mininum priority fee (tip)
+    /// Configure the minimum priority fee (tip)
     pub const fn with_min_suggested_priority_fee(mut self, min: u64) -> Self {
         self.min_suggested_priority_fee = min;
         self
