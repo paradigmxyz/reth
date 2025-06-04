@@ -157,7 +157,7 @@ impl FromStr for TransactionPropagationKind {
 /// Dictates how the `TransactionManager` should proceed on an announced transaction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnnouncementAcceptance {
-    /// Accept the transaction annoucement.
+    /// Accept the transaction announcement.
     Accept,
     /// Log the transaction but no fetching the transaction or penalizing the peer.
     Ignore,
