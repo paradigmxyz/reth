@@ -51,10 +51,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - name: Verify crate version matches tag
+        # Check that the Cargo version starts with the tag,
+        # so that Cargo version 1.4.8 can be matched against both v1.4.8 and v1.4.8-rc.1
         run: |
-          # Check that the Cargo version starts with the tag,
-          # so that Cargo version 1.4.8 can be matched against both v1.4.8 and v1.4.8-rc.1
-          tag="${{ needs.extract-version.outputs.VERSION#v }}"
+          tag="${{ needs.extract-version.outputs.VERSION }}"
+          tag=${tag#v}
           cargo_ver=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
           [[ "$tag" == "$cargo_ver"* ]] || { echo "Tag $tag doesn’t match the Cargo version $cargo_ver"; exit 1; }
 
