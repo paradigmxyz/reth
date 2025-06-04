@@ -159,7 +159,7 @@ impl FromStr for TransactionPropagationKind {
 pub enum AnnouncementAcceptance {
     /// Accept the transaction announcement.
     Accept,
-    /// Log the transaction but no fetching the transaction or penalizing the peer.
+    /// Log the transaction but not fetching the transaction or penalizing the peer.
     Ignore,
     /// Reject
     Reject {
