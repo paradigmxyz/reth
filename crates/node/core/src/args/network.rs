@@ -491,7 +491,7 @@ impl DiscoveryArgs {
     }
 
     /// Returns true if discv5 discovery should be configured
-    fn should_enable_discv5(&self) -> bool {
+    const fn should_enable_discv5(&self) -> bool {
         if self.disable_discovery {
             return false;
         }
