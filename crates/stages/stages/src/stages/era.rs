@@ -26,9 +26,10 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-type Item<BH, BB> = Box<dyn Iterator<Item = eyre::Result<(BH, BB)>> + Send + Sync + Unpin>;
-type ThreadSafeEraStream<BH, BB> =
-    Box<dyn Stream<Item = eyre::Result<Item<BH, BB>>> + Send + Sync + Unpin>;
+type Item<Header, Body> =
+    Box<dyn Iterator<Item = eyre::Result<(Header, Body)>> + Send + Sync + Unpin>;
+type ThreadSafeEraStream<Header, Body> =
+    Box<dyn Stream<Item = eyre::Result<Item<Header, Body>>> + Send + Sync + Unpin>;
 
 /// The [ERA1](https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md)
 /// pre-merge history stage.
@@ -51,12 +52,12 @@ trait EraStreamFactory<Header, Body> {
     fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<Header, Body>, StageError>;
 }
 
-impl<BH, BB> EraStreamFactory<BH, BB> for EraImportSource
+impl<Header, Body> EraStreamFactory<Header, Body> for EraImportSource
 where
-    BH: FullBlockHeader + Value,
-    BB: FullBlockBody<OmmerHeader = BH>,
+    Header: FullBlockHeader + Value,
+    Body: FullBlockBody<OmmerHeader = Header>,
 {
-    fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<BH, BB>, StageError> {
+    fn create(self, input: ExecInput) -> Result<ThreadSafeEraStream<Header, Body>, StageError> {
         match self {
             Self::Path(path) => Self::convert(
                 read_dir(path, input.next_block()).map_err(|e| StageError::Fatal(e.into()))?,
@@ -75,16 +76,16 @@ where
 }
 
 impl EraImportSource {
-    fn convert<BH, BB>(
+    fn convert<Header, Body>(
         stream: impl Stream<Item = eyre::Result<impl EraMeta + Send + Sync + 'static + Unpin>>
             + Send
             + Sync
             + 'static
             + Unpin,
-    ) -> Result<ThreadSafeEraStream<BH, BB>, StageError>
+    ) -> Result<ThreadSafeEraStream<Header, Body>, StageError>
     where
-        BH: FullBlockHeader + Value,
-        BB: FullBlockBody<OmmerHeader = BH>,
+        Header: FullBlockHeader + Value,
+        Body: FullBlockBody<OmmerHeader = Header>,
     {
         Ok(Box::new(Box::pin(stream.map(|meta| {
             meta.and_then(|meta| {
@@ -100,13 +101,13 @@ impl EraImportSource {
                     .flatten(),
                 );
 
-                Ok(Box::new(iter) as Item<BH, BB>)
+                Ok(Box::new(iter) as Item<Header, Body>)
             })
         }))))
     }
 }
 
-impl<BH: Debug, BB: Debug, F: Debug> Debug for EraStage<BH, BB, F> {
+impl<Header: Debug, Body: Debug, F: Debug> Debug for EraStage<Header, Body, F> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EraStage")
             .field("source", &self.source)
@@ -117,7 +118,7 @@ impl<BH: Debug, BB: Debug, F: Debug> Debug for EraStage<BH, BB, F> {
     }
 }
 
-impl<BH, BB, F> EraStage<BH, BB, F> {
+impl<Header, Body, F> EraStage<Header, Body, F> {
     /// Creates a new [`EraStage`].
     pub fn new(source: Option<F>, etl_config: EtlConfig) -> Self {
         Self {
