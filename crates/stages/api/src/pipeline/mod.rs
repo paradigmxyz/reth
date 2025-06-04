@@ -30,8 +30,12 @@ use progress::*;
 use reth_errors::RethResult;
 pub use set::*;
 
+/// The initial depth (number of blocks) to unwind when a `DetachedHead` error occurs.
 const INITIAL_DETACHED_HEAD_UNWIND_DEPTH: u64 = 100;
+/// The maximum exponent to use in the exponential backoff calculation for unwind depth.
 const EXPONENTIAL_UNWIND_MAX_EXPONENT: u32 = 4;
+/// The maximum depth (number of blocks) for a single unwind step taken during
+/// exponential backoff. This caps the result of `base_depth * multiplier`.
 const EXPONENTIAL_UNWIND_MAX_STEP_DEPTH: u64 = 1000;
 
 /// A container for a queued stage.
