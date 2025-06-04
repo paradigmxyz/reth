@@ -45,8 +45,6 @@ pub struct EraStage<Header, Body, StreamFactory> {
     item: Option<Item<Header, Body>>,
     /// A stream of [`Item`]s, i.e. iterators over block `Header` and `Body` pairs.
     stream: Option<ThreadSafeEraStream<Header, Body>>,
-    /// Last block height extracted from ERA files.
-    last_block_height: Option<BlockNumber>,
 }
 
 trait EraStreamFactory<Header, Body> {
@@ -126,7 +124,6 @@ impl<BH, BB, F> EraStage<BH, BB, F> {
             source,
             item: None,
             stream: None,
-            last_block_height: None,
             hash_collector: Collector::new(etl_config.file_size, etl_config.dir),
         }
     }
@@ -200,8 +197,6 @@ where
                 last_header_number..=input.target(),
             )
             .map_err(|e| StageError::Fatal(e.into()))?;
-
-            self.last_block_height.replace(height);
 
             if !self.hash_collector.is_empty() {
                 era::build_index(provider, &mut self.hash_collector)
