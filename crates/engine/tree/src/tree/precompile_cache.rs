@@ -1,16 +1,12 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
 use alloy_primitives::Bytes;
+use parking_lot::RwLock;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
-use std::{
-    collections::HashMap,
-    hash::Hash,
-    sync::Arc,
-};
-use parking_lot::RwLock;
 use schnellru::LruMap;
+use std::{collections::HashMap, hash::Hash, sync::Arc};
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -29,9 +25,7 @@ where
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(
-    Arc<RwLock<LruMap<CacheKey<S>, CacheEntry>>>,
-)
+pub struct PrecompileCache<S>(Arc<RwLock<LruMap<CacheKey<S>, CacheEntry>>>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
 
@@ -40,9 +34,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(Arc::new(RwLock::new(
-            LruMap::new(schnellru::ByLength::new(100_000))
-        )))
+        Self(Arc::new(RwLock::new(LruMap::new(schnellru::ByLength::new(100_000)))))
     }
 }
 
@@ -50,7 +42,7 @@ impl<S> PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    fn get(&self, key: &CacheKey<S>) -> Option<CacheEntry> {
+    fn get(&self, key: &CacheKeyRef<'_, S>) -> Option<CacheEntry> {
         // LruMap's get() method requires a mutable reference since it updates the LRU order
         // So we need to use a write lock here
         self.0.write().get(key).cloned()
@@ -73,6 +65,22 @@ pub struct CacheKey<S>((S, Bytes));
 impl<S> CacheKey<S> {
     const fn new(spec_id: S, input: Bytes) -> Self {
         Self((spec_id, input))
+    }
+}
+
+/// Cache key reference, used to avoid cloning the input bytes when looking up using a [`CacheKey`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CacheKeyRef<'a, S>((S, &'a [u8]));
+
+impl<'a, S> CacheKeyRef<'a, S> {
+    const fn new(spec_id: S, input: &'a [u8]) -> Self {
+        Self((spec_id, input))
+    }
+}
+
+impl<S: PartialEq> PartialEq<CacheKey<S>> for CacheKeyRef<'_, S> {
+    fn eq(&self, other: &CacheKey<S>) -> bool {
+        self.0 .0 == other.0 .0 && self.0 .1 == other.0 .1.as_ref()
     }
 }
 
@@ -148,7 +156,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn call(&self, data: &[u8], gas_limit: u64) -> PrecompileResult {
-        let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(data));
+        let key = CacheKeyRef::new(self.spec_id.clone(), data);
 
         if let Some(entry) = &self.cache.get(&key) {
             self.increment_by_one_precompile_cache_hits();
@@ -178,7 +186,7 @@ where
 // We can add the Borrow trait implementation for the generic CacheKey
 impl<S> std::borrow::Borrow<[u8]> for CacheKey<S> {
     fn borrow(&self) -> &[u8] {
-        self.0.1.as_ref() // Access the Bytes part of the tuple
+        self.0 .1.as_ref() // Access the Bytes part of the tuple
     }
 }
 
@@ -217,16 +225,16 @@ mod tests {
         let cache =
             CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE);
 
-        let key = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
-
         let output = PrecompileOutput {
             gas_used: 50,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
         };
 
+        let key = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
         let expected = CacheEntry(output);
-        cache.cache.insert(key.clone(), expected.clone());
+        cache.cache.insert(key, expected.clone());
 
+        let key = CacheKeyRef::new(SpecId::PRAGUE, b"test_input");
         let actual = cache.cache.get(&key).unwrap();
 
         assert_eq!(actual, expected);
