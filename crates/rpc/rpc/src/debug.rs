@@ -528,7 +528,7 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx_env = this.eth_api().evm_config().tx_env(tx);
-                        let (res, _) = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
+                        let res = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
