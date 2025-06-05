@@ -28,14 +28,12 @@
 use super::{
     config::TransactionFetcherConfig,
     constants::{tx_fetcher::*, SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST},
-    MessageFilter, PeerMetadata, PooledTransactions,
-    SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
+    PeerMetadata, PooledTransactions, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use crate::{
     cache::{LruCache, LruMap},
     duration_metered_exec,
     metrics::TransactionFetcherMetrics,
-    transactions::{validation, PartiallyFilterMessage},
 };
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
@@ -60,7 +58,6 @@ use std::{
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
 use tracing::trace;
-use validation::FilterOutcome;
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -85,8 +82,6 @@ pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     pub hashes_pending_fetch: LruCache<TxHash>,
     /// Tracks all hashes in the transaction fetcher.
     pub hashes_fetch_inflight_and_pending_fetch: LruMap<TxHash, TxFetchMetadata, ByLength>,
-    /// Filter for valid announcement and response data.
-    pub(super) filter_valid_message: MessageFilter,
     /// Info on capacity of the transaction fetcher.
     pub info: TransactionFetcherInfo,
     #[doc(hidden)]
@@ -919,20 +914,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 //
                 let unvalidated_payload_len = verified_payload.len();
 
-                let (validation_outcome, valid_payload) =
-                    self.filter_valid_message.partially_filter_valid_entries(verified_payload);
+                let valid_payload = verified_payload.dedup();
 
                 // todo: validate based on announced tx size/type and report peer for sending
                 // invalid response <https://github.com/paradigmxyz/reth/issues/6529>. requires
                 // passing the rlp encoded length down from active session along with the decoded
                 // tx.
 
-                if validation_outcome == FilterOutcome::ReportPeer {
+                if valid_payload.len() != unvalidated_payload_len {
                     trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        unvalidated_payload_len,
-                        valid_payload_len=valid_payload.len(),
-                        "received invalid `PooledTransactions` response from peer, filtered out duplicate entries"
+                    peer_id=format!("{peer_id:#}"),
+                    unvalidated_payload_len,
+                    valid_payload_len=valid_payload.len(),
+                    "received `PooledTransactions` response from peer with duplicate entries, filtered them out"
                     );
                 }
                 // valid payload will have at least one transaction at this point. even if the tx
@@ -1014,7 +1008,6 @@ impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
             hashes_fetch_inflight_and_pending_fetch: LruMap::new(
                 DEFAULT_MAX_CAPACITY_CACHE_INFLIGHT_AND_PENDING_FETCH,
             ),
-            filter_valid_message: Default::default(),
             info: TransactionFetcherInfo::default(),
             metrics: Default::default(),
         }
