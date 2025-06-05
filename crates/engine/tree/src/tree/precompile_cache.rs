@@ -13,7 +13,7 @@ use std::{
 };
 
 /// Default max cache size for [`PrecompileCache`]
-const MAX_CACHE_SIZE: usize = 10_000;
+const MAX_CACHE_SIZE: u32 = 10_000;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
