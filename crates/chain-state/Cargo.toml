@@ -32,6 +32,7 @@ revm-state = { workspace = true, optional = true }
 # async
 tokio = { workspace = true, default-features = false, features = ["sync", "macros"] }
 tokio-stream = { workspace = true, features = ["sync"] }
+futures-util.workspace = true
 
 # tracing
 tracing.workspace = true
