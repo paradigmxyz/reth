@@ -1,0 +1,34 @@
+# .github/workflows/preview.yml
+name: Deploy PR previews
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+
+concurrency: preview-${{ github.ref }}
+
+jobs:
+  deploy-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Build Vocs
+        if: github.event.action != 'closed' # You might want to skip the build if the PR has been closed
+        run: |
+          echo "PWD: $(pwd)"
+          cd book/vocs/ && bun i && bun run build
+          echo "Vocs Build Complete"
+
+      - name: Deploy preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: ./book/vocs/docs/dist
