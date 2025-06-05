@@ -31,6 +31,9 @@ where
 }
 
 /// Cache for precompiles, for each input stores the result.
+///
+/// [`LruMap`] requires a mutable reference on `get` since it updates the LRU order,
+/// so we use a [`Mutex`] instead of an `RwLock`.
 #[derive(Debug, Clone)]
 pub struct PrecompileCache<S>(Arc<Mutex<LruMap<CacheKey<S>, CacheEntry>>>)
 where
@@ -50,8 +53,6 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, key: &CacheKeyRef<'_, S>) -> Option<CacheEntry> {
-        // LruMap's get() method requires a mutable reference since it updates the LRU order
-        // So we need to use a write lock here
         self.0.lock().get(key).cloned()
     }
 
