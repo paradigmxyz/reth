@@ -381,6 +381,9 @@ pub enum RpcInvalidTransactionError {
     /// Thrown if the transaction gas exceeds the limit
     #[error("intrinsic gas too high")]
     GasTooHigh,
+    /// Thrown if the transaction gas limit exceeds the maximum
+    #[error("gas limit too high")]
+    GasLimitTooHigh,
     /// Thrown if a transaction is not supported in the current network configuration.
     #[error("transaction type not supported")]
     TxTypeNotSupported,
@@ -617,6 +620,7 @@ impl From<InvalidTransactionError> for RpcInvalidTransactionError {
             InvalidTransactionError::TipAboveFeeCap => Self::TipAboveFeeCap,
             InvalidTransactionError::FeeCapTooLow => Self::FeeCapTooLow,
             InvalidTransactionError::SignerAccountHasBytecode => Self::SenderNoEOA,
+            InvalidTransactionError::GasLimitTooHigh => Self::GasLimitTooHigh,
         }
     }
 }

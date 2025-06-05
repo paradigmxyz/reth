@@ -23,7 +23,7 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, OmmersProvider, StateCommitmentProvider,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, StateCommitmentProvider,
     TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
@@ -365,12 +365,8 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.pending_block()
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.provider()?.pending_block_with_senders()
     }
 
     fn pending_block_and_receipts(
@@ -530,12 +526,6 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         self.provider()?.receipts_by_block_range(block_range)
-    }
-}
-
-impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.provider()?.ommers(id)
     }
 }
 

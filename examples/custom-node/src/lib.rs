@@ -8,8 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{
-    evm::CustomExecutorBuilder, network::CustomNetworkPrimitives, pool::CustomPooledTransaction,
-    primitives::CustomTransaction,
+    evm::CustomExecutorBuilder, pool::CustomPooledTransaction, primitives::CustomTransaction,
 };
 use chainspec::CustomChainSpec;
 use primitives::CustomNodePrimitives;
@@ -27,7 +26,6 @@ pub mod chainspec;
 pub mod engine;
 pub mod engine_api;
 pub mod evm;
-pub mod network;
 pub mod pool;
 pub mod primitives;
 
@@ -50,7 +48,7 @@ where
         N,
         OpPoolBuilder<txpool::OpPooledTransaction<CustomTransaction, CustomPooledTransaction>>,
         BasicPayloadServiceBuilder<OpPayloadBuilder>,
-        OpNetworkBuilder<CustomNetworkPrimitives, CustomPooledTransaction>,
+        OpNetworkBuilder,
         CustomExecutorBuilder,
         OpConsensusBuilder,
     >;

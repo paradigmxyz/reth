@@ -3,11 +3,12 @@
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives_traits::BlockBody;
+use reth_evm::ConfigureEvm;
+use reth_primitives_traits::{BlockBody, NodePrimitives};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
-    RpcNodeCoreExt, RpcReceipt,
+    RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 use reth_storage_api::{BlockReader, ProviderTx};
@@ -77,7 +78,10 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
+            Primitives: NodePrimitives<SignedTx = ProviderTx<Self::Provider>>,
+            Evm = EvmConfig,
         >,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
 {
 }

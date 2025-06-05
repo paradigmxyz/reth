@@ -16,6 +16,7 @@ use std::sync::Arc;
 pub fn matching_block_logs_with_tx_hashes<'a, I, R>(
     filter: &Filter,
     block_num_hash: BlockNumHash,
+    block_timestamp: u64,
     tx_hashes_and_receipts: I,
     removed: bool,
 ) -> Vec<Log>
@@ -44,7 +45,7 @@ where
                     transaction_index: Some(receipt_idx as u64),
                     log_index: Some(log_index),
                     removed,
-                    block_timestamp: None,
+                    block_timestamp: Some(block_timestamp),
                 };
                 all_logs.push(log);
             }
