@@ -26,7 +26,7 @@ pub struct EngineArgs {
 
     /// CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming
     /// if you want to disable caching and prewarming.
-    #[arg(long = "engine.caching-and-prewarming", default_value = "true")]
+    #[arg(long = "engine.caching-and-prewarming", default_value = "true", hide = true)]
     pub caching_and_prewarming_enabled: bool,
 
     /// Disable cross-block caching and parallel prewarming
@@ -61,8 +61,12 @@ pub struct EngineArgs {
     pub reserved_cpu_cores: usize,
 
     /// Enable precompile cache
-    #[arg(long = "engine.precompile-cache", default_value = "false")]
+    #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
     pub precompile_cache_enabled: bool,
+
+    /// Enable precompile cache
+    #[arg(long = "engine.disable-precompile-cache", default_value = "false")]
+    pub precompile_cache_disabled: bool,
 
     /// Enable state root fallback, useful for testing
     #[arg(long = "engine.state-root-fallback", default_value = "false")]
@@ -83,7 +87,8 @@ impl Default for EngineArgs {
             accept_execution_requests_hash: false,
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
-            precompile_cache_enabled: false,
+            precompile_cache_enabled: true,
+            precompile_cache_disabled: false,
             state_root_fallback: false,
         }
     }
@@ -102,7 +107,7 @@ impl EngineArgs {
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
             .with_max_proof_task_concurrency(self.max_proof_task_concurrency)
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
-            .with_precompile_cache_enabled(self.precompile_cache_enabled)
+            .without_precompile_cache(self.precompile_cache_disabled)
             .with_state_root_fallback(self.state_root_fallback)
     }
 }
