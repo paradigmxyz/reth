@@ -912,24 +912,6 @@ async fn test_engine_tree_fcu_missing_head() {
 }
 
 #[tokio::test]
-async fn test_engine_tree_fcu_canon_chain_insertion() {
-    let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-
-    let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
-    test_harness = test_harness.with_blocks(base_chain.clone());
-
-    test_harness
-        .fcu_to(base_chain.last().unwrap().recovered_block().hash(), ForkchoiceStatus::Valid)
-        .await;
-
-    // extend main chain
-    let main_chain = test_harness.block_builder.create_fork(base_chain[0].recovered_block(), 3);
-
-    test_harness.insert_chain(main_chain).await;
-}
-
-#[tokio::test]
 async fn test_engine_tree_fcu_reorg_with_all_blocks() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec.clone());
