@@ -47,6 +47,7 @@ jobs:
     name: check version
     runs-on: ubuntu-latest
     needs: extract-version
+    if: ${{ github.event.inputs.dry_run != 'true' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -154,8 +155,8 @@ jobs:
 
   draft-release:
     name: draft release
-    needs: [build, extract-version]
     runs-on: ubuntu-latest
+    needs: [build, extract-version]
     if: ${{ github.event.inputs.dry_run != 'true' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
@@ -266,8 +267,8 @@ jobs:
 
   dry-run-summary:
     name: dry run summary
-    needs: [build, extract-version]
     runs-on: ubuntu-latest
+    needs: [build, extract-version]
     if: ${{ github.event.inputs.dry_run == 'true' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
