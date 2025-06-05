@@ -56,12 +56,11 @@ where
         self.0.lock().get(key).cloned()
     }
 
-    fn insert(&self, key: CacheKey<S>, value: CacheEntry) {
-        self.0.lock().insert(key, value);
-    }
-
-    fn weighted_size(&self) -> u64 {
-        self.0.lock().len() as u64
+    /// Inserts the given key and value into the cache, returning the new cache size.
+    fn insert(&self, key: CacheKey<S>, value: CacheEntry) -> usize {
+        let mut cache = self.0.lock();
+        cache.insert(key, value);
+        cache.len()
     }
 }
 
@@ -159,11 +158,6 @@ where
     fn increment_by_one_precompile_errors(&self) {
         self.metrics.precompile_errors.increment(1);
     }
-
-    fn update_precompile_cache_size(&self) {
-        let new_size = self.cache.weighted_size();
-        self.metrics.precompile_cache_size.set(new_size as f64);
-    }
 }
 
 impl<S> Precompile for CachedPrecompile<S>
@@ -184,16 +178,15 @@ where
 
         match &result {
             Ok(output) => {
-                self.increment_by_one_precompile_cache_misses();
                 let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(data));
-                self.cache.insert(key, CacheEntry(output.clone()));
+                let size = self.cache.insert(key, CacheEntry(output.clone()));
+                self.metrics.precompile_cache_size.set(size as f64);
+                self.increment_by_one_precompile_cache_misses();
             }
             _ => {
                 self.increment_by_one_precompile_errors();
             }
         }
-
-        self.update_precompile_cache_size();
         result
     }
 }
