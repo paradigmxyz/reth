@@ -64,7 +64,7 @@ pub struct EngineArgs {
     #[arg(long = "engine.precompile-cache", default_value = "true", hide = true)]
     pub precompile_cache_enabled: bool,
 
-    /// Enable precompile cache
+    /// Disable precompile cache
     #[arg(long = "engine.disable-precompile-cache", default_value = "false")]
     pub precompile_cache_disabled: bool,
 
