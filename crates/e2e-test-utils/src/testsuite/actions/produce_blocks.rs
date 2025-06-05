@@ -2,7 +2,7 @@
 
 use crate::testsuite::{
     actions::{validate_fcu_response, Action, Sequence},
-    Environment, LatestBlockInfo,
+    BlockInfo, Environment,
 };
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
@@ -146,7 +146,7 @@ where
             }
 
             let latest_info = env
-                .latest_block_info
+                .current_block_info
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -177,7 +177,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let latest_block = env
-                .latest_block_info
+                .current_block_info
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
             let block_number = latest_block.number;
@@ -209,7 +209,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let latest_block = env
-                .latest_block_info
+                .current_block_info
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -382,7 +382,11 @@ where
     }
 }
 
-/// Action that updates environment state after block production
+/// Action that syncs environment state with the node's canonical chain via RPC.
+///
+/// This queries the latest canonical block from the node and updates the environment
+/// to match. Typically used after forkchoice operations to ensure the environment
+/// is in sync with the node's view of the canonical chain.
 #[derive(Debug, Default)]
 pub struct UpdateBlockInfo {}
 
@@ -404,9 +408,10 @@ where
                 .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
 
             // update environment with the new block information
-            env.latest_block_info = Some(LatestBlockInfo {
+            env.current_block_info = Some(BlockInfo {
                 hash: latest_block.header.hash,
                 number: latest_block.header.number,
+                timestamp: latest_block.header.timestamp,
             });
 
             env.latest_header_time = latest_block.header.timestamp;
@@ -415,6 +420,54 @@ where
             debug!(
                 "Updated environment to block {} (hash: {})",
                 latest_block.header.number, latest_block.header.hash
+            );
+
+            Ok(())
+        })
+    }
+}
+
+/// Action that updates environment state using the locally produced payload.
+///
+/// This uses the execution payload stored in the environment rather than querying RPC,
+/// making it more efficient and reliable during block production. Preferred over
+/// `UpdateBlockInfo` when we have just produced a block and have the payload available.
+#[derive(Debug, Default)]
+pub struct UpdateBlockInfoToLatestPayload {}
+
+impl<Engine> Action<Engine> for UpdateBlockInfoToLatestPayload
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let payload_envelope = env
+                .latest_payload_envelope
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No execution payload envelope available"))?;
+
+            let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
+                payload_envelope.clone().into();
+            let execution_payload = execution_payload_envelope.execution_payload;
+
+            let block_hash = execution_payload.payload_inner.payload_inner.block_hash;
+            let block_number = execution_payload.payload_inner.payload_inner.block_number;
+            let block_timestamp = execution_payload.payload_inner.payload_inner.timestamp;
+
+            // update environment with the new block information from the payload
+            env.current_block_info = Some(BlockInfo {
+                hash: block_hash,
+                number: block_number,
+                timestamp: block_timestamp,
+            });
+
+            env.latest_header_time = block_timestamp;
+            env.latest_fork_choice_state.head_block_hash = block_hash;
+
+            debug!(
+                "Updated environment to newly produced block {} (hash: {})",
+                block_number, block_hash
             );
 
             Ok(())
@@ -436,7 +489,7 @@ where
             let mut accepted_check: bool = false;
 
             let latest_block = env
-                .latest_block_info
+                .current_block_info
                 .as_mut()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -636,7 +689,7 @@ where
                     Box::new(GeneratePayloadAttributes::default()),
                     Box::new(GenerateNextPayload::default()),
                     Box::new(BroadcastNextNewPayload::default()),
-                    Box::new(UpdateBlockInfo::default()),
+                    Box::new(UpdateBlockInfoToLatestPayload::default()),
                 ]);
                 sequence.execute(env).await?;
             }
