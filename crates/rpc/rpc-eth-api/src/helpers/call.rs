@@ -12,7 +12,7 @@ use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
+    BlockId, BlockOverrides, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
@@ -98,7 +98,37 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     State::builder().with_database(StateProviderDatabase::new(state)).build();
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
-                for block in block_state_calls {
+
+                let mut block_state_calls = block_state_calls;
+
+                // Reversed, to emulate popping from the front
+                block_state_calls.reverse();
+
+                let mut previous_block_number = None;
+                while let Some(block) = block_state_calls.pop() {
+                    if let Some(previous_block_number) = previous_block_number {
+                        let next_block = block_state_calls.last();
+                        if let Some(next_block_number) = next_block
+                            .and_then(|b| b.block_overrides.as_ref())
+                            .and_then(|block| block.number)
+                        {
+                            let gap_block_number = previous_block_number + U256::ONE;
+                            if next_block_number > gap_block_number {
+                                block_state_calls.push(SimBlock::default().with_block_overrides(
+                                    BlockOverrides {
+                                        number: Some(gap_block_number),
+                                        ..Default::default()
+                                    },
+                                ))
+                            }
+                        }
+                    }
+                    if let Some(block_number) =
+                        block.block_overrides.as_ref().and_then(|block| block.number)
+                    {
+                        previous_block_number = Some(block_number);
+                    }
+
                     let mut evm_env = this
                         .evm_config()
                         .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
