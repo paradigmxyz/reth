@@ -67,6 +67,17 @@ pub struct EngineArgs {
     /// Enable state root fallback, useful for testing
     #[arg(long = "engine.state-root-fallback", default_value = "false")]
     pub state_root_fallback: bool,
+
+    /// Always process payload attributes and begin a payload build process even if
+    /// `forkchoiceState.headBlockHash` is already the canonical head or an ancestor. See
+    /// `TreeConfig::always_process_payload_attributes_on_canonical_head` for more details.
+    ///
+    /// Note: This is a no-op on OP Stack.
+    #[arg(
+        long = "engine.always-process-payload-attributes-on-canonical-head",
+        default_value = "false"
+    )]
+    pub always_process_payload_attributes_on_canonical_head: bool,
 }
 
 impl Default for EngineArgs {
@@ -85,6 +96,7 @@ impl Default for EngineArgs {
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_enabled: false,
             state_root_fallback: false,
+            always_process_payload_attributes_on_canonical_head: false,
         }
     }
 }
@@ -104,6 +116,9 @@ impl EngineArgs {
             .with_reserved_cpu_cores(self.reserved_cpu_cores)
             .with_precompile_cache_enabled(self.precompile_cache_enabled)
             .with_state_root_fallback(self.state_root_fallback)
+            .with_always_process_payload_attributes_on_canonical_head(
+                self.always_process_payload_attributes_on_canonical_head,
+            )
     }
 }
 
