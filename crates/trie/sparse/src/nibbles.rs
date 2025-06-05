@@ -1,4 +1,5 @@
 use core::{
+    cmp::Ordering,
     fmt,
     ops::{Bound, RangeBounds},
 };
@@ -26,7 +27,7 @@ const SLICE_MASKS: [U256; 65] = {
 
 /// Representation for nibbles that uses a single [`U256`] to store at most 64 nibbles.
 #[repr(C)] // We want to preserve the order of fields in the memory layout.
-#[derive(Default, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Default, Clone, Copy, Hash, PartialEq, Eq)]
 pub struct PackedNibbles {
     /// Nibbles length.
     // This field goes first, because the derived implementation of `PartialEq` compares the fields
@@ -69,6 +70,24 @@ impl From<PackedNibbles> for Nibbles {
     }
 }
 
+// TODO: this can be optimized
+impl Ord for PackedNibbles {
+    fn cmp(&self, other: &Self) -> Ordering {
+        for i in 0..self.len().min(other.len()) {
+            if self.get_nibble(i) != other.get_nibble(i) {
+                return self.get_nibble(i).cmp(&other.get_nibble(i));
+            }
+        }
+        self.length.cmp(&other.length)
+    }
+}
+
+impl PartialOrd for PackedNibbles {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 impl PackedNibbles {
     /// Creates a new [`PackedNibbles`] instance.
     pub const fn new() -> Self {
@@ -101,17 +120,24 @@ impl PackedNibbles {
 
     /// Creates a new [`PackedNibbles`] instance from a slice of bytes.
     pub fn unpack(bytes: impl AsRef<[u8]>) -> Self {
-        Self {
-            // TODO: this can be optimized
-            length: (bytes.as_ref().len() * 2) as u8,
-            nibbles: bytes.as_ref().iter().enumerate().fold(U256::ZERO, |mut acc, (i, byte)| {
-                acc |= U256::from(*byte);
-                if i < bytes.as_ref().len() {
-                    acc <<= 8;
-                }
-                acc
-            }),
+        let bytes = bytes.as_ref();
+        let mut packed = Self::default();
+
+        // Convert each byte to two nibbles
+        for &byte in bytes {
+            let high_nibble = (byte >> 4) & 0x0F;
+            let low_nibble = byte & 0x0F;
+
+            // Pack high nibble
+            packed.nibbles = (packed.nibbles << 4) | U256::from(high_nibble);
+            packed.length += 1;
+
+            // Pack low nibble
+            packed.nibbles = (packed.nibbles << 4) | U256::from(low_nibble);
+            packed.length += 1;
         }
+
+        packed
     }
 
     /// Returns the total number of bits in this [`PackedNibbles`].
@@ -189,6 +215,16 @@ impl PackedNibbles {
 
     /// Returns the length of the common prefix between this [`PackedNibbles`] and `other`.
     pub const fn common_prefix_length(&self, other: &Self) -> usize {
+        let min_len = if self.len() < other.len() { self.len() } else { other.len() };
+        let mut i = 0;
+        while i < min_len {
+            if self.get_nibble(i) != other.get_nibble(i) {
+                return i;
+            }
+            i += 1;
+        }
+        return i;
+
         const fn count_equal_nibbles(self_limb: u64, other_limb: u64) -> usize {
             // Pad both limbs with trailing zeros to the same effective length
             let lhs_bit_len = u64::BITS - self_limb.leading_zeros(); // Effective bit length of the left limb
@@ -339,6 +375,8 @@ impl PackedNibbles {
 
 #[cfg(test)]
 mod tests {
+    use core::cmp::Ordering;
+
     use super::*;
 
     #[test]
@@ -360,42 +398,55 @@ mod tests {
         // Test empty nibbles
         let nibbles1 = PackedNibbles::default();
         let nibbles2 = PackedNibbles::default();
-        assert_eq!(nibbles1.cmp(&nibbles2), core::cmp::Ordering::Equal);
+        assert_eq!(nibbles1.cmp(&nibbles2), Ordering::Equal);
 
         // Test with same nibbles
         let nibbles1 = PackedNibbles::unpack([0x12, 0x34]);
         let nibbles2 = PackedNibbles::unpack([0x12, 0x34]);
-        assert_eq!(nibbles1.cmp(&nibbles2), core::cmp::Ordering::Equal);
+        assert_eq!(nibbles1.cmp(&nibbles2), Ordering::Equal);
 
         // Test with different lengths
         let short = PackedNibbles::unpack([0x12]);
         let long = PackedNibbles::unpack([0x12, 0x34]);
-        assert_eq!(short.cmp(&long), core::cmp::Ordering::Less);
+        assert_eq!(short.cmp(&long), Ordering::Less);
 
         // Test with common prefix but different values
         let nibbles1 = PackedNibbles::unpack([0x12, 0x34]);
         let nibbles2 = PackedNibbles::unpack([0x12, 0x35]);
-        assert_eq!(nibbles1.cmp(&nibbles2), core::cmp::Ordering::Less);
+        assert_eq!(nibbles1.cmp(&nibbles2), Ordering::Less);
 
         // Test with differing first byte
         let nibbles1 = PackedNibbles::unpack([0x12, 0x34]);
         let nibbles2 = PackedNibbles::unpack([0x13, 0x34]);
-        assert_eq!(nibbles1.cmp(&nibbles2), core::cmp::Ordering::Less);
+        assert_eq!(nibbles1.cmp(&nibbles2), Ordering::Less);
 
         // Test with odd length nibbles
         let nibbles1 = PackedNibbles::unpack([0x1]);
         let nibbles2 = PackedNibbles::unpack([0x2]);
-        assert_eq!(nibbles1.cmp(&nibbles2), core::cmp::Ordering::Less);
+        assert_eq!(nibbles1.cmp(&nibbles2), Ordering::Less);
 
         // Test with odd and even length nibbles
         let odd = PackedNibbles::unpack([0x1]);
         let even = PackedNibbles::unpack([0x12]);
-        assert_eq!(odd.cmp(&even), core::cmp::Ordering::Less);
+        assert_eq!(odd.cmp(&even), Ordering::Less);
 
         // Test with longer sequences
         let nibbles1 = PackedNibbles::unpack([0x12, 0x34, 0x56, 0x78]);
         let nibbles2 = PackedNibbles::unpack([0x12, 0x34, 0x56, 0x79]);
-        assert_eq!(nibbles1.cmp(&nibbles2), core::cmp::Ordering::Less);
+        assert_eq!(nibbles1.cmp(&nibbles2), Ordering::Less);
+
+        let nibbles1 = PackedNibbles::from_nibbles([0x0, 0x0]);
+        let nibbles2 = PackedNibbles::from_nibbles([0x1]);
+        // Sanity check for nybbles
+        assert_eq!(Nibbles::from(nibbles1).cmp(&Nibbles::from(nibbles2)), Ordering::Less);
+        assert_eq!(nibbles1.cmp(&nibbles2), Ordering::Less);
+
+        let nibbles1 = PackedNibbles::from_nibbles([0x1]);
+        let nibbles2 = PackedNibbles::from_nibbles([0x0, 0x2]);
+        println!("nibbles1: {:x}, nibbles2: {:x}", nibbles1.nibbles, nibbles2.nibbles);
+        // Sanity check for nybbles
+        assert_eq!(Nibbles::from(nibbles1).cmp(&Nibbles::from(nibbles2)), Ordering::Greater);
+        assert_eq!(nibbles1.cmp(&nibbles2), Ordering::Greater);
     }
 
     #[test]
@@ -693,5 +744,34 @@ mod tests {
             nibbles.push_unchecked(nibble);
         }
         assert_eq!(nibbles, PackedNibbles::from_nibbles(test_sequence));
+    }
+
+    #[test]
+    fn test_packed_nibbles_unpack() {
+        for (test_idx, bytes) in (0..=32).map(|i| vec![0xFF; i]).enumerate() {
+            let packed_nibbles = PackedNibbles::unpack(&bytes);
+            let nibbles = Nibbles::unpack(&bytes);
+
+            assert_eq!(
+                packed_nibbles.len(),
+                nibbles.len(),
+                "Test case {}: Length mismatch for bytes {:?}",
+                test_idx,
+                bytes
+            );
+            assert_eq!(
+                packed_nibbles.len(),
+                bytes.len() * 2,
+                "Test case {}: Expected length to be 2x byte length",
+                test_idx
+            );
+
+            // Compare each nibble individually
+            for i in 0..packed_nibbles.len() {
+                assert_eq!(packed_nibbles.get_nibble(i), nibbles[i],
+                           "Test case {}: Nibble at index {} differs for bytes {:?}: PackedNibbles={:?}, Nibbles={:?}",
+                           test_idx, i, bytes, packed_nibbles.get_nibble(i), nibbles[i]);
+            }
+        }
     }
 }
