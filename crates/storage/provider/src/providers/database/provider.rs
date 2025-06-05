@@ -1016,6 +1016,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
             }
         }
 
+        // For pre-merge blocks, try to get from static files first, then fall back to database
         self.static_file_provider.get_with_static_file_or_database(
             StaticFileSegment::Headers,
             number,
@@ -2842,6 +2843,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             // Put header with canonical hashes.
             self.tx.put::<tables::Headers<HeaderTy<N>>>(block_number, block.header().clone())?;
             durations_recorder.record_relative(metrics::Action::InsertHeaders);
+
+            // Only write to HeaderTerminalDifficulties for pre-merge blocks
+            if !self.chain_spec.is_paris_active_at_block(block_number) {
+                self.tx.put::<tables::HeaderTerminalDifficulties>(block_number, ttd.into())?;
+                durations_recorder
+                    .record_relative(metrics::Action::InsertHeaderTerminalDifficulties);
+            }
         }
 
         if write_to.static_files() {
@@ -2980,7 +2988,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         // this table in `canonical_hashes_range`.
         self.remove::<tables::CanonicalHeaders>(block + 1..)?;
         self.remove::<tables::Headers<HeaderTy<N>>>(block + 1..)?;
-        // Note: HeaderTerminalDifficulties table is read-only in the live database after
+        // Note: HeaderTerminalDifficulties table is read-only in the database after
         // Paris/Merge, so we do not remove entries from it here.
 
         // First transaction to be removed

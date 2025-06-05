@@ -217,7 +217,7 @@ mod tests {
 
         assert_eq!(db.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
         assert_eq!(db.table::<tables::Headers>().unwrap().len(), headers.len());
-        // Note: HeaderTerminalDifficulties table is read-only in live database after Paris/Merge
+        // Note: HeaderTerminalDifficulties table is read-only in database after Paris/Merge
         // so we don't check its length as it's not being written to
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
@@ -282,7 +282,7 @@ mod tests {
                 db.table::<tables::Headers>().unwrap().len(),
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
-            // Note: HeaderTerminalDifficulties table is read-only in live database after
+            // Note: HeaderTerminalDifficulties table is read-only in database after
             // Paris/Merge so we don't check its length as it's not being written to
             assert_eq!(
                 db.factory.provider().unwrap().get_prune_checkpoint(PruneSegment::Headers).unwrap(),

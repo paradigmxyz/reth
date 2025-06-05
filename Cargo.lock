@@ -10150,6 +10150,7 @@ dependencies = [
  "assert_matches",
  "parking_lot",
  "rayon",
+ "reth-chainspec",
  "reth-codecs",
  "reth-db",
  "reth-db-api",

@@ -162,7 +162,7 @@ impl TestStageDB {
             writer.append_header(header.header(), td, &header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-            // Note: HeaderTerminalDifficulties table is read-only in live database after
+            // Note: HeaderTerminalDifficulties table is read-only in database after
             // Paris/Merge but still written to static files for historical data
             tx.put::<tables::Headers>(header.number, header.header().clone())?;
         }
