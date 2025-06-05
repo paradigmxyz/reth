@@ -25,7 +25,7 @@ use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -201,8 +201,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
             }
             EthMessage::NewBlock(msg) => {
-                let block =
-                    NewBlockMessage { hash: msg.block.header().hash_slow(), block: Arc::new(*msg) };
+                let block = NewBlockMessage {
+                    hash: msg.block().header().hash_slow(),
+                    block: Arc::new(*msg),
+                };
                 self.try_emit_broadcast(PeerMessage::NewBlock(block)).into()
             }
             EthMessage::Transactions(msg) => {
@@ -856,8 +858,8 @@ mod tests {
     use reth_ecies::stream::ECIESStream;
     use reth_eth_wire::{
         handshake::EthHandshake, EthNetworkPrimitives, EthStream, GetBlockBodies,
-        HelloMessageWithProtocols, P2PStream, Status, StatusBuilder, UnauthedEthStream,
-        UnauthedP2PStream,
+        HelloMessageWithProtocols, P2PStream, StatusBuilder, UnauthedEthStream, UnauthedP2PStream,
+        UnifiedStatus,
     };
     use reth_ethereum_forks::EthereumHardfork;
     use reth_network_peers::pk2id;
@@ -881,7 +883,7 @@ mod tests {
         secret_key: SecretKey,
         local_peer_id: PeerId,
         hello: HelloMessageWithProtocols,
-        status: Status,
+        status: UnifiedStatus,
         fork_filter: ForkFilter,
         next_id: usize,
     }

@@ -12,7 +12,7 @@ use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_evm_ethereum::execute::EthExecutorProvider;
+use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
@@ -319,8 +319,13 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
     // Now validate using the stateless client if everything else passes
     for (block, execution_witness) in program_inputs {
-        stateless_validation(block.into_block(), execution_witness, chain_spec.clone())
-            .expect("stateless validation failed");
+        stateless_validation(
+            block.into_block(),
+            execution_witness,
+            chain_spec.clone(),
+            EthEvmConfig::new(chain_spec.clone()),
+        )
+        .expect("stateless validation failed");
     }
 
     Ok(())

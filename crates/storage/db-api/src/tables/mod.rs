@@ -405,8 +405,7 @@ tables! {
     /// the shard that equal or more than asked. For example:
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
-    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and
-    ///     know that needed entry is in `AccountPlainState`.
+    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `AccountPlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
@@ -428,8 +427,7 @@ tables! {
     /// the shard that equal or more than asked. For example:
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
-    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and
-    ///     know that needed entry is in `StoragePlainState`.
+    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `StoragePlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
@@ -481,7 +479,7 @@ tables! {
         type Value = BranchNodeCompact;
     }
 
-    /// From HashedAddress => NibblesSubKey => Intermediate value
+    /// From `HashedAddress` => `NibblesSubKey` => Intermediate value
     table StoragesTrie {
         type Key = B256;
         type Value = StorageTrieEntry;

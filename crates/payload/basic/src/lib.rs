@@ -726,7 +726,7 @@ impl<Payload> BuildOutcome<Payload> {
     }
 
     /// Applies a fn on the current payload.
-    pub(crate) fn map_payload<F, P>(self, f: F) -> BuildOutcome<P>
+    pub fn map_payload<F, P>(self, f: F) -> BuildOutcome<P>
     where
         F: FnOnce(Payload) -> P,
     {

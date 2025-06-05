@@ -36,8 +36,6 @@ use tracing::error;
 pub struct EthPubSub<Eth> {
     /// All nested fields bundled together.
     inner: Arc<EthPubSubInner<Eth>>,
-    /// The type that's used to spawn subscription tasks.
-    subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // === impl EthPubSub ===
@@ -52,8 +50,8 @@ impl<Eth> EthPubSub<Eth> {
 
     /// Creates a new, shareable instance.
     pub fn with_spawner(eth_api: Eth, subscription_task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = EthPubSubInner { eth_api };
-        Self { inner: Arc::new(inner), subscription_task_spawner }
+        let inner = EthPubSubInner { eth_api, subscription_task_spawner };
+        Self { inner: Arc::new(inner) }
     }
 }
 
@@ -64,8 +62,11 @@ where
             Provider: BlockNumReader + CanonStateSubscriptions,
             Pool: TransactionPool,
             Network: NetworkInfo,
-        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>
-        + 'static,
+        > + EthApiTypes<
+            TransactionCompat: TransactionCompat<
+                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
+            >,
+        > + 'static,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -76,7 +77,7 @@ where
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.inner.clone();
-        self.subscription_task_spawner.spawn(Box::pin(async move {
+        self.inner.subscription_task_spawner.spawn(Box::pin(async move {
             let _ = handle_accepted(pubsub, sink, kind, params).await;
         }));
 
@@ -96,7 +97,11 @@ where
             Provider: BlockNumReader + CanonStateSubscriptions,
             Pool: TransactionPool,
             Network: NetworkInfo,
-        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>,
+        > + EthApiTypes<
+            TransactionCompat: TransactionCompat<
+                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
+            >,
+        >,
 {
     match kind {
         SubscriptionKind::NewHeads => {
@@ -262,6 +267,8 @@ impl<Eth> std::fmt::Debug for EthPubSub<Eth> {
 struct EthPubSubInner<EthApi> {
     /// The `eth` API.
     eth_api: EthApi,
+    /// The type that's used to spawn subscription tasks.
+    subscription_task_spawner: Box<dyn TaskSpawner>,
 }
 
 // == impl EthPubSubInner ===
@@ -333,6 +340,7 @@ where
                 let all_logs = logs_utils::matching_block_logs_with_tx_hashes(
                     &filter,
                     block_receipts.block,
+                    block_receipts.timestamp,
                     block_receipts.tx_receipts.iter().map(|(tx, receipt)| (*tx, receipt)),
                     removed,
                 );

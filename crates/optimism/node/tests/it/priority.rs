@@ -19,8 +19,8 @@ use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
     args::RollupArgs,
     node::{
-        OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpNodeTypes,
-        OpPayloadBuilder, OpPoolBuilder,
+        OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpNodeComponentBuilder,
+        OpNodeTypes, OpPayloadBuilder, OpPoolBuilder,
     },
     txpool::OpPooledTransaction,
     utils::optimism_payload_attributes,
@@ -88,14 +88,7 @@ impl OpPayloadTransactions<OpPooledTransaction> for CustomTxPriority {
 /// Builds the node with custom transaction priority service within default payload builder.
 fn build_components<Node>(
     chain_id: ChainId,
-) -> ComponentsBuilder<
-    Node,
-    OpPoolBuilder,
-    BasicPayloadServiceBuilder<OpPayloadBuilder<CustomTxPriority>>,
-    OpNetworkBuilder,
-    OpExecutorBuilder,
-    OpConsensusBuilder,
->
+) -> OpNodeComponentBuilder<Node, OpPayloadBuilder<CustomTxPriority>>
 where
     Node: FullNodeTypes<Types: OpNodeTypes>,
 {
@@ -109,7 +102,7 @@ where
             OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
         ))
-        .network(OpNetworkBuilder { disable_txpool_gossip, disable_discovery_v4: !discovery_v4 })
+        .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
         .consensus(OpConsensusBuilder::default())
 }
 

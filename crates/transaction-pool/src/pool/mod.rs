@@ -94,7 +94,7 @@ use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_execution_types::ChangedAccount;
 
-use alloy_eips::{eip4844::BlobTransactionSidecar, Typed2718};
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, Typed2718};
 use reth_primitives_traits::Recovered;
 use rustc_hash::FxHashMap;
 use std::{collections::HashSet, fmt, sync::Arc, time::Instant};
@@ -420,8 +420,12 @@ where
             self.pool.write().update_accounts(changed_senders);
         let mut listener = self.event_listener.write();
 
-        promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-        discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &promoted {
+            listener.pending(tx.hash(), None);
+        }
+        for tx in &discarded {
+            listener.discarded(tx.hash());
+        }
 
         // This deletes outdated blob txs from the blob store, based on the account's nonce. This is
         // called during txpool maintenance when the pool drifted.
@@ -570,7 +574,9 @@ where
 
             {
                 let mut listener = self.event_listener.write();
-                discarded_hashes.iter().for_each(|hash| listener.discarded(hash));
+                for hash in &discarded_hashes {
+                    listener.discarded(hash);
+                }
             }
 
             // A newly added transaction may be immediately discarded, so we need to
@@ -619,7 +625,7 @@ where
     }
 
     /// Notify all listeners about a blob sidecar for a newly inserted blob (eip4844) transaction.
-    fn on_new_blob_sidecar(&self, tx_hash: &TxHash, sidecar: &BlobTransactionSidecar) {
+    fn on_new_blob_sidecar(&self, tx_hash: &TxHash, sidecar: &BlobTransactionSidecarVariant) {
         let mut sidecar_listeners = self.blob_transaction_sidecar_listener.lock();
         if sidecar_listeners.is_empty() {
             return
@@ -665,9 +671,15 @@ where
         // broadcast specific transaction events
         let mut listener = self.event_listener.write();
 
-        mined.iter().for_each(|tx| listener.mined(tx, block_hash));
-        promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-        discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &mined {
+            listener.mined(tx, block_hash);
+        }
+        for tx in &promoted {
+            listener.pending(tx.hash(), None);
+        }
+        for tx in &discarded {
+            listener.discarded(tx.hash());
+        }
     }
 
     /// Fire events for the newly added transaction if there are any.
@@ -679,8 +691,12 @@ where
                 let AddedPendingTransaction { transaction, promoted, discarded, replaced } = tx;
 
                 listener.pending(transaction.hash(), replaced.clone());
-                promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
-                discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
+                for tx in promoted {
+                    listener.pending(tx.hash(), None);
+                }
+                for tx in discarded {
+                    listener.discarded(tx.hash());
+                }
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
@@ -748,7 +764,9 @@ where
 
         let mut listener = self.event_listener.write();
 
-        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &removed {
+            listener.discarded(tx.hash());
+        }
 
         removed
     }
@@ -766,7 +784,9 @@ where
 
         let mut listener = self.event_listener.write();
 
-        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &removed {
+            listener.discarded(tx.hash());
+        }
 
         removed
     }
@@ -781,7 +801,9 @@ where
 
         let mut listener = self.event_listener.write();
 
-        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
+        for tx in &removed {
+            listener.discarded(tx.hash());
+        }
 
         removed
     }
@@ -924,7 +946,7 @@ where
     }
 
     /// Inserts a blob transaction into the blob store
-    fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecar) {
+    fn insert_blob(&self, hash: TxHash, blob: BlobTransactionSidecarVariant) {
         debug!(target: "txpool", "[{:?}] storing blob sidecar", hash);
         if let Err(err) = self.blob_store.insert(hash, blob) {
             warn!(target: "txpool", %err, "[{:?}] failed to insert blob", hash);
@@ -1195,7 +1217,7 @@ mod tests {
         validate::ValidTransaction,
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
-    use alloy_eips::eip4844::BlobTransactionSidecar;
+    use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -1224,7 +1246,9 @@ mod tests {
         };
 
         // Generate a BlobTransactionSidecar from the blobs.
-        let sidecar = BlobTransactionSidecar::try_from_blobs_hex(blobs).unwrap();
+        let sidecar = BlobTransactionSidecarVariant::Eip4844(
+            BlobTransactionSidecar::try_from_blobs_hex(blobs).unwrap(),
+        );
 
         // Define the maximum limit for blobs in the sub-pool.
         let blob_limit = SubPoolLimit::new(1000, usize::MAX);

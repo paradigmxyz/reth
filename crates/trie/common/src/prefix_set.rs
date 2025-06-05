@@ -15,6 +15,13 @@ pub struct TriePrefixSetsMut {
 }
 
 impl TriePrefixSetsMut {
+    /// Returns `true` if all prefix sets are empty.
+    pub fn is_empty(&self) -> bool {
+        self.account_prefix_set.is_empty() &&
+            self.storage_prefix_sets.is_empty() &&
+            self.destroyed_accounts.is_empty()
+    }
+
     /// Extends prefix sets with contents of another prefix set.
     pub fn extend(&mut self, other: Self) {
         self.account_prefix_set.extend(other.account_prefix_set);
