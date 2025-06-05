@@ -271,4 +271,4 @@ pub trait StageExt<Provider>: Stage<Provider> {
     }
 }
 
-impl<Provider, S: Stage<Provider>> StageExt<Provider> for S {}
+impl<Provider, S: Stage<Provider> + ?Sized> StageExt<Provider> for S {}
