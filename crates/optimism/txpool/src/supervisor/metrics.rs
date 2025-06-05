@@ -1,6 +1,7 @@
 //! Optimism supervisor and sequencer metrics
 
-use crate::supervisor::{errors::InvalidInboxEntry, InteropTxValidatorError};
+use crate::supervisor::InteropTxValidatorError;
+use op_alloy_rpc_types::InvalidInboxEntry;
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
@@ -47,26 +48,24 @@ impl SupervisorMetrics {
 
     /// Increments the metrics for the given error
     pub fn increment_metrics_for_error(&self, error: &InteropTxValidatorError) {
-        use InvalidInboxEntry::{
-            AwaitingReplacement, ConflictingData, DataCorruption, FutureData, IneffectiveData,
-            MissedData, NoParentForFirstBlock, OutOfOrder, OutOfScope, SkippedData,
-            UninitializedChainDatabase, UnknownChain,
-        };
-
         if let InteropTxValidatorError::InvalidEntry(inner) = error {
             match inner {
-                SkippedData => self.skipped_data_count.increment(1),
-                UnknownChain => self.unknown_chain_count.increment(1),
-                ConflictingData => self.conflicting_data_count.increment(1),
-                IneffectiveData => self.ineffective_data_count.increment(1),
-                OutOfOrder => self.out_of_order_count.increment(1),
-                AwaitingReplacement => self.awaiting_replacement_count.increment(1),
-                OutOfScope => self.out_of_scope_count.increment(1),
-                NoParentForFirstBlock => self.no_parent_for_first_block_count.increment(1),
-                FutureData => self.future_data_count.increment(1),
-                MissedData => self.missed_data_count.increment(1),
-                DataCorruption => self.data_corruption_count.increment(1),
-                UninitializedChainDatabase => {}
+                InvalidInboxEntry::SkippedData => self.skipped_data_count.increment(1),
+                InvalidInboxEntry::UnknownChain => self.unknown_chain_count.increment(1),
+                InvalidInboxEntry::ConflictingData => self.conflicting_data_count.increment(1),
+                InvalidInboxEntry::IneffectiveData => self.ineffective_data_count.increment(1),
+                InvalidInboxEntry::OutOfOrder => self.out_of_order_count.increment(1),
+                InvalidInboxEntry::AwaitingReplacement => {
+                    self.awaiting_replacement_count.increment(1)
+                }
+                InvalidInboxEntry::OutOfScope => self.out_of_scope_count.increment(1),
+                InvalidInboxEntry::NoParentForFirstBlock => {
+                    self.no_parent_for_first_block_count.increment(1)
+                }
+                InvalidInboxEntry::FutureData => self.future_data_count.increment(1),
+                InvalidInboxEntry::MissedData => self.missed_data_count.increment(1),
+                InvalidInboxEntry::DataCorruption => self.data_corruption_count.increment(1),
+                InvalidInboxEntry::UninitializedChainDatabase => {}
             }
         }
     }
