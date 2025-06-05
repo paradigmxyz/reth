@@ -5,8 +5,11 @@ use alloy_genesis::{Genesis, GenesisAccount};
 use alloy_primitives::{b256, Address, TxKind, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder, EthereumHardfork, MAINNET, MIN_TRANSACTION_GAS};
 use reth_ethereum_primitives::{Block, BlockBody, Receipt, Transaction};
-use reth_evm::execute::{BlockExecutionOutput, BlockExecutorProvider, Executor};
-use reth_evm_ethereum::execute::EthExecutorProvider;
+use reth_evm::{
+    execute::{BlockExecutionOutput, Executor},
+    ConfigureEvm,
+};
+use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
 use reth_node_api::FullNodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
@@ -66,7 +69,7 @@ where
 
     // Execute the block to produce a block execution output
     let mut block_execution_output = EthExecutorProvider::ethereum(chain_spec)
-        .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)))
+        .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)))
         .execute(block)?;
     block_execution_output.state.reverts.sort();
 
@@ -200,8 +203,9 @@ where
 
     let provider = provider_factory.provider()?;
 
-    let executor = EthExecutorProvider::ethereum(chain_spec)
-        .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
+    let evm_config = EthEvmConfig::new(chain_spec);
+    let executor = evm_config
+        .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)));
 
     let mut execution_outcome = executor.execute_batch(vec![&block1, &block2])?;
     execution_outcome.state_mut().reverts.sort();

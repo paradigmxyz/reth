@@ -3,7 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use futures::{Stream, StreamExt};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::BlockExecutorProvider;
+use reth_evm::ConfigureEvm;
 use reth_exex_types::ExExHead;
 use reth_node_api::NodePrimitives;
 use reth_provider::{BlockReader, Chain, HeaderProvider, StateProviderFactory};
@@ -22,7 +22,7 @@ use tokio::sync::mpsc::Receiver;
 #[derive(Debug)]
 pub struct ExExNotifications<P, E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     inner: ExExNotificationsInner<P, E>,
 }
@@ -66,7 +66,7 @@ pub trait ExExNotificationsStream<N: NodePrimitives = EthPrimitives>:
 #[derive(Debug)]
 enum ExExNotificationsInner<P, E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
     WithoutHead(ExExNotificationsWithoutHead<P, E>),
@@ -80,13 +80,13 @@ where
 
 impl<P, E> ExExNotifications<P, E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// Creates a new stream of [`ExExNotifications`] without a head.
     pub const fn new(
         node_head: BlockNumHash,
         provider: P,
-        executor: E,
+        evm_config: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
         wal_handle: WalHandle<E::Primitives>,
     ) -> Self {
@@ -94,7 +94,7 @@ where
             inner: ExExNotificationsInner::WithoutHead(ExExNotificationsWithoutHead::new(
                 node_head,
                 provider,
-                executor,
+                evm_config,
                 notifications,
                 wal_handle,
             )),
@@ -105,10 +105,7 @@ where
 impl<P, E> ExExNotificationsStream<E::Primitives> for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
-        + Unpin
-        + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     fn set_without_head(&mut self) {
         let current = std::mem::replace(&mut self.inner, ExExNotificationsInner::Invalid);
@@ -117,7 +114,7 @@ where
             ExExNotificationsInner::WithHead(notifications) => ExExNotificationsWithoutHead::new(
                 notifications.initial_local_head,
                 notifications.provider,
-                notifications.executor,
+                notifications.evm_config,
                 notifications.notifications,
                 notifications.wal_handle,
             ),
@@ -135,7 +132,7 @@ where
                 Box::new(ExExNotificationsWithHead::new(
                     notifications.initial_local_head,
                     notifications.provider,
-                    notifications.executor,
+                    notifications.evm_config,
                     notifications.notifications,
                     notifications.wal_handle,
                     exex_head,
@@ -159,10 +156,7 @@ where
 impl<P, E> Stream for ExExNotifications<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
-        + Unpin
-        + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
 
@@ -183,23 +177,23 @@ where
 /// A stream of [`ExExNotification`]s. The stream will emit notifications for all blocks.
 pub struct ExExNotificationsWithoutHead<P, E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     node_head: BlockNumHash,
     provider: P,
-    executor: E,
+    evm_config: E,
     notifications: Receiver<ExExNotification<E::Primitives>>,
     wal_handle: WalHandle<E::Primitives>,
 }
 
 impl<P: Debug, E> Debug for ExExNotificationsWithoutHead<P, E>
 where
-    E: Debug + BlockExecutorProvider,
+    E: ConfigureEvm + Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExExNotifications")
             .field("provider", &self.provider)
-            .field("executor", &self.executor)
+            .field("evm_config", &self.evm_config)
             .field("notifications", &self.notifications)
             .finish()
     }
@@ -207,17 +201,17 @@ where
 
 impl<P, E> ExExNotificationsWithoutHead<P, E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// Creates a new instance of [`ExExNotificationsWithoutHead`].
     const fn new(
         node_head: BlockNumHash,
         provider: P,
-        executor: E,
+        evm_config: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
         wal_handle: WalHandle<E::Primitives>,
     ) -> Self {
-        Self { node_head, provider, executor, notifications, wal_handle }
+        Self { node_head, provider, evm_config, notifications, wal_handle }
     }
 
     /// Subscribe to notifications with the given head.
@@ -225,7 +219,7 @@ where
         ExExNotificationsWithHead::new(
             self.node_head,
             self.provider,
-            self.executor,
+            self.evm_config,
             self.notifications,
             self.wal_handle,
             head,
@@ -235,7 +229,7 @@ where
 
 impl<P: Unpin, E> Stream for ExExNotificationsWithoutHead<P, E>
 where
-    E: Unpin + BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     type Item = ExExNotification<E::Primitives>;
 
@@ -255,12 +249,12 @@ where
 #[derive(Debug)]
 pub struct ExExNotificationsWithHead<P, E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// The node's local head at launch.
     initial_local_head: BlockNumHash,
     provider: P,
-    executor: E,
+    evm_config: E,
     notifications: Receiver<ExExNotification<E::Primitives>>,
     wal_handle: WalHandle<E::Primitives>,
     /// The exex head at launch
@@ -278,13 +272,13 @@ where
 
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// Creates a new [`ExExNotificationsWithHead`].
     const fn new(
         node_head: BlockNumHash,
         provider: P,
-        executor: E,
+        evm_config: E,
         notifications: Receiver<ExExNotification<E::Primitives>>,
         wal_handle: WalHandle<E::Primitives>,
         exex_head: ExExHead,
@@ -292,7 +286,7 @@ where
         Self {
             initial_local_head: node_head,
             provider,
-            executor,
+            evm_config,
             notifications,
             wal_handle,
             initial_exex_head: exex_head,
@@ -306,10 +300,7 @@ where
 impl<P, E> ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
-        + Unpin
-        + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     /// Checks if the ExEx head is on the canonical chain.
     ///
@@ -369,7 +360,7 @@ where
     ///   exex_head.number`). Nothing to do.
     fn check_backfill(&mut self) -> eyre::Result<()> {
         let backfill_job_factory =
-            BackfillJobFactory::new(self.executor.clone(), self.provider.clone());
+            BackfillJobFactory::new(self.evm_config.clone(), self.provider.clone());
         match self.initial_exex_head.block.number.cmp(&self.initial_local_head.number) {
             std::cmp::Ordering::Less => {
                 // ExEx is behind the node head, start backfill
@@ -396,10 +387,7 @@ where
 impl<P, E> Stream for ExExNotificationsWithHead<P, E>
 where
     P: BlockReader + HeaderProvider + StateProviderFactory + Clone + Unpin + 'static,
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>>
-        + Clone
-        + Unpin
-        + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + Clone + Unpin + 'static,
 {
     type Item = eyre::Result<ExExNotification<E::Primitives>>;
 
@@ -535,7 +523,7 @@ mod tests {
             Some(ExExNotification::ChainCommitted {
                 new: Arc::new(
                     BackfillJobFactory::new(
-                        notifications.executor.clone(),
+                        notifications.evm_config.clone(),
                         notifications.provider.clone()
                     )
                     .backfill(1..=1)

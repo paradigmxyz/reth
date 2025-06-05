@@ -3,13 +3,13 @@
 use crate::{setup_engine, testsuite::Environment, NodeBuilderHelper, PayloadAttributesBuilder};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::PayloadAttributes;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
-use reth_node_api::{NodeTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_rpc_api::clients::EthApiClient;
@@ -34,6 +34,8 @@ pub struct Setup<I> {
     pub state: Option<EvmState>,
     /// Network configuration
     pub network: NetworkSetup,
+    /// Engine tree configuration
+    pub tree_config: TreeConfig,
     /// Shutdown channel to stop nodes when setup is dropped
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
@@ -50,6 +52,7 @@ impl<I> Default for Setup<I> {
             blocks: Vec::new(),
             state: None,
             network: NetworkSetup::default(),
+            tree_config: TreeConfig::default(),
             shutdown_tx: None,
             is_dev: true,
             _phantom: Default::default(),
@@ -66,7 +69,10 @@ impl<I> Drop for Setup<I> {
     }
 }
 
-impl<I> Setup<I> {
+impl<I> Setup<I>
+where
+    I: EngineTypes,
+{
     /// Create a new setup with default values
     pub fn new() -> Self {
         Self::default()
@@ -114,6 +120,12 @@ impl<I> Setup<I> {
         self
     }
 
+    /// Set the engine tree configuration
+    pub const fn with_tree_config(mut self, tree_config: TreeConfig) -> Self {
+        self.tree_config = tree_config;
+        self
+    }
+
     /// Apply the setup to the environment
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
@@ -149,6 +161,7 @@ impl<I> Setup<I> {
             node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
             is_dev,
+            self.tree_config.clone(),
             attributes_generator,
         )
         .await;
@@ -161,9 +174,9 @@ impl<I> Setup<I> {
                     let rpc = node
                         .rpc_client()
                         .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
-                    let engine = node.engine_api_client();
+                    let auth = node.auth_server_handle();
 
-                    node_clients.push(crate::testsuite::NodeClient { rpc, engine });
+                    node_clients.push(crate::testsuite::NodeClient::new(rpc, auth));
                 }
 
                 // spawn a separate task just to handle the shutdown
@@ -220,6 +233,34 @@ impl<I> Setup<I> {
         }
 
         env.node_clients = node_clients;
+
+        // Initialize the environment with genesis block information
+        let first_client = &env.node_clients[0];
+        let genesis_block =
+            EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
+                &first_client.rpc,
+                BlockNumberOrTag::Number(0),
+                false,
+            )
+            .await?
+            .ok_or_else(|| eyre!("Genesis block not found"))?;
+
+        env.latest_block_info = Some(crate::testsuite::LatestBlockInfo {
+            hash: genesis_block.header.hash,
+            number: genesis_block.header.number,
+        });
+
+        env.latest_header_time = genesis_block.header.timestamp;
+        env.latest_fork_choice_state = ForkchoiceState {
+            head_block_hash: genesis_block.header.hash,
+            safe_block_hash: genesis_block.header.hash,
+            finalized_block_hash: genesis_block.header.hash,
+        };
+
+        debug!(
+            "Environment initialized with genesis block {} (hash: {})",
+            genesis_block.header.number, genesis_block.header.hash
+        );
 
         // TODO: For each block in self.blocks, replay it on the node
 

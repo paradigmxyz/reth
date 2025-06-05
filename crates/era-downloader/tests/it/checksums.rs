@@ -9,14 +9,13 @@ use test_case::test_case;
 
 #[test_case("https://mainnet.era1.nimbus.team/"; "nimbus")]
 #[test_case("https://era1.ethportal.net/"; "ethportal")]
+#[test_case("https://era.ithaca.xyz/era1/index.html"; "ithaca")]
 #[tokio::test]
 async fn test_invalid_checksum_returns_error(url: &str) {
     let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
     let folder = folder.path().to_owned().into_boxed_path();
     let client = EraClient::new(FailingClient, base_url, folder.clone());
-
-    client.fetch_file_list().await.unwrap();
 
     let mut stream = EraStream::new(
         client,
@@ -70,6 +69,12 @@ impl HttpClient for FailingClient {
                     })))
                         as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
                 }
+                "https://era.ithaca.xyz/era1/index.html" => {
+                    Ok(Box::new(futures::stream::once(Box::pin(async move {
+                        Ok(bytes::Bytes::from(crate::ITHACA))
+                    })))
+                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+                }
                 "https://mainnet.era1.nimbus.team/checksums.txt" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(CHECKSUMS))
@@ -77,6 +82,12 @@ impl HttpClient for FailingClient {
                         as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
                 }
                 "https://era1.ethportal.net/checksums.txt" => {
+                    Ok(Box::new(futures::stream::once(Box::pin(async move {
+                        Ok(bytes::Bytes::from(CHECKSUMS))
+                    })))
+                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+                }
+                "https://era.ithaca.xyz/era1/checksums.txt" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(CHECKSUMS))
                     })))
@@ -94,6 +105,12 @@ impl HttpClient for FailingClient {
                     })))
                         as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
                 }
+                "https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1" => {
+                    Ok(Box::new(futures::stream::once(Box::pin(async move {
+                        Ok(bytes::Bytes::from(crate::MAINNET_0))
+                    })))
+                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+                }
                 "https://era1.ethportal.net/mainnet-00001-a5364e9a.era1" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(crate::MAINNET_1))
@@ -101,6 +118,12 @@ impl HttpClient for FailingClient {
                         as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
                 }
                 "https://mainnet.era1.nimbus.team/mainnet-00001-a5364e9a.era1" => {
+                    Ok(Box::new(futures::stream::once(Box::pin(async move {
+                        Ok(bytes::Bytes::from(crate::MAINNET_1))
+                    })))
+                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+                }
+                "https://era.ithaca.xyz/era1/mainnet-00001-a5364e9a.era1" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(crate::MAINNET_1))
                     })))

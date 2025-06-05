@@ -17,7 +17,7 @@ use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
-use reth_evm::{execute::BasicBlockExecutorProvider, noop::NoopEvmConfig, ConfigureEvm};
+use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -332,6 +332,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the configured [`PruneConfig`]
+    ///
     /// Any configuration set in CLI will take precedence over those set in toml
     pub fn prune_config(&self) -> Option<PruneConfig> {
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
@@ -423,7 +424,7 @@ where
                     Arc::new(NoopConsensus::default()),
                     NoopHeaderDownloader::default(),
                     NoopBodiesDownloader::default(),
-                    BasicBlockExecutorProvider::new(NoopEvmConfig::<Evm>::default()),
+                    NoopEvmConfig::<Evm>::default(),
                     self.toml_config().stages.clone(),
                     self.prune_modes(),
                 ))
@@ -443,7 +444,9 @@ where
                     let _ = tx.send(result);
                 }),
             );
-            rx.await??;
+            rx.await?.inspect_err(|err| {
+                error!(target: "reth::cli", unwind_target = %unwind_target, %err, "failed to run unwind")
+            })?;
         }
 
         Ok(factory)
@@ -905,7 +908,7 @@ where
                 Ok(match hook {
                     InvalidBlockHookType::Witness => Box::new(InvalidBlockWitnessHook::new(
                         self.blockchain_db().clone(),
-                        self.components().block_executor().clone(),
+                        self.components().evm_config().clone(),
                         output_directory,
                         healthy_node_rpc_client.clone(),
                     )),
@@ -1084,7 +1087,7 @@ mod tests {
                     storage_history_full: false,
                     storage_history_distance: None,
                     storage_history_before: None,
-                    receipts_log_filter: vec![],
+                    receipts_log_filter: None,
                 },
                 ..NodeConfig::test()
             };

@@ -37,6 +37,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
+use reth_chainspec::EnrForkIdEntry;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
@@ -108,7 +109,7 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage<N>>,
     /// Handles block imports according to the `eth` protocol.
-    block_import: Box<dyn BlockImport<N::Block>>,
+    block_import: Box<dyn BlockImport<N::NewBlockPayload>>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
@@ -268,7 +269,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         if let Some(disc_config) = discovery_v4_config.as_mut() {
             // merge configured boot nodes
             disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
-            disc_config.add_eip868_pair("eth", status.forkid);
+            // add the forkid entry for EIP-868, but wrap it in an `EnrForkIdEntry` for proper
+            // encoding
+            disc_config.add_eip868_pair("eth", EnrForkIdEntry::from(status.forkid));
         }
 
         if let Some(discv5) = discovery_v5_config.as_mut() {
@@ -520,7 +523,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
     }
 
     /// Invoked after a `NewBlock` message from the peer was validated
-    fn on_block_import_result(&mut self, event: BlockImportEvent<N::Block>) {
+    fn on_block_import_result(&mut self, event: BlockImportEvent<N::NewBlockPayload>) {
         match event {
             BlockImportEvent::Announcement(validation) => match validation {
                 BlockValidation::ValidHeader { block } => {
@@ -613,6 +616,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             PeerMessage::SendTransactions(_) => {
                 unreachable!("Not emitted by session")
             }
+            PeerMessage::BlockRangeUpdated(_) => {}
             PeerMessage::Other(other) => {
                 debug!(target: "net", message_id=%other.id, "Ignoring unsupported message");
             }
@@ -711,6 +715,9 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 } else {
                     let _ = tx.send(None);
                 }
+            }
+            NetworkHandleMessage::InternalBlockRangeUpdate(block_range_update) => {
+                self.swarm.sessions_mut().update_advertised_block_range(block_range_update);
             }
             NetworkHandleMessage::EthMessage { peer_id, message } => {
                 self.swarm.sessions_mut().send_message(&peer_id, message)

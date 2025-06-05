@@ -5,7 +5,8 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    config_cmd, db, dump_genesis, import, import_era, init_cmd, init_state,
+    config_cmd, db, download, dump_genesis, import, import_era, init_cmd, init_state,
+    launcher::FnLauncher,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
 };
@@ -151,9 +152,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             (EthExecutorProvider::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
         };
         match self.command {
-            Commands::Node(command) => {
-                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
-            }
+            Commands::Node(command) => runner.run_command_until_exit(|ctx| {
+                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+            }),
             Commands::Init(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
@@ -168,6 +169,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            }
+            Commands::Download(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
             Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
@@ -223,6 +227,9 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Database debugging utilities
     #[command(name = "db")]
     Db(db::Command<C>),
+    /// Download public node snapshots
+    #[command(name = "download")]
+    Download(download::DownloadCommand<C>),
     /// Manipulate individual stages.
     #[command(name = "stage")]
     Stage(stage::Command<C>),
@@ -258,6 +265,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             Self::ImportEra(cmd) => cmd.chain_spec(),
             Self::DumpGenesis(cmd) => cmd.chain_spec(),
             Self::Db(cmd) => cmd.chain_spec(),
+            Self::Download(cmd) => cmd.chain_spec(),
             Self::Stage(cmd) => cmd.chain_spec(),
             Self::P2P(cmd) => cmd.chain_spec(),
             #[cfg(feature = "dev")]

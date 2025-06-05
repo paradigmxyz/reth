@@ -66,8 +66,8 @@ pub trait GanacheApi {
 
     /// Snapshot the state of the blockchain at the current block. Takes no parameters. Returns the
     /// id of the snapshot that was created. A snapshot can only be reverted once. After a
-    /// successful evm_revert, the same snapshot id cannot be used again. Consider creating a new
-    /// snapshot after each evm_revert if you need to revert to the same point multiple times.
+    /// successful `evm_revert`, the same snapshot id cannot be used again. Consider creating a new
+    /// snapshot after each `evm_revert` if you need to revert to the same point multiple times.
     ///
     /// Returns the hex-encoded identifier for this snapshot.
     #[method(name = "snapshot")]

@@ -47,7 +47,7 @@ pub async fn setup<N>(
     attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider + NodeTypes,
+    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider,
     N::ComponentsBuilder: NodeComponentsBuilder<
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
@@ -107,6 +107,7 @@ pub async fn setup_engine<N>(
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
     is_dev: bool,
+    tree_config: reth_node_api::TreeConfig,
     attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(
     Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
@@ -153,7 +154,7 @@ where
                 let launcher = EngineNodeLauncher::new(
                     builder.task_executor().clone(),
                     builder.config().datadir(),
-                    Default::default(),
+                    tree_config.clone(),
                 );
                 builder.launch_with(launcher)
             })
@@ -205,8 +206,7 @@ pub type NodeHelperType<N, Provider = BlockchainProvider<NodeTypesWithDBAdapter<
 pub trait NodeBuilderHelper
 where
     Self: Default
-        + NodeTypesForProvider
-        + NodeTypes<
+        + NodeTypesForProvider<
             Payload: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,
@@ -240,8 +240,7 @@ where
 impl<T> NodeBuilderHelper for T
 where
     Self: Default
-        + NodeTypesForProvider
-        + NodeTypes<
+        + NodeTypesForProvider<
             Payload: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,

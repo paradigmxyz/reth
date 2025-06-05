@@ -31,7 +31,6 @@ reth-chainspec.workspace = true
 reth-rpc-engine-api.workspace = true
 
 # op-reth
-reth-optimism-chainspec.workspace = true
 reth-optimism-evm.workspace = true
 reth-optimism-payload-builder.workspace = true
 reth-optimism-txpool.workspace = true
@@ -74,6 +73,10 @@ eyre.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 derive_more = { workspace = true, features = ["constructor"] }
+
+# metrics
+reth-metrics.workspace = true
+metrics.workspace = true
 
 [dev-dependencies]
 reth-optimism-chainspec.workspace = true

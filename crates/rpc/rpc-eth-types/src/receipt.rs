@@ -124,8 +124,6 @@ impl EthReceiptBuilder {
                 TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt_with_bloom),
                 TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt_with_bloom),
                 TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt_with_bloom),
-                #[expect(unreachable_patterns)]
-                _ => unreachable!(),
             },
         )?;
 

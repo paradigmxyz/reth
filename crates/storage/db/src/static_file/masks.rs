@@ -48,14 +48,14 @@ add_static_file_mask! {
 
 // BLOCK_META MASKS
 add_static_file_mask! {
-    #[doc = "Mask for a `StoredBlockBodyIndices` from BlockMeta static file segment"]
+    #[doc = "Mask for a `StoredBlockBodyIndices` from `BlockMeta` static file segment"]
     BodyIndicesMask, <BlockBodyIndices as Table>::Value, 0b001
 }
 add_static_file_mask! {
-    #[doc = "Mask for a `StoredBlockOmmers` from BlockMeta static file segment"]
+    #[doc = "Mask for a `StoredBlockOmmers` from `BlockMeta` static file segment"]
     OmmersMask<H>, StoredBlockOmmers<H>, 0b010
 }
 add_static_file_mask! {
-    #[doc = "Mask for a `StaticFileBlockWithdrawals` from BlockMeta static file segment"]
+    #[doc = "Mask for a `StaticFileBlockWithdrawals` from `BlockMeta` static file segment"]
     WithdrawalsMask, StaticFileBlockWithdrawals, 0b100
 }

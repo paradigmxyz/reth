@@ -1,23 +1,34 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
 use crate::EthApi;
-use alloy_consensus::TxType;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types::TransactionRequest;
+use alloy_signer::Either;
 use reth_evm::{ConfigureEvm, EvmEnv, EvmFactory, SpecFor};
 use reth_node_api::NodePrimitives;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
-    FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError,
+    FromEthApiError, FromEvmError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{revm_utils::CallFees, EthApiError, RpcInvalidTransactionError};
 use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
+use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::{context::TxEnv, context_interface::Block, Database};
 
 impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: EstimateCall + LoadPendingBlock + FullEthApiTypes,
+    Self: EstimateCall
+        + LoadPendingBlock
+        + FullEthApiTypes
+        + RpcNodeCoreExt<
+            Pool: TransactionPool<
+                Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
+            >,
+            Primitives: NodePrimitives<SignedTx = ProviderTx<Self::Provider>>,
+            Evm = EvmConfig,
+        >,
+    EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
     Provider: BlockReader,
 {
 }
@@ -57,17 +68,7 @@ where
             return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into_eth_err())
         }
 
-        let tx_type = if request.authorization_list.is_some() {
-            TxType::Eip7702
-        } else if request.sidecar.is_some() || request.max_fee_per_blob_gas.is_some() {
-            TxType::Eip4844
-        } else if request.max_fee_per_gas.is_some() || request.max_priority_fee_per_gas.is_some() {
-            TxType::Eip1559
-        } else if request.access_list.is_some() {
-            TxType::Eip2930
-        } else {
-            TxType::Legacy
-        } as u8;
+        let tx_type = request.minimal_tx_type() as u8;
 
         let TransactionRequest {
             from,
@@ -139,7 +140,11 @@ where
                 .map(|v| v.saturating_to())
                 .unwrap_or_default(),
             // EIP-7702 fields
-            authorization_list: authorization_list.unwrap_or_default(),
+            authorization_list: authorization_list
+                .unwrap_or_default()
+                .into_iter()
+                .map(Either::Left)
+                .collect(),
         };
 
         Ok(env)
