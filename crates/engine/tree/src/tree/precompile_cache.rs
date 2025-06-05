@@ -12,6 +12,9 @@ use std::{
     sync::Arc,
 };
 
+/// Default max cache size for [`PrecompileCache`]
+const MAX_CACHE_SIZE: usize = 10_000;
+
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(HashMap<Address, PrecompileCache<S>>)
@@ -38,7 +41,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(Arc::new(RwLock::new(LruMap::new(schnellru::ByLength::new(100_000)))))
+        Self(Arc::new(RwLock::new(LruMap::new(schnellru::ByLength::new(MAX_CACHE_SIZE)))))
     }
 }
 
