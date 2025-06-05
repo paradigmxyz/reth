@@ -183,13 +183,6 @@ where
     }
 }
 
-// We can add the Borrow trait implementation for the generic CacheKey
-impl<S> std::borrow::Borrow<[u8]> for CacheKey<S> {
-    fn borrow(&self) -> &[u8] {
-        self.0 .1.as_ref() // Access the Bytes part of the tuple
-    }
-}
-
 /// Metrics for the cached precompile.
 #[derive(reth_metrics::Metrics, Clone)]
 #[metrics(scope = "sync.caching")]
