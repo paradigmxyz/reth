@@ -185,9 +185,9 @@ async fn test_reorg_through_backfill() -> eyre::Result<()> {
     let head = first_provider.get_block_by_number(20.into()).await?.unwrap();
     second_node.sync_to(head.header.hash).await?;
 
-    // Produce an unfinalized fork chain with 5 blocks
+    // Produce an unfinalized fork chain with 30 blocks
     second_node.payload.timestamp = head.header.timestamp;
-    advance_with_random_transactions(&mut second_node, 10, &mut rng, false).await?;
+    advance_with_random_transactions(&mut second_node, 30, &mut rng, false).await?;
 
     // Now reorg second node to the finalized canonical head
     let head = first_provider.get_block_by_number(100.into()).await?.unwrap();
