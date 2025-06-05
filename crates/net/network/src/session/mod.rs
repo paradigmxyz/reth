@@ -42,7 +42,7 @@ use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
-use reth_network_types::SessionsConfig;
+use reth_network_types::{peers::RangeInfo, SessionsConfig};
 use reth_tasks::TaskSpawner;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
@@ -543,6 +543,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                     terminate_message: None,
+                    range_info: None,
                 };
 
                 self.spawn(session);
@@ -579,6 +580,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     messages,
                     direction,
                     timeout,
+                    range_info: None,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
@@ -701,6 +703,8 @@ pub enum SessionEvent<N: NetworkPrimitives> {
         /// The maximum time that the session waits for a response from the peer before timing out
         /// the connection
         timeout: Arc<AtomicU64>,
+        /// The range info for the peer.
+        range_info: Option<RangeInfo>,
     },
     /// The peer was already connected with another session.
     AlreadyConnected {

@@ -8683,7 +8683,9 @@ name = "reth-network-types"
 version = "1.4.8"
 dependencies = [
  "alloy-eip2124",
+ "alloy-primitives",
  "humantime-serde",
+ "parking_lot",
  "reth-net-banlist",
  "reth-network-peers",
  "serde",

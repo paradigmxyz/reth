@@ -18,7 +18,7 @@ use reth_eth_wire::{
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
-use reth_network_types::{PeerAddr, PeerKind};
+use reth_network_types::{peers::RangeInfo, PeerAddr, PeerKind};
 use reth_primitives_traits::Block;
 use std::{
     collections::{HashMap, VecDeque},
@@ -149,13 +149,20 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         status: Arc<UnifiedStatus>,
         request_tx: PeerRequestSender<PeerRequest<N>>,
         timeout: Arc<AtomicU64>,
+        range_info: Option<RangeInfo>,
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 
         // find the corresponding block number
         let block_number =
             self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
-        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number, timeout);
+        self.state_fetcher.new_active_peer(
+            peer,
+            status.blockhash,
+            block_number,
+            timeout,
+            range_info,
+        );
 
         self.active_peers.insert(
             peer,
@@ -613,6 +620,7 @@ mod tests {
             Arc::default(),
             peer_tx,
             Arc::new(AtomicU64::new(1)),
+            None,
         );
 
         assert!(state.active_peers.contains_key(&peer_id));

@@ -32,7 +32,7 @@ use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
-use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
+use reth_network_types::{peers::RangeInfo, session::config::INITIAL_REQUEST_TIMEOUT};
 use reth_primitives_traits::Block;
 use rustc_hash::FxHashMap;
 use tokio::{
@@ -114,6 +114,8 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// Used to reserve a slot to guarantee that the termination message is delivered
     pub(crate) terminate_message:
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
+    /// The range info for the peer.
+    pub(crate) range_info: Option<RangeInfo>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -987,6 +989,7 @@ mod tests {
                         )),
                         protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
                         terminate_message: None,
+                        range_info: None,
                     }
                 }
                 ev => {
