@@ -1,7 +1,7 @@
 //! Contains a precompile cache that is backed by a moka cache.
 
 use alloy_primitives::Bytes;
-use parking_lot::RwLock;
+use parking_lot::Mutex;
 use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
@@ -32,7 +32,7 @@ where
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(Arc<RwLock<LruMap<CacheKey<S>, CacheEntry>>>)
+pub struct PrecompileCache<S>(Arc<Mutex<LruMap<CacheKey<S>, CacheEntry>>>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
 
@@ -41,7 +41,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(Arc::new(RwLock::new(LruMap::new(schnellru::ByLength::new(MAX_CACHE_SIZE)))))
+        Self(Arc::new(Mutex::new(LruMap::new(schnellru::ByLength::new(MAX_CACHE_SIZE)))))
     }
 }
 
@@ -52,15 +52,15 @@ where
     fn get(&self, key: &CacheKeyRef<'_, S>) -> Option<CacheEntry> {
         // LruMap's get() method requires a mutable reference since it updates the LRU order
         // So we need to use a write lock here
-        self.0.write().get(key).cloned()
+        self.0.lock().get(key).cloned()
     }
 
     fn insert(&self, key: CacheKey<S>, value: CacheEntry) {
-        self.0.write().insert(key, value);
+        self.0.lock().insert(key, value);
     }
 
     fn weighted_size(&self) -> u64 {
-        self.0.read().len() as u64
+        self.0.lock().len() as u64
     }
 }
 
