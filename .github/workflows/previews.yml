@@ -1,14 +1,7 @@
 # .github/workflows/preview.yml
 name: Deploy PR previews
 
-on:
-  pull_request:
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - closed
-
+on: push
 concurrency: preview-${{ github.ref }}
 
 jobs:
@@ -22,13 +15,22 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Build Vocs
-        if: github.event.action != 'closed' # You might want to skip the build if the PR has been closed
         run: |
           cd book/vocs/ && bun i && bun run build
           echo "Vocs Build Complete"
 
-      - name: Deploy preview
-        uses: rossjrw/pr-preview-action@v1
+      # - name: Deploy preview
+      #   uses: rossjrw/pr-preview-action@v1
+      #   with:
+      #     source-dir: ./book/vocs/docs/dist
+      #     token:
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          source-dir: ./book/vocs/docs/dist
-          token: ${{ secrets.PREVIEW_TOKEN }}
+          path: "./book/vocs/docs/dist"
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
