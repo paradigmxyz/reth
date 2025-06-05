@@ -4,7 +4,7 @@ mod client;
 
 pub use client::FetchClient;
 
-use crate::message::BlockRequest;
+use crate::{message::BlockRequest, session::RangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
@@ -15,7 +15,7 @@ use reth_network_p2p::{
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_network_types::{peers::RangeInfo, ReputationChangeKind};
+use reth_network_types::ReputationChangeKind;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{

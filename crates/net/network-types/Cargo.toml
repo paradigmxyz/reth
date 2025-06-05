@@ -17,13 +17,11 @@ reth-network-peers.workspace = true
 reth-net-banlist.workspace = true
 
 alloy-eip2124.workspace = true
-alloy-primitives.workspace = true
 
 # misc
 serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"] }
-parking_lot.workspace = true
 
 # misc
 tracing.workspace = true

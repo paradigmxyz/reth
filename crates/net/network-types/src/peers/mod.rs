@@ -15,10 +15,6 @@ use crate::{
     DEFAULT_REPUTATION,
 };
 
-use alloy_primitives::B256;
-use parking_lot::RwLock;
-use std::sync::{atomic::AtomicU64, Arc};
-
 /// Tracks info about a single peer.
 #[derive(Debug, Clone)]
 pub struct Peer {
@@ -139,31 +135,4 @@ impl Peer {
     pub const fn is_static(&self) -> bool {
         matches!(self.kind, PeerKind::Static)
     }
-}
-
-/// Information about the range of blocks available from a peer.
-#[derive(Debug, Clone)]
-pub struct RangeInfo {
-    /// The inner range information.
-    inner: Arc<RangeInfoInner>,
-}
-
-impl RangeInfo {
-    /// Updates the range information.
-    pub fn update(&self, earliest: u64, latest: u64, latest_hash: B256) {
-        self.inner.earliest.store(earliest, std::sync::atomic::Ordering::SeqCst);
-        self.inner.latest.store(latest, std::sync::atomic::Ordering::SeqCst);
-        *self.inner.latest_hash.write() = latest_hash;
-    }
-}
-
-/// Inner structure containing the range information with atomic and thread-safe fields.
-#[derive(Debug)]
-pub struct RangeInfoInner {
-    /// The earliest block which is available.
-    pub earliest: AtomicU64,
-    /// The latest block which is available.
-    pub latest: AtomicU64,
-    /// Latest available block's hash.
-    pub latest_hash: RwLock<B256>,
 }

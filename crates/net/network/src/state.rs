@@ -6,6 +6,7 @@ use crate::{
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
+    session::RangeInfo,
     FetchClient,
 };
 use alloy_consensus::BlockHeader;
@@ -18,7 +19,7 @@ use reth_eth_wire::{
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
-use reth_network_types::{peers::RangeInfo, PeerAddr, PeerKind};
+use reth_network_types::{PeerAddr, PeerKind};
 use reth_primitives_traits::Block;
 use std::{
     collections::{HashMap, VecDeque},

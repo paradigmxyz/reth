@@ -18,7 +18,10 @@ use std::{
     collections::HashMap,
     future::Future,
     net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -29,8 +32,10 @@ use crate::{
     protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
     session::active::ActiveSession,
 };
+use alloy_primitives::B256;
 use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
+use parking_lot::RwLock;
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
@@ -42,7 +47,7 @@ use reth_ethereum_forks::{ForkFilter, ForkId, ForkTransition, Head};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::{PeerRequest, PeerRequestSender};
 use reth_network_peers::PeerId;
-use reth_network_types::{peers::RangeInfo, SessionsConfig};
+use reth_network_types::SessionsConfig;
 use reth_tasks::TaskSpawner;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
@@ -54,6 +59,33 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, instrument, trace};
+
+/// Information about the range of blocks available from a peer.
+#[derive(Debug, Clone)]
+pub struct RangeInfo {
+    /// The inner range information.
+    inner: Arc<RangeInfoInner>,
+}
+
+impl RangeInfo {
+    /// Updates the range information.
+    pub fn update(&self, earliest: u64, latest: u64, latest_hash: B256) {
+        self.inner.earliest.store(earliest, Ordering::Relaxed);
+        self.inner.latest.store(latest, Ordering::Relaxed);
+        *self.inner.latest_hash.write() = latest_hash;
+    }
+}
+
+/// Inner structure containing the range information with atomic and thread-safe fields.
+#[derive(Debug)]
+pub(crate) struct RangeInfoInner {
+    /// The earliest block which is available.
+    earliest: AtomicU64,
+    /// The latest block which is available.
+    latest: AtomicU64,
+    /// Latest available block's hash.
+    latest_hash: RwLock<B256>,
+}
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]

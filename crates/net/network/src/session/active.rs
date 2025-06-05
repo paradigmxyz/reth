@@ -16,7 +16,7 @@ use crate::{
     session::{
         conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
-        SessionId,
+        RangeInfo, SessionId,
     },
 };
 use alloy_primitives::Sealable;
@@ -32,7 +32,7 @@ use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
-use reth_network_types::{peers::RangeInfo, session::config::INITIAL_REQUEST_TIMEOUT};
+use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
 use reth_primitives_traits::Block;
 use rustc_hash::FxHashMap;
 use tokio::{
@@ -114,7 +114,7 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// Used to reserve a slot to guarantee that the termination message is delivered
     pub(crate) terminate_message:
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
-    /// The range info for the peer.
+    /// The range info for the remote peer.
     pub(crate) range_info: Option<RangeInfo>,
 }
 
@@ -264,7 +264,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::BlockRangeUpdate(msg) => {
-                self.try_emit_broadcast(PeerMessage::BlockRangeUpdated(msg)).into()
+                if let Some(range_info) = self.range_info.as_mut() {
+                    range_info.update(msg.earliest, msg.latest, msg.latest_hash);
+                }
+
+                OnIncomingMessageOutcome::Ok
             }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
