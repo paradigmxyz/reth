@@ -24,7 +24,6 @@ jobs:
       - name: Build Vocs
         if: github.event.action != 'closed' # You might want to skip the build if the PR has been closed
         run: |
-          echo "PWD: $(pwd)"
           cd book/vocs/ && bun i && bun run build
           echo "Vocs Build Complete"
 
@@ -32,3 +31,4 @@ jobs:
         uses: rossjrw/pr-preview-action@v1
         with:
           source-dir: ./book/vocs/docs/dist
+          token: ${{ secrets.PREVIEW_TOKEN }}
