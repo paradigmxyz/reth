@@ -6,7 +6,11 @@ use reth_evm::precompiles::{DynPrecompile, Precompile};
 use revm::precompile::{PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use schnellru::LruMap;
-use std::{collections::HashMap, hash::Hash, sync::Arc};
+use std::{
+    collections::HashMap,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -69,7 +73,7 @@ impl<S> CacheKey<S> {
 }
 
 /// Cache key reference, used to avoid cloning the input bytes when looking up using a [`CacheKey`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CacheKeyRef<'a, S>((S, &'a [u8]));
 
 impl<'a, S> CacheKeyRef<'a, S> {
@@ -81,6 +85,13 @@ impl<'a, S> CacheKeyRef<'a, S> {
 impl<S: PartialEq> PartialEq<CacheKey<S>> for CacheKeyRef<'_, S> {
     fn eq(&self, other: &CacheKey<S>) -> bool {
         self.0 .0 == other.0 .0 && self.0 .1 == other.0 .1.as_ref()
+    }
+}
+
+impl<'a, S: Hash> Hash for CacheKeyRef<'a, S> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0 .0.hash(state);
+        self.0 .1.hash(state);
     }
 }
 
@@ -193,9 +204,7 @@ pub(crate) struct CachedPrecompileMetrics {
     /// Precompile cache misses
     precompile_cache_misses: metrics::Counter,
 
-    /// Precompile cache size
-    ///
-    /// NOTE: this uses the LruMap's length as the size metric.
+    /// Precompile cache size. Uses the LRU cache length as the size metric.
     precompile_cache_size: metrics::Gauge,
 
     /// Precompile execution errors.
@@ -204,9 +213,28 @@ pub(crate) struct CachedPrecompileMetrics {
 
 #[cfg(test)]
 mod tests {
+    use std::hash::DefaultHasher;
+
     use super::*;
     use revm::precompile::PrecompileOutput;
     use revm_primitives::hardfork::SpecId;
+
+    #[test]
+    fn test_cache_key_ref_hash() {
+        let key1 = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
+        let key2 = CacheKeyRef::new(SpecId::PRAGUE, b"test_input");
+        assert!(PartialEq::eq(&key2, &key1));
+
+        let mut hasher = DefaultHasher::new();
+        key1.hash(&mut hasher);
+        let hash1 = hasher.finish();
+
+        let mut hasher = DefaultHasher::new();
+        key2.hash(&mut hasher);
+        let hash2 = hasher.finish();
+
+        assert_eq!(hash1, hash2);
+    }
 
     #[test]
     fn test_precompile_cache_basic() {
