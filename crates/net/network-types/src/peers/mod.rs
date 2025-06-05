@@ -83,7 +83,11 @@ impl Peer {
     }
 
     /// Applies a reputation change to the peer and returns what action should be taken.
-    pub fn apply_reputation(&mut self, reputation: i32, kind: ReputationChangeKind) -> ReputationChangeOutcome {
+    pub fn apply_reputation(
+        &mut self,
+        reputation: i32,
+        kind: ReputationChangeKind,
+    ) -> ReputationChangeOutcome {
         let previous = self.reputation;
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);

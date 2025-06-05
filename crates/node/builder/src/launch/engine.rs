@@ -308,6 +308,9 @@ where
 
             let mut res = Ok(());
 
+            /// We always assume that node is syncing on the restart
+            network_handle.update_sync_state(SyncState::Syncing);
+
             // advance the chain and await payloads built locally to add into the engine api tree handler to prevent re-execution if that block is received as payload from the CL
             loop {
                 tokio::select! {
@@ -341,6 +344,8 @@ where
                             }
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
+                                    // Once we're progressing via live sync, we can consider the node is not syncing anymore
+                                    network_handle.update_sync_state(SyncState::Idle);
                                     let head_block = Head {
                                         number: head.number(),
                                         hash: head.hash(),
