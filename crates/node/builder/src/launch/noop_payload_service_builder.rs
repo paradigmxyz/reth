@@ -27,6 +27,7 @@ where
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         ctx.task_executor().spawn_critical("payload builder", async move {
+            #[allow(clippy::collection_is_never_read)]
             let mut subscriptions = Vec::new();
 
             while let Some(message) = rx.recv().await {
