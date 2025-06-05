@@ -76,6 +76,7 @@ pub struct EngineArgs {
     pub state_root_fallback: bool,
 }
 
+#[allow(deprecated)]
 impl Default for EngineArgs {
     fn default() -> Self {
         Self {
@@ -83,7 +84,6 @@ impl Default for EngineArgs {
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             legacy_state_root_task_enabled: false,
             state_root_task_compare_updates: false,
-            #[allow(deprecated)]
             caching_and_prewarming_enabled: true,
             caching_and_prewarming_disabled: false,
             state_provider_metrics: false,
@@ -91,7 +91,6 @@ impl Default for EngineArgs {
             accept_execution_requests_hash: false,
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
-            #[allow(deprecated)]
             precompile_cache_enabled: true,
             precompile_cache_disabled: false,
             state_root_fallback: false,
