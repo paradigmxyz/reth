@@ -4,6 +4,12 @@ name: Deploy PR previews
 on: push
 concurrency: preview-${{ github.ref }}
 
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   deploy-preview:
     runs-on: ubuntu-latest
