@@ -65,6 +65,8 @@ use tracing::*;
 
 mod block_buffer;
 mod cached_state;
+#[cfg(test)]
+mod e2e_tests;
 pub mod error;
 mod instrumented_state;
 mod invalid_block_hook;
