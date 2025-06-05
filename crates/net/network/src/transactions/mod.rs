@@ -8,7 +8,6 @@ pub mod constants;
 pub mod fetcher;
 /// Defines the [`TransactionPolicies`] trait for aggregating transaction-related policies.
 pub mod policy;
-pub mod validation;
 
 pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
@@ -20,7 +19,6 @@ pub use config::{
     TransactionPropagationPolicy, TransactionsManagerConfig,
 };
 use policy::{NetworkPolicies, TransactionPolicies};
-pub use validation::*;
 
 pub(crate) use fetcher::{FetchEvent, TransactionFetcher};
 
@@ -596,10 +594,15 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
         }
 
         // 1. filter out spam
-        let (validation_outcome, mut partially_valid_msg) =
-            self.transaction_fetcher.filter_valid_message.partially_filter_valid_entries(msg);
+        if msg.is_empty() {
+            self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
+            return;
+        }
 
-        if validation_outcome == FilterOutcome::ReportPeer {
+        let original_len = msg.len();
+        let mut partially_valid_msg = msg.dedup();
+
+        if partially_valid_msg.len() != original_len {
             self.report_peer(peer_id, ReputationChangeKind::BadAnnouncement);
         }
 
