@@ -43,7 +43,7 @@ impl SenderIdentifiers {
         &mut self,
         addrs: impl IntoIterator<Item = Address>,
     ) -> Vec<SenderId> {
-        addrs.into_iter().filter_map(|addr| self.sender_id(&addr)).collect()
+        addrs.into_iter().map(|addr| self.sender_id_or_create(addr)).collect()
     }
 
     /// Returns the current identifier and increments the counter.
