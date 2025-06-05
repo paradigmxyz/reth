@@ -581,6 +581,40 @@ mod tests {
         ]);
         assert_eq!(nibbles1.common_prefix_length(&nibbles2), 31);
         assert_eq!(nibbles2.common_prefix_length(&nibbles1), 31);
+
+        // Test with 48 nibbles with different endings
+        let nibbles1 = PackedNibbles::from_nibbles([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0,
+        ]);
+        let nibbles2 = PackedNibbles::from_nibbles([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 1,
+        ]);
+        assert_eq!(nibbles1.common_prefix_length(&nibbles2), 47);
+        assert_eq!(nibbles2.common_prefix_length(&nibbles1), 47);
+
+        // Test with 64 nibbles with different endings
+        let nibbles1 = PackedNibbles::from_nibbles([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3,
+            4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0,
+        ]);
+        let nibbles2 = PackedNibbles::from_nibbles([
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
+            11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3,
+            4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 1,
+        ]);
+        assert_eq!(nibbles1.common_prefix_length(&nibbles2), 63);
+        assert_eq!(nibbles2.common_prefix_length(&nibbles1), 63);
+
+        let current = PackedNibbles::from_nibbles([0u8; 64]);
+        let path = PackedNibbles::from_nibbles([vec![0u8; 63], vec![2u8]].concat());
+        assert_eq!(current.common_prefix_length(&path), 63);
+
+        let current = PackedNibbles::from_nibbles([0u8; 63]);
+        let path = PackedNibbles::from_nibbles([vec![0u8; 62], vec![1u8], vec![0u8]].concat());
+        assert_eq!(current.common_prefix_length(&path), 62);
     }
 
     #[test]
