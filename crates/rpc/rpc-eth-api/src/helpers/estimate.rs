@@ -94,7 +94,7 @@ pub trait EstimateCall: Call {
                         // with the minimum gas limit to make sure.
                         let mut tx_env = tx_env.clone();
                         tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
-                        if let Ok((res, _)) = self.transact(&mut db, evm_env.clone(), tx_env) {
+                        if let Ok(res) = self.transact(&mut db, evm_env.clone(), tx_env) {
                             if res.result.is_success() {
                                 return Ok(U256::from(MIN_TRANSACTION_GAS))
                             }
@@ -119,36 +119,30 @@ pub trait EstimateCall: Call {
         trace!(target: "rpc::eth::estimate", ?evm_env, ?tx_env, "Starting gas estimation");
 
         // Execute the transaction with the highest possible gas limit.
-        let (mut res, (mut evm_env, mut tx_env)) =
-            match self.transact(&mut db, evm_env.clone(), tx_env.clone()) {
-                // Handle the exceptional case where the transaction initialization uses too much
-                // gas. If the gas price or gas limit was specified in the request,
-                // retry the transaction with the block's gas limit to determine if
-                // the failure was due to insufficient gas.
-                Err(err)
-                    if err.is_gas_too_high() &&
-                        (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
-                {
-                    return Err(self.map_out_of_gas_err(
-                        block_env_gas_limit,
-                        evm_env,
-                        tx_env,
-                        &mut db,
-                    ))
+        let mut res = match self.transact(&mut db, evm_env.clone(), tx_env.clone()) {
+            // Handle the exceptional case where the transaction initialization uses too much
+            // gas. If the gas price or gas limit was specified in the request,
+            // retry the transaction with the block's gas limit to determine if
+            // the failure was due to insufficient gas.
+            Err(err)
+                if err.is_gas_too_high() &&
+                    (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
+            {
+                return Err(self.map_out_of_gas_err(block_env_gas_limit, evm_env, tx_env, &mut db))
+            }
+            Err(err) if err.is_gas_too_low() => {
+                // This failed because the configured gas cost of the tx was lower than what
+                // actually consumed by the tx This can happen if the
+                // request provided fee values manually and the resulting gas cost exceeds the
+                // sender's allowance, so we return the appropriate error here
+                return Err(RpcInvalidTransactionError::GasRequiredExceedsAllowance {
+                    gas_limit: tx_env.gas_limit(),
                 }
-                Err(err) if err.is_gas_too_low() => {
-                    // This failed because the configured gas cost of the tx was lower than what
-                    // actually consumed by the tx This can happen if the
-                    // request provided fee values manually and the resulting gas cost exceeds the
-                    // sender's allowance, so we return the appropriate error here
-                    return Err(RpcInvalidTransactionError::GasRequiredExceedsAllowance {
-                        gas_limit: tx_env.gas_limit(),
-                    }
-                    .into_eth_err())
-                }
-                // Propagate other results (successful or other errors).
-                ethres => ethres?,
-            };
+                .into_eth_err())
+            }
+            // Propagate other results (successful or other errors).
+            ethres => ethres?,
+        };
 
         let gas_refund = match res.result {
             ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
@@ -194,7 +188,7 @@ pub trait EstimateCall: Call {
             tx_env.set_gas_limit(optimistic_gas_limit);
             // Re-execute the transaction with the new gas limit and update the result and
             // environment.
-            (res, (evm_env, tx_env)) = self.transact(&mut db, evm_env, tx_env)?;
+            res = self.transact(&mut db, evm_env.clone(), tx_env.clone())?;
             // Update the gas used based on the new result.
             gas_used = res.result.gas_used();
             // Update the gas limit estimates (highest and lowest) based on the execution result.
@@ -241,7 +235,7 @@ pub trait EstimateCall: Call {
                 // Handle other cases, including successful transactions.
                 ethres => {
                     // Unpack the result and environment if the transaction was successful.
-                    (res, (evm_env, tx_env)) = ethres?;
+                    res = ethres?;
                     // Update the estimated gas range based on the transaction result.
                     update_estimated_gas_range(
                         res.result,
@@ -296,7 +290,7 @@ pub trait EstimateCall: Call {
     {
         let req_gas_limit = tx_env.gas_limit();
         tx_env.set_gas_limit(env_gas_limit);
-        let (res, _) = match self.transact(db, evm_env, tx_env) {
+        let res = match self.transact(db, evm_env, tx_env) {
             Ok(res) => res,
             Err(err) => return err,
         };

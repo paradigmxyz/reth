@@ -215,7 +215,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
-            let (res, _env) =
+            let res =
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
             ensure_success(res.result)
@@ -288,7 +288,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let block_transactions = block.transactions_recovered().take(num_txs);
                     for tx in block_transactions {
                         let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-                        let (res, _) = this.transact(&mut db, evm_env.clone(), tx_env)?;
+                        let res = this.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
@@ -313,7 +313,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         let (current_evm_env, prepared_tx) =
                             this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-                        let (res, _) = this.transact(&mut db, current_evm_env, prepared_tx)?;
+                        let res = this.transact(&mut db, current_evm_env, prepared_tx)?;
 
                         match ensure_success::<_, Self::Error>(res.result) {
                             Ok(output) => {
@@ -426,11 +426,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         };
 
         // transact again to get the exact gas used
-        let (result, (_, tx_env)) = self.transact(&mut db, evm_env, tx_env)?;
+        let gas_limit = tx_env.gas_limit();
+        let result = self.transact(&mut db, evm_env, tx_env)?;
         let res = match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error =
-                    Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
+                let error = Some(Self::Error::from_evm_halt(reason, gas_limit).to_string());
                 AccessListResult { access_list, gas_used: U256::from(gas_used), error }
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -477,61 +477,47 @@ pub trait Call:
 
     /// Executes the `TxEnv` against the given [Database] without committing state
     /// changes.
-    #[expect(clippy::type_complexity)]
     fn transact<DB>(
         &self,
         db: DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
-    ) -> Result<
-        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
-        Self::Error,
-    >
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
         DB: Database<Error = ProviderError>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
 
-        Ok((res, (evm_env, tx_env)))
+        Ok(res)
     }
 
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
-    #[expect(clippy::type_complexity)]
     fn transact_with_inspector<DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
         inspector: I,
-    ) -> Result<
-        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
-        Self::Error,
-    >
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
         DB: Database<Error = ProviderError>,
         I: InspectorFor<Self::Evm, DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
 
-        Ok((res, (evm_env, tx_env)))
+        Ok(res)
     }
 
     /// Executes the call request at the given [`BlockId`].
-    #[expect(clippy::type_complexity)]
     fn transact_call_at(
         &self,
         request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> impl Future<
-        Output = Result<
-            (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
-            Self::Error,
-        >,
-    > + Send
+    ) -> impl Future<Output = Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
     {
@@ -655,7 +641,7 @@ pub trait Call:
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
 
-                let (res, _) = this.transact(&mut db, evm_env, tx_env)?;
+                let res = this.transact(&mut db, evm_env, tx_env)?;
                 f(tx_info, res, db)
             })
             .await
