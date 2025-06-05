@@ -2411,7 +2411,7 @@ where
             .build();
         let mut executor = self.evm_config.executor_for_block(&mut db, block);
 
-        if self.config.precompile_cache_enabled() {
+        if !self.config.precompile_cache_disabled() {
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,
