@@ -63,24 +63,35 @@ jobs:
     name: build release
     runs-on: ${{ matrix.configs.os }}
     needs: extract-version
+    continue-on-error: ${{ matrix.configs.allow_fail }}
     strategy:
+      fail-fast: true
       matrix:
         configs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
             profile: maxperf
+            allow_fail: false
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04
             profile: maxperf
+            allow_fail: false
           - target: x86_64-apple-darwin
             os: macos-13
             profile: maxperf
+            allow_fail: false
           - target: aarch64-apple-darwin
             os: macos-14
             profile: maxperf
+            allow_fail: false
           - target: x86_64-pc-windows-gnu
             os: ubuntu-24.04
             profile: maxperf
+            allow_fail: false
+          - target: riscv64gc-unknown-linux-gnu
+            os: ubuntu-24.04
+            profile: maxperf
+            allow_fail: true
         build:
           - command: build
             binary: reth
