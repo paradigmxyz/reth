@@ -63,7 +63,7 @@ where
     disable_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
-    /// whether precompile cache should be enabled.
+    /// Whether precompile cache should be disabled.
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
