@@ -10061,6 +10061,7 @@ dependencies = [
  "reth-errors",
  "reth-metrics",
  "reth-network-p2p",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
  "reth-stages-types",
