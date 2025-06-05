@@ -9,9 +9,6 @@ pub(crate) mod engine;
 pub use common::LaunchContext;
 pub use exex::ExExLauncher;
 
-///contains `NoopPayloadServiceBuilder`
-pub mod noop_payload_service_builder;
-
 use std::future::Future;
 
 /// A general purpose trait that launches a new node of any kind.
