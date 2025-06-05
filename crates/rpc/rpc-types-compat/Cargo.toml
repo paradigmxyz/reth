@@ -19,7 +19,11 @@ reth-primitives-traits.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth = { workspace = true, default-features = false, features = ["serde"] }
 alloy-consensus.workspace = true
+alloy-network.workspace = true
 
 # io
 serde.workspace = true
 jsonrpsee-types.workspace = true
+
+# error
+thiserror.workspace = true

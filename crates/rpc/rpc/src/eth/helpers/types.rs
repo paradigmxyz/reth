@@ -9,6 +9,7 @@ use reth_primitives_traits::{Recovered, TxTy};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
+use std::fmt::Debug;
 
 /// A standalone [`EthApiTypes`] implementation for Ethereum.
 #[derive(Debug, Clone, Copy, Default)]

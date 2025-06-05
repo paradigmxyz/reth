@@ -1,11 +1,15 @@
 //! Compatibility functions for rpc `Transaction` type.
 
-use alloy_consensus::transaction::Recovered;
-use alloy_rpc_types_eth::{request::TransactionRequest, TransactionInfo};
+use alloy_consensus::{
+    error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844, TxEip4844Variant,
+};
+use alloy_network::Network;
+use alloy_rpc_types_eth::{request::TransactionRequest, Transaction, TransactionInfo};
 use core::error;
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use serde::{Deserialize, Serialize};
-use std::fmt::Debug;
+use std::{fmt::Debug, marker::PhantomData};
+use thiserror::Error;
 
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
@@ -45,4 +49,87 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
         &self,
         request: TransactionRequest,
     ) -> Result<TxTy<Self::Primitives>, Self::Error>;
+}
+
+/// Converts `self` into `T`.
+pub trait IntoRpcTx<T> {
+    /// Performs the conversion.
+    fn into_rpc_tx(self, tx_info: TransactionInfo) -> T;
+}
+
+/// Converts [`TransactionRequest`] into `Self`.
+pub trait FromTxReq {
+    /// Performs the conversion.
+    fn from_tx_req(request: TransactionRequest) -> Result<Self, ValueError<TransactionRequest>>
+    where
+        Self: Sized;
+}
+
+impl IntoRpcTx<Transaction> for Recovered<EthereumTxEnvelope<TxEip4844>> {
+    fn into_rpc_tx(self, tx_info: TransactionInfo) -> Transaction {
+        Transaction::from_transaction(
+            self.map(|v| match v {
+                EthereumTxEnvelope::Eip4844(v) => {
+                    EthereumTxEnvelope::Eip4844(v.map(TxEip4844Variant::TxEip4844))
+                }
+                EthereumTxEnvelope::Legacy(v) => EthereumTxEnvelope::Legacy(v),
+                EthereumTxEnvelope::Eip2930(v) => EthereumTxEnvelope::Eip2930(v),
+                EthereumTxEnvelope::Eip1559(v) => EthereumTxEnvelope::Eip1559(v),
+                EthereumTxEnvelope::Eip7702(v) => EthereumTxEnvelope::Eip7702(v),
+            }),
+            tx_info,
+        )
+    }
+}
+
+impl FromTxReq for EthereumTxEnvelope<TxEip4844> {
+    fn from_tx_req(request: TransactionRequest) -> Result<Self, ValueError<TransactionRequest>> {
+        TransactionRequest::build_typed_simulate_transaction(request)
+    }
+}
+
+/// Error that occurred during conversions into RPC response.
+#[derive(Debug, Clone, Error)]
+pub enum CompatError {
+    /// Error that happens on conversion into transaction RPC response.
+    #[error("Failed to convert transaction into RPC response")]
+    TransactionConversionError,
+}
+
+impl From<CompatError> for jsonrpsee_types::ErrorObject<'static> {
+    fn from(_value: CompatError) -> Self {
+        todo!()
+    }
+}
+
+/// Generic RPC response object converter for primitives `N` and network `E`.
+#[derive(Debug, Clone)]
+pub struct RpcTransactionConverter<N, E>(PhantomData<(N, E)>);
+
+impl<N, E> TransactionCompat for RpcTransactionConverter<N, E>
+where
+    N: NodePrimitives,
+    E: Network + Unpin,
+    TxTy<N>: FromTxReq + Clone + Debug,
+    Recovered<TxTy<N>>: IntoRpcTx<<E as Network>::TransactionResponse>,
+    Self: Send + Sync,
+{
+    type Primitives = N;
+    type Transaction = <E as Network>::TransactionResponse;
+    type Error = CompatError;
+
+    fn fill(
+        &self,
+        tx: Recovered<TxTy<N>>,
+        tx_info: TransactionInfo,
+    ) -> Result<Self::Transaction, Self::Error> {
+        Ok(tx.into_rpc_tx(tx_info))
+    }
+
+    fn build_simulate_v1_transaction(
+        &self,
+        request: TransactionRequest,
+    ) -> Result<TxTy<N>, Self::Error> {
+        TxTy::<N>::from_tx_req(request).map_err(|_| CompatError::TransactionConversionError)
+    }
 }
