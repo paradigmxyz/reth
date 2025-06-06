@@ -324,6 +324,13 @@ impl ChainSpec {
         genesis.into()
     }
 
+    /// Override the hardforks for the chain spec.
+    pub fn override_hardforks(&self, hardforks: ChainHardforks) -> Self {
+        let mut new_self = self.clone();
+        new_self.hardforks = hardforks;
+        new_self
+    }
+
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain

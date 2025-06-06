@@ -2,7 +2,7 @@
 
 use crate::launcher::Launcher;
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, HardforkOverride};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
@@ -10,8 +10,8 @@ use reth_db::init_db;
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, HardforkOverridesArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -109,6 +109,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten, next_help_heading = "Engine")]
     pub engine: EngineArgs,
 
+    /// All hardfork overrides related arguments
+    #[command(flatten, next_help_heading = "Hardfork Overrides")]
+    pub hardfork_overrides: HardforkOverridesArgs,
+
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
@@ -133,7 +137,7 @@ impl<C: ChainSpecParser> NodeCommand<C> {
 impl<C, Ext> NodeCommand<C, Ext>
 where
     C: ChainSpecParser,
-    C::ChainSpec: EthChainSpec + EthereumHardforks,
+    C::ChainSpec: EthChainSpec + EthereumHardforks + Clone + HardforkOverride,
     Ext: clap::Args + fmt::Debug,
 {
     /// Launches the node
@@ -163,7 +167,12 @@ where
             pruning,
             ext,
             engine,
+            hardfork_overrides,
         } = self;
+
+        let chain = chain
+            .override_hardforks(hardfork_overrides.apply_overrides_to_hardforks(chain.hardforks()))
+            .into();
 
         // set up node config
         let mut node_config = NodeConfig {
@@ -181,6 +190,7 @@ where
             dev,
             pruning,
             engine,
+            hardfork_overrides,
         };
 
         let data_dir = node_config.datadir();
