@@ -2,7 +2,6 @@
 
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction, TxEip4844,
-    TxEip4844Variant,
 };
 use alloy_network::Network;
 use alloy_primitives::{Address, Signature};
@@ -94,16 +93,7 @@ impl IntoRpcTx<Transaction> for EthereumTxEnvelope<TxEip4844> {
     type TxInfo = TransactionInfo;
 
     fn into_rpc_tx(self, signer: Address, tx_info: TransactionInfo) -> Transaction {
-        Transaction::from_transaction(
-            self.with_signer(signer).map(|v| match v {
-                Self::Eip4844(v) => EthereumTxEnvelope::Eip4844(v.map(TxEip4844Variant::TxEip4844)),
-                Self::Legacy(v) => EthereumTxEnvelope::Legacy(v),
-                Self::Eip2930(v) => EthereumTxEnvelope::Eip2930(v),
-                Self::Eip1559(v) => EthereumTxEnvelope::Eip1559(v),
-                Self::Eip7702(v) => EthereumTxEnvelope::Eip7702(v),
-            }),
-            tx_info,
-        )
+        Transaction::from_transaction(self.with_signer(signer).convert(), tx_info)
     }
 }
 
