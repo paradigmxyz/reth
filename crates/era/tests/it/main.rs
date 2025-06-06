@@ -32,7 +32,7 @@ const fn main() {}
 const MAINNET: &str = "mainnet";
 /// Default mainnet url
 /// for downloading mainnet `.era1` files
-const MAINNET_URL: &str = "https://era.ithaca.xyz/era1/";
+const MAINNET_URL: &str = "https://era.ithaca.xyz/era1/index.html";
 
 /// Succinct list of mainnet files we want to download
 /// from <https://era.ithaca.xyz/era1/>

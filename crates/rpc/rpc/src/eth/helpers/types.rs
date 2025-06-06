@@ -1,12 +1,11 @@
 //! L1 `eth` API types.
 
-use alloy_consensus::{SignableTransaction, TxEnvelope};
+use alloy_consensus::TxEnvelope;
 use alloy_network::{Ethereum, Network};
-use alloy_primitives::Signature;
 use alloy_rpc_types::TransactionRequest;
 use alloy_rpc_types_eth::{Transaction, TransactionInfo};
-use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::Recovered;
+use reth_ethereum_primitives::EthPrimitives;
+use reth_primitives_traits::{Recovered, TxTy};
 use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::TransactionCompat;
@@ -30,17 +29,18 @@ impl EthApiTypes for EthereumEthApiTypes {
 #[non_exhaustive]
 pub struct EthTxBuilder;
 
-impl TransactionCompat<TransactionSigned> for EthTxBuilder
+impl TransactionCompat for EthTxBuilder
 where
     Self: Send + Sync,
 {
+    type Primitives = EthPrimitives;
     type Transaction = <Ethereum as Network>::TransactionResponse;
 
     type Error = EthApiError;
 
     fn fill(
         &self,
-        tx: Recovered<TransactionSigned>,
+        tx: Recovered<TxTy<Self::Primitives>>,
         tx_info: TransactionInfo,
     ) -> Result<Self::Transaction, Self::Error> {
         let tx = tx.convert::<TxEnvelope>();
@@ -50,17 +50,9 @@ where
     fn build_simulate_v1_transaction(
         &self,
         request: TransactionRequest,
-    ) -> Result<TransactionSigned, Self::Error> {
-        let Ok(tx) = request.build_typed_tx() else {
-            return Err(EthApiError::TransactionConversionError)
-        };
-        let signature = Signature::new(Default::default(), Default::default(), false);
-        Ok(tx.into_signed(signature).into())
-    }
-
-    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        let input = tx.inner.inner_mut().input_mut();
-        *input = input.slice(..4);
+    ) -> Result<TxTy<Self::Primitives>, Self::Error> {
+        TransactionRequest::build_typed_simulate_transaction(request)
+            .map_err(|_| EthApiError::TransactionConversionError)
     }
 }
 

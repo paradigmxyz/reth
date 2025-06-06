@@ -41,6 +41,9 @@ type ReceiptsResponseSender<R> = oneshot::Sender<ProviderResult<Option<Arc<Vec<R
 
 type CachedBlockResponseSender<B> = oneshot::Sender<Option<Arc<RecoveredBlock<B>>>>;
 
+type CachedBlockAndReceiptsResponseSender<B, R> =
+    oneshot::Sender<(Option<Arc<RecoveredBlock<B>>>, Option<Arc<Vec<R>>>)>;
+
 /// The type that can send the response to a requested header
 type HeaderResponseSender<H> = oneshot::Sender<ProviderResult<H>>;
 
@@ -195,6 +198,18 @@ impl<B: Block, R: Send + Sync> EthStateCache<B, R> {
 
         let block = block.map_err(|_| CacheServiceUnavailable)?;
         Ok(receipts?.map(|r| (r, block)))
+    }
+
+    /// Retrieves both block and receipts from cache if available.
+    pub async fn maybe_cached_block_and_receipts(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<(Option<Arc<RecoveredBlock<B>>>, Option<Arc<Vec<R>>>)> {
+        let (response_tx, rx) = oneshot::channel();
+        let _ = self
+            .to_service
+            .send(CacheAction::GetCachedBlockAndReceipts { block_hash, response_tx });
+        rx.await.map_err(|_| CacheServiceUnavailable.into())
     }
 
     /// Streams cached receipts and blocks for a list of block hashes, preserving input order.
@@ -436,6 +451,11 @@ where
                             let _ =
                                 response_tx.send(this.full_block_cache.get(&block_hash).cloned());
                         }
+                        CacheAction::GetCachedBlockAndReceipts { block_hash, response_tx } => {
+                            let block = this.full_block_cache.get(&block_hash).cloned();
+                            let receipts = this.receipts_cache.get(&block_hash).cloned();
+                            let _ = response_tx.send((block, receipts));
+                        }
                         CacheAction::GetBlockWithSenders { block_hash, response_tx } => {
                             if let Some(block) = this.full_block_cache.get(&block_hash).cloned() {
                                 let _ = response_tx.send(Ok(Some(block)));
@@ -623,6 +643,10 @@ enum CacheAction<B: Block, R> {
     GetCachedBlock {
         block_hash: B256,
         response_tx: CachedBlockResponseSender<B>,
+    },
+    GetCachedBlockAndReceipts {
+        block_hash: B256,
+        response_tx: CachedBlockAndReceiptsResponseSender<B, R>,
     },
     BlockWithSendersResult {
         block_hash: B256,

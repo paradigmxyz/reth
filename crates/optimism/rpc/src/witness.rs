@@ -7,8 +7,8 @@ use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpPayloadBuilder, OpPayloadPrimitives};
 use reth_optimism_txpool::OpPooledTx;
 use reth_primitives_traits::SealedHeader;
@@ -66,11 +66,10 @@ where
     Pool: TransactionPool<
             Transaction: OpPooledTx<Consensus = <Provider::Primitives as NodePrimitives>::SignedTx>,
         > + 'static,
-    Provider: BlockReaderIdExt
-        + NodePrimitivesProvider<
-            Primitives: OpPayloadPrimitives + NodePrimitives<BlockHeader = Provider::Header>,
-        > + StateProviderFactory
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+    Provider: BlockReaderIdExt<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
+        + NodePrimitivesProvider<Primitives: OpPayloadPrimitives>
+        + StateProviderFactory
+        + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone
         + 'static,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>

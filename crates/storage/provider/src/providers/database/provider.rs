@@ -17,13 +17,12 @@ use crate::{
     StageCheckpointReader, StateCommitmentProvider, StateProviderBox, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
-    WithdrawalsProvider,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
     BlockHeader, Header, TxReceipt,
 };
-use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals, BlockHashOrNumber};
+use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
@@ -56,8 +55,8 @@ use reth_prune_types::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, OmmersProvider,
-    StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, StateProvider,
+    StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ProviderResult, RootMismatch};
 use reth_trie::{
@@ -1192,12 +1191,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
 
         Ok(None)
     }
-
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(None)
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
@@ -1616,62 +1610,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         }
 
         Ok(result)
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypes<ChainSpec: EthereumHardforks>> WithdrawalsProvider
-    for DatabaseProvider<TX, N>
-{
-    fn withdrawals_by_block(
-        &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        if self.chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-            if let Some(number) = self.convert_hash_or_number(id)? {
-                return self.static_file_provider.get_with_static_file_or_database(
-                    StaticFileSegment::BlockMeta,
-                    number,
-                    |static_file| static_file.withdrawals_by_block(number.into(), timestamp),
-                    || {
-                        // If we are past shanghai, then all blocks should have a withdrawal list,
-                        // even if empty
-                        let withdrawals = self
-                            .tx
-                            .get::<tables::BlockWithdrawals>(number)
-                            .map(|w| w.map(|w| w.withdrawals))?
-                            .unwrap_or_default();
-                        Ok(Some(withdrawals))
-                    },
-                )
-            }
-        }
-        Ok(None)
-    }
-}
-
-impl<TX: DbTx + 'static, N: NodeTypesForProvider> OmmersProvider for DatabaseProvider<TX, N> {
-    /// Returns the ommers for the block with matching id from the database.
-    ///
-    /// If the block is not found, this returns `None`.
-    /// If the block exists, but doesn't contain ommers, this returns `None`.
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        if let Some(number) = self.convert_hash_or_number(id)? {
-            // If the Paris (Merge) hardfork block is known and block is after it, return empty
-            // ommers.
-            if self.chain_spec.is_paris_active_at_block(number) {
-                return Ok(Some(Vec::new()))
-            }
-
-            return self.static_file_provider.get_with_static_file_or_database(
-                StaticFileSegment::BlockMeta,
-                number,
-                |static_file| static_file.ommers(id),
-                || Ok(self.tx.get::<tables::BlockOmmers<Self::Header>>(number)?.map(|o| o.ommers)),
-            )
-        }
-
-        Ok(None)
     }
 }
 
@@ -3013,13 +2951,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
                 // Increment transaction id for each transaction.
                 next_tx_num += 1;
             }
-
-            debug!(
-                target: "providers::db",
-                ?block_number,
-                actions = ?durations_recorder.actions,
-                "Inserted block body"
-            );
         }
 
         self.storage.writer().write_block_bodies(self, bodies, write_to)?;
