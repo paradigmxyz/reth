@@ -173,8 +173,8 @@ impl TryIntoSimTx<OpTxEnvelope> for TransactionRequest {
 
 /// Conversion into transaction RPC response failed.
 #[derive(Debug, Clone, Error)]
-#[error("Failed to convert transaction into RPC response")]
-pub struct TransactionConversionError;
+#[error("Failed to convert transaction into RPC response: {0}")]
+pub struct TransactionConversionError(String);
 
 /// Generic RPC response object converter for primitives `N` and network `E`.
 #[derive(Debug)]
@@ -250,6 +250,6 @@ where
         &self,
         request: TransactionRequest,
     ) -> Result<TxTy<N>, Self::Error> {
-        Ok(request.try_into_sim_tx().map_err(|_| TransactionConversionError)?)
+        Ok(request.try_into_sim_tx().map_err(|e| TransactionConversionError(e.to_string()))?)
     }
 }
