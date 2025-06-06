@@ -247,7 +247,7 @@ mod tests {
         BackfillJobFactory,
     };
     use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
@@ -264,7 +264,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthExecutorProvider::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
@@ -300,7 +300,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthExecutorProvider::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
