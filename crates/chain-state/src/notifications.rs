@@ -1,23 +1,16 @@
 //! Canonical chain state notification trait and types.
 
 use alloy_eips::eip2718::Encodable2718;
-use alloy_primitives::{map::HashMap, B256};
 use derive_more::{Deref, DerefMut};
-use futures_util::StreamExt;
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
 use reth_storage_api::NodePrimitivesProvider;
 use std::{
-    future::Future,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
-    time::Duration,
 };
-use tokio::{
-    sync::{broadcast, mpsc, oneshot, watch},
-    time::Instant,
-};
+use tokio::sync::{broadcast, watch};
 use tokio_stream::{
     wrappers::{BroadcastStream, WatchStream},
     Stream,
@@ -218,37 +211,6 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
                 None => return Poll::Ready(None),
             }
         }
-    }
-}
-
-/// A monitor that tracks confirmations of canonical state notifications.
-#[derive(Debug)]
-pub struct ConfirmationMonitor {
-    canonical_stream: CanonStateNotificationStream,
-    tracked: HashMap<B256, (Instant, oneshot::Sender<CanonStateNotification>)>,
-    incoming_requests: mpsc::UnboundedReceiver<(B256, oneshot::Sender<CanonStateNotification>)>,
-    timeout_duration: Duration,
-}
-impl Future for ConfirmationMonitor {
-    type Output = ();
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        while let Poll::Ready(Some(notification)) = self.canonical_stream.poll_next_unpin(cx) {
-            if let Some((_, sender)) = self.tracked.remove(&notification.tip().hash()) {
-                let _ = sender.send(notification);
-            }
-        }
-
-        while let Poll::Ready(Some((block_hash, sender))) = self.incoming_requests.poll_recv(cx) {
-            self.tracked.insert(block_hash, (Instant::now(), sender));
-        }
-
-        let timeout_duration = self.timeout_duration;
-        let now = Instant::now();
-        self.tracked
-            .retain(|_, (start_time, _)| now.duration_since(*start_time) < timeout_duration);
-
-        Poll::Pending
     }
 }
 

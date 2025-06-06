@@ -1,5 +1,6 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
+use alloy_consensus::Receipt;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
@@ -337,6 +338,10 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     /// Sends signed transaction, returning its hash.
     #[method(name = "sendRawTransaction")]
     async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<B256>;
+
+    /// Sends raw transaction and waits for receipt.
+    #[method(name = "sendRawTransactionSync")]
+    async fn send_raw_transaction_sync(&self, tx: Bytes) -> RpcResult<Receipt>;
 
     /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
     /// + len(message) + message))).
@@ -800,6 +805,12 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
         Ok(EthTransactions::send_raw_transaction(self, tx).await?)
+    }
+
+    /// Handler for: `eth_sendRawTransactionSync`
+    async fn send_raw_transaction_sync(&self, tx: Bytes) -> RpcResult<Receipt> {
+        trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransactionSync");
+        Ok(EthTransactions::send_raw_transaction_sync(self, tx).await?)
     }
 
     /// Handler for: `eth_sign`

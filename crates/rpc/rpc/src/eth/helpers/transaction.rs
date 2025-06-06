@@ -1,7 +1,10 @@
 //! Contains RPC handler implementations specific to transactions
 
 use crate::EthApi;
+use alloy_consensus::Receipt;
 use alloy_primitives::{Bytes, B256};
+use futures::StreamExt;
+use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
@@ -14,7 +17,8 @@ impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>> + CanonStateSubscriptions,
+    Self::Provider: CanonStateSubscriptions,
 {
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
@@ -40,6 +44,48 @@ where
             .map_err(Self::Error::from_eth_err)?;
 
         Ok(hash)
+    }
+
+    async fn send_raw_transaction_sync(&self, tx: Bytes) -> Result<Receipt, Self::Error> {
+        let recovered = recover_raw_transaction(&tx)?;
+
+        // broadcast raw transaction to subscribers if there is any.
+        self.broadcast_raw_transaction(tx);
+
+        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+        // submit the transaction to the pool with a Local origin
+        let hash = self
+            .pool()
+            .add_transaction(TransactionOrigin::Local, pool_transaction)
+            .await
+            .map_err(Self::Error::from_eth_err)?;
+
+        let receiver = self.provider().subscribe_to_canonical_state();
+        let mut stream = self.provider().canonical_state_stream();
+        //let mut stream = tokio_stream::wrappers::BroadcastStream::new(receiver);
+        let mut timeout_sleep = tokio::time::sleep(tokio::time::Duration::from_secs(30));
+        tokio::pin!(timeout_sleep);
+
+        loop {
+            tokio::select! {
+                maybe_notification = stream.next() => {
+                    match maybe_notification {
+                        Some(notification) => {
+                            let chain = notification.committed();
+                            for block in chain.blocks_iter() {
+                                    // TODO: Receipt logic here
+                                    return Ok(Receipt::default());
+                            }
+                        }
+                        None => return Err(Self::Error::StreamClosed),
+                    }
+                }
+
+                _ = &mut timeout_sleep => {
+                    return Err(Self::Error::Timeout);
+                }
+            }
+        }
     }
 }
 

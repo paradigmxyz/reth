@@ -19,8 +19,8 @@ pub use chain_info::ChainInfoTracker;
 mod notifications;
 pub use notifications::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotificationStream,
-    CanonStateNotifications, CanonStateSubscriptions, ConfirmationMonitor, ForkChoiceNotifications,
-    ForkChoiceStream, ForkChoiceSubscriptions,
+    CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications, ForkChoiceStream,
+    ForkChoiceSubscriptions,
 };
 
 mod memory_overlay;

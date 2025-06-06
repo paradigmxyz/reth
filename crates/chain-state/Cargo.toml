@@ -44,6 +44,7 @@ parking_lot.workspace = true
 pin-project.workspace = true
 serde = { workspace = true, optional = true }
 
+
 # optional deps for test-utils
 alloy-signer = { workspace = true, optional = true }
 alloy-signer-local = { workspace = true, optional = true }

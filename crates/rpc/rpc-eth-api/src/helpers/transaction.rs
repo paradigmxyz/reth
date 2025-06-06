@@ -8,7 +8,7 @@ use crate::{
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
-    BlockHeader, Transaction,
+    BlockHeader, Receipt, Transaction,
 };
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
@@ -63,6 +63,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         &self,
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send;
+
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// Obtain receipt.
+    fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+    ) -> impl Future<Output = Result<Receipt, Self::Error>> + Send;
 
     /// Returns the transaction by hash.
     ///
