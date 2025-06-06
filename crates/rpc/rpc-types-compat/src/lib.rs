@@ -13,6 +13,6 @@
 pub mod block;
 pub mod transaction;
 pub use transaction::{
-    try_into_op_tx_info, CompatError, IntoRpcTx, RpcTransactionConverter, TransactionCompat,
-    TryIntoSimTx, TxInfoMapper,
+    try_into_op_tx_info, IntoRpcTx, RpcTransactionConverter, TransactionCompat,
+    TransactionConversionError, TryIntoSimTx, TxInfoMapper,
 };

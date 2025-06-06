@@ -1,5 +1,9 @@
 //! Loads and formats OP transaction RPC response.
 
+use crate::{
+    eth::{OpEthApiInner, OpNodeCore},
+    OpEthApi, OpEthApiError, SequencerClient,
+};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTxEnvelope};
@@ -7,22 +11,18 @@ use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::DepositReceipt;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    try_into_op_tx_info, CompatError, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore,
+    try_into_op_tx_info, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore,
     RpcNodeCoreExt, TxInfoMapper,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
+use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
+    errors::ProviderError, BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider,
+    TransactionsProvider,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::{
     fmt::{Debug, Formatter},
     sync::Arc,
-};
-
-use crate::{
-    eth::{OpEthApiInner, OpNodeCore},
-    OpEthApi, OpEthApiError, SequencerClient,
 };
 
 impl<N> EthTransactions for OpEthApi<N>
@@ -89,12 +89,6 @@ where
     }
 }
 
-impl From<CompatError> for OpEthApiError {
-    fn from(value: CompatError) -> Self {
-        Self::Eth(EthApiError::from(value))
-    }
-}
-
 /// Optimism implementation of [`TxInfoMapper`].
 ///
 /// For deposits, receipt is fetched to extract `deposit_nonce` and `deposit_receipt_version`.
@@ -121,12 +115,13 @@ where
     N::Provider: ReceiptProvider<Receipt: DepositReceipt>,
 {
     type Out = OpTransactionInfo;
+    type Err = ProviderError;
 
     fn try_map(
         &self,
         tx: &OpTxEnvelope,
         tx_info: TransactionInfo,
-    ) -> Result<Self::Out, CompatError> {
+    ) -> Result<Self::Out, ProviderError> {
         try_into_op_tx_info(self.0.eth_api.provider(), tx, tx_info)
     }
 }

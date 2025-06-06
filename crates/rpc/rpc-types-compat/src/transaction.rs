@@ -17,7 +17,7 @@ use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction, TxTy};
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use serde::{Deserialize, Serialize};
-use std::{error::Error, fmt::Debug, marker::PhantomData};
+use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Builds RPC transaction w.r.t. network.
@@ -111,15 +111,18 @@ impl IntoRpcTx<Transaction> for EthereumTxEnvelope<TxEip4844> {
 pub trait TxInfoMapper<T> {
     /// An associated output type that carries [`TransactionInfo`] with some extra context.
     type Out;
+    /// An associated error that can occur during the mapping.
+    type Err;
 
     /// Performs the conversion.
-    fn try_map(&self, tx: T, tx_info: TransactionInfo) -> Result<Self::Out, CompatError>;
+    fn try_map(&self, tx: T, tx_info: TransactionInfo) -> Result<Self::Out, Self::Err>;
 }
 
 impl<T> TxInfoMapper<&T> for () {
     type Out = TransactionInfo;
+    type Err = Infallible;
 
-    fn try_map(&self, _tx: &T, tx_info: TransactionInfo) -> Result<Self::Out, CompatError> {
+    fn try_map(&self, _tx: &T, tx_info: TransactionInfo) -> Result<Self::Out, Self::Err> {
         Ok(tx_info)
     }
 }
@@ -130,7 +133,7 @@ pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
     provider: &T,
     tx: &OpTxEnvelope,
     tx_info: TransactionInfo,
-) -> Result<OpTransactionInfo, CompatError> {
+) -> Result<OpTransactionInfo, ProviderError> {
     let deposit_meta = if tx.is_deposit() {
         provider.receipt_by_hash(tx.tx_hash())?.and_then(|receipt| {
             receipt.as_deposit_receipt().map(|receipt| OpDepositInfo {
@@ -178,16 +181,10 @@ impl TryIntoSimTx<OpTxEnvelope> for TransactionRequest {
     }
 }
 
-/// Error that occurred during conversions into RPC response.
+/// Conversion into transaction RPC response failed.
 #[derive(Debug, Clone, Error)]
-pub enum CompatError {
-    /// Conversion into transaction RPC response failed.
-    #[error("Failed to convert transaction into RPC response")]
-    TransactionConversionError,
-    /// Storage access failed.
-    #[error(transparent)]
-    Provider(#[from] ProviderError),
-}
+#[error("Failed to convert transaction into RPC response")]
+pub struct TransactionConversionError;
 
 /// Generic RPC response object converter for primitives `N` and network `E`.
 #[derive(Debug)]
@@ -228,7 +225,8 @@ where
     E: Network + Unpin,
     TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + Clone + Debug,
     TransactionRequest: TryIntoSimTx<TxTy<N>>,
-    Err: From<CompatError>
+    Err: From<TransactionConversionError>
+        + for<'a> From<<Map as TxInfoMapper<&'a TxTy<N>>>::Err>
         + Error
         + Unpin
         + Sync
@@ -262,6 +260,6 @@ where
         &self,
         request: TransactionRequest,
     ) -> Result<TxTy<N>, Self::Error> {
-        Ok(request.try_into_sim_tx().map_err(|_| CompatError::TransactionConversionError)?)
+        Ok(request.try_into_sim_tx().map_err(|_| TransactionConversionError)?)
     }
 }
