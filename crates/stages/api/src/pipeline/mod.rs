@@ -1,13 +1,13 @@
 mod ctrl;
 mod event;
 pub use crate::pipeline::ctrl::ControlFlow;
-use crate::{HistoryType, PipelineTarget, StageCheckpoint, StageId};
+use crate::{PipelineTarget, StageCheckpoint, StageId};
 use alloy_primitives::{BlockNumber, B256};
 pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, BlockNumReader,
     ChainStateBlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
     StageCheckpointReader, StageCheckpointWriter,
 };
