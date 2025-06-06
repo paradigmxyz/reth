@@ -3,13 +3,12 @@
 
 use std::sync::Arc;
 
-use crate::EthApiBuilder;
+use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
-use reth_ethereum_primitives::EthPrimitives;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -19,7 +18,6 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
-use reth_rpc_types_compat::transaction::RpcConverter;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
 };
@@ -67,7 +65,7 @@ pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
     /// Transaction RPC response builder.
-    pub tx_resp_builder: RpcConverter<EthPrimitives, Ethereum, EthApiError>,
+    pub tx_resp_builder: EthRpcConverter,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
@@ -160,7 +158,7 @@ where
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
-    type TransactionCompat = RpcConverter<EthPrimitives, Ethereum, EthApiError>;
+    type TransactionCompat = EthRpcConverter;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder
