@@ -68,6 +68,17 @@ pub struct RangeInfo {
 }
 
 impl RangeInfo {
+    /// Creates a new range information.
+    pub fn new(earliest: u64, latest: u64, latest_hash: B256) -> Self {
+        Self {
+            inner: Arc::new(RangeInfoInner {
+                earliest: AtomicU64::new(earliest),
+                latest: AtomicU64::new(latest),
+                latest_hash: RwLock::new(latest_hash),
+            }),
+        }
+    }
+
     /// Updates the range information.
     pub fn update(&self, earliest: u64, latest: u64, latest_hash: B256) {
         self.inner.earliest.store(earliest, Ordering::Relaxed);
