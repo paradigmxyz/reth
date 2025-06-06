@@ -349,6 +349,41 @@ impl TestHarness {
         }
     }
 
+    async fn check_block_received(&mut self, hash: B256) {
+        let event = self.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::BlockReceived(
+                header,
+            )) => {
+                assert_eq!(header.hash(), hash);
+            }
+            _ => panic!("Unexpected event: {event:#?}"),
+        }
+    }
+
+    async fn check_fork_block_added(&mut self, expected_hash: B256) {
+        let event = self.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
+                executed,
+                _,
+            )) => {
+                assert_eq!(executed.recovered_block.hash(), expected_hash);
+            }
+            _ => panic!("Unexpected event: {event:#?}"),
+        }
+    }
+
+    async fn check_invalid_block(&mut self, expected_hash: B256) {
+        let event = self.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(block)) => {
+                assert_eq!(block.hash(), expected_hash);
+            }
+            _ => panic!("Unexpected event: {event:#?}"),
+        }
+    }
+
     fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>) {
         let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
         let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
@@ -1137,6 +1172,9 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected() {
     assert!(test_harness.tree.state.buffer.block(&buffered_block_hash).is_none());
 
     // both blocks are added to the canon chain in order
+    // note that the buffered block is received first, but added last
+    test_harness.check_block_received(buffered_block_hash).await;
+    test_harness.check_block_received(non_buffered_block_hash).await;
     test_harness.check_canon_block_added(non_buffered_block_hash).await;
     test_harness.check_canon_block_added(buffered_block_hash).await;
 }
