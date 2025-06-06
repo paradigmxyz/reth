@@ -31,7 +31,8 @@ pub use reth_rpc_eth_types::error::{
     AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError,
 };
 pub use reth_rpc_types_compat::{
-    CompatError, IntoRpcTx, RpcTransactionConverter, TransactionCompat, TryIntoSimTx,
+    try_into_op_tx_info, CompatError, IntoRpcTx, RpcTransactionConverter, TransactionCompat,
+    TryIntoSimTx, TxInfoMapper,
 };
 pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
 

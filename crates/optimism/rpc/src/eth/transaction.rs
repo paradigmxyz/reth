@@ -13,16 +13,23 @@ use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    CompatError, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
-    TransactionCompat,
+    try_into_op_tx_info, CompatError, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore,
+    RpcNodeCoreExt, TransactionCompat, TxInfoMapper,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use std::{
+    fmt::{Debug, Formatter},
+    sync::Arc,
+};
 
-use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
+use crate::{
+    eth::{OpEthApiInner, OpNodeCore},
+    OpEthApi, OpEthApiError, SequencerClient,
+};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
@@ -148,5 +155,41 @@ where
         // Create an empty signature for the transaction.
         let signature = Signature::new(Default::default(), Default::default(), false);
         Ok(tx.into_signed(signature).into())
+    }
+}
+
+/// Optimism implementation of [`TxInfoMapper`].
+///
+/// For deposits, receipt is fetched to extract `deposit_nonce` and `deposit_receipt_version`.
+/// Otherwise, it works like regular Ethereum implementation, i.e. uses [`TransactionInfo`].
+#[derive(Clone)]
+pub struct OpTxInfoMapper<N: OpNodeCore>(Arc<OpEthApiInner<N>>);
+
+impl<N: OpNodeCore> Debug for OpTxInfoMapper<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OpTxInfoMapper").finish()
+    }
+}
+
+impl<N: OpNodeCore> OpTxInfoMapper<N> {
+    /// Creates [`OpTxInfoMapper`] that uses [`ReceiptProvider`] borrowed from given `eth_api`.
+    pub const fn new(eth_api: Arc<OpEthApiInner<N>>) -> Self {
+        Self(eth_api)
+    }
+}
+
+impl<N> TxInfoMapper<&OpTxEnvelope> for OpTxInfoMapper<N>
+where
+    N: FullNodeComponents,
+    N::Provider: ReceiptProvider<Receipt: DepositReceipt>,
+{
+    type Out = OpTransactionInfo;
+
+    fn try_map(
+        &self,
+        tx: &OpTxEnvelope,
+        tx_info: TransactionInfo,
+    ) -> Result<Self::Out, CompatError> {
+        try_into_op_tx_info(self.0.eth_api.provider(), tx, tx_info)
     }
 }
