@@ -70,15 +70,32 @@ impl From<PackedNibbles> for Nibbles {
     }
 }
 
-// TODO: this can be optimized
+/// Deriving [`Ord`] for [`PackedNibbles`] is not correct, because they will be compared as unsigned
+/// integers without accounting for length. This is incorrect, because `0x1` should be considered
+/// greater than `0x02`.
 impl Ord for PackedNibbles {
     fn cmp(&self, other: &Self) -> Ordering {
-        for i in 0..self.len().min(other.len()) {
-            if self.get_nibble(i) != other.get_nibble(i) {
-                return self.get_nibble(i).cmp(&other.get_nibble(i));
+        match self.length.cmp(&other.length) {
+            Ordering::Equal => self.nibbles.cmp(&other.nibbles),
+            Ordering::Greater => {
+                let shift = ((self.length - other.length) as usize) * 4;
+                let cmp = self.nibbles.wrapping_shr(shift).cmp(&other.nibbles);
+                if cmp == Ordering::Equal {
+                    Ordering::Greater
+                } else {
+                    cmp
+                }
+            }
+            Ordering::Less => {
+                let shift = ((other.length - self.length) as usize) * 4;
+                let cmp = self.nibbles.cmp(&other.nibbles.wrapping_shr(shift));
+                if cmp == Ordering::Equal {
+                    Ordering::Less
+                } else {
+                    cmp
+                }
             }
         }
-        self.length.cmp(&other.length)
     }
 }
 
