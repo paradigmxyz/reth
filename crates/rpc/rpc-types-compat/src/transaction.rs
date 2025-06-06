@@ -123,7 +123,6 @@ where
     E: Network + Unpin,
     TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + Clone + Debug,
     TransactionRequest: TryIntoSimTx<TxTy<N>>,
-    Self: Send + Sync,
 {
     type Primitives = N;
     type Transaction = <E as Network>::TransactionResponse;
