@@ -70,9 +70,9 @@ impl From<PackedNibbles> for Nibbles {
     }
 }
 
-/// Deriving [`Ord`] for [`PackedNibbles`] is not correct, because they will be compared as unsigned
-/// integers without accounting for length. This is incorrect, because `0x1` should be considered
-/// greater than `0x02`.
+// Deriving [`Ord`] for [`PackedNibbles`] is not correct, because they will be compared as unsigned
+// integers without accounting for length. This is incorrect, because `0x1` should be considered
+// greater than `0x02`.
 impl Ord for PackedNibbles {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.length.cmp(&other.length) {
@@ -241,6 +241,8 @@ impl PackedNibbles {
             i += 1;
         }
         return i;
+
+        // TODO: the optimized implementation below fails the last test case
 
         const fn count_equal_nibbles(self_limb: u64, other_limb: u64) -> usize {
             // Pad both limbs with trailing zeros to the same effective length
