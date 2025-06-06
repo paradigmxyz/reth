@@ -25,8 +25,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcNodeCore, RpcNodeCoreExt,
-    RpcTransactionConverter,
+    EthApiTypes, FromEvmError, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{
@@ -68,8 +67,7 @@ pub struct OpEthApi<N: OpNodeCore, NetworkT = Optimism> {
     inner: Arc<OpEthApiInner<N>>,
     /// Marker for the network types.
     _nt: PhantomData<NetworkT>,
-    tx_resp_builder:
-        RpcTransactionConverter<N::Primitives, NetworkT, OpEthApiError, OpTxInfoMapper<N>>,
+    tx_resp_builder: RpcConverter<N::Primitives, NetworkT, OpEthApiError, OpTxInfoMapper<N>>,
 }
 
 impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
@@ -84,7 +82,7 @@ impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
         Self {
             inner: inner.clone(),
             _nt: PhantomData,
-            tx_resp_builder: RpcTransactionConverter::with_mapper(OpTxInfoMapper::new(inner)),
+            tx_resp_builder: RpcConverter::with_mapper(OpTxInfoMapper::new(inner)),
         }
     }
 }
@@ -121,7 +119,7 @@ where
     type Error = OpEthApiError;
     type NetworkTypes = NetworkT;
     type TransactionCompat =
-        RpcTransactionConverter<N::Primitives, NetworkT, OpEthApiError, OpTxInfoMapper<N>>;
+        RpcConverter<N::Primitives, NetworkT, OpEthApiError, OpTxInfoMapper<N>>;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder

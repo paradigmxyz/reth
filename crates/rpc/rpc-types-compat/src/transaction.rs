@@ -178,38 +178,38 @@ pub struct TransactionConversionError;
 
 /// Generic RPC response object converter for primitives `N` and network `E`.
 #[derive(Debug)]
-pub struct RpcTransactionConverter<N, E, Err, Map = ()> {
+pub struct RpcConverter<N, E, Err, Map = ()> {
     phantom: PhantomData<(N, E, Err)>,
     mapper: Map,
 }
 
-impl<N, E, Err> RpcTransactionConverter<N, E, Err, ()> {
-    /// Creates a new [`RpcTransactionConverter`] with the default mapper.
+impl<N, E, Err> RpcConverter<N, E, Err, ()> {
+    /// Creates a new [`RpcConverter`] with the default mapper.
     pub const fn new() -> Self {
         Self::with_mapper(())
     }
 }
 
-impl<N, E, Err, Map> RpcTransactionConverter<N, E, Err, Map> {
-    /// Creates a new [`RpcTransactionConverter`] with `mapper`.
+impl<N, E, Err, Map> RpcConverter<N, E, Err, Map> {
+    /// Creates a new [`RpcConverter`] with `mapper`.
     pub const fn with_mapper(mapper: Map) -> Self {
         Self { phantom: PhantomData, mapper }
     }
 }
 
-impl<N, E, Err, Map: Clone> Clone for RpcTransactionConverter<N, E, Err, Map> {
+impl<N, E, Err, Map: Clone> Clone for RpcConverter<N, E, Err, Map> {
     fn clone(&self) -> Self {
         Self::with_mapper(self.mapper.clone())
     }
 }
 
-impl<N, E, Err> Default for RpcTransactionConverter<N, E, Err> {
+impl<N, E, Err> Default for RpcConverter<N, E, Err> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N, E, Err, Map> TransactionCompat for RpcTransactionConverter<N, E, Err, Map>
+impl<N, E, Err, Map> TransactionCompat for RpcConverter<N, E, Err, Map>
 where
     N: NodePrimitives,
     E: Network + Unpin,

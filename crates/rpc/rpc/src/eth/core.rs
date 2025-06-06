@@ -19,7 +19,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
-use reth_rpc_types_compat::transaction::RpcTransactionConverter;
+use reth_rpc_types_compat::transaction::RpcConverter;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
 };
@@ -67,7 +67,7 @@ pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
     /// Transaction RPC response builder.
-    pub tx_resp_builder: RpcTransactionConverter<EthPrimitives, Ethereum, EthApiError>,
+    pub tx_resp_builder: RpcConverter<EthPrimitives, Ethereum, EthApiError>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
@@ -160,7 +160,7 @@ where
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
-    type TransactionCompat = RpcTransactionConverter<EthPrimitives, Ethereum, EthApiError>;
+    type TransactionCompat = RpcConverter<EthPrimitives, Ethereum, EthApiError>;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder
