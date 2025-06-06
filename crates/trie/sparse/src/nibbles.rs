@@ -368,7 +368,9 @@ impl PackedNibbles {
         if self.length > 0 {
             self.nibbles = self.nibbles.wrapping_shl(4);
         }
-        self.nibbles = self.nibbles.bitor(U256::from_limbs([(nibble & 0x0F) as u64, 0, 0, 0]));
+        if nibble > 0 {
+            self.nibbles = self.nibbles.bitor(U256::from_limbs([(nibble & 0x0F) as u64, 0, 0, 0]));
+        }
         self.length += 1;
     }
 
