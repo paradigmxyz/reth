@@ -2,7 +2,7 @@
 
 use crate::testsuite::{
     actions::{produce_blocks::ProduceBlocks, Sequence},
-    Action, Environment, LatestBlockInfo,
+    Action, BlockInfo, Environment,
 };
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
@@ -40,10 +40,15 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
+            // store the fork base for later validation
+            env.current_fork_base = Some(self.fork_base_block);
+
             let mut sequence = Sequence::new(vec![
                 Box::new(SetForkBase::new(self.fork_base_block)),
                 Box::new(ProduceBlocks::new(self.num_blocks)),
-                Box::new(ValidateFork::new(self.fork_base_block)),
+                // Note: ValidateFork is not called here because fork blocks are not accessible
+                // via RPC until they are made canonical. Validation will be done automatically
+                // as part of MakeCanonical or ReorgTo actions.
             ]);
 
             sequence.execute(env).await
@@ -87,9 +92,10 @@ where
                 .ok_or_else(|| eyre::eyre!("Fork base block {} not found", self.fork_base_block))?;
 
             // update environment to point to the fork base block
-            env.latest_block_info = Some(LatestBlockInfo {
+            env.current_block_info = Some(BlockInfo {
                 hash: fork_base_block.header.hash,
                 number: fork_base_block.header.number,
+                timestamp: fork_base_block.header.timestamp,
             });
 
             env.latest_header_time = fork_base_block.header.timestamp;
@@ -132,7 +138,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let current_block_info = env
-                .latest_block_info
+                .current_block_info
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No current block information available"))?;
 

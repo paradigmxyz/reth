@@ -1,19 +1,14 @@
 //! Reorg actions for the e2e testing framework.
 
 use crate::testsuite::{
-    actions::{
-        produce_blocks::{BroadcastLatestForkchoice, UpdateBlockInfo},
-        Action, Sequence,
-    },
-    Environment, LatestBlockInfo,
+    actions::{produce_blocks::BroadcastLatestForkchoice, Action, Sequence},
+    BlockInfo, Environment,
 };
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
-use reth_rpc_api::clients::EthApiClient;
 use std::marker::PhantomData;
 use tracing::debug;
 
@@ -56,9 +51,13 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            // resolve the target hash from either direct hash or tag
-            let target_hash = match &self.target {
-                ReorgTarget::Hash(hash) => *hash,
+            // resolve the target block info from either direct hash or tag
+            let target_block_info = match &self.target {
+                ReorgTarget::Hash(_hash) => {
+                    return Err(eyre::eyre!(
+                        "Direct hash reorgs are not supported. Use CaptureBlock to tag the target block first, then use ReorgTo::new_from_tag()"
+                    ));
+                }
                 ReorgTarget::Tag(tag) => env
                     .block_registry
                     .get(tag)
@@ -67,9 +66,8 @@ where
             };
 
             let mut sequence = Sequence::new(vec![
-                Box::new(SetReorgTarget::new(target_hash)),
+                Box::new(SetReorgTarget::new(target_block_info)),
                 Box::new(BroadcastLatestForkchoice::default()),
-                Box::new(UpdateBlockInfo::default()),
             ]);
 
             sequence.execute(env).await
@@ -80,14 +78,14 @@ where
 /// Sub-action to set the reorg target block in the environment
 #[derive(Debug)]
 pub struct SetReorgTarget {
-    /// Hash of the block to reorg to
-    pub target_hash: B256,
+    /// Complete block info for the reorg target
+    pub target_block_info: BlockInfo,
 }
 
 impl SetReorgTarget {
     /// Create a new `SetReorgTarget` action
-    pub const fn new(target_hash: B256) -> Self {
-        Self { target_hash }
+    pub const fn new(target_block_info: BlockInfo) -> Self {
+        Self { target_block_info }
     }
 }
 
@@ -97,42 +95,25 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            if env.node_clients.is_empty() {
-                return Err(eyre::eyre!("No node clients available"));
-            }
-
-            // verify the target block exists
-            let rpc_client = &env.node_clients[0].rpc;
-            let target_block = EthApiClient::<Transaction, Block, Receipt, Header>::block_by_hash(
-                rpc_client,
-                self.target_hash,
-                false,
-            )
-            .await?
-            .ok_or_else(|| eyre::eyre!("Target reorg block {} not found", self.target_hash))?;
+            let block_info = self.target_block_info;
 
             debug!(
                 "Setting reorg target to block {} (hash: {})",
-                target_block.header.number, self.target_hash
+                block_info.number, block_info.hash
             );
 
             // update environment to point to the target block
-            env.latest_block_info = Some(LatestBlockInfo {
-                hash: target_block.header.hash,
-                number: target_block.header.number,
-            });
-
-            env.latest_header_time = target_block.header.timestamp;
+            env.current_block_info = Some(block_info);
+            env.latest_header_time = block_info.timestamp;
 
             // update fork choice state to make the target block canonical
             env.latest_fork_choice_state = ForkchoiceState {
-                head_block_hash: self.target_hash,
-                safe_block_hash: self.target_hash, // Simplified - in practice might be different
-                finalized_block_hash: self.target_hash, /* Simplified - in practice might be
-                                                    * different */
+                head_block_hash: block_info.hash,
+                safe_block_hash: block_info.hash,
+                finalized_block_hash: block_info.hash,
             };
 
-            debug!("Set reorg target to block {}", self.target_hash);
+            debug!("Set reorg target to block {}", block_info.hash);
             Ok(())
         })
     }

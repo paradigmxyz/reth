@@ -4,7 +4,7 @@ use crate::tree::TreeConfig;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
-    actions::{MakeCanonical, ProduceBlocks},
+    actions::{CaptureBlock, CreateFork, MakeCanonical, ProduceBlocks, ReorgTo},
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
@@ -12,12 +12,9 @@ use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;
 
-/// Test that verifies forkchoice update and canonical chain insertion functionality.
-#[tokio::test]
-async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
-    reth_tracing::init_test_tracing();
-
-    let setup = Setup::default()
+/// Creates the standard setup for engine tree e2e tests.
+fn default_engine_tree_setup() -> Setup<EthEngineTypes> {
+    Setup::default()
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
@@ -33,10 +30,16 @@ async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
         .with_network(NetworkSetup::single_node())
         .with_tree_config(
             TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
-        );
+        )
+}
+
+/// Test that verifies forkchoice update and canonical chain insertion functionality.
+#[tokio::test]
+async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
 
     let test = TestBuilder::new()
-        .with_setup(setup)
+        .with_setup(default_engine_tree_setup())
         // produce one block
         .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
         // make it canonical via forkchoice update
@@ -45,6 +48,27 @@ async fn test_engine_tree_fcu_canon_chain_insertion_e2e() -> Result<()> {
         .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
         // make the latest block canonical
         .with_action(MakeCanonical::new());
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Test that verifies forkchoice update with a reorg where all blocks are already available.
+#[tokio::test]
+async fn test_engine_tree_fcu_reorg_with_all_blocks_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        // create a main chain with 5 blocks (blocks 0-4)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
+        .with_action(MakeCanonical::new())
+        // create a fork from block 2 with 3 additional blocks
+        .with_action(CreateFork::<EthEngineTypes>::new(2, 3))
+        .with_action(CaptureBlock::new("fork_tip"))
+        // perform FCU to the fork tip - this should make the fork canonical
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_tip"));
 
     test.run::<EthereumNode>().await?;
 

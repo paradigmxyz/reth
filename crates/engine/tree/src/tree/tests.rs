@@ -912,36 +912,6 @@ async fn test_engine_tree_fcu_missing_head() {
 }
 
 #[tokio::test]
-async fn test_engine_tree_fcu_reorg_with_all_blocks() {
-    let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-
-    let main_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..5).collect();
-    test_harness = test_harness.with_blocks(main_chain.clone());
-
-    let fork_chain = test_harness.block_builder.create_fork(main_chain[2].recovered_block(), 3);
-    let fork_chain_last_hash = fork_chain.last().unwrap().hash();
-
-    // add fork blocks to the tree
-    for block in &fork_chain {
-        test_harness.insert_block(block.clone()).unwrap();
-    }
-
-    test_harness.send_fcu(fork_chain_last_hash, ForkchoiceStatus::Valid).await;
-
-    // check for ForkBlockAdded events, we expect fork_chain.len() blocks added
-    test_harness.check_fork_chain_insertion(fork_chain.clone()).await;
-
-    // check for CanonicalChainCommitted event
-    test_harness.check_canon_commit(fork_chain_last_hash).await;
-
-    test_harness.check_fcu(fork_chain_last_hash, ForkchoiceStatus::Valid).await;
-
-    // new head is the tip of the fork chain
-    test_harness.check_canon_head(fork_chain_last_hash);
-}
-
-#[tokio::test]
 async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     reth_tracing::init_test_tracing();
 
