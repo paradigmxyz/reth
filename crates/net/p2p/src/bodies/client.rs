@@ -39,7 +39,7 @@ pub trait BodiesClient: DownloadClient {
     /// requested blocks.
     ///
     /// The range hint is not required, but can be used to optimize the routing of the request if
-    /// the hashes are  continuous or close together and the range hint is `[earliest, latest]` for
+    /// the hashes are continuous or close together and the range hint is `[earliest, latest]` for
     /// the requested blocks.
     fn get_block_bodies_with_priority_and_range_hint(
         &self,
