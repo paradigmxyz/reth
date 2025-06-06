@@ -2951,13 +2951,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
                 // Increment transaction id for each transaction.
                 next_tx_num += 1;
             }
-
-            debug!(
-                target: "providers::db",
-                ?block_number,
-                actions = ?durations_recorder.actions,
-                "Inserted block body"
-            );
         }
 
         self.storage.writer().write_block_bodies(self, bodies, write_to)?;

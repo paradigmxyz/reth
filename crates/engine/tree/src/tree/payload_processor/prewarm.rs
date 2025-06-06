@@ -214,7 +214,7 @@ where
     pub(super) metrics: PrewarmMetrics,
     /// An atomic bool that tells prewarm tasks to not start any more execution.
     pub(super) terminate_execution: Arc<AtomicBool>,
-    pub(super) precompile_cache_enabled: bool,
+    pub(super) precompile_cache_disabled: bool,
     pub(super) precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
 }
 
@@ -237,7 +237,7 @@ where
             provider,
             metrics,
             terminate_execution,
-            precompile_cache_enabled,
+            precompile_cache_disabled,
             mut precompile_cache_map,
         } = self;
 
@@ -269,7 +269,7 @@ where
         let spec_id = *evm_env.spec_id();
         let mut evm = evm_config.evm_with_env(state_provider, evm_env);
 
-        if precompile_cache_enabled {
+        if !precompile_cache_disabled {
             evm.precompiles_mut().map_precompiles(|address, precompile| {
                 CachedPrecompile::wrap(
                     precompile,

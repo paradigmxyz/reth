@@ -272,8 +272,44 @@ where
 
         Ok(Some((parent_hash, prices)))
     }
-}
 
+    /// Get the median tip value for the given block. This is useful for determining
+    /// tips when a block is at capacity.
+    ///
+    /// If the block cannot be found or has no transactions, this will return `None`.
+    pub async fn get_block_median_tip(&self, block_hash: B256) -> EthResult<Option<U256>> {
+        // check the cache (this will hit the disk if the block is not cached)
+        let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
+            return Ok(None)
+        };
+
+        let base_fee_per_gas = block.base_fee_per_gas();
+
+        // Filter, sort and collect the prices
+        let prices = block
+            .transactions_recovered()
+            .filter_map(|tx| {
+                if let Some(base_fee) = base_fee_per_gas {
+                    (*tx).effective_tip_per_gas(base_fee)
+                } else {
+                    Some((*tx).priority_fee_or_price())
+                }
+            })
+            .sorted()
+            .collect::<Vec<_>>();
+
+        let median = if prices.is_empty() {
+            // if there are no prices, return `None`
+            None
+        } else if prices.len() % 2 == 1 {
+            Some(U256::from(prices[prices.len() / 2]))
+        } else {
+            Some(U256::from((prices[prices.len() / 2 - 1] + prices[prices.len() / 2]) / 2))
+        };
+
+        Ok(median)
+    }
+}
 /// Container type for mutable inner state of the [`GasPriceOracle`]
 #[derive(Debug)]
 struct GasPriceOracleInner {

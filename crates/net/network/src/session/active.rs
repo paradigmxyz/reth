@@ -16,7 +16,7 @@ use crate::{
     session::{
         conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
-        SessionId,
+        BlockRangeInfo, SessionId,
     },
 };
 use alloy_primitives::Sealable;
@@ -114,6 +114,8 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// Used to reserve a slot to guarantee that the termination message is delivered
     pub(crate) terminate_message:
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
+    /// The eth69 range info for the remote peer.
+    pub(crate) range_info: Option<BlockRangeInfo>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -262,7 +264,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::BlockRangeUpdate(msg) => {
-                self.try_emit_broadcast(PeerMessage::BlockRangeUpdated(msg)).into()
+                if let Some(range_info) = self.range_info.as_ref() {
+                    range_info.update(msg.earliest, msg.latest, msg.latest_hash);
+                }
+
+                OnIncomingMessageOutcome::Ok
             }
             EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
@@ -987,6 +993,7 @@ mod tests {
                         )),
                         protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
                         terminate_message: None,
+                        range_info: None,
                     }
                 }
                 ev => {
