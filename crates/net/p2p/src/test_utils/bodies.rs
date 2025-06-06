@@ -8,7 +8,10 @@ use alloy_primitives::B256;
 use futures::FutureExt;
 use reth_ethereum_primitives::BlockBody;
 use reth_network_peers::PeerId;
-use std::fmt::{Debug, Formatter};
+use std::{
+    fmt::{Debug, Formatter},
+    ops::RangeInclusive,
+};
 use tokio::sync::oneshot;
 
 /// A test client for fetching bodies
@@ -40,10 +43,11 @@ where
     type Body = BlockBody;
     type Output = BodiesFut;
 
-    fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority_and_range_hint(
         &self,
         hashes: Vec<B256>,
         _priority: Priority,
+        _range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send((self.responder)(hashes));
