@@ -13,7 +13,8 @@ use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
+    CompatError, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::{
@@ -84,6 +85,12 @@ where
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
         self.inner.sequencer_client.clone()
+    }
+}
+
+impl From<CompatError> for OpEthApiError {
+    fn from(value: CompatError) -> Self {
+        Self::Eth(EthApiError::from(value))
     }
 }
 

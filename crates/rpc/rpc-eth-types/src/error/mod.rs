@@ -235,6 +235,7 @@ impl From<CompatError> for EthApiError {
     fn from(value: CompatError) -> Self {
         match value {
             CompatError::TransactionConversionError => Self::TransactionConversionError,
+            CompatError::Provider(err) => Self::from(err),
         }
     }
 }
