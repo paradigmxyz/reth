@@ -74,3 +74,38 @@ async fn test_engine_tree_fcu_reorg_with_all_blocks_e2e() -> Result<()> {
 
     Ok(())
 }
+
+/// Test that verifies valid forks with an older canonical head.
+///
+/// This test creates two competing fork chains starting from a common ancestor,
+/// then switches between them using forkchoice updates, verifying that the engine
+/// correctly handles chains where the canonical head is older than fork tips.
+#[tokio::test]
+async fn test_engine_tree_valid_forks_with_older_canonical_head_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        // create base chain with 1 block (this will be our old head)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(CaptureBlock::new("old_head"))
+        .with_action(MakeCanonical::new())
+        // extend base chain with 5 more blocks to establish a fork point
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
+        .with_action(CaptureBlock::new("fork_point"))
+        .with_action(MakeCanonical::new())
+        // revert to old head to simulate scenario where canonical head is older
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("old_head"))
+        // create first competing chain (chain A) from fork point with 10 blocks
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
+        .with_action(CaptureBlock::new("chain_a_tip"))
+        // create second competing chain (chain B) from same fork point with 10 blocks
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
+        .with_action(CaptureBlock::new("chain_b_tip"))
+        // switch to chain B via forkchoice update - this should become canonical
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("chain_b_tip"));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
