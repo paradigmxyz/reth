@@ -21,7 +21,7 @@ pub use evm::{EthEvmConfig, EthExecutorProvider};
 
 pub use reth_ethereum_consensus as consensus;
 pub mod node;
-pub use node::{EthereumEthApiBuilder, EthereumNode};
+pub use node::*;
 
 pub mod payload;
 
