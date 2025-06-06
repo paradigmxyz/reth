@@ -134,7 +134,8 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
 
     /// Returns the _next_ idle peer that's ready to accept a request,
     /// prioritizing those with the lowest timeout/latency and those that recently responded with
-    /// adequate data.
+    /// adequate data. Additionally prioritizes peers that either have no `BlockRangeInfo` or have
+    /// the full range available.
     fn next_best_peer(&self) -> Option<PeerId> {
         let mut idle = self.peers.iter().filter(|(_, peer)| peer.state.is_idle());
 
@@ -147,9 +148,20 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 continue
             }
 
-            // replace best peer if this peer has better rtt
+            // replace best peer if this peer has better range info (no range or starts from 0)
+            let best_has_good_range =
+                best_peer.1.range_info.as_ref().is_none_or(|r| r.earliest() == 0);
+            let maybe_better_has_good_range =
+                maybe_better.1.range_info.as_ref().is_none_or(|r| r.earliest() == 0);
+            if !best_has_good_range && maybe_better_has_good_range {
+                best_peer = maybe_better;
+                continue;
+            }
+
+            // replace best peer if this peer has better rtt and both have same range quality
             if maybe_better.1.timeout() < best_peer.1.timeout() &&
-                !maybe_better.1.last_response_likely_bad
+                !maybe_better.1.last_response_likely_bad &&
+                best_has_good_range == maybe_better_has_good_range
             {
                 best_peer = maybe_better;
             }
