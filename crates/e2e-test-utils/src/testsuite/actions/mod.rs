@@ -16,7 +16,7 @@ pub use fork::{CreateFork, SetForkBase, ValidateFork};
 pub use produce_blocks::{
     AssertMineBlock, BroadcastLatestForkchoice, BroadcastNextNewPayload, CheckPayloadAccepted,
     GenerateNextPayload, GeneratePayloadAttributes, PickNextBlockProducer, ProduceBlocks,
-    UpdateBlockInfo,
+    UpdateBlockInfo, UpdateBlockInfoToLatestPayload,
 };
 pub use reorg::{ReorgTarget, ReorgTo, SetReorgTarget};
 
@@ -117,8 +117,21 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let mut broadcast_action = BroadcastLatestForkchoice::default();
-            broadcast_action.execute(env).await
+            let mut actions: Vec<Box<dyn Action<Engine>>> = vec![
+                Box::new(BroadcastLatestForkchoice::default()),
+                Box::new(UpdateBlockInfo::default()),
+            ];
+
+            // if we're on a fork, validate it now that it's canonical
+            if let Some(fork_base) = env.current_fork_base {
+                debug!("MakeCanonical: Adding fork validation from base block {}", fork_base);
+                actions.push(Box::new(ValidateFork::new(fork_base)));
+                // clear the fork base since we're now canonical
+                env.current_fork_base = None;
+            }
+
+            let mut sequence = Sequence::new(actions);
+            sequence.execute(env).await
         })
     }
 }
@@ -144,11 +157,11 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let current_block = env
-                .latest_block_info
+                .current_block_info
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No current block information available"))?;
 
-            env.block_registry.insert(self.tag.clone(), current_block.hash);
+            env.block_registry.insert(self.tag.clone(), *current_block);
 
             debug!(
                 "Captured block {} (hash: {}) with tag '{}'",
