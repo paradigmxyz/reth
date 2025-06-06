@@ -6,6 +6,8 @@ use clap::{builder::RangedU64ValueParser, Args};
 use reth_config::config::PruneConfig;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 use std::collections::BTreeMap;
+use reth_chainspec::EthereumHardforks;
+use crate::primitives::EthereumHardfork;
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
@@ -86,11 +88,27 @@ pub struct PruningArgs {
     /// pruned.
     #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["storage_history_full", "storage_history_distance"])]
     pub storage_history_before: Option<BlockNumber>,
+
+    // Bodies
+    /// Prune bodies before the merge block.
+    #[arg(long = "prune.bodies.pre-merge", value_name = "BLOCKS", conflicts_with_all = &["bodies_distance", "bodies_before"])]
+    pub bodies_pre_merge: Option<u64>,
+    /// Prune bodies before the `head-N` block number. In other words, keep last N + 1
+    /// blocks.
+    #[arg(long = "prune.storagehistory.distance", value_name = "BLOCKS", conflicts_with_all = &["bodies_pre_merge", "bodies_before"])]
+    pub bodies_distance: Option<u64>,
+    /// Prune storage history before the specified block number. The specified block number is not
+    /// pruned.
+    #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["bodies_distance", "bodies_pre_merge"])]
+    pub bodies_before: Option<BlockNumber>,
 }
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> Option<PruneConfig> {
+    // TODO: accept chainspec again so that we can access merge block if any
+    pub fn prune_config<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneConfig>
+        where ChainSpec: EthereumHardforks
+    {
         // Initialise with a default prune configuration.
         let mut config = PruneConfig::default();
 
@@ -104,6 +122,8 @@ impl PruningArgs {
                     receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
+                    // TODO: set default to pre-merge block if available
+                    bodies_history: None,
                     receipts_log_filter: Default::default(),
                 },
             }
@@ -138,6 +158,22 @@ impl PruningArgs {
         }
 
         Some(config)
+    }
+
+    fn bodies_prune_mode<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneMode>
+    where ChainSpec: EthereumHardforks
+    {
+        if self.bodies_pre_merge.is_some() {
+            chain_spec.ethereum_fork_activation(EthereumHardfork::Paris)
+            Some(PruneMode::Full)
+        } else if let Some(distance) = self.sender_recovery_distance {
+            Some(PruneMode::Distance(distance))
+        } else if let Some(block_number) = self.sender_recovery_before {
+            Some(PruneMode::Before(block_number))
+        } else {
+            None
+        }
+
     }
 
     const fn sender_recovery_prune_mode(&self) -> Option<PruneMode> {

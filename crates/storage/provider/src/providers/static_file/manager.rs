@@ -229,6 +229,7 @@ pub struct StaticFileProviderInner<N> {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
+    // TODO: track lowest staticfile block for each segment
     /// Max static file block for each segment
     static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
     /// Available static file block ranges on disk indexed by max transactions.
