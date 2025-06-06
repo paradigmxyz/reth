@@ -1,20 +1,14 @@
 //! Loads and formats OP transaction RPC response.
 
-use alloy_consensus::{transaction::Recovered, SignableTransaction};
-use alloy_primitives::{Bytes, Signature, B256};
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
-use op_alloy_consensus::{
-    transaction::{OpDepositInfo, OpTransactionInfo},
-    OpTxEnvelope,
-};
-use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
-use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
+use op_alloy_consensus::{transaction::OpTransactionInfo, OpTxEnvelope};
+use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     try_into_op_tx_info, CompatError, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore,
-    RpcNodeCoreExt, TransactionCompat, TxInfoMapper,
+    RpcNodeCoreExt, TxInfoMapper,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::{
@@ -98,63 +92,6 @@ where
 impl From<CompatError> for OpEthApiError {
     fn from(value: CompatError) -> Self {
         Self::Eth(EthApiError::from(value))
-    }
-}
-
-impl<N> TransactionCompat for OpEthApi<N>
-where
-    N: FullNodeComponents,
-    N::Provider: ReceiptProvider<Receipt: DepositReceipt>,
-    <<N as FullNodeTypes>::Types as NodeTypes>::Primitives: NodePrimitives<SignedTx = OpTxEnvelope>,
-{
-    type Primitives = <<N as FullNodeTypes>::Types as NodeTypes>::Primitives;
-    type Transaction = Transaction;
-    type Error = OpEthApiError;
-
-    fn fill(
-        &self,
-        tx: Recovered<TxTy<Self::Primitives>>,
-        tx_info: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error> {
-        let tx = tx.convert::<TxTy<Self::Primitives>>();
-        let mut deposit_receipt_version = None;
-        let mut deposit_nonce = None;
-
-        if tx.is_deposit() {
-            // for depost tx we need to fetch the receipt
-            self.inner
-                .eth_api
-                .provider()
-                .receipt_by_hash(tx.tx_hash())
-                .map_err(Self::Error::from_eth_err)?
-                .inspect(|receipt| {
-                    if let Some(receipt) = receipt.as_deposit_receipt() {
-                        deposit_receipt_version = receipt.deposit_receipt_version;
-                        deposit_nonce = receipt.deposit_nonce;
-                    }
-                });
-        }
-
-        let tx_info = OpTransactionInfo::new(
-            tx_info,
-            OpDepositInfo { deposit_nonce, deposit_receipt_version },
-        );
-
-        Ok(Transaction::from_transaction(tx, tx_info))
-    }
-
-    fn build_simulate_v1_transaction(
-        &self,
-        request: alloy_rpc_types_eth::TransactionRequest,
-    ) -> Result<TxTy<Self::Primitives>, Self::Error> {
-        let request: OpTransactionRequest = request.into();
-        let Ok(tx) = request.build_typed_tx() else {
-            return Err(OpEthApiError::Eth(EthApiError::TransactionConversionError))
-        };
-
-        // Create an empty signature for the transaction.
-        let signature = Signature::new(Default::default(), Default::default(), false);
-        Ok(tx.into_signed(signature).into())
     }
 }
 
