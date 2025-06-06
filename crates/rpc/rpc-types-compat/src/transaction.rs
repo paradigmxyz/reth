@@ -69,6 +69,12 @@ where
     Self: Sized,
 {
     /// Performs the conversion.
+    ///
+    /// Should return a signed typed transaction envelope for the [`eth_simulateV1`] endpoint with a
+    /// dummy signature or an error if [required fields] are missing.
+    ///
+    /// [`eth_simulateV1`]: <https://github.com/ethereum/execution-apis/pull/484>
+    /// [required fields]: TransactionRequest::buildable_type
     fn try_into_sim_tx(self) -> Result<T, ValueError<Self>>;
 }
 
