@@ -114,11 +114,14 @@ impl PackedNibbles {
     /// Creates a new [`PackedNibbles`] instance from an iterator of nibbles.
     ///
     /// Each item in the iterator should be a nibble (0-15).
-    pub fn from_nibbles(nibbles: impl IntoIterator<Item = u8>) -> Self {
+    pub fn from_nibbles<T: AsRef<[u8]>>(nibbles: T) -> Self {
+        let nibbles = nibbles.as_ref();
+        assert!(nibbles.iter().all(|&nibble| nibble <= 0xf), "Invalid nibbles");
+
         let mut packed = Self::default();
         for nibble in nibbles {
             packed.nibbles = (packed.nibbles << 4) | U256::from(nibble & 0x0F);
-            packed.length += 1
+            packed.length += 1;
         }
         packed
     }
@@ -127,12 +130,13 @@ impl PackedNibbles {
     /// bounds.
     ///
     /// Each item in the iterator should be a nibble (0-15).
-    ///
-    /// NOTE: This function is essentially identical to `from_nibbles`, but is kept for API
-    /// compatibility.
-    #[inline(always)]
-    pub fn from_nibbles_unchecked(nibbles: impl IntoIterator<Item = u8>) -> Self {
-        Self::from_nibbles(nibbles)
+    pub fn from_nibbles_unchecked<T: AsRef<[u8]>>(nibbles: T) -> Self {
+        let mut packed = Self::default();
+        for nibble in nibbles.as_ref() {
+            packed.nibbles = (packed.nibbles << 4) | U256::from(nibble & 0x0F);
+            packed.length += 1;
+        }
+        packed
     }
 
     /// Creates a new [`PackedNibbles`] instance from a slice of bytes.
