@@ -4,7 +4,10 @@ use crate::tree::TreeConfig;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
-    actions::{CaptureBlock, CreateFork, MakeCanonical, ProduceBlocks, ReorgTo},
+    actions::{
+        CaptureBlock, CreateFork, ExpectFcuStatus, MakeCanonical, ProduceBlocks,
+        ProduceInvalidBlocks, ReorgTo, ValidateCanonicalTag,
+    },
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
@@ -104,6 +107,45 @@ async fn test_engine_tree_valid_forks_with_older_canonical_head_e2e() -> Result<
         .with_action(CaptureBlock::new("chain_b_tip"))
         // switch to chain B via forkchoice update - this should become canonical
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("chain_b_tip"));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Test that verifies valid and invalid forks with an older canonical head.
+#[tokio::test]
+async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        // create base chain with 1 block (old head)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(CaptureBlock::new("old_head"))
+        .with_action(MakeCanonical::new())
+        // extend base chain with 5 more blocks to establish fork point
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(5))
+        .with_action(CaptureBlock::new("fork_point"))
+        .with_action(MakeCanonical::new())
+        // revert to old head to simulate older canonical head scenario
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("old_head"))
+        // create chain B (the valid chain) from fork point with 10 blocks
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("fork_point", 10))
+        .with_action(CaptureBlock::new("chain_b_tip"))
+        // make chain B canonical via FCU - this becomes the valid chain
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("chain_b_tip"))
+        // create chain A (competing chain) - first produce valid blocks, then test invalid
+        // scenario
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("fork_point"))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
+        .with_action(CaptureBlock::new("chain_a_tip"))
+        // test that FCU to chain A tip returns VALID status (it's a valid competing chain)
+        .with_action(ExpectFcuStatus::valid("chain_a_tip"))
+        // attempt to produce invalid blocks (which should be rejected)
+        .with_action(ProduceInvalidBlocks::<EthEngineTypes>::with_invalid_at(3, 2))
+        // chain B remains the canonical chain
+        .with_action(ValidateCanonicalTag::new("chain_b_tip"));
 
     test.run::<EthereumNode>().await?;
 
