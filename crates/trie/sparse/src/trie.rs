@@ -104,7 +104,7 @@ impl<P> fmt::Debug for SparseTrie<P> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AllocatedEmpty { .. } => write!(f, "AllocatedEmpty"),
-            Self::Blind { .. } => write!(f, "Blind"),
+            Self::Blind => write!(f, "Blind"),
             Self::Revealed(revealed) => write!(f, "Revealed({revealed:?})"),
         }
     }
