@@ -42,7 +42,7 @@ use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
     DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, OmmersProvider};
+use reth_storage_api::{BlockBodyIndicesProvider, DBProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{hash_map::Entry, BTreeMap, HashMap},
@@ -1644,12 +1644,7 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        // Required data not present in static_files
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1695,25 +1690,6 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-}
-
-impl<N: FullNodePrimitives<BlockHeader: Value>> OmmersProvider for StaticFileProvider<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        if let Some(num) = id.as_number() {
-            return self
-                .get_segment_provider_from_block(StaticFileSegment::BlockMeta, num, None)
-                .and_then(|provider| provider.ommers(id))
-                .or_else(|err| {
-                    if let ProviderError::MissingStaticFileBlock(_, _) = err {
-                        Ok(None)
-                    } else {
-                        Err(err)
-                    }
-                })
-        }
-        // Only accepts block number queries
         Err(ProviderError::UnsupportedProvider)
     }
 }

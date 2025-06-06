@@ -441,7 +441,7 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_nat();
         }
 
-        if !self.disable_discovery && self.enable_discv5_discovery {
+        if self.should_enable_discv5() {
             network_config_builder = network_config_builder
                 .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes));
         }
@@ -488,6 +488,17 @@ impl DiscoveryArgs {
             .lookup_interval(*discv5_lookup_interval)
             .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
+    }
+
+    /// Returns true if discv5 discovery should be configured
+    const fn should_enable_discv5(&self) -> bool {
+        if self.disable_discovery {
+            return false;
+        }
+
+        self.enable_discv5_discovery ||
+            self.discv5_addr.is_some() ||
+            self.discv5_addr_ipv6.is_some()
     }
 
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when

@@ -735,9 +735,6 @@ Engine:
       --engine.legacy-state-root
           Enable legacy state root
 
-      --engine.caching-and-prewarming
-          CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming if you want to disable caching and prewarming
-
       --engine.disable-caching-and-prewarming
           Disable cross-block caching and parallel prewarming
 
@@ -765,8 +762,8 @@ Engine:
 
           [default: 1]
 
-      --engine.precompile-cache
-          Enable precompile cache
+      --engine.disable-precompile-cache
+          Disable precompile cache
 
       --engine.state-root-fallback
           Enable state root fallback, useful for testing

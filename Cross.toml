@@ -24,5 +24,15 @@ pre-build = [
 # Inspired by https://github.com/cross-rs/cross/blob/9e2298e17170655342d3248a9c8ac37ef92ba38f/docker/Dockerfile.x86_64-pc-windows-gnu#L51
 dockerfile = "./Dockerfile.x86_64-pc-windows-gnu"
 
+[target.riscv64gc-unknown-linux-gnu]
+image = "ubuntu:24.04"
+pre-build = [
+    "apt update",
+    "apt install --yes gcc gcc-riscv64-linux-gnu libclang-dev make",
+]
+env.passthrough = [
+    "CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER=riscv64-linux-gnu-gcc",
+]
+
 [build.env]
 passthrough = ["JEMALLOC_SYS_WITH_LG_PAGE"]

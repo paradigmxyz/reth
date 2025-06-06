@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions,
+    CanonStateSubscriptions, ExecutedTrieUpdates,
 };
 use alloy_consensus::{
     Header, SignableTransaction, Transaction as _, TxEip1559, TxReceipt, EMPTY_ROOT_HASH,
@@ -25,7 +25,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, updates::TrieUpdates, HashedPostState};
+use reth_trie::{root::state_root_unhashed, HashedPostState};
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
@@ -222,7 +222,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 vec![Requests::default()],
             )),
             Arc::new(HashedPostState::default()),
-            Arc::new(TrieUpdates::default()),
+            ExecutedTrieUpdates::empty(),
         )
     }
 

@@ -83,7 +83,7 @@ where
             >,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
-                <Self::Provider as TransactionsProvider>::Transaction,
+                Primitives = <Self as RpcNodeCore>::Primitives,
                 Transaction = RpcTransaction<Self::NetworkTypes>,
                 Error = RpcError<Self>,
             >,
@@ -99,7 +99,7 @@ impl<T> FullEthApiTypes for T where
             >,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
-                <Self::Provider as TransactionsProvider>::Transaction,
+                Primitives = <Self as RpcNodeCore>::Primitives,
                 Transaction = RpcTransaction<T::NetworkTypes>,
                 Error = RpcError<T>,
             >,
