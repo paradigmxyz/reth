@@ -224,6 +224,7 @@ where
                 "Target block already reached"
             );
             self.is_etl_ready = true;
+            self.sync_gap = Some(gap);
             return Poll::Ready(Ok(()))
         }
 
