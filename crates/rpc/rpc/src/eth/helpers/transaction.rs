@@ -63,12 +63,11 @@ where
                             let chain = notification.committed();
                             for block in chain.blocks_iter() {
                                 let transactions: Vec<_> = block.body().transactions().to_vec();
-                                     for tx in transactions.iter(){
+                                     for tx in &transactions{
                                 if tx.tx_hash() == *hash {
-                                    match self.transaction_receipt(hash).await? {
-                                        Some(receipt) => return Ok(Some(receipt)),
-                                        None => continue,
-                                    }
+                                    if let Some(receipt) = self.transaction_receipt(hash).await? {
+                                     return Ok(Some(receipt));
+                          }
                                 }
                             }
                             }
