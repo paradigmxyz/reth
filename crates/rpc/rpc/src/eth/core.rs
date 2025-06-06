@@ -3,12 +3,13 @@
 
 use std::sync::Arc;
 
-use crate::{eth::EthTxBuilder, EthApiBuilder};
+use crate::EthApiBuilder;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
@@ -18,6 +19,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
+use reth_rpc_types_compat::transaction::RpcTransactionConverter;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
 };
@@ -65,7 +67,7 @@ pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
     /// Transaction RPC response builder.
-    pub tx_resp_builder: EthTxBuilder,
+    pub tx_resp_builder: RpcTransactionConverter<EthPrimitives, Ethereum, EthApiError>,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
@@ -73,7 +75,7 @@ where
     Provider: BlockReader,
 {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
+        Self { inner: self.inner.clone(), tx_resp_builder: Default::default() }
     }
 }
 
@@ -147,7 +149,7 @@ where
             proof_permits,
         );
 
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
+        Self { inner: Arc::new(inner), tx_resp_builder: Default::default() }
     }
 }
 
@@ -158,7 +160,7 @@ where
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
-    type TransactionCompat = EthTxBuilder;
+    type TransactionCompat = RpcTransactionConverter<EthPrimitives, Ethereum, EthApiError>;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder

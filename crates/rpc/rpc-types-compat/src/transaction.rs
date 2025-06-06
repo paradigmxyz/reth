@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{request::TransactionRequest, Transaction, TransactionI
 use core::error;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction, TxTy};
 use serde::{Deserialize, Serialize};
-use std::{fmt::Debug, marker::PhantomData};
+use std::{error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Builds RPC transaction w.r.t. network.
@@ -107,26 +107,38 @@ pub enum CompatError {
     TransactionConversionError,
 }
 
-impl From<CompatError> for jsonrpsee_types::ErrorObject<'static> {
-    fn from(_value: CompatError) -> Self {
-        todo!()
+/// Generic RPC response object converter for primitives `N` and network `E`.
+#[derive(Debug)]
+pub struct RpcTransactionConverter<N, E, Err>(PhantomData<(N, E, Err)>);
+
+impl<N, E, Err> Clone for RpcTransactionConverter<N, E, Err> {
+    fn clone(&self) -> Self {
+        Default::default()
     }
 }
 
-/// Generic RPC response object converter for primitives `N` and network `E`.
-#[derive(Debug, Clone)]
-pub struct RpcTransactionConverter<N, E>(PhantomData<(N, E)>);
+impl<N, E, Err> Default for RpcTransactionConverter<N, E, Err> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
+}
 
-impl<N, E> TransactionCompat for RpcTransactionConverter<N, E>
+impl<N, E, Err> TransactionCompat for RpcTransactionConverter<N, E, Err>
 where
     N: NodePrimitives,
     E: Network + Unpin,
     TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + Clone + Debug,
     TransactionRequest: TryIntoSimTx<TxTy<N>>,
+    Err: From<CompatError>
+        + Error
+        + Unpin
+        + Sync
+        + Send
+        + Into<jsonrpsee_types::ErrorObject<'static>>,
 {
     type Primitives = N;
     type Transaction = <E as Network>::TransactionResponse;
-    type Error = CompatError;
+    type Error = Err;
 
     fn fill(
         &self,
@@ -141,6 +153,6 @@ where
         &self,
         request: TransactionRequest,
     ) -> Result<TxTy<N>, Self::Error> {
-        request.try_into_sim_tx().map_err(|_| CompatError::TransactionConversionError)
+        Ok(request.try_into_sim_tx().map_err(|_| CompatError::TransactionConversionError)?)
     }
 }

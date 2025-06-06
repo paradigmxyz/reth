@@ -13,6 +13,7 @@ use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
+use reth_rpc_types_compat::transaction::CompatError;
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
@@ -226,6 +227,14 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
+        }
+    }
+}
+
+impl From<CompatError> for EthApiError {
+    fn from(value: CompatError) -> Self {
+        match value {
+            CompatError::TransactionConversionError => Self::TransactionConversionError,
         }
     }
 }
