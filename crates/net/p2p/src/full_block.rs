@@ -20,6 +20,7 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::Hash,
+    ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -692,10 +693,11 @@ where
     /// # Returns
     ///
     /// A future containing an empty vector of block bodies and a randomly generated `PeerId`.
-    fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority_and_range_hint(
         &self,
         _hashes: Vec<B256>,
         _priority: Priority,
+        _range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         // Create a future that immediately returns an empty vector of block bodies and a random
         // PeerId.
