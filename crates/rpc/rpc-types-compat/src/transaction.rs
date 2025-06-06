@@ -53,17 +53,23 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
 }
 
 /// Converts `self` into `T`.
+///
+/// Should create an RPC transaction response object based on a consensus transaction, its signer
+/// [`Address`] and an additional context carried as [`TransactionInfo`].
 pub trait IntoRpcTx<T> {
     /// Performs the conversion.
     fn into_rpc_tx(self, signer: Address, tx_info: TransactionInfo) -> T;
 }
 
-/// Converts [`TransactionRequest`] into `Self`.
-pub trait FromTxReq {
+/// Converts `self` into `T`.
+///
+/// Should create a fake transaction for simulation using [`TransactionRequest`].
+pub trait TryIntoSimTx<T>
+where
+    Self: Sized,
+{
     /// Performs the conversion.
-    fn from_tx_req(request: TransactionRequest) -> Result<Self, ValueError<TransactionRequest>>
-    where
-        Self: Sized;
+    fn try_into_sim_tx(self) -> Result<T, ValueError<Self>>;
 }
 
 impl IntoRpcTx<Transaction> for EthereumTxEnvelope<TxEip4844> {
@@ -81,9 +87,9 @@ impl IntoRpcTx<Transaction> for EthereumTxEnvelope<TxEip4844> {
     }
 }
 
-impl FromTxReq for EthereumTxEnvelope<TxEip4844> {
-    fn from_tx_req(request: TransactionRequest) -> Result<Self, ValueError<TransactionRequest>> {
-        TransactionRequest::build_typed_simulate_transaction(request)
+impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
+    fn try_into_sim_tx(self) -> Result<EthereumTxEnvelope<TxEip4844>, ValueError<Self>> {
+        Self::build_typed_simulate_transaction(self)
     }
 }
 
@@ -109,7 +115,8 @@ impl<N, E> TransactionCompat for RpcTransactionConverter<N, E>
 where
     N: NodePrimitives,
     E: Network + Unpin,
-    TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + FromTxReq + Clone + Debug,
+    TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + Clone + Debug,
+    TransactionRequest: TryIntoSimTx<TxTy<N>>,
     Self: Send + Sync,
 {
     type Primitives = N;
@@ -129,6 +136,6 @@ where
         &self,
         request: TransactionRequest,
     ) -> Result<TxTy<N>, Self::Error> {
-        TxTy::<N>::from_tx_req(request).map_err(|_| CompatError::TransactionConversionError)
+        request.try_into_sim_tx().map_err(|_| CompatError::TransactionConversionError)
     }
 }
