@@ -768,6 +768,11 @@ Engine:
       --engine.state-root-fallback
           Enable state root fallback, useful for testing
 
+      --engine.always-process-payload-attributes-on-canonical-head
+          Always process payload attributes and begin a payload build process even if `forkchoiceState.headBlockHash` is already the canonical head or an ancestor. See `TreeConfig::always_process_payload_attributes_on_canonical_head` for more details.
+
+          Note: This is a no-op on OP Stack.
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol
