@@ -1,4 +1,5 @@
-use alloy_primitives::{hex, hex::ToHexExt};
+use crate::BLOCKS_PER_FILE;
+use alloy_primitives::{hex, hex::ToHexExt, BlockNumber};
 use bytes::Bytes;
 use eyre::{eyre, OptionExt};
 use futures_util::{stream::StreamExt, Stream, TryStreamExt};
@@ -41,6 +42,7 @@ pub struct EraClient<Http> {
     client: Http,
     url: Url,
     folder: Box<Path>,
+    start_from: Option<u64>,
 }
 
 impl<Http: HttpClient + Clone> EraClient<Http> {
@@ -48,7 +50,15 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
     pub const fn new(client: Http, url: Url, folder: Box<Path>) -> Self {
-        Self { client, url, folder }
+        Self { client, url, folder, start_from: None }
+    }
+
+    /// Overrides the starting ERA file based on `block_number`.
+    ///
+    /// The normal behavior is that the index is recovered based on files contained in the `folder`.
+    pub const fn start_from(mut self, block_number: BlockNumber) -> Self {
+        self.start_from.replace(block_number / BLOCKS_PER_FILE);
+        self
     }
 
     /// Performs a GET request on `url` and stores the response body into a file located within
@@ -116,6 +126,10 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
     /// Recovers index of file following the latest downloaded file from a different run.
     pub async fn recover_index(&self) -> u64 {
+        if let Some(block_number) = self.start_from {
+            return block_number;
+        }
+
         let mut max = None;
 
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {

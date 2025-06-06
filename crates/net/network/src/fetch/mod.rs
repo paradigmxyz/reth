@@ -18,6 +18,7 @@ use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
 use std::{
     collections::{HashMap, VecDeque},
+    ops::RangeInclusive,
     sync::{
         atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc,
@@ -431,6 +432,8 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         request: Vec<B256>,
         response: oneshot::Sender<PeerRequestResult<Vec<N::BlockBody>>>,
         priority: Priority,
+        #[allow(dead_code)]
+        range_hint: Option<RangeInclusive<u64>>,
     },
 }
 
@@ -503,6 +506,7 @@ mod tests {
                 request: vec![],
                 response: tx,
                 priority: Priority::default(),
+                range_hint: None,
             });
             assert!(fetcher.poll(cx).is_pending());
 

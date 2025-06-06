@@ -234,6 +234,7 @@ where
                 evm_config,
                 config.stages.clone(),
                 PruneModes::default(),
+                None,
             )
             .builder()
             .disable_all_if(&StageId::STATE_REQUIRED, || disable_exec),

@@ -1136,66 +1136,6 @@ async fn test_engine_tree_live_sync_fcu_extends_canon_chain() {
 }
 
 #[tokio::test]
-async fn test_engine_tree_valid_forks_with_older_canonical_head() {
-    reth_tracing::init_test_tracing();
-
-    let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-
-    // create base chain and setup test harness with it
-    let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
-    test_harness = test_harness.with_blocks(base_chain.clone());
-
-    let old_head = base_chain.first().unwrap().recovered_block();
-
-    // extend base chain
-    let extension_chain = test_harness.block_builder.create_fork(old_head, 5);
-    let fork_block = extension_chain.last().unwrap().clone_sealed_block();
-
-    test_harness.setup_range_insertion_for_valid_chain(extension_chain.clone());
-    test_harness.insert_chain(extension_chain).await;
-
-    // fcu to old_head
-    test_harness.fcu_to(old_head.hash(), ForkchoiceStatus::Valid).await;
-
-    // create two competing chains starting from fork_block
-    let chain_a = test_harness.block_builder.create_fork(&fork_block, 10);
-    let chain_b = test_harness.block_builder.create_fork(&fork_block, 10);
-
-    // insert chain A blocks using newPayload
-    test_harness.setup_range_insertion_for_valid_chain(chain_a.clone());
-    for block in &chain_a {
-        test_harness.send_new_payload(block.clone()).await;
-    }
-
-    test_harness.check_canon_chain_insertion(chain_a.clone()).await;
-
-    // insert chain B blocks using newPayload
-    test_harness.setup_range_insertion_for_valid_chain(chain_b.clone());
-    for block in &chain_b {
-        test_harness.send_new_payload(block.clone()).await;
-    }
-
-    test_harness.check_canon_chain_insertion(chain_b.clone()).await;
-
-    // send FCU to make the tip of chain B the new head
-    let chain_b_tip_hash = chain_b.last().unwrap().hash();
-    test_harness.send_fcu(chain_b_tip_hash, ForkchoiceStatus::Valid).await;
-
-    // check for CanonicalChainCommitted event
-    test_harness.check_canon_commit(chain_b_tip_hash).await;
-
-    // verify FCU was processed
-    test_harness.check_fcu(chain_b_tip_hash, ForkchoiceStatus::Valid).await;
-
-    // verify the new canonical head
-    test_harness.check_canon_head(chain_b_tip_hash);
-
-    // verify that chain A is now considered a fork
-    assert!(test_harness.tree.is_fork(chain_a.last().unwrap().sealed_header()).unwrap());
-}
-
-#[tokio::test]
 async fn test_engine_tree_buffered_blocks_are_eventually_connected() {
     let chain_spec = MAINNET.clone();
     let mut test_harness = TestHarness::new(chain_spec.clone());

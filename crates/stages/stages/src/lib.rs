@@ -52,6 +52,7 @@
 //! #    provider_factory.clone(),
 //! #    PruneModes::default()
 //! # );
+//! # let era_import_source = None;
 //! // Create a pipeline that can fully sync
 //! # let pipeline =
 //! Pipeline::<MockNodeTypesWithDB>::builder()
@@ -65,6 +66,7 @@
 //!         executor_provider,
 //!         StageConfig::default(),
 //!         PruneModes::default(),
+//!         era_import_source,
 //!     ))
 //!     .build(provider_factory, static_file_producer);
 //! ```

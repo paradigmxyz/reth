@@ -12,7 +12,7 @@ pub mod fork;
 pub mod produce_blocks;
 pub mod reorg;
 
-pub use fork::{CreateFork, SetForkBase, ValidateFork};
+pub use fork::{CreateFork, ForkBase, SetForkBase, SetForkBaseFromBlockInfo, ValidateFork};
 pub use produce_blocks::{
     AssertMineBlock, BroadcastLatestForkchoice, BroadcastNextNewPayload, CheckPayloadAccepted,
     GenerateNextPayload, GeneratePayloadAttributes, PickNextBlockProducer, ProduceBlocks,
