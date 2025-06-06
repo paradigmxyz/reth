@@ -6,7 +6,7 @@ use crate::{
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
-    session::RangeInfo,
+    session::BlockRangeInfo,
     FetchClient,
 };
 use alloy_consensus::BlockHeader;
@@ -150,7 +150,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         status: Arc<UnifiedStatus>,
         request_tx: PeerRequestSender<PeerRequest<N>>,
         timeout: Arc<AtomicU64>,
-        range_info: Option<RangeInfo>,
+        range_info: Option<BlockRangeInfo>,
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 

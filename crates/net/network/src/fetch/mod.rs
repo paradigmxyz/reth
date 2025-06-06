@@ -4,7 +4,7 @@ mod client;
 
 pub use client::FetchClient;
 
-use crate::{message::BlockRequest, session::RangeInfo};
+use crate::{message::BlockRequest, session::BlockRangeInfo};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
@@ -80,7 +80,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
         best_hash: B256,
         best_number: u64,
         timeout: Arc<AtomicU64>,
-        range_info: Option<RangeInfo>,
+        range_info: Option<BlockRangeInfo>,
     ) {
         self.peers.insert(
             peer_id,
@@ -351,7 +351,7 @@ struct Peer {
     last_response_likely_bad: bool,
     /// Tracks the range info for the peer.
     #[allow(dead_code)]
-    range_info: Option<RangeInfo>,
+    range_info: Option<BlockRangeInfo>,
 }
 
 impl Peer {
