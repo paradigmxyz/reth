@@ -20,7 +20,7 @@ use reth_evm::{
     Evm,
 };
 use reth_primitives_traits::{
-    block::BlockTx, BlockBody as _, Recovered, RecoveredBlock, SignedTransaction, TxTy,
+    block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
 };
 use reth_rpc_server_types::result::rpc_err;
 use reth_rpc_types_compat::{block::from_block, TransactionCompat};
@@ -77,7 +77,7 @@ pub fn execute_transactions<S, T>(
 >
 where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
-    T: TransactionCompat<TxTy<S::Primitives>>,
+    T: TransactionCompat<Primitives = S::Primitives>,
 {
     builder.apply_pre_execution_changes()?;
 
@@ -111,7 +111,7 @@ where
 /// them into primitive transactions.
 ///
 /// This will set the defaults as defined in <https://github.com/ethereum/execution-apis/blob/e56d3208789259d0b09fa68e9d8594aa4d73c725/docs/ethsimulatev1-notes.md#default-values-for-transactions>
-pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
+pub fn resolve_transaction<DB: Database, Tx, T>(
     mut tx: TransactionRequest,
     default_gas_limit: u64,
     block_base_fee_per_gas: u64,
@@ -121,6 +121,7 @@ pub fn resolve_transaction<DB: Database, Tx, T: TransactionCompat<Tx>>(
 ) -> Result<Recovered<Tx>, EthApiError>
 where
     DB::Error: Into<EthApiError>,
+    T: TransactionCompat<Primitives: NodePrimitives<SignedTx = Tx>>,
 {
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
@@ -192,23 +193,26 @@ pub fn build_simulated_block<T, B, Halt: Clone>(
     tx_resp_builder: &T,
 ) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
 where
-    T: TransactionCompat<BlockTx<B>, Error: FromEthApiError + FromEvmHalt<Halt>>,
+    T: TransactionCompat<
+        Primitives: NodePrimitives<SignedTx = BlockTx<B>>,
+        Error: FromEthApiError + FromEvmHalt<Halt>,
+    >,
     B: reth_primitives_traits::Block,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
     let mut log_index = 0;
-    for (index, (result, tx)) in results.iter().zip(block.body().transactions()).enumerate() {
+    for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = T::Error::from_evm_halt(reason.clone(), tx.gas_limit());
+                let error = T::Error::from_evm_halt(reason, tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
                         code: error.into().code(),
                     }),
-                    gas_used: *gas_used,
+                    gas_used,
                     logs: Vec::new(),
                     status: false,
                 }
@@ -216,26 +220,26 @@ where
             ExecutionResult::Revert { output, gas_used } => {
                 let error = RevertError::new(output.clone());
                 SimCallResult {
-                    return_data: output.clone(),
+                    return_data: output,
                     error: Some(SimulateError {
                         code: error.error_code(),
                         message: error.to_string(),
                     }),
-                    gas_used: *gas_used,
+                    gas_used,
                     status: false,
                     logs: Vec::new(),
                 }
             }
             ExecutionResult::Success { output, gas_used, logs, .. } => SimCallResult {
-                return_data: output.clone().into_data(),
+                return_data: output.into_data(),
                 error: None,
-                gas_used: *gas_used,
+                gas_used,
                 logs: logs
-                    .iter()
+                    .into_iter()
                     .map(|log| {
                         log_index += 1;
                         alloy_rpc_types_eth::Log {
-                            inner: log.clone(),
+                            inner: log,
                             log_index: Some(log_index - 1),
                             transaction_index: Some(index as u64),
                             transaction_hash: Some(*tx.tx_hash()),

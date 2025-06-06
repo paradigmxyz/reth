@@ -67,16 +67,30 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
         let number =
             self.file_name_to_number(file_name).ok_or_eyre("Cannot parse number from file name")?;
-        let mut stream = client.get(url).await?;
-        let mut file = File::create(&path).await?;
-        let mut hasher = Sha256::new();
 
-        while let Some(item) = stream.next().await.transpose()? {
-            io::copy(&mut item.as_ref(), &mut file).await?;
-            hasher.update(item);
+        let mut tries = 1..3;
+        let mut actual_checksum: eyre::Result<_>;
+        loop {
+            actual_checksum = async {
+                let mut file = File::create(&path).await?;
+                let mut stream = client.get(url.clone()).await?;
+                let mut hasher = Sha256::new();
+
+                while let Some(item) = stream.next().await.transpose()? {
+                    io::copy(&mut item.as_ref(), &mut file).await?;
+                    hasher.update(item);
+                }
+
+                Ok(hasher.finalize().to_vec())
+            }
+            .await;
+
+            if actual_checksum.is_ok() || tries.next().is_none() {
+                break;
+            }
         }
 
-        let actual_checksum = hasher.finalize().to_vec();
+        let actual_checksum = actual_checksum?;
 
         let file = File::open(self.folder.join(Self::CHECKSUMS)).await?;
         let reader = io::BufReader::new(file);
@@ -142,7 +156,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
     pub async fn fetch_file_list(&self) -> eyre::Result<()> {
         let (mut index, mut checksums) = try_join!(
-            self.client.get(self.url.clone().join("index.html")?),
+            self.client.get(self.url.clone()),
             self.client.get(self.url.clone().join(Self::CHECKSUMS)?),
         )?;
 

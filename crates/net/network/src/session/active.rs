@@ -25,7 +25,7 @@ use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -201,8 +201,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
             }
             EthMessage::NewBlock(msg) => {
-                let block =
-                    NewBlockMessage { hash: msg.block.header().hash_slow(), block: Arc::new(*msg) };
+                let block = NewBlockMessage {
+                    hash: msg.block().header().hash_slow(),
+                    block: Arc::new(*msg),
+                };
                 self.try_emit_broadcast(PeerMessage::NewBlock(block)).into()
             }
             EthMessage::Transactions(msg) => {

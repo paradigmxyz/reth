@@ -470,7 +470,7 @@ where
 
     OtterscanClient::<Transaction, Header>::get_block_transactions(
         client,
-        block_number,
+        LenientBlockNumberOrTag::new(BlockNumberOrTag::Number(block_number)),
         page_number,
         page_size,
     )
@@ -482,7 +482,7 @@ where
         OtterscanClient::<Transaction, Header>::search_transactions_before(
             client,
             address,
-            block_number,
+            LenientBlockNumberOrTag::new(BlockNumberOrTag::Number(block_number)),
             page_size,
         )
         .await
@@ -493,7 +493,7 @@ where
         OtterscanClient::<Transaction, Header>::search_transactions_after(
             client,
             address,
-            block_number,
+            LenientBlockNumberOrTag::new(BlockNumberOrTag::Number(block_number)),
             page_size,
         )
         .await

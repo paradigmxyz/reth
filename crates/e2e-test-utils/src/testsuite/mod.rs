@@ -8,7 +8,7 @@ use alloy_primitives::B256;
 use eyre::Result;
 use jsonrpsee::http_client::HttpClient;
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_node_api::{NodeTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
 use reth_payload_builder::PayloadId;
 use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
@@ -36,23 +36,28 @@ impl NodeClient {
     }
 }
 
-/// Represents the latest block information.
-#[derive(Debug, Clone)]
-pub struct LatestBlockInfo {
-    /// Hash of the latest block
+/// Represents complete block information.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockInfo {
+    /// Hash of the block
     pub hash: B256,
-    /// Number of the latest block
+    /// Number of the block
     pub number: u64,
+    /// Timestamp of the block
+    pub timestamp: u64,
 }
 /// Represents a test environment.
 #[derive(Debug)]
-pub struct Environment<I> {
+pub struct Environment<I>
+where
+    I: EngineTypes,
+{
     /// Combined clients with both RPC and Engine API endpoints
     pub node_clients: Vec<NodeClient>,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
-    /// Latest block information
-    pub latest_block_info: Option<LatestBlockInfo>,
+    /// Current block information
+    pub current_block_info: Option<BlockInfo>,
     /// Last producer index
     pub last_producer_idx: Option<usize>,
     /// Stores payload attributes indexed by block number
@@ -71,18 +76,27 @@ pub struct Environment<I> {
     pub latest_payload_built: Option<PayloadAttributes>,
     /// Stores the most recent executed payload
     pub latest_payload_executed: Option<PayloadAttributes>,
+    /// Stores the most recent built execution payload envelope
+    pub latest_payload_envelope: Option<I::ExecutionPayloadEnvelopeV3>,
     /// Number of slots until a block is considered safe
     pub slots_to_safe: u64,
     /// Number of slots until a block is considered finalized
     pub slots_to_finalized: u64,
+    /// Registry for tagged blocks, mapping tag names to complete block info
+    pub block_registry: HashMap<String, BlockInfo>,
+    /// Fork base block number for validation (if we're currently on a fork)
+    pub current_fork_base: Option<u64>,
 }
 
-impl<I> Default for Environment<I> {
+impl<I> Default for Environment<I>
+where
+    I: EngineTypes,
+{
     fn default() -> Self {
         Self {
             node_clients: vec![],
             _phantom: Default::default(),
-            latest_block_info: None,
+            current_block_info: None,
             last_producer_idx: None,
             payload_attributes: Default::default(),
             latest_header_time: 0,
@@ -92,25 +106,42 @@ impl<I> Default for Environment<I> {
             latest_fork_choice_state: ForkchoiceState::default(),
             latest_payload_built: None,
             latest_payload_executed: None,
+            latest_payload_envelope: None,
             slots_to_safe: 0,
             slots_to_finalized: 0,
+            block_registry: HashMap::new(),
+            current_fork_base: None,
         }
     }
 }
 
 /// Builder for creating test scenarios
 #[expect(missing_debug_implementations)]
-#[derive(Default)]
-pub struct TestBuilder<I> {
+pub struct TestBuilder<I>
+where
+    I: EngineTypes,
+{
     setup: Option<Setup<I>>,
     actions: Vec<ActionBox<I>>,
     env: Environment<I>,
 }
 
-impl<I: 'static> TestBuilder<I> {
+impl<I> Default for TestBuilder<I>
+where
+    I: EngineTypes,
+{
+    fn default() -> Self {
+        Self { setup: None, actions: Vec::new(), env: Default::default() }
+    }
+}
+
+impl<I> TestBuilder<I>
+where
+    I: EngineTypes + 'static,
+{
     /// Create a new test builder
     pub fn new() -> Self {
-        Self { setup: None, actions: Vec::new(), env: Default::default() }
+        Self::default()
     }
 
     /// Set the test setup

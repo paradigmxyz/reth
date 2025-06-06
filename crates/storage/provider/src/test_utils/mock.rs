@@ -3,10 +3,10 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EthStorage, HeaderProvider, ReceiptProviderIdExt,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header};
-use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
     TxHash, TxNumber, B256, U256,
@@ -30,8 +30,8 @@ use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, DBProvider, DatabaseProviderFactory, HashedPostStateProvider,
-    NodePrimitivesProvider, OmmersProvider, StageCheckpointReader, StateCommitmentProvider,
-    StateProofProvider, StorageRootProvider,
+    NodePrimitivesProvider, StageCheckpointReader, StateCommitmentProvider, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -669,11 +669,7 @@ impl<ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(None)
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
@@ -744,13 +740,6 @@ where
         match self.block_by_id(id)? {
             None => Ok(None),
             Some(block) => Ok(Some(block.header)),
-        }
-    }
-
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
-        match id {
-            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
-            BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),
         }
     }
 }
@@ -952,29 +941,6 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
 
     fn pending_state_by_hash(&self, _block_hash: B256) -> ProviderResult<Option<StateProviderBox>> {
         Ok(Some(Box::new(self.clone())))
-    }
-}
-
-impl<T: NodePrimitives, ChainSpec: Send + Sync> WithdrawalsProvider
-    for MockEthProvider<T, ChainSpec>
-{
-    fn withdrawals_by_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        Ok(None)
-    }
-}
-
-impl<T, ChainSpec> OmmersProvider for MockEthProvider<T, ChainSpec>
-where
-    T: NodePrimitives,
-    ChainSpec: Send + Sync,
-    Self: HeaderProvider,
-{
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        Ok(None)
     }
 }
 
