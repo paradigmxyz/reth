@@ -64,5 +64,9 @@ pub use engine::EngineArgs;
 mod ress_args;
 pub use ress_args::RessArgs;
 
+/// HardforkArgs for configuring hardfork activation block overrides
+mod hardfork;
+pub use hardfork::HardforkOverrideArgs;
+
 mod error;
 pub mod types;

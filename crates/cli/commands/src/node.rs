@@ -2,7 +2,7 @@
 
 use crate::launcher::Launcher;
 use clap::{value_parser, Args, Parser};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthChainSpecHardforksOverrides, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
@@ -10,8 +10,8 @@ use reth_db::init_db;
 use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, HardforkOverrideArgs,
+        NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
@@ -112,6 +112,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
+
+    /// All hardfork related arguments
+    #[command(flatten)]
+    pub hardfork: HardforkOverrideArgs,
 }
 
 impl<C: ChainSpecParser> NodeCommand<C> {
@@ -133,7 +137,7 @@ impl<C: ChainSpecParser> NodeCommand<C> {
 impl<C, Ext> NodeCommand<C, Ext>
 where
     C: ChainSpecParser,
-    C::ChainSpec: EthChainSpec + EthereumHardforks,
+    C::ChainSpec: EthChainSpec + EthereumHardforks + EthChainSpecHardforksOverrides,
     Ext: clap::Args + fmt::Debug,
 {
     /// Launches the node
@@ -163,9 +167,17 @@ where
             pruning,
             ext,
             engine,
+            hardfork,
         } = self;
 
-        // set up node config
+        // Override the hardforks if any are provided
+        let hardfork_overrides = hardfork.overrides();
+        let chain = if !hardfork_overrides.is_empty() {
+            Arc::new(chain.with_hardforks_overrides(hardfork_overrides))
+        } else {
+            chain
+        };
+
         let mut node_config = NodeConfig {
             datadir,
             config,
