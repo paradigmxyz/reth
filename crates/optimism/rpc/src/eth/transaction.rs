@@ -3,17 +3,20 @@
 use alloy_consensus::{transaction::Recovered, SignableTransaction};
 use alloy_primitives::{Bytes, Signature, B256};
 use alloy_rpc_types_eth::TransactionInfo;
+use futures::StreamExt;
 use op_alloy_consensus::{
     transaction::{OpDepositInfo, OpTransactionInfo},
     OpTxEnvelope,
 };
 use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{NodePrimitives, TxTy};
+use reth_primitives_traits::{BlockBody, NodePrimitives, SignedTransaction, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TransactionCompat,
+    EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
+    TransactionCompat,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::{
@@ -25,8 +28,11 @@ use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
 
 impl<N> EthTransactions for OpEthApi<N>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<Error = OpEthApiError>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>
+        + reth_rpc_eth_api::helpers::LoadReceipt
+        + EthApiTypes<Error = OpEthApiError>,
     N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
+    Self::Provider: CanonStateSubscriptions + reth_chainspec::ChainSpecProvider,
 {
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
         self.inner.eth_api.signers()
@@ -66,6 +72,45 @@ where
             .map_err(Self::Error::from_eth_err)?;
 
         Ok(hash)
+    }
+
+    async fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+    ) -> Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error> {
+        let hash = self.send_raw_transaction(tx).await?;
+        let mut stream = self.provider().canonical_state_stream();
+        let timeout_sleep = tokio::time::sleep(tokio::time::Duration::from_secs(30));
+        tokio::pin!(timeout_sleep);
+
+        loop {
+            tokio::select! {
+                maybe_notification = stream.next() => {
+                    match maybe_notification {
+                        Some(notification) => {
+                            let chain = notification.committed();
+                            for block in chain.blocks_iter() {
+                                let transactions: Vec<_> = block.body().transactions().to_vec();
+                                     for tx in transactions.iter(){
+                                if tx.tx_hash() == *hash {
+                                    // Transaction found, get the receipt
+                                    match self.transaction_receipt(hash).await? {
+                                        Some(receipt) => return Ok(Some(receipt)),
+                                        None => continue,
+                                    }
+                                }
+                            }
+                            }
+                        }
+                        None => return Ok(None), // Stream ended, no transaction found
+                    }
+                }
+
+                _ = &mut timeout_sleep => {
+                    return Ok(None); // Timeout reached, no transaction found
+                }
+            }
+        }
     }
 }
 

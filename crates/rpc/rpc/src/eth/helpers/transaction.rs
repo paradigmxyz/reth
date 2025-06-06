@@ -1,13 +1,13 @@
 //! Contains RPC handler implementations specific to transactions
 
 use crate::EthApi;
-use alloy_consensus::Receipt;
 use alloy_primitives::{Bytes, B256};
 use futures::StreamExt;
 use reth_chain_state::CanonStateSubscriptions;
+use reth_primitives_traits::{BlockBody, SignedTransaction};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
@@ -16,9 +16,9 @@ use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool}
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt> + reth_rpc_eth_api::helpers::LoadReceipt,
     Provider: BlockReader<Transaction = ProviderTx<Self::Provider>> + CanonStateSubscriptions,
-    Self::Provider: CanonStateSubscriptions,
+    Self::Provider: CanonStateSubscriptions + reth_chainspec::ChainSpecProvider,
 {
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
@@ -46,24 +46,13 @@ where
         Ok(hash)
     }
 
-    async fn send_raw_transaction_sync(&self, tx: Bytes) -> Result<Receipt, Self::Error> {
-        let recovered = recover_raw_transaction(&tx)?;
-
-        // broadcast raw transaction to subscribers if there is any.
-        self.broadcast_raw_transaction(tx);
-
-        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
-        // submit the transaction to the pool with a Local origin
-        let hash = self
-            .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
-            .await
-            .map_err(Self::Error::from_eth_err)?;
-
-        let receiver = self.provider().subscribe_to_canonical_state();
+    async fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+    ) -> Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error> {
+        let hash = self.send_raw_transaction(tx).await?;
         let mut stream = self.provider().canonical_state_stream();
-        //let mut stream = tokio_stream::wrappers::BroadcastStream::new(receiver);
-        let mut timeout_sleep = tokio::time::sleep(tokio::time::Duration::from_secs(30));
+        let timeout_sleep = tokio::time::sleep(tokio::time::Duration::from_secs(30));
         tokio::pin!(timeout_sleep);
 
         loop {
@@ -73,16 +62,23 @@ where
                         Some(notification) => {
                             let chain = notification.committed();
                             for block in chain.blocks_iter() {
-                                    // TODO: Receipt logic here
-                                    return Ok(Receipt::default());
+                                let transactions: Vec<_> = block.body().transactions().to_vec();
+                                     for tx in transactions.iter(){
+                                if tx.tx_hash() == *hash {
+                                    match self.transaction_receipt(hash).await? {
+                                        Some(receipt) => return Ok(Some(receipt)),
+                                        None => continue,
+                                    }
+                                }
+                            }
                             }
                         }
-                        None => return Err(Self::Error::StreamClosed),
+                        None => return Ok(None), // Stream ended, no transaction found
                     }
                 }
 
                 _ = &mut timeout_sleep => {
-                    return Err(Self::Error::Timeout);
+                    return Ok(None); // Timeout reached, no transaction found
                 }
             }
         }
