@@ -15,8 +15,9 @@ pub mod reorg;
 pub use fork::{CreateFork, ForkBase, SetForkBase, SetForkBaseFromBlockInfo, ValidateFork};
 pub use produce_blocks::{
     AssertMineBlock, BroadcastLatestForkchoice, BroadcastNextNewPayload, CheckPayloadAccepted,
-    GenerateNextPayload, GeneratePayloadAttributes, PickNextBlockProducer, ProduceBlocks,
-    UpdateBlockInfo, UpdateBlockInfoToLatestPayload,
+    ExpectFcuStatus, GenerateNextPayload, GeneratePayloadAttributes, PickNextBlockProducer,
+    ProduceBlocks, ProduceInvalidBlocks, TestFcuToTag, UpdateBlockInfo,
+    UpdateBlockInfoToLatestPayload, ValidateCanonicalTag,
 };
 pub use reorg::{ReorgTarget, ReorgTo, SetReorgTarget};
 
