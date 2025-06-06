@@ -35,7 +35,12 @@ pub trait BodiesClient: DownloadClient {
         self.get_block_bodies_with_priority_and_range_hint(hashes, priority, None)
     }
 
-    /// Fetches the block body for the requested block with priority and range hint
+    /// Fetches the block body for the requested block with priority and a range hint for the
+    /// requested blocks.
+    ///
+    /// The range hint is not required, but can be used to optimize the routing of the request if
+    /// the hashes are  continuous or close together and the range hint is `[earliest, latest]` for
+    /// the requested blocks.
     fn get_block_bodies_with_priority_and_range_hint(
         &self,
         hashes: Vec<B256>,
