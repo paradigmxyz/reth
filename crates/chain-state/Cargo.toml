@@ -70,6 +70,7 @@ serde = [
     "reth-trie/serde",
     "revm-database/serde",
     "revm-state?/serde",
+    "reth-storage-api/serde",
 ]
 test-utils = [
     "alloy-primitives/getrandom",

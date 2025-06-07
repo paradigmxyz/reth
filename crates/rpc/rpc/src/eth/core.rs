@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::{eth::EthTxBuilder, EthApiBuilder};
+use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
@@ -65,7 +65,7 @@ pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
     /// Transaction RPC response builder.
-    pub tx_resp_builder: EthTxBuilder,
+    pub tx_resp_builder: EthRpcConverter,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
@@ -73,7 +73,7 @@ where
     Provider: BlockReader,
 {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
+        Self { inner: self.inner.clone(), tx_resp_builder: self.tx_resp_builder.clone() }
     }
 }
 
@@ -147,7 +147,7 @@ where
             proof_permits,
         );
 
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
+        Self { inner: Arc::new(inner), tx_resp_builder: Default::default() }
     }
 }
 
@@ -158,7 +158,7 @@ where
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
-    type TransactionCompat = EthTxBuilder;
+    type TransactionCompat = EthRpcConverter;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
         &self.tx_resp_builder

@@ -10010,11 +10010,17 @@ name = "reth-rpc-types-compat"
 version = "1.4.8"
 dependencies = [
  "alloy-consensus",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "jsonrpsee-types",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types",
+ "reth-optimism-primitives",
  "reth-primitives-traits",
+ "reth-storage-api",
  "serde",
+ "thiserror 2.0.12",
 ]
 
 [[package]]

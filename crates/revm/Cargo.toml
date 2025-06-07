@@ -54,5 +54,6 @@ serde = [
     "reth-trie?/serde",
     "reth-ethereum-forks/serde",
     "reth-primitives-traits/serde",
+    "reth-storage-api/serde",
 ]
 portable = ["revm/portable"]

@@ -30,7 +30,10 @@ pub use pubsub::EthPubSubApiServer;
 pub use reth_rpc_eth_types::error::{
     AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError,
 };
-pub use reth_rpc_types_compat::TransactionCompat;
+pub use reth_rpc_types_compat::{
+    try_into_op_tx_info, IntoRpcTx, RpcConverter, TransactionCompat, TransactionConversionError,
+    TryIntoSimTx, TxInfoMapper,
+};
 pub use types::{EthApiTypes, FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction};
 
 #[cfg(feature = "client")]
