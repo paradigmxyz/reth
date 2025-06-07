@@ -69,13 +69,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
+        let mut hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
         let provider_factory = &provider_factory.provider_rw()?.0;
 
         if let Some(path) = self.import.path {
-            let stream = read_dir(path)?;
+            let stream = read_dir(path, 0)?;
 
-            era::import(stream, provider_factory, hash_collector)?;
+            era::import(stream, provider_factory, &mut hash_collector)?;
         } else {
             let url = match self.import.url {
                 Some(url) => url,
@@ -86,7 +86,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
             let client = EraClient::new(Client::new(), url, folder);
             let stream = EraStream::new(client, EraStreamConfig::default());
 
-            era::import(stream, provider_factory, hash_collector)?;
+            era::import(stream, provider_factory, &mut hash_collector)?;
         }
 
         Ok(())

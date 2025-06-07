@@ -36,13 +36,15 @@ impl NodeClient {
     }
 }
 
-/// Represents the latest block information.
-#[derive(Debug, Clone)]
-pub struct LatestBlockInfo {
-    /// Hash of the latest block
+/// Represents complete block information.
+#[derive(Debug, Clone, Copy)]
+pub struct BlockInfo {
+    /// Hash of the block
     pub hash: B256,
-    /// Number of the latest block
+    /// Number of the block
     pub number: u64,
+    /// Timestamp of the block
+    pub timestamp: u64,
 }
 /// Represents a test environment.
 #[derive(Debug)]
@@ -54,8 +56,8 @@ where
     pub node_clients: Vec<NodeClient>,
     /// Tracks instance generic.
     _phantom: PhantomData<I>,
-    /// Latest block information
-    pub latest_block_info: Option<LatestBlockInfo>,
+    /// Current block information
+    pub current_block_info: Option<BlockInfo>,
     /// Last producer index
     pub last_producer_idx: Option<usize>,
     /// Stores payload attributes indexed by block number
@@ -80,8 +82,10 @@ where
     pub slots_to_safe: u64,
     /// Number of slots until a block is considered finalized
     pub slots_to_finalized: u64,
-    /// Registry for tagged blocks, mapping tag names to block hashes
-    pub block_registry: HashMap<String, B256>,
+    /// Registry for tagged blocks, mapping tag names to complete block info
+    pub block_registry: HashMap<String, BlockInfo>,
+    /// Fork base block number for validation (if we're currently on a fork)
+    pub current_fork_base: Option<u64>,
 }
 
 impl<I> Default for Environment<I>
@@ -92,7 +96,7 @@ where
         Self {
             node_clients: vec![],
             _phantom: Default::default(),
-            latest_block_info: None,
+            current_block_info: None,
             last_producer_idx: None,
             payload_attributes: Default::default(),
             latest_header_time: 0,
@@ -106,6 +110,7 @@ where
             slots_to_safe: 0,
             slots_to_finalized: 0,
             block_registry: HashMap::new(),
+            current_fork_base: None,
         }
     }
 }

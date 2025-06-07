@@ -1213,11 +1213,13 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 mod tests {
     use crate::{
         blobstore::{BlobStore, InMemoryBlobStore},
+        identifier::SenderId,
         test_utils::{MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
+    use alloy_primitives::Address;
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -1303,5 +1305,29 @@ mod tests {
 
         // Assert that the pool's blob store matches the expected blob store.
         assert_eq!(*test_pool.blob_store(), blob_store);
+    }
+
+    #[test]
+    fn test_auths_stored_in_identifiers() {
+        // Create a test pool with default configuration.
+        let test_pool = &TestPoolBuilder::default().with_config(Default::default()).pool;
+
+        let auth = Address::new([1; 20]);
+        let tx = MockTransaction::eip7702();
+
+        test_pool.add_transactions(
+            TransactionOrigin::Local,
+            [TransactionValidationOutcome::Valid {
+                balance: U256::from(1_000),
+                state_nonce: 0,
+                bytecode_hash: None,
+                transaction: ValidTransaction::Valid(tx),
+                propagate: true,
+                authorities: Some(vec![auth]),
+            }],
+        );
+
+        let identifiers = test_pool.identifiers.read();
+        assert_eq!(identifiers.sender_id(&auth), Some(SenderId::from(1)));
     }
 }

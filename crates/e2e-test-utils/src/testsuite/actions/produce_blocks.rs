@@ -2,7 +2,7 @@
 
 use crate::testsuite::{
     actions::{validate_fcu_response, Action, Sequence},
-    Environment, LatestBlockInfo,
+    BlockInfo, Environment,
 };
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
@@ -13,7 +13,7 @@ use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
-use std::{marker::PhantomData, time::Duration};
+use std::{collections::HashSet, marker::PhantomData, time::Duration};
 use tokio::time::sleep;
 use tracing::debug;
 
@@ -146,7 +146,7 @@ where
             }
 
             let latest_info = env
-                .latest_block_info
+                .current_block_info
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -177,7 +177,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let latest_block = env
-                .latest_block_info
+                .current_block_info
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
             let block_number = latest_block.number;
@@ -209,7 +209,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let latest_block = env
-                .latest_block_info
+                .current_block_info
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -382,7 +382,11 @@ where
     }
 }
 
-/// Action that updates environment state after block production
+/// Action that syncs environment state with the node's canonical chain via RPC.
+///
+/// This queries the latest canonical block from the node and updates the environment
+/// to match. Typically used after forkchoice operations to ensure the environment
+/// is in sync with the node's view of the canonical chain.
 #[derive(Debug, Default)]
 pub struct UpdateBlockInfo {}
 
@@ -404,9 +408,10 @@ where
                 .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
 
             // update environment with the new block information
-            env.latest_block_info = Some(LatestBlockInfo {
+            env.current_block_info = Some(BlockInfo {
                 hash: latest_block.header.hash,
                 number: latest_block.header.number,
+                timestamp: latest_block.header.timestamp,
             });
 
             env.latest_header_time = latest_block.header.timestamp;
@@ -415,6 +420,54 @@ where
             debug!(
                 "Updated environment to block {} (hash: {})",
                 latest_block.header.number, latest_block.header.hash
+            );
+
+            Ok(())
+        })
+    }
+}
+
+/// Action that updates environment state using the locally produced payload.
+///
+/// This uses the execution payload stored in the environment rather than querying RPC,
+/// making it more efficient and reliable during block production. Preferred over
+/// `UpdateBlockInfo` when we have just produced a block and have the payload available.
+#[derive(Debug, Default)]
+pub struct UpdateBlockInfoToLatestPayload {}
+
+impl<Engine> Action<Engine> for UpdateBlockInfoToLatestPayload
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let payload_envelope = env
+                .latest_payload_envelope
+                .as_ref()
+                .ok_or_else(|| eyre::eyre!("No execution payload envelope available"))?;
+
+            let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
+                payload_envelope.clone().into();
+            let execution_payload = execution_payload_envelope.execution_payload;
+
+            let block_hash = execution_payload.payload_inner.payload_inner.block_hash;
+            let block_number = execution_payload.payload_inner.payload_inner.block_number;
+            let block_timestamp = execution_payload.payload_inner.payload_inner.timestamp;
+
+            // update environment with the new block information from the payload
+            env.current_block_info = Some(BlockInfo {
+                hash: block_hash,
+                number: block_number,
+                timestamp: block_timestamp,
+            });
+
+            env.latest_header_time = block_timestamp;
+            env.latest_fork_choice_state.head_block_hash = block_hash;
+
+            debug!(
+                "Updated environment to newly produced block {} (hash: {})",
+                block_number, block_hash
             );
 
             Ok(())
@@ -436,7 +489,7 @@ where
             let mut accepted_check: bool = false;
 
             let latest_block = env
-                .latest_block_info
+                .current_block_info
                 .as_mut()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
@@ -636,9 +689,277 @@ where
                     Box::new(GeneratePayloadAttributes::default()),
                     Box::new(GenerateNextPayload::default()),
                     Box::new(BroadcastNextNewPayload::default()),
-                    Box::new(UpdateBlockInfo::default()),
+                    Box::new(UpdateBlockInfoToLatestPayload::default()),
                 ]);
                 sequence.execute(env).await?;
+            }
+            Ok(())
+        })
+    }
+}
+
+/// Action to test forkchoice update to a tagged block with expected status
+#[derive(Debug)]
+pub struct TestFcuToTag {
+    /// Tag name of the target block
+    pub tag: String,
+    /// Expected payload status
+    pub expected_status: PayloadStatusEnum,
+}
+
+impl TestFcuToTag {
+    /// Create a new `TestFcuToTag` action
+    pub fn new(tag: impl Into<String>, expected_status: PayloadStatusEnum) -> Self {
+        Self { tag: tag.into(), expected_status }
+    }
+}
+
+impl<Engine> Action<Engine> for TestFcuToTag
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // get the target block from the registry
+            let target_block = env
+                .block_registry
+                .get(&self.tag)
+                .copied()
+                .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", self.tag))?;
+
+            let engine_client = env.node_clients[0].engine.http_client();
+            let fcu_state = ForkchoiceState {
+                head_block_hash: target_block.hash,
+                safe_block_hash: target_block.hash,
+                finalized_block_hash: target_block.hash,
+            };
+
+            let fcu_response =
+                EngineApiClient::<Engine>::fork_choice_updated_v2(&engine_client, fcu_state, None)
+                    .await?;
+
+            // validate the response matches expected status
+            match (&fcu_response.payload_status.status, &self.expected_status) {
+                (PayloadStatusEnum::Valid, PayloadStatusEnum::Valid) => {
+                    debug!("FCU to '{}' returned VALID as expected", self.tag);
+                }
+                (PayloadStatusEnum::Invalid { .. }, PayloadStatusEnum::Invalid { .. }) => {
+                    debug!("FCU to '{}' returned INVALID as expected", self.tag);
+                }
+                (PayloadStatusEnum::Syncing, PayloadStatusEnum::Syncing) => {
+                    debug!("FCU to '{}' returned SYNCING as expected", self.tag);
+                }
+                (PayloadStatusEnum::Accepted, PayloadStatusEnum::Accepted) => {
+                    debug!("FCU to '{}' returned ACCEPTED as expected", self.tag);
+                }
+                (actual, expected) => {
+                    return Err(eyre::eyre!(
+                        "FCU to '{}': expected status {:?}, but got {:?}",
+                        self.tag,
+                        expected,
+                        actual
+                    ));
+                }
+            }
+
+            Ok(())
+        })
+    }
+}
+
+/// Action to expect a specific FCU status when targeting a tagged block
+#[derive(Debug)]
+pub struct ExpectFcuStatus {
+    /// Tag name of the target block
+    pub target_tag: String,
+    /// Expected payload status
+    pub expected_status: PayloadStatusEnum,
+}
+
+impl ExpectFcuStatus {
+    /// Create a new `ExpectFcuStatus` action expecting VALID status
+    pub fn valid(target_tag: impl Into<String>) -> Self {
+        Self { target_tag: target_tag.into(), expected_status: PayloadStatusEnum::Valid }
+    }
+
+    /// Create a new `ExpectFcuStatus` action expecting INVALID status
+    pub fn invalid(target_tag: impl Into<String>) -> Self {
+        Self {
+            target_tag: target_tag.into(),
+            expected_status: PayloadStatusEnum::Invalid {
+                validation_error: "corrupted block".to_string(),
+            },
+        }
+    }
+
+    /// Create a new `ExpectFcuStatus` action expecting SYNCING status
+    pub fn syncing(target_tag: impl Into<String>) -> Self {
+        Self { target_tag: target_tag.into(), expected_status: PayloadStatusEnum::Syncing }
+    }
+
+    /// Create a new `ExpectFcuStatus` action expecting ACCEPTED status
+    pub fn accepted(target_tag: impl Into<String>) -> Self {
+        Self { target_tag: target_tag.into(), expected_status: PayloadStatusEnum::Accepted }
+    }
+}
+
+impl<Engine> Action<Engine> for ExpectFcuStatus
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let mut test_fcu = TestFcuToTag::new(&self.target_tag, self.expected_status.clone());
+            test_fcu.execute(env).await
+        })
+    }
+}
+
+/// Action to validate that a tagged block remains canonical by performing FCU to it
+#[derive(Debug)]
+pub struct ValidateCanonicalTag {
+    /// Tag name of the block to validate as canonical
+    pub tag: String,
+}
+
+impl ValidateCanonicalTag {
+    /// Create a new `ValidateCanonicalTag` action
+    pub fn new(tag: impl Into<String>) -> Self {
+        Self { tag: tag.into() }
+    }
+}
+
+impl<Engine> Action<Engine> for ValidateCanonicalTag
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let mut expect_valid = ExpectFcuStatus::valid(&self.tag);
+            expect_valid.execute(env).await?;
+
+            debug!("Successfully validated that '{}' remains canonical", self.tag);
+            Ok(())
+        })
+    }
+}
+
+/// Action that produces a sequence of blocks where some blocks are intentionally invalid
+#[derive(Debug)]
+pub struct ProduceInvalidBlocks<Engine> {
+    /// Number of blocks to produce
+    pub num_blocks: u64,
+    /// Set of indices (0-based) where blocks should be made invalid
+    pub invalid_indices: HashSet<u64>,
+    /// Tracks engine type
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> ProduceInvalidBlocks<Engine> {
+    /// Create a new `ProduceInvalidBlocks` action
+    pub fn new(num_blocks: u64, invalid_indices: HashSet<u64>) -> Self {
+        Self { num_blocks, invalid_indices, _phantom: Default::default() }
+    }
+
+    /// Create a new `ProduceInvalidBlocks` action with a single invalid block at the specified
+    /// index
+    pub fn with_invalid_at(num_blocks: u64, invalid_index: u64) -> Self {
+        let mut invalid_indices = HashSet::new();
+        invalid_indices.insert(invalid_index);
+        Self::new(num_blocks, invalid_indices)
+    }
+}
+
+impl<Engine> Action<Engine> for ProduceInvalidBlocks<Engine>
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            for block_index in 0..self.num_blocks {
+                let is_invalid = self.invalid_indices.contains(&block_index);
+
+                if is_invalid {
+                    debug!("Producing invalid block at index {}", block_index);
+
+                    // produce a valid block first, then corrupt it
+                    let mut sequence = Sequence::new(vec![
+                        Box::new(PickNextBlockProducer::default()),
+                        Box::new(GeneratePayloadAttributes::default()),
+                        Box::new(GenerateNextPayload::default()),
+                    ]);
+                    sequence.execute(env).await?;
+
+                    // get the latest payload and corrupt it
+                    let latest_envelope = env
+                        .latest_payload_envelope
+                        .as_ref()
+                        .ok_or_else(|| eyre::eyre!("No payload envelope available to corrupt"))?;
+
+                    let envelope_v3: ExecutionPayloadEnvelopeV3 = latest_envelope.clone().into();
+                    let mut corrupted_payload = envelope_v3.execution_payload;
+
+                    // corrupt the state root to make the block invalid
+                    corrupted_payload.payload_inner.payload_inner.state_root = B256::random();
+
+                    debug!(
+                        "Corrupted state root for block {} to: {}",
+                        block_index, corrupted_payload.payload_inner.payload_inner.state_root
+                    );
+
+                    // send the corrupted payload via newPayload
+                    let engine_client = env.node_clients[0].engine.http_client();
+                    // for simplicity, we'll use empty versioned hashes for invalid block testing
+                    let versioned_hashes = Vec::new();
+                    // use a random parent beacon block root since this is for invalid block testing
+                    let parent_beacon_block_root = B256::random();
+
+                    let new_payload_response = EngineApiClient::<Engine>::new_payload_v3(
+                        &engine_client,
+                        corrupted_payload.clone(),
+                        versioned_hashes,
+                        parent_beacon_block_root,
+                    )
+                    .await?;
+
+                    // expect the payload to be rejected as invalid
+                    match new_payload_response.status {
+                        PayloadStatusEnum::Invalid { validation_error } => {
+                            debug!(
+                                "Block {} correctly rejected as invalid: {:?}",
+                                block_index, validation_error
+                            );
+                        }
+                        other_status => {
+                            return Err(eyre::eyre!(
+                                "Expected block {} to be rejected as INVALID, but got: {:?}",
+                                block_index,
+                                other_status
+                            ));
+                        }
+                    }
+
+                    // update block info with the corrupted block (for potential future reference)
+                    env.current_block_info = Some(BlockInfo {
+                        hash: corrupted_payload.payload_inner.payload_inner.block_hash,
+                        number: corrupted_payload.payload_inner.payload_inner.block_number,
+                        timestamp: corrupted_payload.timestamp(),
+                    });
+                } else {
+                    debug!("Producing valid block at index {}", block_index);
+
+                    // produce a valid block normally
+                    let mut sequence = Sequence::new(vec![
+                        Box::new(PickNextBlockProducer::default()),
+                        Box::new(GeneratePayloadAttributes::default()),
+                        Box::new(GenerateNextPayload::default()),
+                        Box::new(BroadcastNextNewPayload::default()),
+                        Box::new(UpdateBlockInfoToLatestPayload::default()),
+                    ]);
+                    sequence.execute(env).await?;
+                }
             }
             Ok(())
         })

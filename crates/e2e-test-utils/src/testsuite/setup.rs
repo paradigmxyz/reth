@@ -245,9 +245,10 @@ where
             .await?
             .ok_or_else(|| eyre!("Genesis block not found"))?;
 
-        env.latest_block_info = Some(crate::testsuite::LatestBlockInfo {
+        env.current_block_info = Some(crate::testsuite::BlockInfo {
             hash: genesis_block.header.hash,
             number: genesis_block.header.number,
+            timestamp: genesis_block.header.timestamp,
         });
 
         env.latest_header_time = genesis_block.header.timestamp;
