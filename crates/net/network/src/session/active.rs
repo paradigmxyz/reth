@@ -253,7 +253,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetNodeData)
             }
             EthMessage::GetReceipts(req) => {
-                on_request!(req, Receipts, GetReceipts)
+                if self.conn.version().is_eth69() {
+                    on_request!(req, Receipts69, GetReceipts69)
+                } else {
+                    on_request!(req, Receipts, GetReceipts)
+                }
             }
             EthMessage::Receipts(resp) => {
                 on_response!(resp, GetReceipts)
