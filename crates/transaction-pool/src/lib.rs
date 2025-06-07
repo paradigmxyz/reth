@@ -206,9 +206,9 @@ mod traits;
 pub mod test_utils;
 
 /// Type alias for default ethereum transaction pool
-pub type EthTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
-    CoinbaseTipOrdering<EthPooledTransaction>,
+pub type EthTransactionPool<Client, S, T = EthPooledTransaction> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T>>,
+    CoinbaseTipOrdering<T>,
     S,
 >;
 
