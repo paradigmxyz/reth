@@ -66,7 +66,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
-    /// Obtain receipt.
+    /// And awaits the receipt.
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
