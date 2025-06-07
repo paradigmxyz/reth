@@ -1696,7 +1696,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no http transport is configured.
     pub fn merge_http(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut http) = self.http {
-            return http.merge(other.into()).map(|_| true);
+            return http.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1708,7 +1708,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ws transport is configured.
     pub fn merge_ws(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ws) = self.ws {
-            return ws.merge(other.into()).map(|_| true);
+            return ws.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1720,7 +1720,7 @@ impl TransportRpcModules {
     /// Returns [Ok(false)] if no ipc transport is configured.
     pub fn merge_ipc(&mut self, other: impl Into<Methods>) -> Result<bool, RegisterMethodError> {
         if let Some(ref mut ipc) = self.ipc {
-            return ipc.merge(other.into()).map(|_| true);
+            return ipc.merge(other.into()).map(|_| true)
         }
         Ok(false)
     }
@@ -1945,56 +1945,49 @@ impl TransportRpcModules {
 
     /// Adds or replaces given [`Methods`] in http module.
     ///
-    /// Returns `true` if the methods were replaced or added, `false` otherwise
-    pub fn add_or_replace_http(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
+    /// Returns `true` if the methods were replaced or added `false` otherwise.
+    pub fn add_or_replace_http(&mut self, other: impl Into<Methods>) -> bool {
+        let other = other.into();
+        self.remove_http_methods(other.method_names());
         if let Some(http) = self.http.as_mut() {
-            let names: Vec<&str> = http.method_names().collect();
-            let _: Vec<_> = names.into_iter().map(|name| http.remove_method(name)).collect();
-            return http.merge(other.into()).map(|_| true);
+            let _ = http.merge(other);
+            return true
         }
-        Ok(false)
+        false
     }
 
     /// Adds or replaces given [`Methods`] in ws module.
     ///
-    /// Returns `true` if the methods were replaced or added, `false` otherwise
-    pub fn add_or_replace_ws(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
+    /// Returns `true` if the methods were replaced or added, `false` otherwise.
+    pub fn add_or_replace_ws(&mut self, other: impl Into<Methods>) -> bool {
+        let other = other.into();
+        self.remove_ws_methods(other.method_names());
         if let Some(ws) = self.ws.as_mut() {
-            let names: Vec<&str> = ws.method_names().collect();
-            let _: Vec<_> = names.into_iter().map(|name| ws.remove_method(name)).collect();
-            return ws.merge(other.into()).map(|_| true);
+            let _ = ws.merge(other);
+            return true
         }
-        Ok(false)
+        false
     }
 
     /// Adds or replaces given [`Methods`] in ipc module.
     ///
-    /// Returns `true` if the methods were replaced or added, `false` otherwise
-    pub fn add_or_replace_ipc(
-        &mut self,
-        other: impl Into<Methods>,
-    ) -> Result<bool, RegisterMethodError> {
+    /// Returns `true` if the methods were replaced or added, `false` otherwise.
+    pub fn add_or_replace_ipc(&mut self, other: impl Into<Methods>) -> bool {
+        let other = other.into();
+        self.remove_ipc_methods(other.method_names());
         if let Some(ipc) = self.ipc.as_mut() {
-            let names: Vec<&str> = ipc.method_names().collect();
-            let _: Vec<_> = names.into_iter().map(|name| ipc.remove_method(name)).collect();
-            return ipc.merge(other.into()).map(|_| true);
+            let _ = ipc.merge(other);
+            return true
         }
-        Ok(false)
+        false
     }
 
     /// Adds or replaces given [`Methods`] in all configured network modules.
-    pub fn add_or_replace(&mut self, other: impl Into<Methods>) -> Result<(), RegisterMethodError> {
+    pub fn add_or_replace_configured(&mut self, other: impl Into<Methods>) {
         let other = other.into();
-        self.add_or_replace_http(other.clone())?;
-        self.add_or_replace_ws(other.clone())?;
-        self.add_or_replace_ipc(other)?;
-        Ok(())
+        self.add_or_replace_http(other.clone());
+        self.add_or_replace_ws(other.clone());
+        self.add_or_replace_ipc(other);
     }
 }
 
