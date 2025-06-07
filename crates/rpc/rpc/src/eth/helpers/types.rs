@@ -2,27 +2,11 @@
 
 use alloy_network::Ethereum;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_rpc_eth_api::EthApiTypes;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::RpcConverter;
-use std::fmt::Debug;
 
 /// An [`RpcConverter`] with its generics set to Ethereum specific.
 pub type EthRpcConverter = RpcConverter<EthPrimitives, Ethereum, EthApiError>;
-
-/// A standalone [`EthApiTypes`] implementation for Ethereum.
-#[derive(Debug, Clone, Default)]
-pub struct EthereumEthApiTypes(EthRpcConverter);
-
-impl EthApiTypes for EthereumEthApiTypes {
-    type Error = EthApiError;
-    type NetworkTypes = Ethereum;
-    type TransactionCompat = EthRpcConverter;
-
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
-        &self.0
-    }
-}
 
 //tests for simulate
 #[cfg(test)]
