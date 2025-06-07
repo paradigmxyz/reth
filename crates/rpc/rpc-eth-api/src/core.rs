@@ -339,10 +339,6 @@ pub trait EthApi<T: RpcObject, B: RpcObject, R: RpcObject, H: RpcObject> {
     #[method(name = "sendRawTransaction")]
     async fn send_raw_transaction(&self, bytes: Bytes) -> RpcResult<B256>;
 
-    /// Sends raw transaction and waits for receipt.
-    #[method(name = "sendRawTransactionSync")]
-    async fn send_raw_transaction_sync(&self, tx: Bytes) -> RpcResult<Option<R>>;
-
     /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
     /// + len(message) + message))).
     #[method(name = "sign")]
@@ -805,15 +801,6 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> RpcResult<B256> {
         trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransaction");
         Ok(EthTransactions::send_raw_transaction(self, tx).await?)
-    }
-
-    /// Handler for: `eth_sendRawTransactionSync`
-    async fn send_raw_transaction_sync(
-        &self,
-        tx: Bytes,
-    ) -> RpcResult<Option<RpcReceipt<T::NetworkTypes>>> {
-        trace!(target: "rpc::eth", ?tx, "Serving eth_sendRawTransactionSync");
-        Ok(EthTransactions::send_raw_transaction_sync(self, tx).await?)
     }
 
     /// Handler for: `eth_sign`

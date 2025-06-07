@@ -80,34 +80,23 @@ where
     ) -> Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error> {
         let hash = self.send_raw_transaction(tx).await?;
         let mut stream = self.provider().canonical_state_stream();
-        let timeout_sleep = tokio::time::sleep(tokio::time::Duration::from_secs(30));
-        tokio::pin!(timeout_sleep);
-
-        loop {
-            tokio::select! {
-                maybe_notification = stream.next() => {
-                    match maybe_notification {
-                        Some(notification) => {
-                            let chain = notification.committed();
-                            for block in chain.blocks_iter() {
-                                let transactions: Vec<_> = block.body().transactions().to_vec();
-                                     for tx in &transactions{
-                                if tx.tx_hash() == *hash {
-                                    if let Some(receipt) = self.transaction_receipt(hash).await? {
-                                     return Ok(Some(receipt));
-                                                }
-                                }
-                            }
-                            }
+        match tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+            while let Some(notification) = stream.next().await {
+                let chain = notification.committed();
+                for block in chain.blocks_iter() {
+                    if block.body().contains_transaction(&hash) {
+                        if let Some(receipt) = self.transaction_receipt(hash).await? {
+                            return Ok(Some(receipt));
                         }
-                        None => return Ok(None), // Stream ended, no transaction found
                     }
                 }
-
-                _ = &mut timeout_sleep => {
-                    return Ok(None); // Timeout reached, no transaction found
-                }
             }
+            Ok(None) // Stream ended, no transaction found
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(_elapsed) => Ok(None), // Timeout reached, no transaction found
         }
     }
 }
