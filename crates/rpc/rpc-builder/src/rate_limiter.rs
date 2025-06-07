@@ -1,6 +1,6 @@
 //! [`jsonrpsee`] helper layer for rate limiting certain methods.
 
-use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request, MethodResponse};
+use jsonrpsee::{server::middleware::rpc::RpcServiceT, types::Request};
 use std::{
     future::Future,
     pin::Pin,
@@ -61,13 +61,15 @@ impl<S> RpcRequestRateLimitingService<S> {
     }
 }
 
-impl<'a, S> RpcServiceT<'a> for RpcRequestRateLimitingService<S>
+impl<S> RpcServiceT for RpcRequestRateLimitingService<S>
 where
-    S: RpcServiceT<'a> + Send + Sync + Clone + 'static,
+    S: RpcServiceT + Send + Sync + Clone + 'static,
 {
-    type Future = RateLimitingRequestFuture<S::Future>;
+    type MethodResponse = S::MethodResponse;
+    type NotificationResponse = S::NotificationResponse;
+    type BatchResponse = S::BatchResponse;
 
-    fn call(&self, req: Request<'a>) -> Self::Future {
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
         let method_name = req.method_name();
         if method_name.starts_with("trace_") || method_name.starts_with("debug_") {
             RateLimitingRequestFuture {
@@ -80,6 +82,20 @@ where
             // is no need to get a semaphore permit
             RateLimitingRequestFuture { fut: self.inner.call(req), guard: None, permit: None }
         }
+    }
+
+    fn batch<'a>(
+        &self,
+        requests: jsonrpsee::core::middleware::Batch<'a>,
+    ) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+        self.inner.batch(requests)
+    }
+
+    fn notification<'a>(
+        &self,
+        n: jsonrpsee::core::middleware::Notification<'a>,
+    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+        self.inner.notification(n)
     }
 }
 
@@ -98,7 +114,7 @@ impl<F> std::fmt::Debug for RateLimitingRequestFuture<F> {
     }
 }
 
-impl<F: Future<Output = MethodResponse>> Future for RateLimitingRequestFuture<F> {
+impl<F: Future> Future for RateLimitingRequestFuture<F> {
     type Output = F::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

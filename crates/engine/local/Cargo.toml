@@ -11,19 +11,12 @@ exclude.workspace = true
 [dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-consensus.workspace = true
 reth-engine-primitives.workspace = true
-reth-engine-service.workspace = true
-reth-engine-tree.workspace = true
-reth-node-types.workspace = true
-reth-evm.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-provider.workspace = true
-reth-prune.workspace = true
 reth-transaction-pool.workspace = true
-reth-stages-api.workspace = true
 
 # alloy
 alloy-consensus.workspace = true
@@ -50,5 +43,4 @@ op = [
     "dep:op-alloy-rpc-types-engine",
     "dep:reth-optimism-chainspec",
     "reth-payload-primitives/op",
-    "reth-evm/op",
 ]

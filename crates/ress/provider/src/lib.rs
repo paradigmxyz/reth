@@ -1,17 +1,23 @@
 //! Reth implementation of [`reth_ress_protocol::RessProtocolProvider`].
 
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
+    html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
+    issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
+)]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::BlockHeader as _;
 use alloy_primitives::{Bytes, B256};
 use parking_lot::Mutex;
-use reth_chain_state::{ExecutedBlock, ExecutedBlockWithTrieUpdates, MemoryOverlayStateProvider};
+use reth_chain_state::{
+    ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, MemoryOverlayStateProvider,
+};
+use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
-use reth_provider::{
-    BlockReader, BlockSource, ProviderError, ProviderResult, StateProvider, StateProviderFactory,
-};
 use reth_ress_protocol::RessProtocolProvider;
 use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
 use reth_tasks::TaskSpawner;
@@ -26,6 +32,7 @@ use recorder::StateWitnessRecorderDatabase;
 
 mod pending_state;
 pub use pending_state::*;
+use reth_storage_api::{BlockReader, BlockSource, StateProviderFactory};
 
 /// Reth provider implementing [`RessProtocolProvider`].
 #[expect(missing_debug_implementations)]
@@ -123,7 +130,7 @@ where
                                     recovered_block: invalid,
                                     ..Default::default()
                                 },
-                                ..Default::default()
+                                trie: ExecutedTrieUpdates::empty(),
                             });
                         }
                     }
@@ -159,7 +166,7 @@ where
         let witness_state_provider = self.provider.state_by_block_hash(ancestor_hash)?;
         let mut trie_input = TrieInput::default();
         for block in executed_ancestors.into_iter().rev() {
-            trie_input.append_cached_ref(&block.trie, &block.hashed_state);
+            trie_input.append_cached_ref(block.trie.as_ref().unwrap(), &block.hashed_state);
         }
         let mut hashed_state = db.into_state();
         hashed_state.extend(record.hashed_state);
@@ -183,7 +190,8 @@ where
         };
 
         // Insert witness into the cache.
-        self.witness_cache.lock().insert(block_hash, Arc::new(witness.clone()));
+        let cached_witness = Arc::new(witness.clone());
+        self.witness_cache.lock().insert(block_hash, cached_witness);
 
         Ok(witness)
     }

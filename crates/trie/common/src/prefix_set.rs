@@ -15,6 +15,13 @@ pub struct TriePrefixSetsMut {
 }
 
 impl TriePrefixSetsMut {
+    /// Returns `true` if all prefix sets are empty.
+    pub fn is_empty(&self) -> bool {
+        self.account_prefix_set.is_empty() &&
+            self.storage_prefix_sets.is_empty() &&
+            self.destroyed_accounts.is_empty()
+    }
+
     /// Extends prefix sets with contents of another prefix set.
     pub fn extend(&mut self, other: Self) {
         self.account_prefix_set.extend(other.account_prefix_set);
@@ -136,6 +143,12 @@ impl PrefixSetMut {
         self.keys.is_empty()
     }
 
+    /// Clears the inner vec for reuse, setting `all` to `false`.
+    pub fn clear(&mut self) {
+        self.all = false;
+        self.keys.clear();
+    }
+
     /// Returns a `PrefixSet` with the same elements as this set.
     ///
     /// If not yet sorted, the elements will be sorted and deduplicated.
@@ -166,6 +179,19 @@ pub struct PrefixSet {
 
 impl PrefixSet {
     /// Returns `true` if any of the keys in the set has the given prefix
+    ///
+    /// # Note on Mutability
+    ///
+    /// This method requires `&mut self` (unlike typical `contains` methods) because it maintains an
+    /// internal position tracker (`self.index`) between calls. This enables significant performance
+    /// optimization for sequential lookups in sorted order, which is common during trie traversal.
+    ///
+    /// The `index` field allows subsequent searches to start where previous ones left off,
+    /// avoiding repeated full scans of the prefix array when keys are accessed in nearby ranges.
+    ///
+    /// This optimization was inspired by Silkworm's implementation and significantly improves
+    /// incremental state root calculation performance
+    /// ([see PR #2417](https://github.com/paradigmxyz/reth/pull/2417)).
     #[inline]
     pub fn contains(&mut self, prefix: &[u8]) -> bool {
         if self.all {

@@ -31,6 +31,7 @@ use std::{
 };
 use tracing::*;
 
+use crate::args::EraArgs;
 pub use reth_engine_primitives::{
     DEFAULT_MAX_PROOF_TASK_CONCURRENCY, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
     DEFAULT_RESERVED_CPU_CORES,
@@ -148,6 +149,9 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All engine related arguments
     pub engine: EngineArgs,
+
+    /// All ERA import related arguments with --era prefix
+    pub era: EraArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -177,6 +181,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
             engine: EngineArgs::default(),
+            era: EraArgs::default(),
         }
     }
 
@@ -283,11 +288,8 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> Option<PruneConfig>
-    where
-        ChainSpec: EthChainSpec,
-    {
-        self.pruning.prune_config(&self.chain)
+    pub fn prune_config(&self) -> Option<PruneConfig> {
+        self.pruning.prune_config()
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
@@ -482,6 +484,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             dev: self.dev,
             pruning: self.pruning,
             engine: self.engine,
+            era: self.era,
         }
     }
 }
@@ -509,6 +512,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             pruning: self.pruning.clone(),
             datadir: self.datadir.clone(),
             engine: self.engine.clone(),
+            era: self.era.clone(),
         }
     }
 }

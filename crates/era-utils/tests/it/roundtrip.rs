@@ -33,10 +33,11 @@ async fn test_history_import_export() {
 
     let folder = tempdir().unwrap();
     let folder = Some(folder.path().to_owned());
-    let hash_collector = Collector::new(4096, folder);
+    let mut hash_collector = Collector::new(4096, folder);
 
     let expected_block_number = 8191;
-    let actual_block_number = import(stream, &provider_factory, hash_collector).unwrap();
+    let actual_block_number =
+        import(stream, &provider_factory.provider_rw().unwrap().0, &mut hash_collector).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 

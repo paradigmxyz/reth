@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use reth_discv4::{Discv4, NatResolver};
 use reth_discv5::Discv5;
 use reth_eth_wire::{
-    DisconnectReason, EthNetworkPrimitives, NetworkPrimitives, NewBlock,
+    BlockRangeUpdate, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
     NewPooledTransactionHashes, SharedTransactions,
 };
 use reth_ethereum_forks::Head;
@@ -116,7 +116,7 @@ impl<N: NetworkPrimitives> NetworkHandle<N> {
     /// Caution: in `PoS` this is a noop because new blocks are no longer announced over devp2p.
     /// Instead they are sent to the node by CL and can be requested over devp2p.
     /// Broadcasting new blocks is considered a protocol violation.
-    pub fn announce_block(&self, block: NewBlock<N::Block>, hash: B256) {
+    pub fn announce_block(&self, block: N::NewBlockPayload, hash: B256) {
         self.send_message(NetworkHandleMessage::AnnounceBlock(block, hash))
     }
 
@@ -415,6 +415,11 @@ impl<N: NetworkPrimitives> NetworkSyncUpdater for NetworkHandle<N> {
     fn update_status(&self, head: Head) {
         self.send_message(NetworkHandleMessage::StatusUpdate { head });
     }
+
+    /// Updates the advertised block range.
+    fn update_block_range(&self, update: reth_eth_wire::BlockRangeUpdate) {
+        self.send_message(NetworkHandleMessage::InternalBlockRangeUpdate(update));
+    }
 }
 
 impl<N: NetworkPrimitives> BlockDownloaderProvider for NetworkHandle<N> {
@@ -479,7 +484,7 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     /// Disconnects a connection to a peer if it exists, optionally providing a disconnect reason.
     DisconnectPeer(PeerId, Option<DisconnectReason>),
     /// Broadcasts an event to announce a new block to all nodes.
-    AnnounceBlock(NewBlock<N::Block>, B256),
+    AnnounceBlock(N::NewBlockPayload, B256),
     /// Sends a list of transactions to the given peer.
     SendTransaction {
         /// The ID of the peer to which the transactions are sent.
@@ -541,4 +546,6 @@ pub(crate) enum NetworkHandleMessage<N: NetworkPrimitives = EthNetworkPrimitives
     AddRlpxSubProtocol(RlpxSubProtocol),
     /// Connect to the given peer.
     ConnectPeer(PeerId, PeerKind, PeerAddr),
+    /// Message to update the node's advertised block range information.
+    InternalBlockRangeUpdate(BlockRangeUpdate),
 }

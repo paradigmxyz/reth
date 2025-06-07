@@ -9,8 +9,6 @@ pub use tx::*;
 
 pub mod tx_type;
 pub use tx_type::*;
-pub mod extended_op_tx_envelope;
-pub use extended_op_tx_envelope::*;
 pub mod tx_custom;
 pub use tx_custom::*;
 
@@ -24,6 +22,6 @@ impl NodePrimitives for CustomNodePrimitives {
     type Block = Block;
     type BlockHeader = CustomHeader;
     type BlockBody = BlockBody;
-    type SignedTx = ExtendedOpTxEnvelope<CustomTransactionEnvelope>;
+    type SignedTx = CustomTransaction;
     type Receipt = OpReceipt;
 }

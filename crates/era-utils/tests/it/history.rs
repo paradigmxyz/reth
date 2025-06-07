@@ -11,7 +11,7 @@ use tempfile::tempdir;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_history_imports_from_fresh_state_successfully() {
     // URL where the ERA1 files are hosted
-    let url = Url::from_str("https://era.ithaca.xyz/era1/").unwrap();
+    let url = Url::from_str("https://era.ithaca.xyz/era1/index.html").unwrap();
 
     // Directory where the ERA1 files will be downloaded to
     let folder = tempdir().unwrap();
@@ -22,17 +22,17 @@ async fn test_history_imports_from_fresh_state_successfully() {
     let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
 
     let stream = EraStream::new(client, config);
-    let provider_factory = create_test_provider_factory();
+    let pf = create_test_provider_factory();
 
-    init_genesis(&provider_factory).unwrap();
+    init_genesis(&pf).unwrap();
 
     let folder = tempdir().unwrap();
     let folder = Some(folder.path().to_owned());
-    let hash_collector = Collector::new(4096, folder);
+    let mut hash_collector = Collector::new(4096, folder);
 
     let expected_block_number = 8191;
     let actual_block_number =
-        reth_era_utils::import(stream, &provider_factory, hash_collector).unwrap();
+        reth_era_utils::import(stream, &pf.provider_rw().unwrap().0, &mut hash_collector).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 }

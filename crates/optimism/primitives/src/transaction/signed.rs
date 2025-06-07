@@ -4,7 +4,7 @@
 use crate::transaction::OpTransaction;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable},
     Sealed, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
     Typed2718,
 };
@@ -103,11 +103,7 @@ impl OpTransactionSigned {
     }
 }
 
-impl SignedTransaction for OpTransactionSigned {
-    fn tx_hash(&self) -> &TxHash {
-        self.hash.get_or_init(|| self.recalculate_hash())
-    }
-
+impl SignerRecoverable for OpTransactionSigned {
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         // Optimism's Deposit transaction does not have a signature. Directly return the
         // `from` address.
@@ -130,6 +126,12 @@ impl SignedTransaction for OpTransactionSigned {
         let Self { transaction, signature, .. } = self;
         let signature_hash = signature_hash(transaction);
         recover_signer_unchecked(signature, signature_hash)
+    }
+}
+
+impl SignedTransaction for OpTransactionSigned {
+    fn tx_hash(&self) -> &TxHash {
+        self.hash.get_or_init(|| self.recalculate_hash())
     }
 
     fn recover_signer_unchecked_with_buf(
@@ -502,15 +504,6 @@ impl<'a> arbitrary::Arbitrary<'a> for OpTransactionSigned {
             signature_hash(&transaction),
         )
         .unwrap();
-
-        // Both `Some(0)` and `None` values are encoded as empty string byte. This introduces
-        // ambiguity in roundtrip tests. Patch the mint value of deposit transaction here, so that
-        // it's `None` if zero.
-        if let OpTypedTransaction::Deposit(ref mut tx_deposit) = transaction {
-            if tx_deposit.mint == Some(0) {
-                tx_deposit.mint = None;
-            }
-        }
 
         let signature = if transaction.is_deposit() { TxDeposit::signature() } else { signature };
 

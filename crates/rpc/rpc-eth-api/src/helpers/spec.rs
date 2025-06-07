@@ -3,10 +3,10 @@
 use alloy_primitives::{Address, U256, U64};
 use alloy_rpc_types_eth::{Stage, SyncInfo, SyncStatus};
 use futures::Future;
-use reth_chainspec::{ChainInfo, EthereumHardforks};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthereumHardforks};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
-use reth_provider::{BlockNumReader, ChainSpecProvider, StageCheckpointReader};
+use reth_storage_api::{BlockNumReader, StageCheckpointReader};
 
 use crate::{helpers::EthSigner, RpcNodeCore};
 

@@ -1,8 +1,6 @@
 use crate::BeaconSidecarConfig;
-use alloy_consensus::{
-    transaction::PooledTransaction, BlockHeader, Signed, Transaction as _, TxEip4844WithSidecar,
-    Typed2718,
-};
+use alloy_consensus::{BlockHeader, Signed, Transaction as _, TxEip4844WithSidecar, Typed2718};
+use alloy_eips::eip7594::BlobTransactionSidecarVariant;
 use alloy_primitives::B256;
 use alloy_rpc_types_beacon::sidecar::{BeaconBlobBundle, SidecarIterator};
 use eyre::Result;
@@ -12,6 +10,7 @@ use reth_ethereum::{
     pool::{BlobStoreError, TransactionPoolExt},
     primitives::RecoveredBlock,
     provider::CanonStateNotification,
+    PooledTransactionVariant,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -31,7 +30,7 @@ pub struct BlockMetadata {
 
 #[derive(Debug, Clone)]
 pub struct MinedBlob {
-    pub transaction: Signed<TxEip4844WithSidecar>,
+    pub transaction: Signed<TxEip4844WithSidecar<BlobTransactionSidecarVariant>>,
     pub block_metadata: BlockMetadata,
 }
 
@@ -99,7 +98,7 @@ where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
     P: TransactionPoolExt + Unpin + 'static,
 {
-    fn process_block(&mut self, block: &RecoveredBlock<reth::primitives::Block>) {
+    fn process_block(&mut self, block: &RecoveredBlock<reth_ethereum::Block>) {
         let txs: Vec<_> = block
             .body()
             .transactions()
@@ -118,7 +117,7 @@ where
             Ok(blobs) => {
                 actions_to_queue.reserve_exact(txs.len());
                 for ((tx, _), sidecar) in txs.iter().zip(blobs.into_iter()) {
-                    if let PooledTransaction::Eip4844(transaction) = tx
+                    if let PooledTransactionVariant::Eip4844(transaction) = tx
                         .clone()
                         .try_into_pooled_eip4844(Arc::unwrap_or_clone(sidecar))
                         .expect("should not fail to convert blob tx if it is already eip4844")
@@ -231,8 +230,8 @@ where
 async fn fetch_blobs_for_block(
     client: reqwest::Client,
     url: String,
-    block: RecoveredBlock<reth::primitives::Block>,
-    txs: Vec<(reth::primitives::TransactionSigned, usize)>,
+    block: RecoveredBlock<reth_ethereum::Block>,
+    txs: Vec<(reth_ethereum::TransactionSigned, usize)>,
 ) -> Result<Vec<BlobTransactionEvent>, SideCarError> {
     let response = match client.get(url).header("Accept", "application/json").send().await {
         Ok(response) => response,
@@ -273,9 +272,9 @@ async fn fetch_blobs_for_block(
         .iter()
         .filter_map(|(tx, blob_len)| {
             sidecar_iterator.next_sidecar(*blob_len).and_then(|sidecar| {
-                if let PooledTransaction::Eip4844(transaction) = tx
+                if let PooledTransactionVariant::Eip4844(transaction) = tx
                     .clone()
-                    .try_into_pooled_eip4844(sidecar)
+                    .try_into_pooled_eip4844(BlobTransactionSidecarVariant::Eip4844(sidecar))
                     .expect("should not fail to convert blob tx if it is already eip4844")
                 {
                     let block_metadata = BlockMetadata {

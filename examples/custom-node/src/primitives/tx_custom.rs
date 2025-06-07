@@ -4,7 +4,7 @@ use alloy_consensus::{
     SignableTransaction, Transaction,
 };
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Typed2718};
-use alloy_primitives::{Bytes, ChainId, Signature, TxKind, B256, U256};
+use alloy_primitives::{Address, Bytes, ChainId, Signature, TxKind, B256, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use core::mem;
 use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
@@ -22,8 +22,8 @@ use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemo
     reth_codecs::Compact,
 )]
 #[serde(rename_all = "camelCase")]
-#[doc(alias = "CustomTransaction", alias = "TransactionCustom", alias = "CustomTx")]
-pub struct TxCustom {
+#[doc(alias = "PaymentTransaction", alias = "TransactionPayment", alias = "PaymentTx")]
+pub struct TxPayment {
     /// EIP-155: Simple replay attack protection
     #[serde(with = "alloy_serde::quantity")]
     pub chain_id: ChainId,
@@ -59,37 +59,23 @@ pub struct TxCustom {
     /// This is also known as `GasTipCap`
     #[serde(with = "alloy_serde::quantity")]
     pub max_priority_fee_per_gas: u128,
-    /// The 160-bit address of the message call’s recipient or, for a contract creation
-    /// transaction, ∅, used here to denote the only member of B0 ; formally Tt.
-    #[serde(default)]
-    pub to: TxKind,
+    /// The 160-bit address of the message call’s recipient.
+    pub to: Address,
     /// A scalar value equal to the number of Wei to
     /// be transferred to the message call’s recipient or,
     /// in the case of contract creation, as an endowment
     /// to the newly created account; formally Tv.
     pub value: U256,
-    /// The accessList specifies a list of addresses and storage keys;
-    /// these addresses and storage keys are added into the `accessed_addresses`
-    /// and `accessed_storage_keys` global sets (introduced in EIP-2929).
-    /// A gas cost is charged, though at a discount relative to the cost of
-    /// accessing outside the list.
-    pub access_list: AccessList,
-    /// Input has two uses depending if `to` field is Create or Call.
-    /// pub init: An unlimited size byte array specifying the
-    /// EVM-code for the account initialisation procedure CREATE,
-    /// data: An unlimited size byte array specifying the
-    /// input data of the message call, formally Td.
-    pub input: Bytes,
 }
 
-impl TxCustom {
+impl TxPayment {
     /// Get the transaction type
     #[doc(alias = "transaction_type")]
     pub const fn tx_type() -> TxTypeCustom {
         TxTypeCustom::Custom
     }
 
-    /// Calculates a heuristic for the in-memory size of the [TxCustom]
+    /// Calculates a heuristic for the in-memory size of the [TxPayment]
     /// transaction.
     #[inline]
     pub fn size(&self) -> usize {
@@ -98,14 +84,12 @@ impl TxCustom {
         mem::size_of::<u64>() + // gas_limit
         mem::size_of::<u128>() + // max_fee_per_gas
         mem::size_of::<u128>() + // max_priority_fee_per_gas
-        self.to.size() + // to
-        mem::size_of::<U256>() + // value
-        self.access_list.size() + // access_list
-        self.input.len() // input
+        mem::size_of::<Address>() + // to
+        mem::size_of::<U256>() // value
     }
 }
 
-impl RlpEcdsaEncodableTx for TxCustom {
+impl RlpEcdsaEncodableTx for TxPayment {
     /// Outputs the length of the transaction's fields, without a RLP header.
     fn rlp_encoded_fields_length(&self) -> usize {
         self.chain_id.length() +
@@ -114,9 +98,7 @@ impl RlpEcdsaEncodableTx for TxCustom {
             self.max_fee_per_gas.length() +
             self.gas_limit.length() +
             self.to.length() +
-            self.value.length() +
-            self.input.0.length() +
-            self.access_list.length()
+            self.value.length()
     }
 
     /// Encodes only the transaction's fields into the desired buffer, without
@@ -129,15 +111,13 @@ impl RlpEcdsaEncodableTx for TxCustom {
         self.gas_limit.encode(out);
         self.to.encode(out);
         self.value.encode(out);
-        self.input.0.encode(out);
-        self.access_list.encode(out);
     }
 }
 
-impl RlpEcdsaDecodableTx for TxCustom {
+impl RlpEcdsaDecodableTx for TxPayment {
     const DEFAULT_TX_TYPE: u8 = { Self::tx_type() as u8 };
 
-    /// Decodes the inner [TxCustom] fields from RLP bytes.
+    /// Decodes the inner [TxPayment] fields from RLP bytes.
     ///
     /// NOTE: This assumes a RLP header has already been decoded, and _just_
     /// decodes the following RLP fields in the following order:
@@ -160,13 +140,11 @@ impl RlpEcdsaDecodableTx for TxCustom {
             gas_limit: Decodable::decode(buf)?,
             to: Decodable::decode(buf)?,
             value: Decodable::decode(buf)?,
-            input: Decodable::decode(buf)?,
-            access_list: Decodable::decode(buf)?,
         })
     }
 }
 
-impl Transaction for TxCustom {
+impl Transaction for TxPayment {
     #[inline]
     fn chain_id(&self) -> Option<ChainId> {
         Some(self.chain_id)
@@ -228,12 +206,12 @@ impl Transaction for TxCustom {
 
     #[inline]
     fn kind(&self) -> TxKind {
-        self.to
+        TxKind::Call(self.to)
     }
 
     #[inline]
     fn is_create(&self) -> bool {
-        self.to.is_create()
+        false
     }
 
     #[inline]
@@ -243,12 +221,14 @@ impl Transaction for TxCustom {
 
     #[inline]
     fn input(&self) -> &Bytes {
-        &self.input
+        // No input data
+        static EMPTY_BYTES: Bytes = Bytes::new();
+        &EMPTY_BYTES
     }
 
     #[inline]
     fn access_list(&self) -> Option<&AccessList> {
-        Some(&self.access_list)
+        None
     }
 
     #[inline]
@@ -262,13 +242,13 @@ impl Transaction for TxCustom {
     }
 }
 
-impl Typed2718 for TxCustom {
+impl Typed2718 for TxPayment {
     fn ty(&self) -> u8 {
         TRANSFER_TX_TYPE_ID
     }
 }
 
-impl SignableTransaction<Signature> for TxCustom {
+impl SignableTransaction<Signature> for TxPayment {
     fn set_chain_id(&mut self, chain_id: ChainId) {
         self.chain_id = chain_id;
     }
@@ -283,7 +263,7 @@ impl SignableTransaction<Signature> for TxCustom {
     }
 }
 
-impl Encodable for TxCustom {
+impl Encodable for TxPayment {
     fn encode(&self, out: &mut dyn BufMut) {
         self.rlp_encode(out);
     }
@@ -293,22 +273,22 @@ impl Encodable for TxCustom {
     }
 }
 
-impl Decodable for TxCustom {
+impl Decodable for TxPayment {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Self::rlp_decode(buf)
     }
 }
 
-impl InMemorySize for TxCustom {
+impl InMemorySize for TxPayment {
     fn size(&self) -> usize {
-        TxCustom::size(self)
+        TxPayment::size(self)
     }
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct BincodeCompatTxCustom(pub TxCustom);
+pub struct BincodeCompatTxCustom(pub TxPayment);
 
-impl SerdeBincodeCompat for TxCustom {
+impl SerdeBincodeCompat for TxPayment {
     type BincodeRepr<'a> = BincodeCompatTxCustom;
 
     fn as_repr(&self) -> Self::BincodeRepr<'_> {

@@ -24,7 +24,7 @@ use reth_network_api::NetworkInfo;
 use reth_network_p2p::{headers::client::HeadersClient, EthBlockClient};
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_core::{args::NetworkArgs, utils::get_single_header};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig};
 use reth_node_events::node::NodeEvent;
 use reth_provider::{
     providers::ProviderNodeTypes, ChainSpecProvider, ProviderFactory, StageCheckpointReader,
@@ -86,7 +86,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
-        let executor = EthExecutorProvider::ethereum(provider_factory.chain_spec());
+        let executor = EthEvmConfig::ethereum(provider_factory.chain_spec());
 
         let pipeline = Pipeline::<N>::builder()
             .with_tip_sender(tip_tx)
@@ -100,6 +100,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                     executor.clone(),
                     stage_conf.clone(),
                     prune_modes,
+                    None,
                 )
                 .set(ExecutionStage::new(
                     executor,
