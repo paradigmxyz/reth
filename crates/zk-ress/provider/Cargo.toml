@@ -21,6 +21,7 @@ reth-ethereum-primitives.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # misc
 eyre.workspace = true

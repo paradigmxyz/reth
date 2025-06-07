@@ -10523,6 +10523,7 @@ name = "reth-zk-ress-provider"
 version = "1.4.3"
 dependencies = [
  "alloy-primitives",
+ "alloy-rlp",
  "eyre",
  "reth-errors",
  "reth-ethereum-primitives",

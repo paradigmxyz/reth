@@ -8,7 +8,8 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{bytes::BytesMut, Bytes, B256};
+use alloy_rlp::Encodable;
 use reth_errors::ProviderResult;
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::ConfigureEvm;
@@ -83,10 +84,16 @@ where
     }
 
     async fn proof(&self, block_hash: B256) -> ProviderResult<Self::Proof> {
-        let _witness = self.ress_provider.execution_witness(block_hash);
+        let witness = self.ress_provider.execution_witness(block_hash).await?;
 
-        // TODO: we have the witness, now make the request to the prover
-        // match self.prover { .. }
-        unimplemented!()
+        match self.prover {
+            ZkRessProver::ExecutionWitness => {
+                let mut encoded = BytesMut::new();
+                witness.encode(&mut encoded);
+                Ok(encoded.freeze().into())
+            }
+            // TODO: we have the witness, now make the request to the prover
+            _ => unimplemented!(),
+        }
     }
 }
