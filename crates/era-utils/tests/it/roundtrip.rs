@@ -12,7 +12,9 @@ use tempfile::tempdir;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_history_import_export() {
-    let base_url = Url::from_str("https://mainnet.era1.nimbus.team/").unwrap();
+    // URL where the ERA1 files are hosted
+    let base_url = Url::from_str("https://era.ithaca.xyz/era1/index.html").unwrap();
+
 
     let folder = tempdir().unwrap();
     let index = folder.path().to_owned().join("index");
