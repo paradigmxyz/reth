@@ -64,6 +64,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send;
 
+    /// Decodes and recovers the transaction and submits it to the pool.
+    ///
+    /// And awaits the receipt.
+    fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+    ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send;
+
     /// Returns the transaction by hash.
     ///
     /// Checks the pool and state.

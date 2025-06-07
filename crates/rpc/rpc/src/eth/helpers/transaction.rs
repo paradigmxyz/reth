@@ -2,9 +2,12 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
+use futures::StreamExt;
+use reth_chain_state::CanonStateSubscriptions;
+use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
@@ -13,8 +16,9 @@ use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool}
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt> + reth_rpc_eth_api::helpers::LoadReceipt,
+    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>> + CanonStateSubscriptions,
+    Self::Provider: CanonStateSubscriptions + reth_chainspec::ChainSpecProvider,
 {
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
@@ -40,6 +44,32 @@ where
             .map_err(Self::Error::from_eth_err)?;
 
         Ok(hash)
+    }
+
+    async fn send_raw_transaction_sync(
+        &self,
+        tx: Bytes,
+    ) -> Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error> {
+        let hash = self.send_raw_transaction(tx).await?;
+        let mut stream = self.provider().canonical_state_stream();
+        match tokio::time::timeout(tokio::time::Duration::from_secs(30), async {
+            while let Some(notification) = stream.next().await {
+                let chain = notification.committed();
+                for block in chain.blocks_iter() {
+                    if block.body().contains_transaction(&hash) {
+                        if let Some(receipt) = self.transaction_receipt(hash).await? {
+                            return Ok(Some(receipt));
+                        }
+                    }
+                }
+            }
+            Ok(None) // Stream ended, no transaction found
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(_elapsed) => Ok(None), // Timeout reached, no transaction found
+        }
     }
 }
 
