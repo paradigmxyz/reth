@@ -23,7 +23,7 @@ pub mod primitives {
 #[cfg(feature = "cli")]
 pub mod cli {
     #[doc(inline)]
-    pub use reth_cli_util as utl;
+    pub use reth_cli_util::*;
     #[doc(inline)]
     pub use reth_ethereum_cli::*;
 }
