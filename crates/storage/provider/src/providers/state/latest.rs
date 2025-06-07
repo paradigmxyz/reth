@@ -18,7 +18,7 @@ use reth_trie::{
 };
 use reth_trie_db::{
     DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
-    DatabaseTrieWitness, StateCommitment,
+    DatabaseTrieWitness, StateCommitment, StorageProofFromTx,
 };
 
 /// State provider over latest state that takes tx reference.
@@ -108,7 +108,8 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
         slot: B256,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        StorageProof::overlay_storage_proof(self.tx(), address, slot, hashed_storage)
+        StorageProof::from_tx(self.tx(), address)
+            .overlay_storage_proof(address, slot, hashed_storage)
             .map_err(ProviderError::from)
     }
 
@@ -118,7 +119,8 @@ impl<Provider: DBProvider + StateCommitmentProvider> StorageRootProvider
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        StorageProof::overlay_storage_multiproof(self.tx(), address, slots, hashed_storage)
+        StorageProof::from_tx(self.tx(), address)
+            .overlay_storage_multiproof(address, slots, hashed_storage)
             .map_err(ProviderError::from)
     }
 }
