@@ -108,6 +108,7 @@ impl DatabaseProviderMetrics {
             Action::InsertCanonicalHeaders => self.insert_canonical_headers.record(duration),
             Action::InsertHeaders => self.insert_headers.record(duration),
             Action::InsertHeaderNumbers => self.insert_header_numbers.record(duration),
+            #[expect(deprecated)]
             Action::InsertHeaderTerminalDifficulties => self.insert_header_td.record(duration),
             Action::InsertBlockBodyIndices => self.insert_block_body_indices.record(duration),
             Action::InsertTransactionBlocks => self.insert_tx_blocks.record(duration),

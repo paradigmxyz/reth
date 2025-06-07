@@ -19,7 +19,7 @@ use std::num::NonZeroUsize;
 use tracing::trace;
 
 /// Number of header tables to prune in one step
-/// Note: HeaderTerminalDifficulties is no longer pruned after Paris/Merge as it's read-only
+/// Note: `HeaderTerminalDifficulties` is no longer pruned after Paris/Merge as it's read-only
 const HEADER_TABLES_TO_PRUNE: usize = 2;
 
 #[derive(Debug)]
