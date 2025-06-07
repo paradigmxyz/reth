@@ -3,16 +3,18 @@
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_ethereum_primitives::{EthPrimitives, PooledTransactionVariant, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
-use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, TxTy};
+use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
+use reth_node_api::{
+    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+};
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
@@ -34,8 +36,8 @@ use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, EthTransactionPool, PoolTransaction, TransactionPool,
-    TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
+    TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
@@ -368,16 +370,13 @@ pub struct EthereumNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<
-                Consensus = TxTy<Node::Types>,
-                Pooled = PooledTransactionVariant,
-            >,
-        > + Unpin
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
         + 'static,
 {
-    type Network = NetworkHandle<EthNetworkPrimitives>;
+    type Network =
+        NetworkHandle<BasicNetworkPrimitives<PrimitivesTy<Node::Types>, PoolPooledTx<Pool>>>;
 
     async fn build_network(
         self,
