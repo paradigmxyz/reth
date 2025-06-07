@@ -195,6 +195,21 @@ impl<N, E, Err, Map> RpcConverter<N, E, Err, Map> {
     pub const fn with_mapper(mapper: Map) -> Self {
         Self { phantom: PhantomData, mapper }
     }
+
+    /// Converts the generic types.
+    pub fn convert<N2, E2, Err2>(self) -> RpcConverter<N2, E2, Err2, Map> {
+        RpcConverter::with_mapper(self.mapper)
+    }
+
+    /// Swaps the inner `mapper`.
+    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<N, E, Err, Map2> {
+        RpcConverter::with_mapper(mapper)
+    }
+
+    /// Converts the generic types and swaps the inner `mapper`.
+    pub fn convert_map<N2, E2, Err2, Map2>(self, mapper: Map2) -> RpcConverter<N2, E2, Err2, Map2> {
+        self.convert().map(mapper)
+    }
 }
 
 impl<N, E, Err, Map: Clone> Clone for RpcConverter<N, E, Err, Map> {
