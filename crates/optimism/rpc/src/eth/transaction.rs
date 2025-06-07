@@ -12,7 +12,7 @@ use op_alloy_rpc_types::{OpTransactionRequest, Transaction};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, NodeTypes};
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{BlockBody, NodePrimitives, SignedTransaction, TxTy};
+use reth_primitives_traits::{BlockBody, NodePrimitives, TxTy};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
