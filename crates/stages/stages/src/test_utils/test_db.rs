@@ -1,5 +1,5 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
-use reth_chainspec::MAINNET;
+use reth_chainspec::{EthereumHardforks, MAINNET};
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
@@ -165,6 +165,11 @@ impl TestStageDB {
             // Note: HeaderTerminalDifficulties table is read-only in database after
             // Paris/Merge but still written to static files for historical data
             tx.put::<tables::Headers>(header.number, header.header().clone())?;
+
+            // Only insert into HeaderTerminalDifficulties for pre-merge blocks
+            if !MAINNET.is_paris_active_at_block(header.number) {
+                tx.put::<tables::HeaderTerminalDifficulties>(header.number, td.into())?;
+            }
         }
 
         tx.put::<tables::HeaderNumbers>(header.hash(), header.number)?;
