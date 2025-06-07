@@ -306,7 +306,12 @@ tables! {
         type Value = HeaderHash;
     }
 
-    /// Stores the total difficulty from a block header.
+    /// Stores the total difficulty from block headers.
+    ///
+    /// Note: This table is no longer written to after the Paris/Merge transition
+    /// as total difficulty is no longer used for consensus. Read operations are
+    /// maintained for backward compatibility. Total difficulty values are still
+    /// written to static files for historical record.
     table HeaderTerminalDifficulties {
         type Key = BlockNumber;
         type Value = CompactU256;
