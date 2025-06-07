@@ -223,7 +223,7 @@ mod tests {
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let segment = super::Headers::new(db.factory.static_file_provider());
             let prune_mode = PruneMode::Before(to_block);
-            let mut limiter = PruneLimiter::default().set_deleted_entries_limit(10);
+            let mut limiter = PruneLimiter::default().set_deleted_entries_limit(6);
             let input = PruneInput {
                 previous_checkpoint: db
                     .factory
@@ -294,11 +294,16 @@ mod tests {
             );
         };
 
+        // First test: Prune with limit of 6 entries
+        // This will prune blocks 0-2 (3 blocks × 2 tables = 6 entries)
         test_prune(
             3,
-            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 9),
+            (PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached), 6),
         );
-        test_prune(3, (PruneProgress::Finished, 3));
+
+        // Second test: Prune remaining blocks
+        // This will prune block 3 (1 block × 2 tables = 2 entries)
+        test_prune(3, (PruneProgress::Finished, 2));
     }
 
     #[test]
