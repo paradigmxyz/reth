@@ -46,7 +46,7 @@ pub struct ExportConfig {
 /// Fetches block history data from the provider
 /// and prepares it for export to era1 files
 /// for a given number of blocks
-/// then writes then to disk.
+/// then writes them to disk.
 pub fn export<P, B>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
 where
     P: DBProvider
