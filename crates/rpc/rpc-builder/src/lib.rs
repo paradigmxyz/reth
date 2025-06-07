@@ -1945,49 +1945,50 @@ impl TransportRpcModules {
 
     /// Adds or replaces given [`Methods`] in http module.
     ///
-    /// Returns `true` if the methods were replaced or added `false` otherwise.
-    pub fn add_or_replace_http(&mut self, other: impl Into<Methods>) -> bool {
+    /// Returns `true` if the methods were replaced or added, `false` otherwise.
+    pub fn add_or_replace_http(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
         let other = other.into();
         self.remove_http_methods(other.method_names());
-        if let Some(http) = self.http.as_mut() {
-            let _ = http.merge(other);
-            return true
-        }
-        false
+        self.merge_http(other)
     }
 
     /// Adds or replaces given [`Methods`] in ws module.
     ///
     /// Returns `true` if the methods were replaced or added, `false` otherwise.
-    pub fn add_or_replace_ws(&mut self, other: impl Into<Methods>) -> bool {
+    pub fn add_or_replace_ws(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
         let other = other.into();
         self.remove_ws_methods(other.method_names());
-        if let Some(ws) = self.ws.as_mut() {
-            let _ = ws.merge(other);
-            return true
-        }
-        false
+        self.merge_ws(other)
     }
 
     /// Adds or replaces given [`Methods`] in ipc module.
     ///
     /// Returns `true` if the methods were replaced or added, `false` otherwise.
-    pub fn add_or_replace_ipc(&mut self, other: impl Into<Methods>) -> bool {
+    pub fn add_or_replace_ipc(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
         let other = other.into();
         self.remove_ipc_methods(other.method_names());
-        if let Some(ipc) = self.ipc.as_mut() {
-            let _ = ipc.merge(other);
-            return true
-        }
-        false
+        self.merge_ipc(other)
     }
 
     /// Adds or replaces given [`Methods`] in all configured network modules.
-    pub fn add_or_replace_configured(&mut self, other: impl Into<Methods>) {
+    pub fn add_or_replace_configured(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<(), RegisterMethodError> {
         let other = other.into();
-        self.add_or_replace_http(other.clone());
-        self.add_or_replace_ws(other.clone());
-        self.add_or_replace_ipc(other);
+        self.add_or_replace_http(other.clone())?;
+        self.add_or_replace_ws(other.clone())?;
+        self.add_or_replace_ipc(other)?;
+        Ok(())
     }
 }
 
