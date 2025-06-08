@@ -257,7 +257,7 @@ pub struct HistoricalRpcService<S, P> {
     /// Client used to forward historical requests  
     historical_client: Arc<HistoricalRpcService>,
     /// Provider used to determine if a block is pre-bedrock
-    provide: Arc<P>,
+    provider: Arc<P>,
     /// Bedrock transition block number
     bedrock_block: BlockNumber,
 }
