@@ -272,10 +272,10 @@ where
     type BatchResponse = S::BatchResponse;
 
     fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
-        let method = req.method;
-        let inner_service = self.inner;
-        let historical_client = self.historical_client;
-        let provider = self.provider; // Fixed variable name
+        let method = req.method.as_ref();
+        let inner_service = self.inner.clone();
+        let historical_client = self.historical_client.clone();
+        let provider = self.provider.clone(); // Fixed variable name
         let bedrock_block = self.bedrock_block;
 
         async move {
