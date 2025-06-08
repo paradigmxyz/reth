@@ -636,6 +636,7 @@ impl<HttpMiddleware, RpcMiddleware> Builder<HttpMiddleware, RpcMiddleware> {
     ///
     /// Panics if the buffer capacity is 0.
     pub const fn set_message_buffer_capacity(mut self, c: u32) -> Self {
+        assert!(c > 0, "message buffer capacity must be greater than 0");
         self.settings.message_buffer_capacity = c;
         self
     }
@@ -1067,5 +1068,18 @@ mod tests {
 
         assert_eq!(say_hello_response, goodbye_msg);
         assert_eq!(say_goodbye_response, hello_msg);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "message buffer capacity must be greater than 0")]
+    async fn test_zero_message_buffer_capacity() {
+        init_test_tracing();
+        let endpoint = &dummy_name();
+        
+        // Setting zero message buffer capacity should panic
+        let server = Builder::default().set_message_buffer_capacity(0).build(endpoint.clone());
+        let mut module = RpcModule::new(());
+        module.register_method("anything", |_, _, _| "ok").unwrap();
+        let _handle = server.start(module).await.unwrap();
     }
 }
