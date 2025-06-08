@@ -285,6 +285,7 @@ impl<S> P2PStream<S> {
     ///
     /// If the provided capacity is `0`.
     pub const fn set_outgoing_message_buffer_capacity(&mut self, capacity: usize) {
+        assert!(capacity > 0, "outgoing message buffer capacity must be greater than 0");
         self.outgoing_message_buffer_capacity = capacity;
     }
 
@@ -1001,5 +1002,30 @@ mod tests {
         let pong = P2PMessage::decode(&mut &snappy_pong[..]).unwrap();
         assert!(matches!(pong, P2PMessage::Pong));
         assert_eq!(alloy_rlp::encode(pong), &snappy_pong[..]);
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "outgoing message buffer capacity must be greater than 0")]
+    async fn test_zero_capacity() {
+        reth_tracing::init_test_tracing();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let local_addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            let (incoming, _) = listener.accept().await.unwrap();
+            let stream = crate::PassthroughCodec::default().framed(incoming);
+            let (server_hello, _) = eth_hello();
+            let (_p2p_stream, _) = UnauthedP2PStream::new(stream).handshake(server_hello).await.unwrap();
+        });
+
+        let outgoing = TcpStream::connect(local_addr).await.unwrap();
+        let sink = crate::PassthroughCodec::default().framed(outgoing);
+        let (client_hello, _) = eth_hello();
+        let (mut p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(client_hello).await.unwrap();
+
+        // setting zero capacity should panic
+        p2p_stream.set_outgoing_message_buffer_capacity(0);
+
+        handle.await.unwrap();
     }
 }
