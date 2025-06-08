@@ -255,7 +255,7 @@ pub struct HistoricalRpcService<S, P> {
     /// The inner service that handles regular RPC requests
     inner: S,
     /// Client used to forward historical requests  
-    historical_client: Arc<HistoricalRpcService>,
+    historical_client: Arc<HttpClient>,
     /// Provider used to determine if a block is pre-bedrock
     provider: Arc<P>,
     /// Bedrock transition block number
