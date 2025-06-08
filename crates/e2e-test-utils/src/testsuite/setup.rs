@@ -234,33 +234,47 @@ where
 
         env.node_clients = node_clients;
 
-        // Initialize the environment with genesis block information
-        let first_client = &env.node_clients[0];
-        let genesis_block =
-            EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
-                &first_client.rpc,
-                BlockNumberOrTag::Number(0),
-                false,
-            )
-            .await?
-            .ok_or_else(|| eyre!("Genesis block not found"))?;
+        // Initialize per-node states for all nodes
+        env.initialize_node_states(node_count);
 
-        env.current_block_info = Some(crate::testsuite::BlockInfo {
-            hash: genesis_block.header.hash,
-            number: genesis_block.header.number,
-            timestamp: genesis_block.header.timestamp,
-        });
+        // Initialize each node's state with genesis block information
+        let genesis_block_info = {
+            let first_client = &env.node_clients[0];
+            let genesis_block =
+                EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
+                    &first_client.rpc,
+                    BlockNumberOrTag::Number(0),
+                    false,
+                )
+                .await?
+                .ok_or_else(|| eyre!("Genesis block not found"))?;
 
-        env.latest_header_time = genesis_block.header.timestamp;
-        env.latest_fork_choice_state = ForkchoiceState {
-            head_block_hash: genesis_block.header.hash,
-            safe_block_hash: genesis_block.header.hash,
-            finalized_block_hash: genesis_block.header.hash,
+            crate::testsuite::BlockInfo {
+                hash: genesis_block.header.hash,
+                number: genesis_block.header.number,
+                timestamp: genesis_block.header.timestamp,
+            }
         };
 
+        // Initialize all node states with the same genesis block
+        for (node_idx, node_state) in env.node_states.iter_mut().enumerate() {
+            node_state.current_block_info = Some(genesis_block_info);
+            node_state.latest_header_time = genesis_block_info.timestamp;
+            node_state.latest_fork_choice_state = ForkchoiceState {
+                head_block_hash: genesis_block_info.hash,
+                safe_block_hash: genesis_block_info.hash,
+                finalized_block_hash: genesis_block_info.hash,
+            };
+
+            debug!(
+                "Node {} initialized with genesis block {} (hash: {})",
+                node_idx, genesis_block_info.number, genesis_block_info.hash
+            );
+        }
+
         debug!(
-            "Environment initialized with genesis block {} (hash: {})",
-            genesis_block.header.number, genesis_block.header.hash
+            "Environment initialized with {} nodes, all starting from genesis block {} (hash: {})",
+            node_count, genesis_block_info.number, genesis_block_info.hash
         );
 
         // TODO: For each block in self.blocks, replay it on the node
