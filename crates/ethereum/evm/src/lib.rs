@@ -212,10 +212,7 @@ where
                 BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
             });
 
-        let mut basefee = parent.next_block_base_fee(
-            self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
-        );
-
+        let mut basefee = chain_spec.next_block_base_fee(&parent);
         let mut gas_limit = attributes.gas_limit;
 
         // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
@@ -231,7 +228,7 @@ where
             gas_limit *= elasticity_multiplier as u64;
 
             // set the base fee to the initial base fee from the EIP-1559 spec
-            basefee = Some(INITIAL_BASE_FEE)
+            basefee = INITIAL_BASE_FEE as u64;
         }
 
         let block_env = BlockEnv {
@@ -242,7 +239,7 @@ where
             prevrandao: Some(attributes.prev_randao),
             gas_limit,
             // calculate basefee based on parent block's gas usage
-            basefee: basefee.unwrap_or_default(),
+            basefee,
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };

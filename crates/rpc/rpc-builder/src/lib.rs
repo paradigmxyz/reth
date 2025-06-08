@@ -22,6 +22,7 @@
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
+pub use cors::CorsDomainError;
 use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
@@ -49,8 +50,8 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
-    AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider, ProviderBlock,
-    StateProviderFactory,
+    AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider, HeaderProvider,
+    ProviderBlock, StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, PoolTransaction, TransactionPool};
@@ -64,8 +65,6 @@ use std::{
 };
 use tower::Layer;
 use tower_http::cors::CorsLayer;
-
-pub use cors::CorsDomainError;
 
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
