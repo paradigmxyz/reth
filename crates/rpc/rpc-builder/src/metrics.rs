@@ -247,3 +247,121 @@ struct RpcServerCallMetrics {
     /// Response for a single call
     time_seconds: Histogram,
 }
+
+/// A service that intercepts RPC calls and forwards pre-bedrock historical requests
+/// to a dedicated endpoint.
+#[derive(Debug, Clone)]
+pub struct HistoricalRpcService<S, P> {
+    /// The inner service that handles regular RPC requests
+    inner: S,
+    /// Client used to forward historical requests  
+    historical_client: Arc<HistoricalRpcService>,
+    /// Provider used to determine if a block is pre-bedrock
+    provide: Arc<P>,
+    /// Bedrock transition block number
+    bedrock_block: BlockNumber,
+}
+
+impl<S, P> RpcServiceT for HistoricalRpcService<S, P>
+where
+    S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync + Clone + 'static,
+    P: BlockReaderIdExt + Send + Sync + Clone + 'static,
+{
+    type MethodResponse = S::MethodResponse;
+    type NotificationResponse = S::NotificationResponse;
+    type BatchResponse = S::BatchResponse;
+
+    fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
+        let method = req.method;
+        let inner_service = self.inner;
+        let historical_client = self.historical_client;
+        let provider = self.provider; // Fixed variable name
+        let bedrock_block = self.bedrock_block;
+
+        async move {
+            // Check if this method should be considered for historical forwarding
+            let is_historical_method = matches!(
+                method,
+                "eth_getBalance"
+                    | "eth_getStorageAt"
+                    | "eth_getCode"
+                    | "eth_call"
+                    | "eth_getTransactionCount"
+                    | "eth_getBlockByHash"
+                    | "eth_getBlockByNumber"
+                    | "eth_getTransactionByHash"
+                    | "eth_getTransactionReceipt"
+            );
+
+            if is_historical_method {
+                // Extract block ID from parameters based on method
+                let maybe_block_id = match method {
+                    "eth_getBlockByNumber" => {
+                        // First param is block ID
+                        req.params.parse::<(BlockId,)>().ok().map(|(id,)| id)
+                    }
+                    "eth_getBlockByHash" => {
+                        // First param is hash
+                        req.params.parse::<(BlockHash,)>().ok().map(|hash| BlockId::Hash(hash.0))
+                    }
+                    _ => None,
+                };
+
+                if let Some(block_id) = maybe_block_id {
+                    // Determine if block is pre-bedrock
+                    let is_pre_bedrock = match block_id {
+                        BlockId::Number(BlockNumberOrTag::Number(num)) => num < bedrock_block,
+                        BlockId::Number(BlockNumberOrTag::Earliest) => true,
+                        BlockId::Number(_) => false,
+                        BlockId::Hash(hash) => {
+                            if let Ok(Some(header)) = provider.header_by_hash(hash).await {
+                                header.number < bedrock_block
+                            } else {
+                                true
+                            }
+                        }
+                    };
+
+                    if is_pre_bedrock {
+                        // Forward pre-bedrock request to historical endpoint
+                        tracing::debug!(
+                            target: "rpc::historical",
+                            method = %method,
+                            ?block_id,
+                            "Forwarding pre-bedrock request to historical endpoint"
+                        );
+
+                        match historical_client.request(method, req.params.clone()).await {
+                            Ok(response) => {
+                                return response;
+                            }
+                            Err(err) => {
+                                tracing::warn!(
+                                    target: "rpc::historical", // Fixed typo
+                                    %err,
+                                    method = %method,
+                                    ?block_id,
+                                    "Historical request failed, falling back to regular service"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Default to inner service
+            inner_service.call(req).await
+        }
+    }
+
+    fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
+        self.inner.batch(req)
+    }
+
+    fn notification<'a>(
+        &self,
+        n: Notification<'a>,
+    ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
+        self.inner.notification(n)
+    }
+}
