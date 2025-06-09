@@ -146,8 +146,7 @@ where
             }
 
             let latest_info = env
-                .current_block_info
-                .as_ref()
+                .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
             // simple round-robin selection based on next block number
@@ -177,11 +176,11 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let latest_block = env
-                .current_block_info
-                .as_ref()
+                .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
             let block_number = latest_block.number;
-            let timestamp = env.latest_header_time + env.block_timestamp_increment;
+            let timestamp =
+                env.active_node_state()?.latest_header_time + env.block_timestamp_increment;
             let payload_attributes = PayloadAttributes {
                 timestamp,
                 prev_randao: B256::random(),
@@ -190,7 +189,9 @@ where
                 parent_beacon_block_root: Some(B256::ZERO),
             };
 
-            env.payload_attributes.insert(latest_block.number + 1, payload_attributes);
+            env.active_node_state_mut()?
+                .payload_attributes
+                .insert(latest_block.number + 1, payload_attributes);
             debug!("Stored payload attributes for block {}", block_number + 1);
             Ok(())
         })
@@ -209,8 +210,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let latest_block = env
-                .current_block_info
-                .as_ref()
+                .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
             let parent_hash = latest_block.hash;
@@ -223,6 +223,7 @@ where
             };
 
             let payload_attributes = env
+                .active_node_state()?
                 .payload_attributes
                 .get(&(latest_block.number + 1))
                 .cloned()
@@ -250,7 +251,8 @@ where
                 debug!("No payload ID returned, generating fresh payload attributes for forking");
 
                 let fresh_payload_attributes = PayloadAttributes {
-                    timestamp: env.latest_header_time + env.block_timestamp_increment,
+                    timestamp: env.active_node_state()?.latest_header_time +
+                        env.block_timestamp_increment,
                     prev_randao: B256::random(),
                     suggested_fee_recipient: alloy_primitives::Address::random(),
                     withdrawals: Some(vec![]),
@@ -277,7 +279,7 @@ where
                 }
             };
 
-            env.next_payload_id = Some(payload_id);
+            env.active_node_state_mut()?.next_payload_id = Some(payload_id);
 
             sleep(Duration::from_secs(1)).await;
 
@@ -289,9 +291,11 @@ where
 
             // Store the payload attributes that were used to generate this payload
             let built_payload = payload_attributes.clone();
-            env.payload_id_history.insert(latest_block.number + 1, payload_id);
-            env.latest_payload_built = Some(built_payload);
-            env.latest_payload_envelope = Some(built_payload_envelope);
+            env.active_node_state_mut()?
+                .payload_id_history
+                .insert(latest_block.number + 1, payload_id);
+            env.active_node_state_mut()?.latest_payload_built = Some(built_payload);
+            env.active_node_state_mut()?.latest_payload_envelope = Some(built_payload_envelope);
 
             Ok(())
         })
@@ -315,7 +319,9 @@ where
             }
 
             // use the hash of the newly executed payload if available
-            let head_hash = if let Some(payload_envelope) = &env.latest_payload_envelope {
+            let head_hash = if let Some(payload_envelope) =
+                &env.active_node_state()?.latest_payload_envelope
+            {
                 let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
                     payload_envelope.clone().into();
                 let new_block_hash = execution_payload_envelope
@@ -408,14 +414,15 @@ where
                 .ok_or_else(|| eyre::eyre!("No latest block found from RPC"))?;
 
             // update environment with the new block information
-            env.current_block_info = Some(BlockInfo {
+            env.set_current_block_info(BlockInfo {
                 hash: latest_block.header.hash,
                 number: latest_block.header.number,
                 timestamp: latest_block.header.timestamp,
-            });
+            })?;
 
-            env.latest_header_time = latest_block.header.timestamp;
-            env.latest_fork_choice_state.head_block_hash = latest_block.header.hash;
+            env.active_node_state_mut()?.latest_header_time = latest_block.header.timestamp;
+            env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash =
+                latest_block.header.hash;
 
             debug!(
                 "Updated environment to block {} (hash: {})",
@@ -443,6 +450,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let payload_envelope = env
+                .active_node_state()?
                 .latest_payload_envelope
                 .as_ref()
                 .ok_or_else(|| eyre::eyre!("No execution payload envelope available"))?;
@@ -456,14 +464,14 @@ where
             let block_timestamp = execution_payload.payload_inner.payload_inner.timestamp;
 
             // update environment with the new block information from the payload
-            env.current_block_info = Some(BlockInfo {
+            env.set_current_block_info(BlockInfo {
                 hash: block_hash,
                 number: block_number,
                 timestamp: block_timestamp,
-            });
+            })?;
 
-            env.latest_header_time = block_timestamp;
-            env.latest_fork_choice_state.head_block_hash = block_hash;
+            env.active_node_state_mut()?.latest_header_time = block_timestamp;
+            env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash = block_hash;
 
             debug!(
                 "Updated environment to newly produced block {} (hash: {})",
@@ -488,17 +496,18 @@ where
         Box::pin(async move {
             let mut accepted_check: bool = false;
 
-            let latest_block = env
-                .current_block_info
-                .as_mut()
+            let mut latest_block = env
+                .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
 
             let payload_id = *env
+                .active_node_state()?
                 .payload_id_history
                 .get(&(latest_block.number + 1))
                 .ok_or_else(|| eyre::eyre!("Cannot find payload_id"))?;
 
-            for (idx, client) in env.node_clients.iter().enumerate() {
+            let node_clients = env.node_clients.clone();
+            for (idx, client) in node_clients.iter().enumerate() {
                 let rpc_client = &client.rpc;
 
                 // get the last header by number using latest_head_number
@@ -512,6 +521,7 @@ where
 
                 // perform several checks
                 let next_new_payload = env
+                    .active_node_state()?
                     .latest_payload_built
                     .as_ref()
                     .ok_or_else(|| eyre::eyre!("No next built payload found"))?;
@@ -563,10 +573,11 @@ where
                 if !accepted_check {
                     accepted_check = true;
                     // save the header in Env
-                    env.latest_header_time = next_new_payload.timestamp;
+                    env.active_node_state_mut()?.latest_header_time = next_new_payload.timestamp;
 
                     // add it to header history
-                    env.latest_fork_choice_state.head_block_hash = rpc_latest_header.hash;
+                    env.active_node_state_mut()?.latest_fork_choice_state.head_block_hash =
+                        rpc_latest_header.hash;
                     latest_block.hash = rpc_latest_header.hash;
                     latest_block.number = rpc_latest_header.inner.number;
                 }
@@ -595,26 +606,30 @@ where
         Box::pin(async move {
             // Get the next new payload to broadcast
             let next_new_payload = env
+                .active_node_state()?
                 .latest_payload_built
                 .as_ref()
-                .ok_or_else(|| eyre::eyre!("No next built payload found"))?;
+                .ok_or_else(|| eyre::eyre!("No next built payload found"))?
+                .clone();
             let parent_beacon_block_root = next_new_payload
                 .parent_beacon_block_root
                 .ok_or_else(|| eyre::eyre!("No parent beacon block root for next new payload"))?;
 
             let payload_envelope = env
+                .active_node_state()?
                 .latest_payload_envelope
                 .as_ref()
-                .ok_or_else(|| eyre::eyre!("No execution payload envelope available"))?;
+                .ok_or_else(|| eyre::eyre!("No execution payload envelope available"))?
+                .clone();
 
-            let execution_payload_envelope: ExecutionPayloadEnvelopeV3 =
-                payload_envelope.clone().into();
+            let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = payload_envelope.into();
             let execution_payload = execution_payload_envelope.execution_payload;
 
             // Loop through all clients and broadcast the next new payload
-            let mut successful_broadcast: bool = false;
+            let mut broadcast_results = Vec::new();
+            let mut first_valid_seen = false;
 
-            for client in &env.node_clients {
+            for (idx, client) in env.node_clients.iter().enumerate() {
                 let engine = client.engine.http_client();
 
                 // Broadcast the execution payload
@@ -626,24 +641,33 @@ where
                 )
                 .await?;
 
-                // Check if broadcast was successful
-                if result.status == PayloadStatusEnum::Valid {
-                    successful_broadcast = true;
-                    // We don't need to update the latest payload built since it should be the same.
-                    // env.latest_payload_built = Some(next_new_payload.clone());
-                    env.latest_payload_executed = Some(next_new_payload.clone());
-                    break;
+                broadcast_results.push((idx, result.status.clone()));
+                debug!("Node {}: new_payload broadcast status: {:?}", idx, result.status);
+
+                // Check if this node accepted the payload
+                if result.status == PayloadStatusEnum::Valid && !first_valid_seen {
+                    first_valid_seen = true;
                 } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
                     debug!(
-                        "Invalid payload status returned from broadcast: {:?}",
-                        validation_error
+                        "Node {}: Invalid payload status returned from broadcast: {:?}",
+                        idx, validation_error
                     );
                 }
             }
 
-            if !successful_broadcast {
+            // Update the executed payload state after broadcasting to all nodes
+            if first_valid_seen {
+                env.active_node_state_mut()?.latest_payload_executed = Some(next_new_payload);
+            }
+
+            // Check if at least one node accepted the payload
+            let any_valid =
+                broadcast_results.iter().any(|(_, status)| *status == PayloadStatusEnum::Valid);
+            if !any_valid {
                 return Err(eyre::eyre!("Failed to successfully broadcast payload to any client"));
             }
+
+            debug!("Broadcast complete. Results: {:?}", broadcast_results);
 
             Ok(())
         })
@@ -721,7 +745,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // get the target block from the registry
-            let target_block = env
+            let (target_block, _node_idx) = env
                 .block_registry
                 .get(&self.tag)
                 .copied()
@@ -893,10 +917,10 @@ where
                     sequence.execute(env).await?;
 
                     // get the latest payload and corrupt it
-                    let latest_envelope = env
-                        .latest_payload_envelope
-                        .as_ref()
-                        .ok_or_else(|| eyre::eyre!("No payload envelope available to corrupt"))?;
+                    let latest_envelope =
+                        env.active_node_state()?.latest_payload_envelope.as_ref().ok_or_else(
+                            || eyre::eyre!("No payload envelope available to corrupt"),
+                        )?;
 
                     let envelope_v3: ExecutionPayloadEnvelopeV3 = latest_envelope.clone().into();
                     let mut corrupted_payload = envelope_v3.execution_payload;
@@ -942,11 +966,11 @@ where
                     }
 
                     // update block info with the corrupted block (for potential future reference)
-                    env.current_block_info = Some(BlockInfo {
+                    env.set_current_block_info(BlockInfo {
                         hash: corrupted_payload.payload_inner.payload_inner.block_hash,
                         number: corrupted_payload.payload_inner.payload_inner.block_number,
                         timestamp: corrupted_payload.timestamp(),
-                    });
+                    })?;
                 } else {
                     debug!("Producing valid block at index {}", block_index);
 
