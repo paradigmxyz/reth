@@ -87,7 +87,7 @@ impl EthChainSpec for ChainSpec {
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
         let is_osaka_activated = self.is_osaka_active_at_timestamp(timestamp);
-        let mut params = if let Some(blob_param) =
+        let params = if let Some(blob_param) =
             self.blob_params.active_scheduled_params_at_timestamp(timestamp)
         {
             Some(*blob_param)
