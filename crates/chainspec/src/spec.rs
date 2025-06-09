@@ -1,5 +1,6 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 use alloy_evm::eth::spec::EthExecutorSpec;
+use itertools::Itertools;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
@@ -522,13 +523,20 @@ impl ChainSpec {
             }
         }
 
+        let bpo_forks = self.blob_params.scheduled.iter().map(|(activation, _)| *activation);
+
+        let timestamp_forks = self
+            .hardforks
+            .forks_iter()
+            .filter_map(|(_, cond)| cond.as_timestamp())
+            .chain(bpo_forks)
+            .filter(|time| time > &self.genesis.timestamp)
+            .sorted();
+
         // timestamp are ALWAYS applied after the merge.
         //
         // this filter ensures that no block-based forks are returned
-        for timestamp in self.hardforks.forks_iter().filter_map(|(_, cond)| {
-            // ensure we only get timestamp forks activated __after__ the genesis block
-            cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
-        }) {
+        for timestamp in timestamp_forks {
             if head.timestamp >= timestamp {
                 // skip duplicated hardfork activated at the same timestamp
                 if timestamp != current_applied {

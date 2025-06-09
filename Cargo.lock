@@ -7200,6 +7200,7 @@ dependencies = [
  "alloy-trie",
  "auto_impl",
  "derive_more",
+ "itertools 0.14.0",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-primitives-traits",
