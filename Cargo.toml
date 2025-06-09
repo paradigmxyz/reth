@@ -747,16 +747,16 @@ alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "fusa
 # jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 
-revm = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-database = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-state = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-handler = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-context = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
-op-revm = { git = "https://github.com/bluealloy/revm", branch = "tx_limit_cap" }
+revm = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-database = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-state = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-handler = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-context = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
+op-revm = { git = "https://github.com/bluealloy/revm", branch = "fusaka/devnet2" }
