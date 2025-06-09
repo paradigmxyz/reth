@@ -11,6 +11,9 @@ use reth_primitives_traits::{
     SealedHeader,
 };
 
+/// The maximum RLP length of a block, defined in [EIP-7934](https://eips.ethereum.org/EIPS/eip-7934).
+pub const MAX_RLP_BLOCK_SIZE: usize = 9_961_472;
+
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
 pub fn validate_header_gas<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
@@ -165,6 +168,15 @@ where
 
     if chain_spec.is_cancun_active_at_timestamp(block.timestamp()) {
         validate_cancun_gas(block)?;
+    }
+
+    if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
+        block.rlp_length() > MAX_RLP_BLOCK_SIZE
+    {
+        return Err(ConsensusError::BlockTooLarge {
+            rlp_length: block.rlp_length(),
+            max_rlp_length: MAX_RLP_BLOCK_SIZE,
+        })
     }
 
     Ok(())
