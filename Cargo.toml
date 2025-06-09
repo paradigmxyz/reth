@@ -724,6 +724,8 @@ vergen-git2 = "1.0.5"
 [patch.crates-io]
 nybbles = { path = "/Users/shekhirin/Projects/nybbles" }
 alloy-trie = { path = "/Users/shekhirin/Projects/alloy-trie" }
+# nybbles = { git = "https://github.com/alloy-rs/nybbles", branch = "alexey/uint-repr" }
+# alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "alexey/nybbles-uint" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
