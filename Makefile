@@ -96,6 +96,15 @@ build-debug: ## Build the reth binary into `target/debug` directory.
 build-op: ## Build the op-reth binary into `target` directory.
 	cargo build --bin op-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
+# Modern CPU baseline builds using haswell (2013+: AVX2, BMI1, BMI2, FMA, LZCNT, MOVBE)
+.PHONY: build-modern
+build-modern: ## Build the reth binary with modern CPU baseline (haswell/2013+).
+	RUSTFLAGS="-C target-cpu=haswell" cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
+
+.PHONY: build-op-modern
+build-op-modern: ## Build the op-reth binary with modern CPU baseline (haswell/2013+).
+	RUSTFLAGS="-C target-cpu=haswell" cargo build --bin op-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
+
 # Builds the reth binary natively.
 build-native-%:
 	cargo build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
@@ -127,12 +136,15 @@ op-build-x86_64-pc-windows-gnu: FEATURES := $(filter-out jemalloc jemalloc-prof,
 
 # Note: The additional rustc compiler flags are for intrinsics needed by MDBX.
 # See: https://github.com/cross-rs/cross/wiki/FAQ#undefined-reference-with-build-std
+# For x86_64 Linux builds, use haswell CPU baseline (2013+) for better performance
 build-%:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+	$(eval EXTRA_FLAGS := $(if $(findstring x86_64-unknown-linux,$*),-C target-cpu=haswell,))
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc $(EXTRA_FLAGS)" \
 		cross build --bin reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)"
 
 op-build-%:
-	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
+	$(eval EXTRA_FLAGS := $(if $(findstring x86_64-unknown-linux,$*),-C target-cpu=haswell,))
+	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc $(EXTRA_FLAGS)" \
 		cross build --bin op-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
@@ -162,6 +174,7 @@ endef
 # will likely need to use `git tag` and create a semver tag (e.g., `v0.2.3`).
 #
 # Note: This excludes macOS tarballs because of SDK licensing issues.
+# Note: x86_64 builds now use haswell CPU baseline (2013+) for better performance
 .PHONY: build-release-tarballs
 build-release-tarballs: ## Create a series of `.tar.gz` files in the BIN_DIR directory, each containing a `reth` binary for a different target.
 	[ -d $(BIN_DIR) ] || mkdir -p $(BIN_DIR)
