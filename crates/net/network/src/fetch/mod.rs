@@ -4,7 +4,10 @@ mod client;
 
 pub use client::FetchClient;
 
-use crate::{message::BlockRequest, session::BlockRangeInfo};
+use crate::{
+    message::BlockRequest,
+    session::{BlockRangeInfo, BlockRangeInfoExt},
+};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};
@@ -137,7 +140,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
     /// prioritizing those with the lowest timeout/latency and those that recently responded with
     /// adequate data. Additionally prioritizes peers that either have no `BlockRangeInfo` or have
     /// the full range available.
-    fn next_best_peer(&self) -> Option<PeerId> {
+    fn next_best_peer(&self, range_hint: Option<RangeInclusive<u64>>) -> Option<PeerId> {
         let mut idle = self.peers.iter().filter(|(_, peer)| peer.state.is_idle());
 
         let mut best_peer = idle.next()?;
@@ -149,20 +152,24 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                 continue
             }
 
-            // replace best peer if this peer has better range info (no range or starts from 0)
-            let best_has_good_range =
-                best_peer.1.range_info.as_ref().is_none_or(|r| r.earliest() == 0);
-            let maybe_better_has_good_range =
-                maybe_better.1.range_info.as_ref().is_none_or(|r| r.earliest() == 0);
-            if !best_has_good_range && maybe_better_has_good_range {
-                best_peer = maybe_better;
-                continue;
+            // replace best peer if this peer has better range(full range or most overlapping)
+            if !best_peer.1.range_info.has_full_history() {
+                if maybe_better.1.range_info.has_full_history() {
+                    best_peer = maybe_better;
+                    continue
+                }
+
+                if range_hint.is_some() &&
+                    best_peer.1.range_info.earliest() > maybe_better.1.range_info.earliest()
+                {
+                    best_peer = maybe_better;
+                    continue
+                }
             }
 
             // replace best peer if this peer has better rtt and both have same range quality
             if maybe_better.1.timeout() < best_peer.1.timeout() &&
-                !maybe_better.1.last_response_likely_bad &&
-                best_has_good_range == maybe_better_has_good_range
+                !maybe_better.1.last_response_likely_bad
             {
                 best_peer = maybe_better;
             }
@@ -178,9 +185,10 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
             return PollAction::NoRequests
         }
 
-        let Some(peer_id) = self.next_best_peer() else { return PollAction::NoPeersAvailable };
-
         let request = self.queued_requests.pop_front().expect("not empty");
+        let Some(peer_id) = self.next_best_peer(request.get_range_hint()) else {
+            return PollAction::NoPeersAvailable
+        };
         let request = self.prepare_block_request(peer_id, request);
 
         PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
@@ -363,7 +371,6 @@ struct Peer {
     /// lowest timeout.
     last_response_likely_bad: bool,
     /// Tracks the range info for the peer.
-    #[allow(dead_code)]
     range_info: Option<BlockRangeInfo>,
 }
 
@@ -432,7 +439,6 @@ pub(crate) enum DownloadRequest<N: NetworkPrimitives> {
         request: Vec<B256>,
         response: oneshot::Sender<PeerRequestResult<Vec<N::BlockBody>>>,
         priority: Priority,
-        #[allow(dead_code)]
         range_hint: Option<RangeInclusive<u64>>,
     },
 }
@@ -460,6 +466,16 @@ impl<N: NetworkPrimitives> DownloadRequest<N> {
     /// Returns `true` if this request is normal priority.
     const fn is_normal_priority(&self) -> bool {
         self.get_priority().is_normal()
+    }
+
+    /// Returns the range hint for block bodies requests, if any.
+    /// This is only applicable for `GetBlockBodies` requests and indicates the block number range
+    /// that the requested bodies belong to.
+    pub fn get_range_hint(&self) -> Option<RangeInclusive<u64>> {
+        match self {
+            Self::GetBlockHeaders { .. } => None,
+            Self::GetBlockBodies { range_hint, .. } => range_hint.clone(),
+        }
     }
 }
 
@@ -526,17 +542,17 @@ mod tests {
         fetcher.new_active_peer(peer1, B256::random(), 1, Arc::new(AtomicU64::new(1)), None);
         fetcher.new_active_peer(peer2, B256::random(), 2, Arc::new(AtomicU64::new(1)), None);
 
-        let first_peer = fetcher.next_best_peer().unwrap();
+        let first_peer = fetcher.next_best_peer(None).unwrap();
         assert!(first_peer == peer1 || first_peer == peer2);
         // Pending disconnect for first_peer
         fetcher.on_pending_disconnect(&first_peer);
         // first_peer now isn't idle, so we should get other peer
-        let second_peer = fetcher.next_best_peer().unwrap();
+        let second_peer = fetcher.next_best_peer(None).unwrap();
         assert!(first_peer == peer1 || first_peer == peer2);
         assert_ne!(first_peer, second_peer);
         // without idle peers, returns None
         fetcher.on_pending_disconnect(&second_peer);
-        assert_eq!(fetcher.next_best_peer(), None);
+        assert_eq!(fetcher.next_best_peer(None), None);
     }
 
     #[tokio::test]
@@ -556,13 +572,13 @@ mod tests {
         fetcher.new_active_peer(peer3, B256::random(), 3, Arc::new(AtomicU64::new(50)), None);
 
         // Must always get peer1 (lowest timeout)
-        assert_eq!(fetcher.next_best_peer(), Some(peer1));
-        assert_eq!(fetcher.next_best_peer(), Some(peer1));
+        assert_eq!(fetcher.next_best_peer(None), Some(peer1));
+        assert_eq!(fetcher.next_best_peer(None), Some(peer1));
         // peer2's timeout changes below peer1's
         peer2_timeout.store(10, Ordering::Relaxed);
         // Then we get peer 2 always (now lowest)
-        assert_eq!(fetcher.next_best_peer(), Some(peer2));
-        assert_eq!(fetcher.next_best_peer(), Some(peer2));
+        assert_eq!(fetcher.next_best_peer(None), Some(peer2));
+        assert_eq!(fetcher.next_best_peer(None), Some(peer2));
     }
 
     #[tokio::test]

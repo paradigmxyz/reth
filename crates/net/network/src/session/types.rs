@@ -59,6 +59,11 @@ impl BlockRangeInfo {
         *self.inner.latest_hash.read()
     }
 
+    /// Returns true if the peer has the full history available.
+    pub fn has_full_history(&self) -> bool {
+        self.earliest() == 0
+    }
+
     /// Updates the range information.
     pub fn update(&self, earliest: u64, latest: u64, latest_hash: B256) {
         self.inner.earliest.store(earliest, Ordering::Relaxed);
@@ -76,4 +81,22 @@ pub(crate) struct BlockRangeInfoInner {
     latest: AtomicU64,
     /// Latest available block's hash.
     latest_hash: RwLock<B256>,
+}
+
+/// Extension trait for Option<BlockRangeInfo>
+pub trait BlockRangeInfoExt {
+    /// Returns true if the peer has the full history available
+    fn has_full_history(&self) -> bool;
+    /// Returns the earliest block number available from the peer.
+    fn earliest(&self) -> u64;
+}
+
+impl BlockRangeInfoExt for Option<BlockRangeInfo> {
+    fn has_full_history(&self) -> bool {
+        self.as_ref().is_none_or(|info| info.has_full_history())
+    }
+
+    fn earliest(&self) -> u64 {
+        self.as_ref().map_or(0, |info| info.earliest())
+    }
 }
