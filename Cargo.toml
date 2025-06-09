@@ -446,7 +446,7 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "24.0.1", default-features = false }
+revm = { version = "24.0.0", default-features = false }
 revm-bytecode = { version = "4.0.0", default-features = false }
 revm-database = { version = "4.0.0", default-features = false }
 revm-state = { version = "4.0.0", default-features = false }
@@ -628,7 +628,7 @@ toml = "0.8"
 arbitrary = "1.3"
 assert_matches = "1.5.0"
 criterion = { package = "codspeed-criterion-compat", version = "2.7" }
-proptest = "1.4"
+proptest = "~1.6"
 proptest-derive = "0.5"
 similar-asserts = { version = "1.5.0", features = ["serde"] }
 tempfile = "3.20"
@@ -730,6 +730,17 @@ vergen-git2 = "1.0.5"
 # alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 
+revm = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+op-revm = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-bytecode = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-database = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-state = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-primitives = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-interpreter = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-inspector = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-context = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-context-interface = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm-database-interface = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "main" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "main" }
 #
