@@ -3,7 +3,7 @@
 pub mod api;
 use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
-use alloy_primitives::{Address, Bytes, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
@@ -146,6 +146,16 @@ pub enum EthApiError {
     /// Error thrown when tracing with a muxTracer fails
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
+    /// Error thrown when waiting for transaction confirmation times out
+    #[error("Transaction timeout: {message}")]
+    TransactionTimeout {
+        /// Hash of the transaction that timed out
+        hash: B256,
+        /// Duration that was waited before timing out
+        duration: Duration,
+        /// Descriptive message about the timeout
+        message: String,
+    },
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -213,6 +223,9 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     block_id_to_str(end_id),
                 ),
             ),
+            EthApiError::TransactionTimeout { hash: _h, duration: _, message } => {
+                rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), message)
+            }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),
             EthApiError::InvalidParams(msg) => invalid_params_rpc_err(msg),

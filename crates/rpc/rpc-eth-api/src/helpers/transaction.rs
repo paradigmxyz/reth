@@ -70,7 +70,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
-    ) -> impl Future<Output = Result<Option<RpcReceipt<Self::NetworkTypes>>, Self::Error>> + Send;
+    ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send;
 
     /// Returns the transaction by hash.
     ///
