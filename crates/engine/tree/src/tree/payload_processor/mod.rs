@@ -63,8 +63,8 @@ where
     disable_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
-    /// whether precompile cache should be enabled.
-    precompile_cache_enabled: bool,
+    /// Whether precompile cache should be disabled.
+    precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     _marker: std::marker::PhantomData<N>,
@@ -89,7 +89,7 @@ where
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_caching_and_prewarming(),
             evm_config,
-            precompile_cache_enabled: config.precompile_cache_enabled(),
+            precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             _marker: Default::default(),
         }
@@ -273,7 +273,7 @@ where
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
-            precompile_cache_enabled: self.precompile_cache_enabled,
+            precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
         };
 

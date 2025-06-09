@@ -7403,6 +7403,7 @@ dependencies = [
  "serde",
  "tempfile",
  "toml",
+ "url",
 ]
 
 [[package]]
@@ -8073,6 +8074,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
  "reth-chainspec",
+ "reth-cli-util",
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
@@ -8846,6 +8848,7 @@ dependencies = [
  "tokio",
  "toml",
  "tracing",
+ "url",
  "vergen",
  "vergen-git2",
 ]
@@ -8965,6 +8968,7 @@ name = "reth-op"
 version = "1.4.8"
 dependencies = [
  "reth-chainspec",
+ "reth-cli-util",
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
@@ -10005,11 +10009,17 @@ name = "reth-rpc-types-compat"
 version = "1.4.8"
 dependencies = [
  "alloy-consensus",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "jsonrpsee-types",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types",
+ "reth-optimism-primitives",
  "reth-primitives-traits",
+ "reth-storage-api",
  "serde",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
@@ -10024,6 +10034,7 @@ dependencies = [
  "bincode 1.3.3",
  "blake3",
  "codspeed-criterion-compat",
+ "eyre",
  "futures-util",
  "itertools 0.14.0",
  "num-traits",
@@ -10038,6 +10049,9 @@ dependencies = [
  "reth-db",
  "reth-db-api",
  "reth-downloaders",
+ "reth-era",
+ "reth-era-downloader",
+ "reth-era-utils",
  "reth-ethereum-consensus",
  "reth-ethereum-primitives",
  "reth-etl",
