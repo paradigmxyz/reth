@@ -61,8 +61,8 @@ where
             // resolve the fork base and execute the appropriate sequence
             match &self.fork_base {
                 ForkBase::Number(block_number) => {
-                    // store the fork base for later validation
-                    env.current_fork_base = Some(*block_number);
+                    // store the fork base for later validation on the active node
+                    env.active_node_state_mut()?.current_fork_base = Some(*block_number);
 
                     let mut sequence = Sequence::new(vec![
                         Box::new(SetForkBase::new(*block_number)),
@@ -71,13 +71,13 @@ where
                     sequence.execute(env).await
                 }
                 ForkBase::Tag(tag) => {
-                    let block_info =
+                    let (block_info, _node_idx) =
                         env.block_registry.get(tag).copied().ok_or_else(|| {
                             eyre::eyre!("Block tag '{}' not found in registry", tag)
                         })?;
 
-                    // store the fork base for later validation
-                    env.current_fork_base = Some(block_info.number);
+                    // store the fork base for later validation on the active node
+                    env.active_node_state_mut()?.current_fork_base = Some(block_info.number);
 
                     let mut sequence = Sequence::new(vec![
                         Box::new(SetForkBaseFromBlockInfo::new(block_info)),
@@ -139,17 +139,18 @@ where
                 .await?
                 .ok_or_else(|| eyre::eyre!("Fork base block {} not found", self.fork_base_block))?;
 
-            // update environment to point to the fork base block
-            env.current_block_info = Some(BlockInfo {
+            // update active node state to point to the fork base block
+            let active_node_state = env.active_node_state_mut()?;
+            active_node_state.current_block_info = Some(BlockInfo {
                 hash: fork_base_block.header.hash,
                 number: fork_base_block.header.number,
                 timestamp: fork_base_block.header.timestamp,
             });
 
-            env.latest_header_time = fork_base_block.header.timestamp;
+            active_node_state.latest_header_time = fork_base_block.header.timestamp;
 
             // update fork choice state to the fork base
-            env.latest_fork_choice_state = ForkchoiceState {
+            active_node_state.latest_fork_choice_state = ForkchoiceState {
                 head_block_hash: fork_base_block.header.hash,
                 safe_block_hash: fork_base_block.header.hash,
                 finalized_block_hash: fork_base_block.header.hash,
@@ -178,12 +179,13 @@ where
                 block_info.number, block_info.hash
             );
 
-            // update environment to point to the fork base block
-            env.current_block_info = Some(block_info);
-            env.latest_header_time = block_info.timestamp;
+            // update active node state to point to the fork base block
+            let active_node_state = env.active_node_state_mut()?;
+            active_node_state.current_block_info = Some(block_info);
+            active_node_state.latest_header_time = block_info.timestamp;
 
             // update fork choice state to the fork base
-            env.latest_fork_choice_state = ForkchoiceState {
+            active_node_state.latest_fork_choice_state = ForkchoiceState {
                 head_block_hash: block_info.hash,
                 safe_block_hash: block_info.hash,
                 finalized_block_hash: block_info.hash,
@@ -217,8 +219,7 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let current_block_info = env
-                .current_block_info
-                .as_ref()
+                .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No current block information available"))?;
 
             // verify that the current tip is at or ahead of the fork base
@@ -232,7 +233,8 @@ where
 
             // get the fork base hash from the environment's fork choice state
             // we assume the fork choice state was set correctly by SetForkBase
-            let fork_base_hash = env.latest_fork_choice_state.finalized_block_hash;
+            let fork_base_hash =
+                env.active_node_state()?.latest_fork_choice_state.finalized_block_hash;
 
             // trace back from current tip to verify it's a descendant of the fork base
             let rpc_client = &env.node_clients[0].rpc;
