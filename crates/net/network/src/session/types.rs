@@ -83,7 +83,7 @@ pub(crate) struct BlockRangeInfoInner {
     latest_hash: RwLock<B256>,
 }
 
-/// Extension trait for Option<BlockRangeInfo>
+/// Extension trait for `Option<BlockRangeInfo>`
 pub trait BlockRangeInfoExt {
     /// Returns true if the peer has the full history available
     fn has_full_history(&self) -> bool;
