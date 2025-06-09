@@ -1,7 +1,10 @@
 //! Example tests using the test suite framework.
 
 use crate::testsuite::{
-    actions::{AssertMineBlock, CaptureBlock, CreateFork, MakeCanonical, ProduceBlocks, ReorgTo},
+    actions::{
+        AssertMineBlock, CaptureBlock, CaptureBlockOnNode, CompareNodeChainTips, CreateFork,
+        MakeCanonical, ProduceBlocks, ReorgTo, SelectActiveNode,
+    },
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
@@ -157,6 +160,52 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
         .with_action(CaptureBlock::new("blockB_height2"))
         // receive forkchoiceUpdated with block hash B as head
         .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("blockB_height2"));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Multi-node test demonstrating block creation and coordination across multiple nodes.
+///
+/// This test demonstrates the working multi-node framework:
+/// - Multiple nodes start from the same genesis
+/// - Nodes can be selected for specific operations
+/// - Block production can happen on different nodes
+/// - Chain tips can be compared between nodes
+/// - Node-specific state is properly tracked
+#[tokio::test]
+async fn test_testsuite_multinode_block_production() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let setup = Setup::default()
+        .with_chain_spec(Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .build(),
+        ))
+        .with_network(NetworkSetup::multi_node(2)) // Create 2 nodes
+        .with_tree_config(TreeConfig::default().with_state_root_fallback(true));
+
+    let test = TestBuilder::new()
+        .with_setup(setup)
+        // both nodes start from genesis
+        .with_action(CaptureBlock::new("genesis"))
+        .with_action(CompareNodeChainTips::expect_same(0, 1))
+        // build main chain (blocks 1-3)
+        .with_action(SelectActiveNode::new(0))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlockOnNode::new("node0_tip", 0))
+        .with_action(CompareNodeChainTips::expect_same(0, 1))
+        // node 0 already has the state and can continue producing blocks
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(2))
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlockOnNode::new("node0_tip_2", 0))
+        // verify both nodes remain in sync
+        .with_action(CompareNodeChainTips::expect_same(0, 1));
 
     test.run::<EthereumNode>().await?;
 
