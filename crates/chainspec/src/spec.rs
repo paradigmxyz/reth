@@ -522,10 +522,20 @@ impl ChainSpec {
             }
         }
 
+        let bpo_condition = self
+            .blob_params
+            .scheduled
+            .iter()
+            .map(|(activation, _)| ForkCondition::Timestamp(*activation));
+
+        let hardforks_iter = self.hardforks.forks_iter().map(|(_, cond)| cond).chain(bpo_condition);
+        // TODO: handle case where more regular hardforks are activated after bpos, needs timestamp
+        // sorting but can be optimized
+
         // timestamp are ALWAYS applied after the merge.
         //
         // this filter ensures that no block-based forks are returned
-        for timestamp in self.hardforks.forks_iter().filter_map(|(_, cond)| {
+        for timestamp in hardforks_iter.filter_map(|cond| {
             // ensure we only get timestamp forks activated __after__ the genesis block
             cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
         }) {
