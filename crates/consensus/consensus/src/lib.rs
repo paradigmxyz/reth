@@ -395,6 +395,14 @@ pub enum ConsensusError {
         /// The block's timestamp.
         timestamp: u64,
     },
+    /// Error when the block is too large.
+    #[error("block is too large: {rlp_length} > {max_rlp_length}")]
+    BlockTooLarge {
+        /// The actual RLP length of the block.
+        rlp_length: usize,
+        /// The maximum allowed RLP length.
+        max_rlp_length: usize,
+    },
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),
