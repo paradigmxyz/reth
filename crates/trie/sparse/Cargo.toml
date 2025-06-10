@@ -90,5 +90,5 @@ name = "rlp_node"
 harness = false
 
 [[bench]]
-name = "sparse_trie_methods"
+name = "update"
 harness = false
