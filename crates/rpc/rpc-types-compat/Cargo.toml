@@ -17,6 +17,7 @@ reth-primitives-traits.workspace = true
 reth-storage-api = { workspace = true, features = ["serde", "serde-bincode-compat"] }
 
 # ethereum
+alloy-primitives.workspace = true
 alloy-rpc-types-eth = { workspace = true, default-features = false, features = ["serde"] }
 alloy-consensus.workspace = true
 alloy-network.workspace = true
