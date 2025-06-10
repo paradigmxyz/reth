@@ -730,17 +730,17 @@ vergen-git2 = "1.0.5"
 # alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 
-revm = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-op-revm = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-bytecode = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-database = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-state = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-primitives = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-interpreter = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-inspector = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-context = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-context-interface = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
-revm-database-interface = { git = "https://github.com/rjected/revm", branch = "dan/gmp-24.0" }
+revm = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+op-revm = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-database = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-state = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-context = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "performance" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "performance" }
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "main" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "main" }
 #
