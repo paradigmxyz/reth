@@ -174,6 +174,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
                         RequestState::Waiting(PeerRequest::$item { response, .. }) => {
+                            trace!(peer_id=?self.remote_peer_id, ?request_id, "received response from peer");
                             let _ = response.send(Ok(message));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
@@ -186,6 +187,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                         }
                     }
                 } else {
+                    trace!(peer_id=?self.remote_peer_id, ?request_id, "received response to unknown request");
                     // we received a response to a request we never sent
                     self.on_bad_message();
                 }
@@ -277,6 +279,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let request_id = self.next_id();
+
+        trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
         let msg = request.create_request_message(request_id);
         self.queued_outgoing.push_back(msg.into());
         let req = InflightRequest {
