@@ -536,7 +536,7 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
                 )
             }
             RpcInvalidTransactionError::NonceTooLow { .. } => {
-                rpc_err(-32000, err.to_string(), None)
+                rpc_err(jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE, err.to_string(), None)
             }
             RpcInvalidTransactionError::Other(err) => err.to_rpc_error(),
             err => rpc_err(err.error_code(), err.to_string(), None),
@@ -752,7 +752,7 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
                 rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), error.to_string())
             }
             RpcPoolError::AlreadyKnown => {
-                rpc_error_with_code(-32000, error.to_string())
+                rpc_error_with_code(jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE, error.to_string())
             }
             error => internal_rpc_err(error.to_string()),
         }
