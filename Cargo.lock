@@ -7789,6 +7789,7 @@ name = "reth-engine-primitives"
 version = "1.4.8"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
