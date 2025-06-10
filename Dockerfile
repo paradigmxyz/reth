@@ -26,7 +26,7 @@ ARG RUSTFLAGS=""
 ENV RUSTFLAGS="$RUSTFLAGS"
 
 # Extra Cargo features
-ARG FEATURES="jemalloc,asm-keccak"
+ARG FEATURES=""
 ENV FEATURES=$FEATURES
 
 # Builds dependencies
