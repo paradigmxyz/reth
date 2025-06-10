@@ -9461,7 +9461,6 @@ dependencies = [
  "byteorder",
  "bytes",
  "derive_more",
- "eyre",
  "modular-bitfield",
  "once_cell",
  "op-alloy-consensus",
@@ -9985,10 +9984,8 @@ name = "reth-rpc-types-compat"
 version = "1.4.6"
 dependencies = [
  "alloy-consensus",
- "alloy-primitives",
  "alloy-rpc-types-eth",
  "jsonrpsee-types",
- "reth-primitives-traits",
  "serde",
 ]
 

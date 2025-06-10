@@ -12,7 +12,7 @@ use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
-use reth_rpc_types_compat::block::from_block;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_storage_api::{
     BlockIdReader, BlockReader, BlockReaderIdExt, ProviderHeader, ProviderReceipt, ProviderTx,
 };
@@ -60,7 +60,9 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
+            let block = (*block).clone().to_rpc_block(full.into(), |tx, tx_info| {
+                self.tx_resp_builder().fill(tx, tx_info)
+            })?;
             Ok(Some(block))
         }
     }

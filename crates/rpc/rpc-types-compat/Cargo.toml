@@ -12,11 +12,7 @@ description = "Compatibility layer for reth-primitives and ethereum RPC types"
 workspace = true
 
 [dependencies]
-# reth
-reth-primitives-traits.workspace = true
-
 # ethereum
-alloy-primitives.workspace = true
 alloy-rpc-types-eth = { workspace = true, default-features = false, features = ["serde"] }
 alloy-consensus.workspace = true
 

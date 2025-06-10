@@ -51,7 +51,6 @@ proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
 alloy-rpc-types-eth = { version = "1.0.9", optional = true }
-eyre = { version = "0.6"}
 
 [dev-dependencies]
 reth-codecs.workspace = true
