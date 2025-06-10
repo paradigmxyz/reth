@@ -7201,6 +7201,7 @@ dependencies = [
  "alloy-trie",
  "auto_impl",
  "derive_more",
+ "itertools 0.14.0",
  "reth-ethereum-forks",
  "reth-network-peers",
  "reth-primitives-traits",
@@ -7761,6 +7762,7 @@ name = "reth-engine-primitives"
 version = "1.4.8"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "auto_impl",
