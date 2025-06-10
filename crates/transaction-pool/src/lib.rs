@@ -153,7 +153,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub use crate::{
-    config::ShardedMempoolConfig,
     blobstore::{BlobStore, BlobStoreError},
     config::{
         LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
@@ -292,11 +291,6 @@ where
     pub fn blob_store(&self) -> &S {
         self.pool.blob_store()
     }
-
-    /// Returns the sharded mempool configuration
-    pub fn sharded_mempool_config(&self) -> &ShardedMempoolConfig {
-        &self.config().sharded_mempool
-    }
 }
 
 impl<Client, S> EthTransactionPool<Client, S>
@@ -355,10 +349,6 @@ where
 
     fn pool_size(&self) -> PoolSize {
         self.pool.size()
-    }
-
-    fn sharded_mempool_config(&self) -> &ShardedMempoolConfig {
-        &self.config().sharded_mempool
     }
 
     fn block_info(&self) -> BlockInfo {

@@ -8,7 +8,6 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use crate::config::ShardedMempoolConfig;
 use alloy_consensus::{error::ValueError, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
     eip2718::{Encodable2718, WithEncoded},
@@ -507,9 +506,6 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
-
-    /// Get the sharded mempool configuration
-    fn sharded_mempool_config(&self) -> &ShardedMempoolConfig;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.
