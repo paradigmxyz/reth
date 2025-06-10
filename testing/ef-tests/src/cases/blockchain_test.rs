@@ -12,7 +12,7 @@ use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
+use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
@@ -212,7 +212,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
     // Decode blocks
     let blocks = decode_blocks(&case.blocks)?;
 
-    let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
+    let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
     let mut parent = genesis_block;
     let mut program_inputs = Vec::new();
 

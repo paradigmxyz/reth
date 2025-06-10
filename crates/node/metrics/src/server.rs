@@ -59,7 +59,7 @@ impl MetricServer {
             task_executor.clone(),
         )
         .await
-        .wrap_err("Could not start Prometheus endpoint")?;
+        .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
 
         // Describe metrics after recorder installation
         describe_db_metrics();

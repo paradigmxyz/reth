@@ -13,7 +13,7 @@ use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, EthApiError, FeeHistoryCache,
     FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
-use reth_storage_api::{BlockIdReader, HeaderProvider};
+use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider};
 use tracing::debug;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
@@ -256,7 +256,10 @@ pub trait EthFees: LoadFee {
 /// Loads fee from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` fees RPC methods.
-pub trait LoadFee: LoadBlock {
+pub trait LoadFee: LoadBlock
+where
+    Self::Provider: BlockReaderIdExt,
+{
     /// Returns a handle for reading gas price.
     ///
     /// Data access in default (L1) trait method implementations.
@@ -335,10 +338,9 @@ pub trait LoadFee: LoadBlock {
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
     fn gas_price(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
-        let header = self.recovered_block(BlockNumberOrTag::Latest.into());
-        let suggested_tip = self.suggested_priority_fee();
         async move {
-            let (header, suggested_tip) = futures::try_join!(header, suggested_tip)?;
+            let header = self.provider().latest_header().map_err(Self::Error::from_eth_err)?;
+            let suggested_tip = self.suggested_priority_fee().await?;
             let base_fee = header.and_then(|h| h.base_fee_per_gas()).unwrap_or_default();
             Ok(suggested_tip + U256::from(base_fee))
         }
@@ -347,8 +349,9 @@ pub trait LoadFee: LoadBlock {
     /// Returns a suggestion for a base fee for blob transactions.
     fn blob_base_fee(&self) -> impl Future<Output = Result<U256, Self::Error>> + Send {
         async move {
-            self.recovered_block(BlockNumberOrTag::Latest.into())
-                .await?
+            self.provider()
+                .latest_header()
+                .map_err(Self::Error::from_eth_err)?
                 .and_then(|h| {
                     h.maybe_next_block_blob_fee(
                         self.provider().chain_spec().blob_params_at_timestamp(h.timestamp()),

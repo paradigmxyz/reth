@@ -14,7 +14,7 @@ use alloy_primitives::B256;
 use rand::seq::SliceRandom;
 use reth_eth_wire::{
     BlockHashNumber, Capabilities, DisconnectReason, EthNetworkPrimitives, NetworkPrimitives,
-    NewBlockHashes, UnifiedStatus,
+    NewBlockHashes, NewBlockPayload, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_api::{DiscoveredEvent, DiscoveryEvent, PeerRequest, PeerRequestSender};
@@ -152,13 +152,20 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         status: Arc<UnifiedStatus>,
         request_tx: PeerRequestSender<PeerRequest<N>>,
         timeout: Arc<AtomicU64>,
+        range_info: Option<BlockRangeInfo>,
     ) {
         debug_assert!(!self.active_peers.contains_key(&peer), "Already connected; not possible");
 
         // find the corresponding block number
         let block_number =
             self.client.block_number(status.blockhash).ok().flatten().unwrap_or_default();
-        self.state_fetcher.new_active_peer(peer, status.blockhash, block_number, timeout);
+        self.state_fetcher.new_active_peer(
+            peer,
+            status.blockhash,
+            block_number,
+            timeout,
+            range_info,
+        );
 
         self.active_peers.insert(
             peer,
@@ -188,12 +195,12 @@ impl<N: NetworkPrimitives> NetworkState<N> {
     /// > the total number of peers) using the `NewBlock` message.
     ///
     /// See also <https://github.com/ethereum/devp2p/blob/master/caps/eth.md>
-    pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage<N::Block>) {
+    pub(crate) fn announce_new_block(&mut self, msg: NewBlockMessage<N::NewBlockPayload>) {
         // send a `NewBlock` message to a fraction of the connected peers (square root of the total
         // number of peers)
         let num_propagate = (self.active_peers.len() as f64).sqrt() as u64 + 1;
 
-        let number = msg.block.block.header().number();
+        let number = msg.block.block().header().number();
         let mut count = 0;
 
         // Shuffle to propagate to a random sample of peers on every block announcement
@@ -230,8 +237,8 @@ impl<N: NetworkPrimitives> NetworkState<N> {
 
     /// Completes the block propagation process started in [`NetworkState::announce_new_block()`]
     /// but sending `NewBlockHash` broadcast to all peers that haven't seen it yet.
-    pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage<N::Block>) {
-        let number = msg.block.block.header().number();
+    pub(crate) fn announce_new_block_hash(&mut self, msg: NewBlockMessage<N::NewBlockPayload>) {
+        let number = msg.block.block().header().number();
         let hashes = NewBlockHashes(vec![BlockHashNumber { hash: msg.hash, number }]);
         for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
@@ -527,7 +534,7 @@ pub(crate) enum StateAction<N: NetworkPrimitives> {
         /// Target of the message
         peer_id: PeerId,
         /// The `NewBlock` message
-        block: NewBlockMessage<N::Block>,
+        block: NewBlockMessage<N::NewBlockPayload>,
     },
     NewBlockHashes {
         /// Target of the message
@@ -616,6 +623,7 @@ mod tests {
             Arc::default(),
             peer_tx,
             Arc::new(AtomicU64::new(1)),
+            None,
         );
 
         assert!(state.active_peers.contains_key(&peer_id));
