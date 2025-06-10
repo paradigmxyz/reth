@@ -113,7 +113,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -137,7 +137,7 @@ dependencies = [
 [[package]]
 name = "alloy-consensus-any"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -151,7 +151,7 @@ dependencies = [
 [[package]]
 name = "alloy-contract"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
@@ -165,14 +165,15 @@ dependencies = [
  "alloy-transport",
  "futures",
  "futures-util",
+ "serde_json",
  "thiserror 2.0.12",
 ]
 
 [[package]]
 name = "alloy-dyn-abi"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18cc14d832bc3331ca22a1c7819de1ede99f58f61a7d123952af7dde8de124a6"
+checksum = "f9135eb501feccf7f4cb8a183afd406a65483fdad7bbd7332d0470e5d725c92f"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives",
@@ -232,7 +233,7 @@ dependencies = [
 [[package]]
 name = "alloy-eips"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -273,7 +274,7 @@ dependencies = [
 [[package]]
 name = "alloy-genesis"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -298,9 +299,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-json-abi"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ccaa79753d7bf15f06399ea76922afbfaf8d18bebed9e8fc452984b4a90dcc9"
+checksum = "8b26fdd571915bafe857fccba4ee1a4f352965800e46a53e4a5f50187b7776fa"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-type-parser",
@@ -311,7 +312,7 @@ dependencies = [
 [[package]]
 name = "alloy-json-rpc"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-primitives",
  "alloy-sol-types",
@@ -325,7 +326,7 @@ dependencies = [
 [[package]]
 name = "alloy-network"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -350,7 +351,7 @@ dependencies = [
 [[package]]
 name = "alloy-network-primitives"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -389,9 +390,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-primitives"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18c35fc4b03ace65001676358ffbbaefe2a2b27ee50fe777c345082c7c888be8"
+checksum = "a326d47106039f38b811057215a92139f46eef7983a4b77b10930a0ea5685b1e"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -421,7 +422,7 @@ dependencies = [
 [[package]]
 name = "alloy-provider"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-chains",
  "alloy-consensus",
@@ -463,7 +464,7 @@ dependencies = [
 [[package]]
 name = "alloy-pubsub"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -505,7 +506,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-client"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -532,7 +533,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-engine",
@@ -544,7 +545,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-admin"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-genesis",
  "alloy-primitives",
@@ -555,7 +556,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-anvil"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -566,7 +567,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-any"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus-any",
  "alloy-rpc-types-eth",
@@ -576,7 +577,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-beacon"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-eips",
  "alloy-primitives",
@@ -593,7 +594,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-debug"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-primitives",
  "serde",
@@ -602,7 +603,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-engine"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -622,7 +623,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-eth"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus",
  "alloy-consensus-any",
@@ -642,7 +643,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-mev"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -656,7 +657,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-trace"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -669,7 +670,7 @@ dependencies = [
 [[package]]
 name = "alloy-rpc-types-txpool"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -680,7 +681,7 @@ dependencies = [
 [[package]]
 name = "alloy-serde"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-primitives",
  "arbitrary",
@@ -691,7 +692,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-primitives",
  "async-trait",
@@ -705,7 +706,7 @@ dependencies = [
 [[package]]
 name = "alloy-signer-local"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -721,9 +722,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-macro"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8612e0658964d616344f199ab251a49d48113992d81b92dab93ed855faa66383"
+checksum = "d4be1ce1274ddd7fdfac86e5ece1b225e9bba1f2327e20fbb30ee6b9cc1423fe"
 dependencies = [
  "alloy-sol-macro-expander",
  "alloy-sol-macro-input",
@@ -735,9 +736,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-macro-expander"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a384edac7283bc4c010a355fb648082860c04b826bb7a814c45263c8f304c74"
+checksum = "01e92f3708ea4e0d9139001c86c051c538af0146944a2a9c7181753bd944bf57"
 dependencies = [
  "alloy-sol-macro-input",
  "const-hex",
@@ -753,9 +754,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-macro-input"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dd588c2d516da7deb421b8c166dc60b7ae31bca5beea29ab6621fcfa53d6ca5"
+checksum = "9afe1bd348a41f8c9b4b54dfb314886786d6201235b0b3f47198b9d910c86bb2"
 dependencies = [
  "const-hex",
  "dunce",
@@ -769,9 +770,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-type-parser"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e86ddeb70792c7ceaad23e57d52250107ebbb86733e52f4a25d8dc1abc931837"
+checksum = "d6195df2acd42df92a380a8db6205a5c7b41282d0ce3f4c665ecf7911ac292f1"
 dependencies = [
  "serde",
  "winnow",
@@ -779,9 +780,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-sol-types"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "584cb97bfc5746cb9dcc4def77da11694b5d6d7339be91b7480a6a68dc129387"
+checksum = "6185e98a79cf19010722f48a74b5a65d153631d2f038cabd250f4b9e9813b8ad"
 dependencies = [
  "alloy-json-abi",
  "alloy-primitives",
@@ -792,7 +793,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-json-rpc",
  "alloy-primitives",
@@ -814,7 +815,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-http"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-json-rpc",
  "alloy-transport",
@@ -828,7 +829,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ipc"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-json-rpc",
  "alloy-pubsub",
@@ -847,7 +848,7 @@ dependencies = [
 [[package]]
 name = "alloy-transport-ws"
 version = "1.0.9"
-source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet1#df07f790e0b7749980b5c41ed08bcb8d0f3fa73b"
+source = "git+https://github.com/alloy-rs/alloy?branch=fusaka%2Fdevnet2#ed680db6c05aaa903ffe645551a9c2443d43bf57"
 dependencies = [
  "alloy-pubsub",
  "alloy-transport",
@@ -4358,7 +4359,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.57.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -11622,9 +11623,9 @@ dependencies = [
 
 [[package]]
 name = "syn-solidity"
-version = "1.1.2"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b5d879005cc1b5ba4e18665be9e9501d9da3a9b95f625497c4cb7ee082b532e"
+checksum = "14c8c8f496c33dc6343dac05b4be8d9e0bca180a4caa81d7b8416b10cc2273cd"
 dependencies = [
  "paste",
  "proc-macro2",
