@@ -19,12 +19,9 @@ use op_alloy_consensus::{
     OpTxEnvelope,
 };
 use op_alloy_rpc_types::OpTransactionRequest;
+use op_revm::OpTransaction;
 use reth_evm::{
-    op_revm::OpTransaction,
-    revm::{
-        context_interface::{either::Either, Block},
-        Database,
-    },
+    revm::context_interface::{either::Either, Block},
     ConfigureEvm, TxEnvFor,
 };
 use reth_optimism_primitives::DepositReceipt;
@@ -82,9 +79,8 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     fn executable_env<Spec>(
         &self,
         request: TransactionRequest,
-        cfg_env: CfgEnv<Spec>,
-        block_env: BlockEnv,
-        db: impl Database<Error: Into<Self::Error>>,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error>;
 }
 
@@ -210,8 +206,8 @@ pub trait TryIntoTxEnv<T> {
     /// Performs the conversion.
     fn try_into_tx_env<Spec>(
         self,
-        cfg_env: CfgEnv<Spec>,
-        block_env: BlockEnv,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
     ) -> Result<T, Self::Err>;
 }
 
@@ -238,8 +234,8 @@ impl TryIntoTxEnv<OpTransaction<TxEnv>> for TransactionRequest {
 
     fn try_into_tx_env<Spec>(
         self,
-        cfg_env: CfgEnv<Spec>,
-        block_env: BlockEnv,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
     ) -> Result<OpTransaction<TxEnv>, Self::Err> {
         Ok(OpTransaction {
             base: self.try_into_tx_env(cfg_env, block_env)?,
@@ -253,8 +249,8 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
 
     fn try_into_tx_env<Spec>(
         self,
-        cfg_env: CfgEnv<Spec>,
-        block_env: BlockEnv,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
     ) -> Result<TxEnv, Self::Err> {
         // Ensure that if versioned hashes are set, they're not empty
         if self.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
@@ -442,20 +438,10 @@ where
 
     fn executable_env<Spec>(
         &self,
-        mut request: TransactionRequest,
-        cfg_env: CfgEnv<Spec>,
-        block_env: BlockEnv,
-        mut db: impl Database<Error: Into<Self::Error>>,
+        request: TransactionRequest,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error> {
-        if request.nonce.is_none() {
-            request.nonce.replace(
-                db.basic(request.from.unwrap_or_default())
-                    .map_err(Into::into)?
-                    .map(|acc| acc.nonce)
-                    .unwrap_or_default(),
-            );
-        }
-
         Ok(request.try_into_tx_env(cfg_env, block_env)?)
     }
 }
