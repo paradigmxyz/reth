@@ -538,6 +538,7 @@ mod rpc_compat {
         Block as BlockTrait, BlockBody as BlockBodyTrait, RecoveredBlock, SignedTransaction,
     };
     use crate::block::error::BlockRecoveryError;
+    use alloc::vec::Vec;
     use alloy_consensus::{
         transaction::Recovered, Block as CBlock, BlockBody, BlockHeader, Sealable,
     };
