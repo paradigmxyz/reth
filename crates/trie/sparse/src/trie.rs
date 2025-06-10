@@ -3157,7 +3157,7 @@ mod tests {
 
         fn transform_updates(
             updates: Vec<BTreeMap<Nibbles, Account>>,
-            mut rng: impl rand_08::Rng,
+            mut rng: impl proptest::prelude::RngCore,
         ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
             let mut keys = BTreeSet::new();
             updates
@@ -3168,9 +3168,13 @@ mod tests {
                     let keys_to_delete_len = update.len() / 2;
                     let keys_to_delete = (0..keys_to_delete_len)
                         .map(|_| {
-                            let key = rand_08::seq::IteratorRandom::choose(keys.iter(), &mut rng)
-                                .unwrap()
-                                .clone();
+                            // Manually select a random element from the set
+                            let keys_vec: Vec<_> = keys.iter().cloned().collect();
+                            if keys_vec.is_empty() {
+                                panic!("No keys available to delete");
+                            }
+                            let idx = (rng.next_u32() as usize) % keys_vec.len();
+                            let key = keys_vec[idx].clone();
                             keys.take(&key).unwrap()
                         })
                         .collect();
