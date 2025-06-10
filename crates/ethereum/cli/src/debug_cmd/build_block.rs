@@ -23,6 +23,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig};
+use reth_payload_builder::KeepPayloadJobAlive;
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -199,6 +200,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 payload_attrs,
                 EngineApiMessageVersion::default() as u8,
             )?,
+            KeepPayloadJobAlive::No,
         );
 
         let args = BuildArguments::new(
