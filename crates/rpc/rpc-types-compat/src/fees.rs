@@ -1,4 +1,3 @@
-use crate::error::RpcInvalidTransactionError;
 use alloy_primitives::{B256, U256};
 use std::cmp::min;
 use thiserror::Error;
@@ -65,25 +64,25 @@ impl CallFees {
                         max_fee < block_base_fee
                     {
                         // `base_fee_per_gas` is greater than the `max_fee_per_gas`
-                        return Err(RpcInvalidTransactionError::FeeCapTooLow.into())
+                        return Err(CallFeesError::FeeCapTooLow)
                     }
                     if max_fee < max_priority_fee_per_gas {
                         return Err(
                             // `max_priority_fee_per_gas` is greater than the `max_fee_per_gas`
-                            RpcInvalidTransactionError::TipAboveFeeCap.into(),
+                            CallFeesError::TipAboveFeeCap,
                         )
                     }
                     // ref <https://github.com/ethereum/go-ethereum/blob/0dd173a727dd2d2409b8e401b22e85d20c25b71f/internal/ethapi/transaction_args.go#L446-L446>
                     Ok(min(
                         max_fee,
-                        block_base_fee.checked_add(max_priority_fee_per_gas).ok_or_else(|| {
-                            CallFeesError::from(RpcInvalidTransactionError::TipVeryHigh)
-                        })?,
+                        block_base_fee
+                            .checked_add(max_priority_fee_per_gas)
+                            .ok_or(CallFeesError::TipVeryHigh)?,
                     ))
                 }
                 None => Ok(block_base_fee
                     .checked_add(max_priority_fee_per_gas.unwrap_or(U256::ZERO))
-                    .ok_or(CallFeesError::from(RpcInvalidTransactionError::TipVeryHigh))?),
+                    .ok_or(CallFeesError::TipVeryHigh)?),
             }
         }
 
@@ -126,7 +125,7 @@ impl CallFees {
                 // Ensure blob_hashes are present
                 if !has_blob_hashes {
                     // Blob transaction but no blob hashes
-                    return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+                    return Err(CallFeesError::BlobTransactionMissingBlobHashes)
                 }
 
                 Ok(Self {
@@ -146,11 +145,21 @@ impl CallFees {
 /// Error coming from decoding and validating transaction request fees.
 #[derive(Debug, Error)]
 pub enum CallFeesError {
-    /// Errors related to invalid transactions
-    #[error(transparent)]
-    InvalidTransaction(#[from] RpcInvalidTransactionError),
     /// Thrown when a call or transaction request (`eth_call`, `eth_estimateGas`,
     /// `eth_sendTransaction`) contains conflicting fields (legacy, EIP-1559)
     #[error("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")]
     ConflictingFeeFieldsInRequest,
+    /// Thrown post London if the transaction's fee is less than the base fee of the block
+    #[error("max fee per gas less than block base fee")]
+    FeeCapTooLow,
+    /// Thrown to ensure no one is able to specify a transaction with a tip higher than the total
+    /// fee cap.
+    #[error("max priority fee per gas higher than max fee per gas")]
+    TipAboveFeeCap,
+    /// A sanity error to avoid huge numbers specified in the tip field.
+    #[error("max priority fee per gas higher than 2^256-1")]
+    TipVeryHigh,
+    /// Blob transaction has no versioned hashes
+    #[error("blob transaction missing blob hashes")]
+    BlobTransactionMissingBlobHashes,
 }

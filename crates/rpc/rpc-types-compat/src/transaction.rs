@@ -1,9 +1,6 @@
 //! Compatibility functions for rpc `Transaction` type.
 
-use crate::{
-    error::RpcInvalidTransactionError,
-    fees::{CallFees, CallFeesError},
-};
+use crate::fees::{CallFees, CallFeesError};
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction, TxEip4844,
 };
@@ -223,12 +220,6 @@ pub enum EthTxEnvError {
     Input(#[from] TransactionInputError),
 }
 
-impl From<RpcInvalidTransactionError> for EthTxEnvError {
-    fn from(value: RpcInvalidTransactionError) -> Self {
-        Self::CallFees(CallFeesError::from(value))
-    }
-}
-
 impl TryIntoTxEnv<OpTransaction<TxEnv>> for TransactionRequest {
     type Err = EthTxEnvError;
 
@@ -254,7 +245,7 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
     ) -> Result<TxEnv, Self::Err> {
         // Ensure that if versioned hashes are set, they're not empty
         if self.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
-            return Err(RpcInvalidTransactionError::BlobTransactionMissingBlobHashes.into())
+            return Err(CallFeesError::BlobTransactionMissingBlobHashes.into())
         }
 
         let tx_type = self.minimal_tx_type() as u8;

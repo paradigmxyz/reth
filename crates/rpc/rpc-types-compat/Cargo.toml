@@ -34,9 +34,7 @@ revm-context.workspace = true
 
 # io
 serde.workspace = true
-jsonrpsee-core.workspace = true
 jsonrpsee-types.workspace = true
-alloy-sol-types.workspace = true
 
 # error
 thiserror.workspace = true
