@@ -259,8 +259,6 @@ where
     let txs_kind =
         if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
-    let block = block.to_rpc_block(txs_kind, |tx, tx_info| {
-        tx_resp_builder.fill(tx, tx_info)
-    })?;
+    let block = block.into_rpc_block(txs_kind, |tx, tx_info| tx_resp_builder.fill(tx, tx_info))?;
     Ok(SimulatedBlock { inner: block, calls })
 }

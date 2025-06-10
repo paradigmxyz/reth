@@ -429,9 +429,9 @@ impl<B: Block> Eq for RecoveredBlock<B> {}
 
 impl<B: Block> PartialEq for RecoveredBlock<B> {
     fn eq(&self, other: &Self) -> bool {
-        self.hash_ref().eq(other.hash_ref())
-            && self.block.eq(&other.block)
-            && self.senders.eq(&other.senders)
+        self.hash_ref().eq(other.hash_ref()) &&
+            self.block.eq(&other.block) &&
+            self.senders.eq(&other.senders)
     }
 }
 
@@ -532,6 +532,209 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
     }
 }
 
+#[cfg(feature = "rpc-compat")]
+mod rpc_compat {
+    use super::{
+        Block as BlockTrait, BlockBody as BlockBodyTrait, RecoveredBlock, SignedTransaction,
+    };
+    use crate::block::error::BlockRecoveryError;
+    use alloy_consensus::{
+        transaction::Recovered, Block as CBlock, BlockBody, BlockHeader, Sealable,
+    };
+    use alloy_primitives::U256;
+    use alloy_rpc_types_eth::{
+        Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
+    };
+    use core::error;
+
+    impl<B> RecoveredBlock<B>
+    where
+        B: BlockTrait,
+    {
+        /// Converts the given primitive block into a [`Block`] response with the given
+        /// [`BlockTransactionsKind`]
+        ///
+        /// The `tx_resp_builder` closure is used to build the transaction response for each
+        /// transaction.
+        pub fn into_rpc_block<T, F, E>(
+            self,
+            kind: BlockTransactionsKind,
+            tx_resp_builder: F,
+        ) -> Result<Block<T, Header<B::Header>>, E>
+        where
+            F: Fn(
+                Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
+                TransactionInfo,
+            ) -> Result<T, E>,
+            E: error::Error,
+        {
+            match kind {
+                BlockTransactionsKind::Hashes => Ok(self.into_rpc_block_with_tx_hashes()),
+                BlockTransactionsKind::Full => self.into_rpc_block_full(tx_resp_builder),
+            }
+        }
+
+        /// Clones the block and converts it into a [`Block`] response with the given
+        /// [`BlockTransactionsKind`]
+        ///
+        /// This is a convenience method that avoids the need to explicitly clone the block
+        /// before calling [`Self::into_rpc_block`]. For transaction hashes, it only clones
+        /// the necessary parts for better efficiency.
+        ///
+        /// The `tx_resp_builder` closure is used to build the transaction response for each
+        /// transaction.
+        pub fn clone_into_rpc_block<T, F, E>(
+            &self,
+            kind: BlockTransactionsKind,
+            tx_resp_builder: F,
+        ) -> Result<Block<T, Header<B::Header>>, E>
+        where
+            F: Fn(
+                Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
+                TransactionInfo,
+            ) -> Result<T, E>,
+            E: error::Error,
+        {
+            match kind {
+                BlockTransactionsKind::Hashes => Ok(self.to_rpc_block_with_tx_hashes()),
+                BlockTransactionsKind::Full => self.clone().into_rpc_block_full(tx_resp_builder),
+            }
+        }
+
+        /// Create a new [`Block`] response from a [`RecoveredBlock`] by reference, using the
+        /// total difficulty to populate its field in the rpc response.
+        ///
+        /// This will populate the `transactions` field with only the hashes of the transactions in
+        /// the block: [`BlockTransactions::Hashes`]
+        ///
+        /// This method only clones the necessary parts and avoids cloning the entire block.
+        pub fn to_rpc_block_with_tx_hashes<T>(&self) -> Block<T, Header<B::Header>> {
+            let transactions = self.body().transaction_hashes_iter().copied().collect();
+            let rlp_length = self.rlp_length();
+            let header = self.clone_sealed_header();
+            let withdrawals = self.body().withdrawals().cloned();
+
+            let transactions = BlockTransactions::Hashes(transactions);
+            let uncles =
+                self.body().ommers().unwrap_or(&[]).iter().map(|h| h.hash_slow()).collect();
+            let header = Header::from_consensus(header.into(), None, Some(U256::from(rlp_length)));
+
+            Block { header, uncles, transactions, withdrawals }
+        }
+
+        /// Create a new [`Block`] response from a [`RecoveredBlock`], using the
+        /// total difficulty to populate its field in the rpc response.
+        ///
+        /// This will populate the `transactions` field with only the hashes of the transactions in
+        /// the block: [`BlockTransactions::Hashes`]
+        pub fn into_rpc_block_with_tx_hashes<T>(self) -> Block<T, Header<B::Header>> {
+            let transactions = self.body().transaction_hashes_iter().copied().collect();
+            let rlp_length = self.rlp_length();
+            let (header, body) = self.into_sealed_block().split_sealed_header_body();
+            let BlockBody { ommers, withdrawals, .. } = body.into_ethereum_body();
+
+            let transactions = BlockTransactions::Hashes(transactions);
+            let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
+            let header = Header::from_consensus(header.into(), None, Some(U256::from(rlp_length)));
+
+            Block { header, uncles, transactions, withdrawals }
+        }
+
+        /// Create a new [`Block`] response from a [`RecoveredBlock`], using the
+        /// total difficulty to populate its field in the rpc response.
+        ///
+        /// This will populate the `transactions` field with the _full_
+        /// transaction objects: [`BlockTransactions::Full`]
+        pub fn into_rpc_block_full<T, F, E>(
+            self,
+            tx_resp_builder: F,
+        ) -> Result<Block<T, Header<B::Header>>, E>
+        where
+            F: Fn(
+                Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
+                TransactionInfo,
+            ) -> Result<T, E>,
+            E: error::Error,
+        {
+            let block_number = self.header().number();
+            let base_fee = self.header().base_fee_per_gas();
+            let block_length = self.rlp_length();
+            let block_hash = Some(self.hash());
+
+            let (block, senders) = self.split_sealed();
+            let (header, body) = block.split_sealed_header_body();
+            let BlockBody { transactions, ommers, withdrawals } = body.into_ethereum_body();
+
+            let transactions = transactions
+                .into_iter()
+                .zip(senders)
+                .enumerate()
+                .map(|(idx, (tx, sender))| {
+                    let tx_info = TransactionInfo {
+                        hash: Some(*tx.tx_hash()),
+                        block_hash,
+                        block_number: Some(block_number),
+                        base_fee,
+                        index: Some(idx as u64),
+                    };
+
+                    tx_resp_builder(Recovered::new_unchecked(tx, sender), tx_info)
+                })
+                .collect::<Result<Vec<_>, E>>()?;
+
+            let transactions = BlockTransactions::Full(transactions);
+            let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
+            let header =
+                Header::from_consensus(header.into(), None, Some(U256::from(block_length)));
+
+            let block = Block { header, uncles, transactions, withdrawals };
+
+            Ok(block)
+        }
+    }
+
+    impl<T> RecoveredBlock<CBlock<T>>
+    where
+        T: SignedTransaction,
+    {
+        /// Create a `RecoveredBlock` from an alloy RPC block.
+        ///
+        /// # Examples
+        /// ```ignore
+        /// // Works with default Transaction type
+        /// let rpc_block: alloy_rpc_types_eth::Block = get_rpc_block();
+        /// let recovered = RecoveredBlock::from_rpc_block(rpc_block)?;
+        ///
+        /// // Also works with custom transaction types that implement From<U>
+        /// let custom_rpc_block: alloy_rpc_types_eth::Block<CustomTx> = get_custom_rpc_block();
+        /// let recovered = RecoveredBlock::from_rpc_block(custom_rpc_block)?;
+        /// ```
+        pub fn from_rpc_block<U>(
+            block: alloy_rpc_types_eth::Block<U>,
+        ) -> Result<Self, BlockRecoveryError<alloy_consensus::Block<T>>>
+        where
+            T: From<U>,
+        {
+            // Convert to consensus block and then convert transactions
+            let consensus_block = block.into_consensus().convert_transactions();
+
+            // Try to recover the block
+            consensus_block.try_into_recovered()
+        }
+    }
+
+    impl<T, U> TryFrom<alloy_rpc_types_eth::Block<U>> for RecoveredBlock<CBlock<T>>
+    where
+        T: SignedTransaction + From<U>,
+    {
+        type Error = BlockRecoveryError<alloy_consensus::Block<T>>;
+
+        fn try_from(block: alloy_rpc_types_eth::Block<U>) -> Result<Self, Self::Error> {
+            Self::from_rpc_block(block)
+        }
+    }
+}
+
 /// Bincode-compatible [`RecoveredBlock`] serde implementation.
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
@@ -628,138 +831,6 @@ pub(super) mod serde_bincode_compat {
 
         fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
             repr.into()
-        }
-    }
-}
-
-#[cfg(feature = "rpc-compat")]
-mod rpc_compat {
-    use super::{
-        Block as BlockTrait, BlockBody as BlockBodyTrait, RecoveredBlock, SignedTransaction,
-    };
-    use alloy_consensus::{transaction::Recovered, BlockBody, BlockHeader, Sealable};
-    use alloy_primitives::U256;
-    use alloy_rpc_types_eth::{
-        Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
-    };
-    use core::error;
-    use alloy_consensus::Block as CBlock;
-
-    impl<B> RecoveredBlock<B>
-    where
-        B: BlockTrait,
-    {
-        /// Converts the given primitive block into a [`Block`] response with the given
-        /// [`BlockTransactionsKind`]
-        ///
-        /// The `tx_resp_builder` closure is used to build the transaction response for each transaction.
-        pub fn to_rpc_block<T, F, E>(
-            self,
-            kind: BlockTransactionsKind,
-            tx_resp_builder: F,
-        ) -> Result<Block<T, Header<B::Header>>, E>
-        where
-            F: Fn(Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>, TransactionInfo) -> Result<T, E>,
-            E: error::Error,
-        {
-            match kind {
-                BlockTransactionsKind::Hashes => Ok(self.to_rpc_block_with_tx_hashes()),
-                BlockTransactionsKind::Full => self.to_rpc_block_full(tx_resp_builder),
-            }
-        }
-
-        /// Create a new [`Block`] response from a [`RecoveredBlock`], using the
-        /// total difficulty to populate its field in the rpc response.
-        ///
-        /// This will populate the `transactions` field with only the hashes of the transactions in the
-        /// block: [`BlockTransactions::Hashes`]
-        pub fn to_rpc_block_with_tx_hashes<T>(self) -> Block<T, Header<B::Header>> {
-            let transactions = self.body().transaction_hashes_iter().copied().collect();
-            let rlp_length = self.rlp_length();
-            let (header, body) = self.into_sealed_block().split_sealed_header_body();
-            let BlockBody { ommers, withdrawals, .. } = body.into_ethereum_body();
-
-            let transactions = BlockTransactions::Hashes(transactions);
-            let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
-            let header = Header::from_consensus(header.into(), None, Some(U256::from(rlp_length)));
-
-            Block { header, uncles, transactions, withdrawals }
-        }
-
-        /// Create a new [`Block`] response from a [`RecoveredBlock`], using the
-        /// total difficulty to populate its field in the rpc response.
-        ///
-        /// This will populate the `transactions` field with the _full_
-        /// transaction objects: [`BlockTransactions::Full`]
-        pub fn to_rpc_block_full<T, F, E>(
-            self,
-            tx_resp_builder: F,
-        ) -> Result<Block<T, Header<B::Header>>, E>
-        where
-            F: Fn(Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>, TransactionInfo) -> Result<T, E>,
-            E: error::Error,
-        {
-            let block_number = self.header().number();
-            let base_fee = self.header().base_fee_per_gas();
-            let block_length = self.rlp_length();
-            let block_hash = Some(self.hash());
-
-            let (block, senders) = self.split_sealed();
-            let (header, body) = block.split_sealed_header_body();
-            let BlockBody { transactions, ommers, withdrawals } = body.into_ethereum_body();
-
-            let transactions = transactions
-                .into_iter()
-                .zip(senders)
-                .enumerate()
-                .map(|(idx, (tx, sender))| {
-                    let tx_info = TransactionInfo {
-                        hash: Some(*tx.tx_hash()),
-                        block_hash,
-                        block_number: Some(block_number),
-                        base_fee,
-                        index: Some(idx as u64),
-                    };
-
-                    tx_resp_builder(Recovered::new_unchecked(tx, sender), tx_info)
-                })
-                .collect::<Result<Vec<_>, E>>()?;
-
-            let transactions = BlockTransactions::Full(transactions);
-            let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
-            let header = Header::from_consensus(header.into(), None, Some(U256::from(block_length)));
-
-            let block = Block { header, uncles, transactions, withdrawals };
-
-            Ok(block)
-        }
-    }
-
-    impl<T> RecoveredBlock<CBlock<T>>
-    where
-        T: SignedTransaction + From<alloy_rpc_types_eth::Transaction>,
-    {
-        /// Create a `RecoveredBlock` from an alloy RPC block.
-        ///
-        /// This function provides a safe conversion from alloy RPC types to reth primitives,
-        /// handling transaction recovery.
-        pub fn from_rpc_block(block: alloy_rpc_types_eth::Block) -> Result<Self, Box<dyn core::error::Error + Send + Sync>> {
-            // Convert to consensus block and then convert transactions
-            let consensus_block = block.into_consensus().convert_transactions();
-
-            // Try to recover the block
-            consensus_block.try_into_recovered().map_err(|e| Box::new(e) as Box<dyn core::error::Error + Send + Sync>)
-        }
-    }
-
-    impl<T> TryFrom<alloy_rpc_types_eth::Block> for RecoveredBlock<CBlock<T>>
-    where
-        T: SignedTransaction + From<alloy_rpc_types_eth::Transaction>,
-    {
-        type Error = Box<dyn core::error::Error + Send + Sync>;
-
-        fn try_from(block: alloy_rpc_types_eth::Block) -> Result<Self, Self::Error> {
-            Self::from_rpc_block(block)
         }
     }
 }

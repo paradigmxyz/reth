@@ -71,7 +71,6 @@ serde.workspace = true
 serde_json.workspace = true
 test-fuzz.workspace = true
 modular-bitfield.workspace = true
-reth-rpc-types-compat.workspace = true
 
 [features]
 default = ["std"]

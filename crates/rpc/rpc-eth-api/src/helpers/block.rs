@@ -14,9 +14,7 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
 use reth_rpc_types_compat::TransactionCompat;
-use reth_storage_api::{
-    BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx,
-};
+use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
 
@@ -61,7 +59,7 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = (*block).clone().to_rpc_block(full.into(), |tx, tx_info| {
+            let block = (*block).clone_into_rpc_block(full.into(), |tx, tx_info| {
                 self.tx_resp_builder().fill(tx, tx_info)
             })?;
             Ok(Some(block))
