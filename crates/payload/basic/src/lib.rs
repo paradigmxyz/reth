@@ -95,20 +95,22 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
     #[inline]
-    fn max_job_duration(&self, unix_timestamp: u64) -> Duration {
-        let duration_until_timestamp = duration_until(unix_timestamp);
+    fn max_job_duration(&self, unix_timestamp: u64) -> Option<Duration> {
+        self.config.deadline.map(|deadline| {
+            let duration_until_timestamp = duration_until(unix_timestamp);
 
-        // safety in case clocks are bad
-        let duration_until_timestamp = duration_until_timestamp.min(self.config.deadline * 3);
+            // safety in case clocks are bad
+            let duration_until_timestamp = duration_until_timestamp.min(deadline * 3);
 
-        self.config.deadline + duration_until_timestamp
+            deadline + duration_until_timestamp
+        })
     }
 
     /// Returns the [Instant](tokio::time::Instant) at which the job should be terminated because it
     /// is considered timed out.
     #[inline]
-    fn job_deadline(&self, unix_timestamp: u64) -> tokio::time::Instant {
-        tokio::time::Instant::now() + self.max_job_duration(unix_timestamp)
+    fn job_deadline(&self, unix_timestamp: u64) -> Option<tokio::time::Instant> {
+        self.max_job_duration(unix_timestamp).map(|d| tokio::time::Instant::now() + d)
     }
 
     /// Returns a reference to the tasks type
@@ -160,8 +162,8 @@ where
 
         let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
 
-        let until = self.job_deadline(config.attributes.timestamp());
-        let deadline = Box::pin(tokio::time::sleep_until(until));
+        let deadline = self.job_deadline(config.attributes.timestamp()).map
+            (|job_deadline| Box::pin(tokio::time::sleep_until(job_deadline)));
 
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
@@ -245,7 +247,7 @@ pub struct BasicPayloadJobGeneratorConfig {
     /// The deadline for when the payload builder job should resolve.
     ///
     /// By default this is [`SLOT_DURATION`]: 12s
-    deadline: Duration,
+    deadline: Option<Duration>,
     /// Maximum number of tasks to spawn for building a payload.
     max_payload_tasks: usize,
 }
@@ -261,7 +263,13 @@ impl BasicPayloadJobGeneratorConfig {
 
     /// Sets the deadline when this job should resolve.
     pub const fn deadline(mut self, deadline: Duration) -> Self {
-        self.deadline = deadline;
+        self.deadline = Some(deadline);
+        self
+    }
+
+    /// Gives this job no deadline.
+    pub const fn nodeadline(mut self) -> Self {
+        self.deadline = None;
         self
     }
 
@@ -282,7 +290,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
         Self {
             interval: Duration::from_secs(1),
             // 12s slot time
-            deadline: SLOT_DURATION,
+            deadline: Some(SLOT_DURATION),
             max_payload_tasks: 3,
         }
     }
@@ -308,7 +316,7 @@ where
     /// How to spawn building tasks
     executor: Tasks,
     /// The deadline when this job should resolve.
-    deadline: Pin<Box<Sleep>>,
+    deadline: Option<Pin<Box<Sleep>>>,
     /// The interval at which the job should build a new payload after the last.
     interval: Interval,
     /// The best payload so far and its state.
@@ -375,7 +383,8 @@ where
         let this = self.get_mut();
 
         // check if the deadline is reached
-        if this.deadline.as_mut().poll(cx).is_ready() {
+        if this.deadline.as_mut()
+            .is_some_and(|f| f.as_mut().poll(cx).is_ready()) {
             trace!(target: "payload_builder", "payload building deadline reached");
             return Poll::Ready(Ok(()))
         }
