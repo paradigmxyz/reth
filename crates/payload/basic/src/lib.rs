@@ -24,14 +24,13 @@ use reth_tasks::TaskSpawner;
 use std::{
     fmt,
     future::Future,
-    ops::Deref,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    sync::{oneshot, Semaphore},
+    sync::{oneshot},
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace, warn};
@@ -55,8 +54,6 @@ pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
-    /// Restricts how many generator tasks can be executed at once.
-    payload_task_guard: PayloadTaskGuard,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -79,7 +76,6 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
         Self {
             client,
             executor,
-            payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
             builder,
             pre_cached: None,
@@ -176,7 +172,6 @@ where
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
-            payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
         };
@@ -218,27 +213,6 @@ pub struct PrecachedState {
     pub cached: CachedReads,
 }
 
-/// Restricts how many generator tasks can be executed at once.
-#[derive(Debug, Clone)]
-pub struct PayloadTaskGuard(Arc<Semaphore>);
-
-impl Deref for PayloadTaskGuard {
-    type Target = Semaphore;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-// === impl PayloadTaskGuard ===
-
-impl PayloadTaskGuard {
-    /// Constructs `Self` with a maximum task count of `max_payload_tasks`.
-    pub fn new(max_payload_tasks: usize) -> Self {
-        Self(Arc::new(Semaphore::new(max_payload_tasks)))
-    }
-}
-
 /// Settings for the [`BasicPayloadJobGenerator`].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
@@ -249,7 +223,6 @@ pub struct BasicPayloadJobGeneratorConfig {
     /// By default this is [`SLOT_DURATION`]: 12s
     deadline: Option<Duration>,
     /// Maximum number of tasks to spawn for building a payload.
-    max_payload_tasks: usize,
     keep_payload_jobs_alive: KeepPayloadJobAlive
 }
 
@@ -274,17 +247,6 @@ impl BasicPayloadJobGeneratorConfig {
         self
     }
 
-    /// Sets the maximum number of tasks to spawn for building a payload(s).
-    ///
-    /// # Panics
-    ///
-    /// If `max_payload_tasks` is 0.
-    pub fn max_payload_tasks(mut self, max_payload_tasks: usize) -> Self {
-        assert!(max_payload_tasks > 0, "max_payload_tasks must be greater than 0");
-        self.max_payload_tasks = max_payload_tasks;
-        self
-    }
-
     /// Keep payload jobs alive after they return a payload.
     pub const fn keep_payload_jobs_alive(mut self) -> Self {
         self.keep_payload_jobs_alive = KeepPayloadJobAlive::Yes;
@@ -305,7 +267,6 @@ impl Default for BasicPayloadJobGeneratorConfig {
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: Some(SLOT_DURATION),
-            max_payload_tasks: 3,
             keep_payload_jobs_alive: KeepPayloadJobAlive::No
         }
     }
@@ -338,8 +299,6 @@ where
     best_payload: PayloadState<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
-    /// Restricts how many generator tasks can be executed at once.
-    payload_task_guard: PayloadTaskGuard,
     /// Caches all disk reads for the state the new payloads builds on
     ///
     /// This is used to avoid reading the same state over and over again when new attempts are
@@ -366,7 +325,6 @@ where
         let (tx, rx) = oneshot::channel();
         let cancel = CancelOnDrop::default();
         let _cancel = cancel.clone();
-        let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.payload().cloned();
         self.metrics.inc_initiated_payload_builds();
@@ -374,7 +332,6 @@ where
         let builder = self.builder.clone();
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
-            let _permit = guard.acquire().await;
             let args =
                 BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
             let result = builder.try_build(args);

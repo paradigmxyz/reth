@@ -15,11 +15,7 @@ use reth_payload_builder_primitives::{Events, PayloadBuilderError, PayloadEvents
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind, PayloadTypes};
 use reth_primitives_traits::NodePrimitives;
 use std::{
-    fmt,
-    future::Future,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
+    collections::VecDeque, fmt, future::Future, pin::Pin, sync::Arc, task::{Context, Poll}
 };
 use tokio::sync::{
     broadcast, mpsc,
@@ -207,7 +203,9 @@ where
     /// The type that knows how to create new payloads.
     generator: Gen,
     /// All active payload jobs.
-    payload_jobs: Vec<(Gen::Job, PayloadId)>,
+    payload_jobs: VecDeque<(Gen::Job, PayloadId)>,
+    /// Maximum number of active payload jobs.
+    max_payload_jobs: usize,
     /// Copy of the sender half, so new [`PayloadBuilderHandle`] can be created on demand.
     service_tx: mpsc::UnboundedSender<PayloadServiceCommand<T>>,
     /// Receiver half of the command channel.
@@ -237,13 +235,14 @@ where
     /// This also takes a stream of chain events that will be forwarded to the generator to apply
     /// additional logic when new state is committed. See also
     /// [`PayloadJobGenerator::on_new_state`].
-    pub fn new(generator: Gen, chain_events: St) -> (Self, PayloadBuilderHandle<T>) {
+    pub fn new(generator: Gen, chain_events: St, max_payload_jobs: usize) -> (Self, PayloadBuilderHandle<T>) {
         let (service_tx, command_rx) = mpsc::unbounded_channel();
         let (payload_events, _) = broadcast::channel(PAYLOAD_EVENTS_BUFFER_SIZE);
 
         let service = Self {
             generator,
-            payload_jobs: Vec::new(),
+            payload_jobs: VecDeque::with_capacity(max_payload_jobs),
+            max_payload_jobs,
             service_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
             metrics: Default::default(),
@@ -292,7 +291,7 @@ where
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
 
         if keep_alive == KeepPayloadJobAlive::No {
-            let (_, id) = self.payload_jobs.swap_remove(job);
+            let (_, id) = self.payload_jobs.remove(job).unwrap();
             debug!(target: "payload_builder", %id, "terminated resolved job");
         }
 
@@ -366,28 +365,30 @@ where
 
             // we poll all jobs first, so we always have the latest payload that we can report if
             // requests
-            // we don't care about the order of the jobs, so we can just swap_remove them
-            for idx in (0..this.payload_jobs.len()).rev() {
-                let (mut job, id) = this.payload_jobs.swap_remove(idx);
-
+            // we care about the order of these jobs, they form a queue
+            let old_len = this.payload_jobs.len();
+            this.payload_jobs.retain_mut (|(job, id)| {
                 // drain better payloads from the job
                 match job.poll_unpin(cx) {
                     Poll::Ready(Ok(_)) => {
-                        this.metrics.set_active_jobs(this.payload_jobs.len());
                         trace!(%id, "payload job finished");
+                        false
                     }
                     Poll::Ready(Err(err)) => {
                         warn!(%err, ?id, "Payload builder job failed; resolving payload");
                         this.metrics.inc_failed_jobs();
-                        this.metrics.set_active_jobs(this.payload_jobs.len());
+                        false
                     }
                     Poll::Pending => {
-                        // still pending, put it back
-                        this.payload_jobs.push((job, id));
+                        // still pending, keep it there
+                        true
                     }
                 }
+            });
+            let pruned_len = this.payload_jobs.len();
+            if pruned_len != old_len {
+                this.metrics.set_active_jobs(this.payload_jobs.len());
             }
-
             // marker for exit condition
             let mut new_job = false;
 
@@ -408,7 +409,12 @@ where
                                     info!(%id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
-                                    this.payload_jobs.push((job, id));
+
+                                    this.payload_jobs.push_back((job, id));
+                                    if this.payload_jobs.len() > this.max_payload_jobs {
+                                        this.payload_jobs.pop_front();
+                                    }
+                                    this.metrics.set_active_jobs(this.payload_jobs.len());
                                     this.payload_events.send(Events::Attributes(attr.clone())).ok();
                                 }
                                 Err(err) => {
