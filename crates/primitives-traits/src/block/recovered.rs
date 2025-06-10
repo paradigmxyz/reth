@@ -545,7 +545,6 @@ mod rpc_compat {
     use alloy_rpc_types_eth::{
         Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
     };
-    use core::error;
 
     impl<B> RecoveredBlock<B>
     where
@@ -566,7 +565,6 @@ mod rpc_compat {
                 Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
                 TransactionInfo,
             ) -> Result<T, E>,
-            E: error::Error,
         {
             match kind {
                 BlockTransactionsKind::Hashes => Ok(self.into_rpc_block_with_tx_hashes()),
@@ -593,7 +591,6 @@ mod rpc_compat {
                 Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
                 TransactionInfo,
             ) -> Result<T, E>,
-            E: error::Error,
         {
             match kind {
                 BlockTransactionsKind::Hashes => Ok(self.to_rpc_block_with_tx_hashes()),
@@ -654,7 +651,6 @@ mod rpc_compat {
                 Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
                 TransactionInfo,
             ) -> Result<T, E>,
-            E: error::Error,
         {
             let block_number = self.header().number();
             let base_fee = self.header().base_fee_per_gas();
