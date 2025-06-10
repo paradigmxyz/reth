@@ -12,7 +12,10 @@ use alloy_evm::block::BlockValidationError;
 use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_evm::{
+    execute::{BasicBlockExecutor, Executor},
+    ConfigureEvm,
+};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
@@ -76,7 +79,7 @@ fn eip_4788_non_genesis_call() {
 
     let provider = EthEvmConfig::new(chain_spec);
 
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute a block without parent beacon block root, expect err
     let err = executor
@@ -197,7 +200,7 @@ fn eip_4788_empty_account_call() {
         ..Header::default()
     };
 
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute an empty block with parent beacon block root, this should not fail
     executor
@@ -230,7 +233,7 @@ fn eip_4788_genesis_call() {
 
     let mut header = chain_spec.genesis_header().clone();
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the genesis block with non-zero parent beacon block root, expect err
     header.parent_beacon_block_root = Some(B256::with_last_byte(0x69));
@@ -291,7 +294,7 @@ fn eip_4788_high_base_fee() {
     let provider = EthEvmConfig::new(chain_spec);
 
     // execute header
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     // Now execute a block with the fixed header, ensure that it does not fail
     executor
@@ -354,7 +357,7 @@ fn eip_2935_pre_fork() {
     );
 
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     // construct the header for block one
     let header = Header { timestamp: 1, number: 1, ..Header::default() };
@@ -392,7 +395,7 @@ fn eip_2935_fork_activation_genesis() {
 
     let header = chain_spec.genesis_header().clone();
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute genesis block, this should not fail
     executor
@@ -436,7 +439,7 @@ fn eip_2935_fork_activation_within_window_bounds() {
         ..Header::default()
     };
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the fork activation block, this should not fail
     executor
@@ -478,7 +481,7 @@ fn eip_2935_fork_activation_outside_window_bounds() {
     );
 
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     let header = Header {
         parent_hash: B256::random(),
@@ -520,7 +523,7 @@ fn eip_2935_state_transition_inside_fork() {
     let header_hash = header.hash_slow();
 
     let provider = EthEvmConfig::new(chain_spec);
-    let mut executor = provider.batch_executor(db);
+    let mut executor = BasicBlockExecutor::new(provider, db);
 
     // attempt to execute the genesis block, this should not fail
     executor
