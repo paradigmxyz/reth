@@ -50,7 +50,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
-alloy-rpc-types-eth = { version = "1.0.9", optional = true }
+alloy-rpc-types-eth = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-codecs.workspace = true
@@ -75,25 +75,26 @@ modular-bitfield.workspace = true
 [features]
 default = ["std"]
 std = [
-    "alloy-consensus/std",
-    "alloy-eips/std",
-    "alloy-genesis/std",
-    "alloy-primitives/std",
-    "revm-primitives/std",
-    "serde?/std",
-    "serde_with?/std",
-    "alloy-rlp/std",
-    "bytes/std",
-    "derive_more/std",
-    "once_cell/std",
-    "secp256k1?/std",
-    "thiserror/std",
-    "alloy-trie/std",
-    "op-alloy-consensus?/std",
-    "serde_json/std",
-    "reth-chainspec/std",
-    "revm-bytecode/std",
-    "revm-state/std",
+	"alloy-consensus/std",
+	"alloy-eips/std",
+	"alloy-genesis/std",
+	"alloy-primitives/std",
+	"revm-primitives/std",
+	"serde?/std",
+	"serde_with?/std",
+	"alloy-rlp/std",
+	"bytes/std",
+	"derive_more/std",
+	"once_cell/std",
+	"secp256k1?/std",
+	"thiserror/std",
+	"alloy-trie/std",
+	"op-alloy-consensus?/std",
+	"serde_json/std",
+	"reth-chainspec/std",
+	"revm-bytecode/std",
+	"revm-state/std",
+	"alloy-rpc-types-eth?/std"
 ]
 secp256k1 = ["alloy-consensus/secp256k1"]
 test-utils = [
@@ -102,20 +103,21 @@ test-utils = [
     "reth-chainspec/test-utils",
 ]
 arbitrary = [
-    "std",
-    "alloy-consensus/arbitrary",
-    "alloy-primitives/arbitrary",
-    "dep:arbitrary",
-    "dep:proptest",
-    "dep:proptest-arbitrary-interop",
-    "alloy-eips/arbitrary",
-    "revm-primitives/arbitrary",
-    "reth-codecs?/arbitrary",
-    "secp256k1?/global-context",
-    "secp256k1?/rand",
-    "op-alloy-consensus?/arbitrary",
-    "alloy-trie/arbitrary",
-    "reth-chainspec/arbitrary",
+	"std",
+	"alloy-consensus/arbitrary",
+	"alloy-primitives/arbitrary",
+	"dep:arbitrary",
+	"dep:proptest",
+	"dep:proptest-arbitrary-interop",
+	"alloy-eips/arbitrary",
+	"revm-primitives/arbitrary",
+	"reth-codecs?/arbitrary",
+	"secp256k1?/global-context",
+	"secp256k1?/rand",
+	"op-alloy-consensus?/arbitrary",
+	"alloy-trie/arbitrary",
+	"reth-chainspec/arbitrary",
+	"alloy-rpc-types-eth?/arbitrary"
 ]
 serde-bincode-compat = [
     "serde",
@@ -126,21 +128,22 @@ serde-bincode-compat = [
     "op-alloy-consensus?/serde-bincode-compat",
 ]
 serde = [
-    "dep:serde",
-    "alloy-consensus/serde",
-    "alloy-eips/serde",
-    "alloy-primitives/serde",
-    "bytes/serde",
-    "rand/serde",
-    "reth-codecs?/serde",
-    "revm-primitives/serde",
-    "revm-primitives/serde",
-    "op-alloy-consensus?/serde",
-    "secp256k1?/serde",
-    "alloy-trie/serde",
-    "revm-bytecode/serde",
-    "revm-state/serde",
-    "rand_08/serde",
+	"dep:serde",
+	"alloy-consensus/serde",
+	"alloy-eips/serde",
+	"alloy-primitives/serde",
+	"bytes/serde",
+	"rand/serde",
+	"reth-codecs?/serde",
+	"revm-primitives/serde",
+	"revm-primitives/serde",
+	"op-alloy-consensus?/serde",
+	"secp256k1?/serde",
+	"alloy-trie/serde",
+	"revm-bytecode/serde",
+	"revm-state/serde",
+	"rand_08/serde",
+	"alloy-rpc-types-eth?/serde"
 ]
 reth-codec = [
     "dep:reth-codecs",
