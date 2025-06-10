@@ -8,7 +8,7 @@ use crate::{
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
-    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
+    validate::{ValidTransaction, ValidationTask},
     EthBlobTransactionSidecar, EthPoolTransaction, LocalTransactionConfig,
     TransactionValidationOutcome, TransactionValidationTaskExecutor, TransactionValidator,
 };
@@ -328,8 +328,8 @@ where
         }
 
         // Check whether the init code size has been exceeded.
-        if self.fork_tracker.is_shanghai_activated() {
-            if let Err(err) = transaction.ensure_max_init_code_size(MAX_INIT_CODE_BYTE_SIZE) {
+        if let Some(init_code_size_limit) = self.fork_tracker.max_initcode_size() {
+            if let Err(err) = transaction.ensure_max_init_code_size(init_code_size_limit) {
                 return Err(TransactionValidationOutcome::Invalid(transaction, err))
             }
         }
@@ -1073,6 +1073,17 @@ impl ForkTracker {
     /// Returns the max blob count.
     pub fn max_blob_count(&self) -> u64 {
         self.max_blob_count.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Returns the max initcode size.
+    pub fn max_initcode_size(&self) -> Option<usize> {
+        if self.is_osaka_activated() {
+            Some(revm_primitives::eip7907::MAX_INITCODE_SIZE)
+        } else if self.is_shanghai_activated() {
+            Some(revm_primitives::eip3860::MAX_INITCODE_SIZE)
+        } else {
+            None
+        }
     }
 }
 
