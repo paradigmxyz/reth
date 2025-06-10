@@ -496,6 +496,7 @@ impl RpcInvalidTransactionError {
             Self::GasTooHigh |
             Self::GasRequiredExceedsAllowance { .. } => EthRpcErrorCode::InvalidInput.code(),
             Self::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
+            Self::NonceTooLow { .. } => jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE,
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
     }
@@ -534,9 +535,6 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
                     revert.to_string(),
                     revert.output.as_ref().map(|out| out.as_ref()),
                 )
-            }
-            RpcInvalidTransactionError::NonceTooLow { .. } => {
-                rpc_err(jsonrpsee_types::error::CALL_EXECUTION_FAILED_CODE, err.to_string(), None)
             }
             RpcInvalidTransactionError::Other(err) => err.to_rpc_error(),
             err => rpc_err(err.error_code(), err.to_string(), None),
