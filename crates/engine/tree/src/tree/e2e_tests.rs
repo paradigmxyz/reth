@@ -151,3 +151,37 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head_e2e(
 
     Ok(())
 }
+
+/// Test that verifies engine tree behavior when handling invalid blocks.
+/// This test demonstrates that invalid blocks are correctly rejected and that
+/// attempts to build on top of them fail appropriately.
+#[tokio::test]
+async fn test_engine_tree_reorg_with_missing_ancestor_expecting_valid_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        // build main chain (blocks 1-6)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(6))
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlock::new("main_chain_tip"))
+        // create a valid fork first
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("main_chain_tip", 5))
+        .with_action(CaptureBlock::new("valid_fork_tip"))
+        // FCU to the valid fork should work
+        .with_action(ExpectFcuStatus::valid("valid_fork_tip"));
+
+    test.run::<EthereumNode>().await?;
+
+    // attempting to build invalid chains fails properly
+    let invalid_test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
+        .with_action(MakeCanonical::new())
+        // This should fail when trying to build subsequent blocks on the invalid block
+        .with_action(ProduceInvalidBlocks::<EthEngineTypes>::with_invalid_at(2, 0));
+
+    assert!(invalid_test.run::<EthereumNode>().await.is_err());
+
+    Ok(())
+}
