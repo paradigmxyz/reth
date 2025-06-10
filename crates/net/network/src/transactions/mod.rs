@@ -13,7 +13,7 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
-use config::{AnnouncementAcceptance, StrictEthAnnouncementFilter, TransactionPropagationKind};
+use config::{AnnouncementAcceptance, ShardedMempoolAnnouncementFilter, StrictEthAnnouncementFilter, TransactionPropagationKind};
 pub use config::{
     AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionPropagationMode,
     TransactionPropagationPolicy, TransactionsManagerConfig,

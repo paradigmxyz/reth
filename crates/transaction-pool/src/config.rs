@@ -63,8 +63,6 @@ pub struct PoolConfig {
     pub max_new_pending_txs_notifications: usize,
     /// Maximum lifetime for transactions in the pool
     pub max_queued_lifetime: Duration,
-    /// Configuration for horizontally sharded blob mempool
-    pub sharded_mempool: ShardedMempoolConfig,
 }
 
 impl PoolConfig {
@@ -95,7 +93,6 @@ impl Default for PoolConfig {
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
-            sharded_mempool: Default::default(),
         }
     }
 }
