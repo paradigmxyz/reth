@@ -490,11 +490,11 @@ pgo-native-optimize: ## Build PGO-optimized reth using native cargo (macOS compa
 	@if command -v llvm-profdata >/dev/null 2>&1; then \
 		echo "Merging PGO data..."; \
 		llvm-profdata merge -o $(PGO_DATA_DIR)/merged.profdata $(PGO_DATA_DIR)/*.profraw; \
-		RUSTFLAGS="-Cprofile-use=$(PGO_DATA_DIR)/merged.profdata" \
+		RUSTFLAGS="-Cprofile-use=$$(pwd)/$(PGO_DATA_DIR)/merged.profdata" \
 			cargo build --profile maxperf --features "$(FEATURES)" --bin reth; \
 	else \
 		echo "Warning: llvm-profdata not found, using unmerged profile data..."; \
-		RUSTFLAGS="-Cprofile-use=$(PGO_DATA_DIR)" \
+		RUSTFLAGS="-Cprofile-use=$$(pwd)/$(PGO_DATA_DIR)" \
 			cargo build --profile maxperf --features "$(FEATURES)" --bin reth; \
 	fi
 	@echo "PGO optimization complete!"
