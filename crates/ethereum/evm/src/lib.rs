@@ -154,7 +154,7 @@ where
             CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 
         if let Some(blob_params) = &blob_params {
-            cfg_env.set_blob_max_count(blob_params.max_blob_count);
+            cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
         if self.chain_spec().is_osaka_active_at_timestamp(header.timestamp) {
@@ -202,7 +202,7 @@ where
             CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
 
         if let Some(blob_params) = &blob_params {
-            cfg.set_blob_max_count(blob_params.max_blob_count);
+            cfg.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
         if self.chain_spec().is_osaka_active_at_timestamp(attributes.timestamp) {
