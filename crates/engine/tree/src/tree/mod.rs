@@ -571,8 +571,8 @@ where
             }
         };
 
-        let header = block.clone_sealed_header();
-        let engine_event = BeaconConsensusEngineEvent::BlockReceived(header);
+        let num_hash = block.num_hash();
+        let engine_event = BeaconConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
         let block_hash = block.hash();

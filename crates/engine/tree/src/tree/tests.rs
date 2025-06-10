@@ -352,31 +352,10 @@ impl TestHarness {
     async fn check_block_received(&mut self, hash: B256) {
         let event = self.from_tree_rx.recv().await.unwrap();
         match event {
-            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::BlockReceived(header)) => {
-                assert_eq!(header.hash(), hash);
-            }
-            _ => panic!("Unexpected event: {event:#?}"),
-        }
-    }
-
-    async fn check_fork_block_added(&mut self, expected_hash: B256) {
-        let event = self.from_tree_rx.recv().await.unwrap();
-        match event {
-            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::ForkBlockAdded(
-                executed,
-                _,
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::BlockReceived(
+                num_hash,
             )) => {
-                assert_eq!(executed.recovered_block.hash(), expected_hash);
-            }
-            _ => panic!("Unexpected event: {event:#?}"),
-        }
-    }
-
-    async fn check_invalid_block(&mut self, expected_hash: B256) {
-        let event = self.from_tree_rx.recv().await.unwrap();
-        match event {
-            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::InvalidBlock(block)) => {
-                assert_eq!(block.hash(), expected_hash);
+                assert_eq!(num_hash.hash, hash);
             }
             _ => panic!("Unexpected event: {event:#?}"),
         }
