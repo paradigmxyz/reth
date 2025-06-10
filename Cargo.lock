@@ -634,7 +634,7 @@ dependencies = [
  "alloy-serde",
  "alloy-sol-types",
  "arbitrary",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -3113,7 +3113,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4359,7 +4359,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.57.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -4804,7 +4804,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6008,7 +6008,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "5.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "auto_impl",
  "once_cell",
@@ -6703,7 +6703,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10478,7 +10478,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "24.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10496,7 +10496,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "4.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "bitvec",
  "once_cell",
@@ -10508,7 +10508,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "5.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "cfg-if",
  "derive-where",
@@ -10523,7 +10523,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "5.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10538,7 +10538,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "4.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10551,7 +10551,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "4.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "auto_impl",
  "revm-primitives",
@@ -10562,7 +10562,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "5.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "auto_impl",
  "revm-bytecode",
@@ -10579,7 +10579,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "5.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "auto_impl",
  "revm-context",
@@ -10615,7 +10615,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "20.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10626,7 +10626,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "21.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10650,7 +10650,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "19.1.0"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -10660,7 +10660,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "4.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#092e9469d4a81e56a11fb5103af9b0ac394d1302"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka%2Fdevnet2#9ce4bef59bff2cefc2f0cdc02084b1ffc57a61e2"
 dependencies = [
  "bitflags 2.9.1",
  "revm-bytecode",
@@ -10892,7 +10892,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10905,7 +10905,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10963,7 +10963,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11711,7 +11711,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
