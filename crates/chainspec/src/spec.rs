@@ -474,16 +474,28 @@ impl ChainSpec {
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
-        let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
-            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
-            // fork filter.
-            Some(match condition {
-                ForkCondition::Block(block) |
-                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
-                ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
-                _ => return None,
+        let forks = self
+            .hardforks
+            .forks_iter()
+            .filter_map(|(_, condition)| {
+                // We filter out TTD-based forks w/o a pre-known block since those do not show up in
+                // the fork filter.
+                Some(match condition {
+                    ForkCondition::Block(block) |
+                    ForkCondition::TTD { fork_block: Some(block), .. } => {
+                        ForkFilterKey::Block(block)
+                    }
+                    ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
+                    _ => return None,
+                })
             })
-        });
+            // Add BPO hardforks to the fork filter as well.
+            .chain(
+                self.blob_params
+                    .scheduled
+                    .iter()
+                    .map(|(activation, _)| ForkFilterKey::Time(*activation)),
+            );
 
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
