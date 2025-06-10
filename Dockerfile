@@ -22,7 +22,7 @@ ARG BUILD_PROFILE=maxperf
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
 # Extra Cargo flags
-ARG RUSTFLAGS="-C target-cpu=native"
+ARG RUSTFLAGS=""
 ENV RUSTFLAGS="$RUSTFLAGS"
 
 # Extra Cargo features
