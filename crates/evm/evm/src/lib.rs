@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use crate::execute::BasicBlockBuilder;
+use crate::execute::{BasicBlockBuilder, Executor};
 use alloc::vec::Vec;
 use alloy_eips::{
     eip2718::{EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
@@ -31,6 +31,7 @@ use alloy_evm::{
 use alloy_primitives::{Address, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
@@ -281,13 +282,19 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Returns a new [`BasicBlockExecutor`].
     #[auto_impl(keep_default_for(&, Arc))]
-    fn executor<DB: Database>(&self, db: DB) -> BasicBlockExecutor<&Self, DB> {
+    fn executor<DB: Database>(
+        &self,
+        db: DB,
+    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
     }
 
     /// Returns a new [`BasicBlockExecutor`].
     #[auto_impl(keep_default_for(&, Arc))]
-    fn batch_executor<DB: Database>(&self, db: DB) -> BasicBlockExecutor<&Self, DB> {
+    fn batch_executor<DB: Database>(
+        &self,
+        db: DB,
+    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
     }
 }
