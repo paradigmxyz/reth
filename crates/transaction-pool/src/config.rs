@@ -5,7 +5,7 @@ use crate::{
 };
 use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
-use alloy_primitives::Address;
+use alloy_primitives::{Address, B256};
 use std::{collections::HashSet, ops::Mul, time::Duration};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
@@ -63,6 +63,8 @@ pub struct PoolConfig {
     pub max_new_pending_txs_notifications: usize,
     /// Maximum lifetime for transactions in the pool
     pub max_queued_lifetime: Duration,
+    /// Configuration for horizontally sharded blob mempool
+    pub sharded_mempool: ShardedMempoolConfig,
 }
 
 impl PoolConfig {
@@ -93,6 +95,7 @@ impl Default for PoolConfig {
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            sharded_mempool: Default::default(),
         }
     }
 }
@@ -230,6 +233,48 @@ impl LocalTransactionConfig {
     }
 }
 
+/// Configuration for horizontally sharded blob mempool
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct ShardedMempoolConfig {
+    /// Number of bits to use for sharding (4 bits = 16 shards)
+    pub shard_bits: u8,
+    /// Node ID for shard calculation
+    pub node_id: Option<B256>,
+}
+
+impl Default for ShardedMempoolConfig {
+    fn default() -> Self {
+        Self {
+            shard_bits: 4, // 16 shards
+            node_id: None,
+        }
+    }
+}
+
+impl ShardedMempoolConfig {
+    /// Creates a new sharded mempool config with the given node ID
+    pub fn new_with_node_id(node_id: B256) -> Self {
+        Self {
+            shard_bits: 4,
+            node_id: Some(node_id),
+        }
+    }
+
+    /// Calculate if we should download the tx based on our shard
+    pub fn should_download_tx(&self, tx_hash: &B256) -> bool {
+        let Some(our_node_id) = self.node_id.as_ref() else {
+            tracing::warn!("Node ID not configured for sharded mempool, downloading all transactions");
+            return true; // Fallback
+        };
+
+        let mask = (1u8 << self.shard_bits) - 1;
+        let tx_shard = tx_hash.as_slice()[31] & mask;
+        let our_shard = our_node_id.as_slice()[31] & mask;
+
+        tx_shard == our_shard
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,5 +393,85 @@ mod tests {
             double,
             SubPoolLimit { max_txs: limit.max_txs * 2, max_size: limit.max_size * 2 }
         )
+    }
+
+    #[test]
+    fn test_sharded_mempool_config_default() {
+       let config = ShardedMempoolConfig::default();
+       assert_eq!(config.shard_bits, 4);
+       assert_eq!(config.node_id, None);
+    }
+    
+    #[test]
+    fn test_should_download_tx_no_node_id() {
+       let config = ShardedMempoolConfig::default();
+       let tx_hash = B256::random();
+       
+       assert!(config.should_download_tx(&tx_hash));
+    }
+    
+    #[test]
+    fn test_should_download_tx_with_sharding() {
+       let node_id = B256::from([
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x05
+       ]);
+       
+       let config = ShardedMempoolConfig::new_with_node_id(node_id);
+       
+       let matching_tx = B256::from([
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x05
+       ]);
+       
+       let non_matching_tx = B256::from([
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x03
+       ]);
+       
+       assert!(config.should_download_tx(&matching_tx));
+       assert!(!config.should_download_tx(&non_matching_tx));
+    }
+    
+    #[test]
+    fn test_shard_calculation_16_shards() {
+       for shard in 0..16u8 {
+           let node_id = B256::from([
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, shard
+           ]);
+           
+           let config = ShardedMempoolConfig::new_with_node_id(node_id);
+           
+           let matching_tx = B256::from([
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+               0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, shard
+           ]);
+           
+           assert!(config.should_download_tx(&matching_tx));
+       }
+    }
+    
+    #[test]
+    fn test_shard_masking_logic() {
+       let node_id = B256::from([
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b11110101
+       ]);
+       
+       let config = ShardedMempoolConfig::new_with_node_id(node_id);
+       
+       let should_match_tx = B256::from([
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b00000101
+       ]);
+       
+       let should_not_match_tx = B256::from([
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+           0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0b00001010
+       ]);
+       
+       assert!(config.should_download_tx(&should_match_tx));
+       assert!(!config.should_download_tx(&should_not_match_tx));
     }
 }
