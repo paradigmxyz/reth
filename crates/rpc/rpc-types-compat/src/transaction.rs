@@ -73,7 +73,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
 
     /// Creates a transaction environment for execution based on `request` with corresponding
     /// `cfg_env` and `block_env`.
-    fn executable_env<Spec>(
+    fn tx_env<Spec>(
         &self,
         request: TransactionRequest,
         cfg_env: &CfgEnv<Spec>,
@@ -427,7 +427,7 @@ where
         Ok(request.try_into_sim_tx().map_err(|e| TransactionConversionError(e.to_string()))?)
     }
 
-    fn executable_env<Spec>(
+    fn tx_env<Spec>(
         &self,
         request: TransactionRequest,
         cfg_env: &CfgEnv<Spec>,

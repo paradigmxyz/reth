@@ -705,7 +705,7 @@ pub trait Call:
             );
         }
 
-        Ok(self.tx_resp_builder().executable_env(request, &evm_env.cfg_env, &evm_env.block_env)?)
+        Ok(self.tx_resp_builder().tx_env(request, &evm_env.cfg_env, &evm_env.block_env)?)
     }
 
     /// Prepares the [`EvmEnv`] for execution of calls.
