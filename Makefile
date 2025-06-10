@@ -472,6 +472,34 @@ pgo-bolt: pgo-clean pgo-build-instrumented pgo-run pgo-optimize bolt-optimize ##
 pgo-only: pgo-clean pgo-build-instrumented pgo-run pgo-optimize ## Run PGO-only workflow without BOLT.
 	@echo "PGO build complete! Binary location: $(CARGO_TARGET_DIR)/maxperf/reth"
 
+# Native PGO targets for macOS (without cargo-pgo)
+.PHONY: pgo-native-build
+pgo-native-build: ## Build reth with PGO instrumentation using native cargo (macOS compatible).
+	@echo "Building reth with PGO instrumentation using native cargo..."
+	@mkdir -p $(PGO_DATA_DIR)
+	RUSTFLAGS="-Cprofile-generate=$(PGO_DATA_DIR) -Cllvm-args=-vp-counters-per-site=64" \
+		cargo build --profile maxperf --features "$(FEATURES)" --bin reth
+	@echo "PGO instrumented build complete!"
+	@echo "Binary: $(CARGO_TARGET_DIR)/maxperf/reth"
+	@echo "PGO data will be written to: $(PGO_DATA_DIR)"
+
+.PHONY: pgo-native-optimize
+pgo-native-optimize: ## Build PGO-optimized reth using native cargo (macOS compatible).
+	@echo "Building PGO-optimized reth using native cargo..."
+	@test -d $(PGO_DATA_DIR) || { echo "Error: No PGO data found in $(PGO_DATA_DIR). Run pgo-native-build and collect profile data first."; exit 1; }
+	@if command -v llvm-profdata >/dev/null 2>&1; then \
+		echo "Merging PGO data..."; \
+		llvm-profdata merge -o $(PGO_DATA_DIR)/merged.profdata $(PGO_DATA_DIR)/*.profraw; \
+		RUSTFLAGS="-Cprofile-use=$(PGO_DATA_DIR)/merged.profdata" \
+			cargo build --profile maxperf --features "$(FEATURES)" --bin reth; \
+	else \
+		echo "Warning: llvm-profdata not found, using unmerged profile data..."; \
+		RUSTFLAGS="-Cprofile-use=$(PGO_DATA_DIR)" \
+			cargo build --profile maxperf --features "$(FEATURES)" --bin reth; \
+	fi
+	@echo "PGO optimization complete!"
+	@echo "Optimized binary: $(CARGO_TARGET_DIR)/maxperf/reth"
+
 fmt:
 	cargo +nightly fmt
 
