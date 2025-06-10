@@ -467,7 +467,7 @@ alloy-evm = { version = "0.10", default-features = false }
 alloy-primitives = { version = "1.1.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.1.0"
-alloy-sol-types = { version = "1.1.0", default-features = false }
+alloy-sol-types = { version = "1.2.0", default-features = false }
 alloy-trie = { version = "0.8.1", default-features = false }
 
 alloy-hardforks = "0.2.2"
