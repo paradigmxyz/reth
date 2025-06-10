@@ -44,7 +44,15 @@ use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7840::BlobParams};
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
 use reth_ethereum_forks::EthereumHardfork;
 
-pub mod execute;
+/// Helper type with backwards compatible methods to obtain Ethereum executor
+/// providers.
+#[doc(hidden)]
+pub mod execute {
+    use crate::EthEvmConfig;
+
+    #[deprecated(note = "Use `EthEvmConfig` instead")]
+    pub type EthExecutorProvider = EthEvmConfig;
+}
 
 mod build;
 pub use build::EthBlockAssembler;

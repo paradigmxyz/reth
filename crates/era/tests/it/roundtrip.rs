@@ -46,7 +46,7 @@ async fn test_file_roundtrip(
     }
 
     // Read back from buffer
-    let mut reader = Era1Reader::new(Cursor::new(&buffer));
+    let reader = Era1Reader::new(Cursor::new(&buffer));
     let roundtrip_file = reader.read(network.to_string())?;
 
     assert_eq!(
@@ -203,7 +203,7 @@ async fn test_file_roundtrip(
             writer.write_era1_file(&new_file)?;
         }
 
-        let mut reader = Era1Reader::new(Cursor::new(&recompressed_buffer));
+        let reader = Era1Reader::new(Cursor::new(&recompressed_buffer));
         let recompressed_file = reader.read(network.to_string())?;
 
         let recompressed_first_block = &recompressed_file.group.blocks[0];

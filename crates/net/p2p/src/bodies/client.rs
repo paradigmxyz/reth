@@ -1,4 +1,5 @@
 use std::{
+    ops::RangeInclusive,
     pin::Pin,
     task::{ready, Context, Poll},
 };
@@ -26,8 +27,26 @@ pub trait BodiesClient: DownloadClient {
     }
 
     /// Fetches the block body for the requested block with priority
-    fn get_block_bodies_with_priority(&self, hashes: Vec<B256>, priority: Priority)
-        -> Self::Output;
+    fn get_block_bodies_with_priority(
+        &self,
+        hashes: Vec<B256>,
+        priority: Priority,
+    ) -> Self::Output {
+        self.get_block_bodies_with_priority_and_range_hint(hashes, priority, None)
+    }
+
+    /// Fetches the block body for the requested block with priority and a range hint for the
+    /// requested blocks.
+    ///
+    /// The range hint is not required, but can be used to optimize the routing of the request if
+    /// the hashes are continuous or close together and the range hint is `[earliest, latest]` for
+    /// the requested blocks.
+    fn get_block_bodies_with_priority_and_range_hint(
+        &self,
+        hashes: Vec<B256>,
+        priority: Priority,
+        range_hint: Option<RangeInclusive<u64>>,
+    ) -> Self::Output;
 
     /// Fetches a single block body for the requested hash.
     fn get_block_body(&self, hash: B256) -> SingleBodyRequest<Self::Output> {

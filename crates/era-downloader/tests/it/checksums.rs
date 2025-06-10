@@ -9,7 +9,7 @@ use test_case::test_case;
 
 #[test_case("https://mainnet.era1.nimbus.team/"; "nimbus")]
 #[test_case("https://era1.ethportal.net/"; "ethportal")]
-#[test_case("https://era.ithaca.xyz/era1/"; "ithaca")]
+#[test_case("https://era.ithaca.xyz/era1/index.html"; "ithaca")]
 #[tokio::test]
 async fn test_invalid_checksum_returns_error(url: &str) {
     let base_url = Url::from_str(url).unwrap();
@@ -57,13 +57,13 @@ impl HttpClient for FailingClient {
 
         async move {
             match url.to_string().as_str() {
-                "https://mainnet.era1.nimbus.team/index.html" => {
+                "https://mainnet.era1.nimbus.team/" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(crate::NIMBUS))
                     })))
                         as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
                 }
-                "https://era1.ethportal.net/index.html" => {
+                "https://era1.ethportal.net/" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(crate::ETH_PORTAL))
                     })))

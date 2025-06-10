@@ -10,9 +10,10 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_api::{
-    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
-    RpcTransaction, TransactionCompat,
+    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCore,
+    RpcNodeCoreExt, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -21,7 +22,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt,
+    ProviderReceipt, TransactionsProvider,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -291,7 +292,13 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader> + 'static,
+    Eth: FullEthApiTypes
+        + RpcNodeCoreExt<
+            Provider: BlockIdReader,
+            Primitives: NodePrimitives<
+                SignedTx = <<Eth as RpcNodeCore>::Provider as TransactionsProvider>::Transaction,
+            >,
+        > + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -677,7 +684,7 @@ struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
 impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat<T::Consensus>,
+    TxCompat: TransactionCompat<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>, tx_resp_builder: TxCompat) -> Self {
@@ -715,7 +722,7 @@ impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat<T::Consensus> + 'static,
+    TxCompat: TransactionCompat<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
 {
     async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
         Self::drain(self).await

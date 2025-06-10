@@ -8,6 +8,7 @@ mod block;
 mod call;
 mod pending_block;
 
+use crate::{eth::transaction::OpTxInfoMapper, OpEthApiError, SequencerClient};
 use alloy_primitives::U256;
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
@@ -24,7 +25,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcNodeCore, RpcNodeCoreExt,
+    EthApiTypes, FromEvmError, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{
@@ -36,9 +37,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use std::{fmt, marker::PhantomData, sync::Arc};
-
-use crate::{OpEthApiError, SequencerClient};
+use std::{fmt, fmt::Formatter, marker::PhantomData, sync::Arc};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -68,12 +67,23 @@ pub struct OpEthApi<N: OpNodeCore, NetworkT = Optimism> {
     inner: Arc<OpEthApiInner<N>>,
     /// Marker for the network types.
     _nt: PhantomData<NetworkT>,
+    tx_resp_builder: RpcConverter<N::Primitives, NetworkT, OpEthApiError, OpTxInfoMapper<N>>,
 }
 
 impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
     /// Creates a new `OpEthApi`.
-    pub fn new(eth_api: EthApiNodeBackend<N>, sequencer_client: Option<SequencerClient>) -> Self {
-        Self { inner: Arc::new(OpEthApiInner { eth_api, sequencer_client }), _nt: PhantomData }
+    pub fn new(
+        eth_api: EthApiNodeBackend<N>,
+        sequencer_client: Option<SequencerClient>,
+        min_suggested_priority_fee: U256,
+    ) -> Self {
+        let inner =
+            Arc::new(OpEthApiInner { eth_api, sequencer_client, min_suggested_priority_fee });
+        Self {
+            inner: inner.clone(),
+            _nt: PhantomData,
+            tx_resp_builder: RpcConverter::with_mapper(OpTxInfoMapper::new(inner)),
+        }
     }
 }
 
@@ -101,16 +111,18 @@ where
 
 impl<N, NetworkT> EthApiTypes for OpEthApi<N, NetworkT>
 where
-    Self: Send + Sync + std::fmt::Debug,
+    Self: Send + Sync + fmt::Debug,
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network + Clone + std::fmt::Debug,
+    NetworkT: op_alloy_network::Network + Clone + fmt::Debug,
+    <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
     type Error = OpEthApiError;
     type NetworkTypes = NetworkT;
-    type TransactionCompat = Self;
+    type TransactionCompat =
+        RpcConverter<N::Primitives, NetworkT, OpEthApiError, OpTxInfoMapper<N>>;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
-        self
+        &self.tx_resp_builder
     }
 }
 
@@ -191,6 +203,7 @@ where
     Self: Send + Sync + Clone + 'static,
     N: OpNodeCore,
     NetworkT: op_alloy_network::Network,
+    <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -226,6 +239,12 @@ where
     fn fee_history_cache(&self) -> &FeeHistoryCache {
         self.inner.eth_api.fee_history_cache()
     }
+
+    async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
+        let base_tip = self.inner.eth_api.gas_oracle().suggest_tip_cap().await?;
+        let min_tip = U256::from(self.inner.min_suggested_priority_fee);
+        Ok(base_tip.max(min_tip))
+    }
 }
 
 impl<N, NetworkT> LoadState for OpEthApi<N, NetworkT>
@@ -235,6 +254,7 @@ where
         Pool: TransactionPool,
     >,
     NetworkT: op_alloy_network::Network,
+    <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
 }
 
@@ -288,12 +308,22 @@ impl<N: OpNodeCore, NetworkT> fmt::Debug for OpEthApi<N, NetworkT> {
 }
 
 /// Container type `OpEthApi`
-struct OpEthApiInner<N: OpNodeCore> {
+pub struct OpEthApiInner<N: OpNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     sequencer_client: Option<SequencerClient>,
+    /// Minimum priority fee enforced by OP-specific logic.
+    ///
+    /// See also <https://github.com/ethereum-optimism/op-geth/blob/d4e0fe9bb0c2075a9bff269fb975464dd8498f75/eth/gasprice/optimism-gasprice.go#L38-L38>
+    min_suggested_priority_fee: U256,
+}
+
+impl<N: OpNodeCore> fmt::Debug for OpEthApiInner<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpEthApiInner").finish()
+    }
 }
 
 impl<N: OpNodeCore> OpEthApiInner<N> {
@@ -316,20 +346,32 @@ pub struct OpEthApiBuilder<NetworkT = Optimism> {
     sequencer_url: Option<String>,
     /// Headers to use for the sequencer client requests.
     sequencer_headers: Vec<String>,
+    /// Minimum suggested priority fee (tip)
+    min_suggested_priority_fee: u64,
     /// Marker for network types.
     _nt: PhantomData<NetworkT>,
 }
 
 impl<NetworkT> Default for OpEthApiBuilder<NetworkT> {
     fn default() -> Self {
-        Self { sequencer_url: None, sequencer_headers: Vec::new(), _nt: PhantomData }
+        Self {
+            sequencer_url: None,
+            sequencer_headers: Vec::new(),
+            min_suggested_priority_fee: 1_000_000,
+            _nt: PhantomData,
+        }
     }
 }
 
 impl<NetworkT> OpEthApiBuilder<NetworkT> {
     /// Creates a [`OpEthApiBuilder`] instance from core components.
     pub const fn new() -> Self {
-        Self { sequencer_url: None, sequencer_headers: Vec::new(), _nt: PhantomData }
+        Self {
+            sequencer_url: None,
+            sequencer_headers: Vec::new(),
+            min_suggested_priority_fee: 1_000_000,
+            _nt: PhantomData,
+        }
     }
 
     /// With a [`SequencerClient`].
@@ -343,6 +385,12 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
         self.sequencer_headers = sequencer_headers;
         self
     }
+
+    /// With minimum suggested priority fee (tip)
+    pub const fn with_min_suggested_priority_fee(mut self, min: u64) -> Self {
+        self.min_suggested_priority_fee = min;
+        self
+    }
 }
 
 impl<N, NetworkT> EthApiBuilder<N> for OpEthApiBuilder<NetworkT>
@@ -354,7 +402,7 @@ where
     type EthApi = OpEthApi<N, NetworkT>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let Self { sequencer_url, sequencer_headers, .. } = self;
+        let Self { sequencer_url, sequencer_headers, min_suggested_priority_fee, .. } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -381,6 +429,6 @@ where
             None
         };
 
-        Ok(OpEthApi::new(eth_api, sequencer_client))
+        Ok(OpEthApi::new(eth_api, sequencer_client, U256::from(min_suggested_priority_fee)))
     }
 }

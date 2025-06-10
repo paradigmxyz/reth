@@ -1,5 +1,5 @@
 [workspace.package]
-version = "1.4.6"
+version = "1.4.8"
 edition = "2021"
 rust-version = "1.86"
 license = "MIT OR Apache-2.0"
@@ -147,6 +147,7 @@ members = [
     "examples/custom-rlpx-subprotocol",
     "examples/custom-node",
     "examples/db-access",
+    "examples/engine-api-access",
     "examples/exex-hello-world",
     "examples/exex-subscription",
     "examples/exex-test",
@@ -507,7 +508,7 @@ op-alloy-rpc-types-engine = { version = "0.17.2", default-features = false }
 op-alloy-network = { version = "0.17.2", default-features = false }
 op-alloy-consensus = { version = "0.17.2", default-features = false }
 op-alloy-rpc-jsonrpsee = { version = "0.17.2", default-features = false }
-op-alloy-flz = { version = "0.13.0", default-features = false }
+op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
 aquamarine = "0.6"

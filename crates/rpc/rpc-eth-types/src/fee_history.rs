@@ -74,8 +74,8 @@ impl FeeHistoryCache {
     async fn insert_blocks<'a, I, B, R, C>(&self, blocks: I, chain_spec: &C)
     where
         B: Block + 'a,
-        R: TxReceipt,
-        I: IntoIterator<Item = (&'a SealedBlock<B>, Arc<Vec<R>>)>,
+        R: TxReceipt + 'a,
+        I: IntoIterator<Item = (&'a SealedBlock<B>, &'a [R])>,
         C: EthChainSpec,
     {
         let mut entries = self.inner.entries.write().await;
@@ -92,7 +92,7 @@ impl FeeHistoryCache {
                 fee_history_entry.gas_used,
                 fee_history_entry.base_fee_per_gas,
                 block.body().transactions(),
-                &receipts,
+                receipts,
             )
             .unwrap_or_default();
             entries.insert(block.number(), fee_history_entry);
@@ -241,7 +241,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
             res = &mut fetch_missing_block =>  {
                 if let Ok(res) = res {
                     let res = res.as_ref()
-                        .map(|(b, r)| (b.sealed_block(), r.clone()));
+                        .map(|(b, r)| (b.sealed_block(), r.as_slice()));
                     fee_history_cache.insert_blocks(res, &chain_spec).await;
                 }
             }
@@ -252,13 +252,12 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
                 };
 
                 let committed = event.committed();
-                let (blocks, receipts): (Vec<_>, Vec<_>) = committed
+                let blocks_and_receipts = committed
                     .blocks_and_receipts()
                     .map(|(block, receipts)| {
-                        (block.clone_sealed_block(), Arc::new(receipts.clone()))
-                    })
-                    .unzip();
-                fee_history_cache.insert_blocks(blocks.iter().zip(receipts), &chain_spec).await;
+                        (block.sealed_block(), receipts.as_slice())
+                    });
+                fee_history_cache.insert_blocks(blocks_and_receipts, &chain_spec).await;
 
                 // keep track of missing blocks
                 missing_blocks = fee_history_cache.missing_consecutive_blocks().await;
