@@ -672,11 +672,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// and the shared local range information that gets propagated to active sessions (Eth69).
     /// The range information is used in ETH69 protocol where peers announce the range of blocks
     /// they can serve to optimize data synchronization.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_range_update` - The new block range information containing the earliest and latest
-    ///   block numbers and the hash of the latest block.
     pub(crate) fn update_advertised_block_range(&mut self, block_range_update: BlockRangeUpdate) {
         self.status.earliest_block = Some(block_range_update.earliest);
         self.status.latest_block = Some(block_range_update.latest);
