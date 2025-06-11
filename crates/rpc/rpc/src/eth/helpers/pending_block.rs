@@ -71,9 +71,7 @@ where
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent
-                .parent_beacon_block_root()
-                .and_then(|_| Some(B256::ZERO)),
+            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
             withdrawals: None,
         })
     }
