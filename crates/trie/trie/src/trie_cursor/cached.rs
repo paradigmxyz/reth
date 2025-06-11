@@ -1,5 +1,5 @@
 use super::{TrieCursor, TrieCursorFactory};
-use crate::{BranchNodeCompact, Nibbles};
+use crate::{updates::TrieUpdates, BranchNodeCompact, Nibbles};
 use alloy_primitives::{map::B256Map, B256};
 use parking_lot::RwLock;
 use reth_storage_errors::db::DatabaseError;
@@ -42,6 +42,36 @@ impl Cache {
     /// Create a new cache with the given size.
     pub fn new(size: u64) -> Self {
         Self(Arc::new(mini_moka::sync::Cache::new(size)))
+    }
+
+    /// Invalidate all entries that match the given path.
+    pub fn invalidate_by_path(&self, path: &Nibbles) {
+        // Remove entries for SeekExact and Seek operations with this path
+        self.0.invalidate(&CacheKey::SeekExact(path.clone()));
+        self.0.invalidate(&CacheKey::Seek(path.clone()));
+        
+        // For Next operations, we need to invalidate entries where the last key
+        // could be affected by this path change
+        // Note: This is a conservative approach - we could optimize further
+        self.0.invalidate(&CacheKey::Next(Some(path.clone())));
+    }
+
+    /// Update all entries for the given path with the new node.
+    pub fn update_by_path(&self, path: &Nibbles, node: BranchNodeCompact) {
+        // Update SeekExact entries
+        if let Some(existing) = self.0.get(&CacheKey::SeekExact(path.clone())) {
+            if existing.is_some() {
+                self.0.insert(CacheKey::SeekExact(path.clone()), Some((path.clone(), node.clone())));
+            }
+        }
+        
+        // Update Seek entries - this is more complex as Seek might return this node
+        // even if seeking for a different key
+        if let Some(existing) = self.0.get(&CacheKey::Seek(path.clone())) {
+            if existing.is_some() {
+                self.0.insert(CacheKey::Seek(path.clone()), Some((path.clone(), node.clone())));
+            }
+        }
     }
 }
 
@@ -99,6 +129,49 @@ impl TrieCursorSharedCaches {
     pub fn clear(&self) {
         self.account_cache.invalidate_all();
         self.storage_caches.write().clear();
+    }
+
+    /// Apply trie updates to the caches instead of clearing them.
+    pub fn apply_updates(&self, updates: &TrieUpdates) {
+        debug!(
+            target: "trie::cached_cursor",
+            "Applying trie updates to caches: {} account nodes, {} removed nodes, {} storage tries",
+            updates.account_nodes.len(),
+            updates.removed_nodes.len(),
+            updates.storage_tries.len()
+        );
+        
+        // Apply account trie updates
+        // First, invalidate removed nodes
+        for removed_path in &updates.removed_nodes {
+            self.account_cache.invalidate_by_path(removed_path);
+        }
+        
+        // Then, update modified nodes
+        for (path, node) in &updates.account_nodes {
+            self.account_cache.update_by_path(path, node.clone());
+        }
+        
+        // Apply storage trie updates
+        for (hashed_address, storage_updates) in &updates.storage_tries {
+            if storage_updates.is_deleted {
+                // If the storage trie is deleted, remove the entire cache for this address
+                self.storage_caches.write().remove(hashed_address);
+            } else {
+                // Apply updates to existing storage cache
+                let storage_caches = self.storage_caches.read();
+                if let Some(cache) = storage_caches.get(hashed_address) {
+                    for removed_path in &storage_updates.removed_nodes {
+                        cache.invalidate_by_path(removed_path);
+                    }
+                    
+                    for (path, node) in &storage_updates.storage_nodes {
+                        cache.update_by_path(path, node.clone());
+                    }
+                }
+                // If there's no cache for this address yet, we don't need to do anything
+            }
+        }
     }
 }
 
@@ -184,6 +257,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            #[cfg(feature = "metrics")]
             self.metrics.hits.increment(1);
             debug!(
                 target: "trie::cached_cursor",
@@ -197,6 +271,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
         let result = self.inner.seek_exact(key.clone())?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        #[cfg(feature = "metrics")]
         self.metrics.misses.increment(1);
         debug!(
             target: "trie::cached_cursor",
@@ -215,6 +290,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            #[cfg(feature = "metrics")]
             self.metrics.hits.increment(1);
             debug!(
                 target: "trie::cached_cursor",
@@ -228,6 +304,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
         let result = self.inner.seek(key.clone())?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        #[cfg(feature = "metrics")]
         self.metrics.misses.increment(1);
         debug!(
             target: "trie::cached_cursor",
@@ -243,6 +320,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            #[cfg(feature = "metrics")]
             self.metrics.hits.increment(1);
             debug!(
                 target: "trie::cached_cursor",
@@ -256,6 +334,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
         let result = self.inner.next()?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        #[cfg(feature = "metrics")]
         self.metrics.misses.increment(1);
         debug!(
             target: "trie::cached_cursor",
@@ -311,6 +390,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            #[cfg(feature = "metrics")]
             self.metrics.hits.increment(1);
             debug!(
                 target: "trie::cached_cursor",
@@ -325,6 +405,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
         let result = self.inner.seek_exact(key.clone())?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        #[cfg(feature = "metrics")]
         self.metrics.misses.increment(1);
         debug!(
             target: "trie::cached_cursor",
@@ -344,6 +425,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            #[cfg(feature = "metrics")]
             self.metrics.hits.increment(1);
             debug!(
                 target: "trie::cached_cursor",
@@ -358,6 +440,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
         let result = self.inner.seek(key.clone())?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        #[cfg(feature = "metrics")]
         self.metrics.misses.increment(1);
         debug!(
             target: "trie::cached_cursor",
@@ -374,6 +457,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            #[cfg(feature = "metrics")]
             self.metrics.hits.increment(1);
             debug!(
                 target: "trie::cached_cursor",
@@ -388,6 +472,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
         let result = self.inner.next()?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        #[cfg(feature = "metrics")]
         self.metrics.misses.increment(1);
         debug!(
             target: "trie::cached_cursor",

@@ -2361,7 +2361,9 @@ where
 
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
-        self.payload_processor.clear_trie_cursor_caches();
+        
+        // Apply trie updates to the cache instead of clearing it
+        self.payload_processor.apply_trie_updates_to_cache(&trie_output);
 
         let is_fork = ensure_ok!(self.is_fork(block.sealed_header()));
 

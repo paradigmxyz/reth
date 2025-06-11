@@ -23,7 +23,7 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::{trie_cursor::TrieCursorSharedCaches, TrieInput};
+use reth_trie::{trie_cursor::TrieCursorSharedCaches, updates::TrieUpdates, TrieInput};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
@@ -312,6 +312,11 @@ where
     /// Clears the trie cursor caches.
     pub fn clear_trie_cursor_caches(&self) {
         self.trie_cursor_shared_caches.clear()
+    }
+
+    /// Apply trie updates to the cursor caches instead of clearing them.
+    pub fn apply_trie_updates_to_cache(&self, updates: &TrieUpdates) {
+        self.trie_cursor_shared_caches.apply_updates(updates)
     }
 }
 
