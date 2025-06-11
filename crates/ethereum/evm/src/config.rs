@@ -1,19 +1,25 @@
 use alloy_consensus::Header;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_ethereum_forks::EthereumHardfork;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 use revm::primitives::hardfork::SpecId;
 
 /// Map the latest active hardfork at the given header to a revm [`SpecId`].
-pub fn revm_spec(chain_spec: &ChainSpec, header: &Header) -> SpecId {
+pub fn revm_spec<C>(chain_spec: &C, header: &Header) -> SpecId
+where
+    C: EthereumHardforks + EthChainSpec + Hardforks,
+{
     revm_spec_by_timestamp_and_block_number(chain_spec, header.timestamp, header.number)
 }
 
 /// Map the latest active hardfork at the given timestamp or block number to a revm [`SpecId`].
-pub fn revm_spec_by_timestamp_and_block_number(
-    chain_spec: &ChainSpec,
+pub fn revm_spec_by_timestamp_and_block_number<C>(
+    chain_spec: &C,
     timestamp: u64,
     block_number: u64,
-) -> SpecId {
+) -> SpecId
+where
+    C: EthereumHardforks + EthChainSpec + Hardforks,
+{
     if chain_spec
         .fork(EthereumHardfork::Osaka)
         .active_at_timestamp_or_number(timestamp, block_number)
@@ -83,8 +89,8 @@ pub fn revm_spec_by_timestamp_and_block_number(
         SpecId::FRONTIER
     } else {
         panic!(
-            "invalid hardfork chainspec: expected at least one hardfork, got {:?}",
-            chain_spec.hardforks
+            "invalid hardfork chainspec: expected at least one hardfork, got {}",
+            chain_spec.display_hardforks()
         )
     }
 }
