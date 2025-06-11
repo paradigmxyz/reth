@@ -16,7 +16,7 @@ use crate::{
     session::{
         conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
-        BlockRangeInfo, SessionId,
+        BlockRangeInfo, EthVersion, SessionId,
     },
 };
 use alloy_primitives::Sealable;
@@ -253,7 +253,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetNodeData)
             }
             EthMessage::GetReceipts(req) => {
-                if self.conn.version().is_eth69() {
+                if self.conn.version() >= EthVersion::Eth69 {
                     on_request!(req, Receipts69, GetReceipts69)
                 } else {
                     on_request!(req, Receipts, GetReceipts)
