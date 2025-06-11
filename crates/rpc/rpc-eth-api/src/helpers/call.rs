@@ -34,6 +34,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
+use reth_rpc_types_compat::TransactionCompat;
 use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
 use revm::{
     context_interface::{
@@ -455,7 +456,10 @@ pub trait Call:
                 SignedTx = ProviderTx<Self::Provider>,
             >,
         >,
-        Error: FromEvmError<Self::Evm>,
+        TransactionCompat: TransactionCompat<TxEnv = TxEnvFor<Self::Evm>>,
+        Error: FromEvmError<Self::Evm>
+                   + From<<Self::TransactionCompat as TransactionCompat>::Error>
+                   + From<ProviderError>,
     > + SpawnBlocking
 {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
@@ -689,9 +693,20 @@ pub trait Call:
     fn create_txn_env(
         &self,
         evm_env: &EvmEnv<SpecFor<Self::Evm>>,
-        request: TransactionRequest,
-        db: impl Database<Error: Into<EthApiError>>,
-    ) -> Result<TxEnvFor<Self::Evm>, Self::Error>;
+        mut request: TransactionRequest,
+        mut db: impl Database<Error: Into<EthApiError>>,
+    ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
+        if request.nonce.is_none() {
+            request.nonce.replace(
+                db.basic(request.from.unwrap_or_default())
+                    .map_err(Into::into)?
+                    .map(|acc| acc.nonce)
+                    .unwrap_or_default(),
+            );
+        }
+
+        Ok(self.tx_resp_builder().tx_env(request, &evm_env.cfg_env, &evm_env.block_env)?)
+    }
 
     /// Prepares the [`EvmEnv`] for execution of calls.
     ///

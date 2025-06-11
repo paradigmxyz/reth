@@ -16,6 +16,10 @@ rpc-compat:
   - eth_getTransactionReceipt/get-legacy-input (reth)
   - eth_getTransactionReceipt/get-legacy-receipt (reth)
 
+  # after https://github.com/paradigmxyz/reth/pull/16742 we start the node in
+  # syncing mode, the test expects syncing to be false on start
+  - eth_syncing/check-syncing
+
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
   - Withdrawals Fork On Genesis (Paris) (reth)

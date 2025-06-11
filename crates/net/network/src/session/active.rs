@@ -116,6 +116,9 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
     /// The eth69 range info for the remote peer.
     pub(crate) range_info: Option<BlockRangeInfo>,
+    /// The eth69 range info for the local node (this node).
+    /// This represents the range of blocks that this node can serve to other peers.
+    pub(crate) local_range_info: BlockRangeInfo,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -998,6 +1001,11 @@ mod tests {
                         protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
                         terminate_message: None,
                         range_info: None,
+                        local_range_info: BlockRangeInfo::new(
+                            0,
+                            1000,
+                            alloy_primitives::B256::ZERO,
+                        ),
                     }
                 }
                 ev => {
