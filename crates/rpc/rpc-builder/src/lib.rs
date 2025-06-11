@@ -724,6 +724,8 @@ where
     pub fn register_ots(&mut self) -> &mut Self
     where
         EthApi: TraceExt + EthTransactions,
+        <EthApi as reth_rpc_eth_api::RpcNodeCore>::Provider:
+            reth_chain_state::CanonStateSubscriptions,
     {
         let otterscan_api = self.otterscan_api();
         self.modules.insert(RethRpcModule::Ots, otterscan_api.into_rpc().into());
@@ -739,6 +741,8 @@ where
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
         EvmConfig::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
+        <EthApi as reth_rpc_eth_api::RpcNodeCore>::Provider:
+            reth_chain_state::CanonStateSubscriptions,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -834,6 +838,8 @@ where
     pub fn bundle_api(&self) -> EthBundle<EthApi>
     where
         EthApi: EthTransactions + LoadPendingBlock + Call,
+        <EthApi as reth_rpc_eth_api::RpcNodeCore>::Provider:
+            reth_chain_state::CanonStateSubscriptions,
     {
         let eth_api = self.eth_api().clone();
         EthBundle::new(eth_api, self.blocking_pool_guard.clone())
@@ -848,6 +854,8 @@ where
     where
         EthApi: EthApiSpec + EthTransactions + TraceExt,
         EvmConfig::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
+        <EthApi as reth_rpc_eth_api::RpcNodeCore>::Provider:
+            reth_chain_state::CanonStateSubscriptions,
     {
         DebugApi::new(
             self.eth_api().clone(),

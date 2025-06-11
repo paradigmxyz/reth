@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 reth-chainspec.workspace = true
+reth-chain-state.workspace = true
 reth-tracing.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true

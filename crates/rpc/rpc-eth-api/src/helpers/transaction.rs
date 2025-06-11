@@ -15,10 +15,14 @@ use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
 use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
-use futures::Future;
+use futures::{Future, StreamExt};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
-use reth_rpc_eth_types::{utils::binary_search, EthApiError, SignError, TransactionSource};
+use reth_rpc_eth_types::{
+    utils::binary_search, EthApiError, EthApiError::TransactionTimeout, SignError,
+    TransactionSource,
+};
 use reth_rpc_types_compat::transaction::TransactionCompat;
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
@@ -49,7 +53,10 @@ use std::sync::Arc;
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
+pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt>
+where
+    <Self as RpcNodeCore>::Provider: CanonStateSubscriptions,
+{
     /// Returns a handle for signing data.
     ///
     /// Signer access in default (L1) trait method implementations.
@@ -70,7 +77,51 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
-    ) -> impl Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send;
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send>,
+    >
+    where
+        Self: LoadReceipt + 'static,
+    {
+        let this = self.clone();
+        Box::pin(async move {
+            let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
+            let mut stream = this.provider().canonical_state_stream();
+            const TIMEOUT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(30);
+            match tokio::time::timeout(TIMEOUT_DURATION, async {
+                while let Some(notification) = stream.next().await {
+                    let chain = notification.committed();
+                    for block in chain.blocks_iter() {
+                        if block.body().contains_transaction(&hash) {
+                            if let Some(receipt) = this.transaction_receipt(hash).await? {
+                                return Ok(receipt);
+                            }
+                        }
+                    }
+                }
+                Err(Self::Error::from_eth_err(reth_rpc_eth_types::EthApiError::TransactionTimeout {
+                    hash,
+                    duration: TIMEOUT_DURATION,
+                    message: format!(
+                        "Transaction {hash:?} was added to the mempool but stream ended before confirmation. \
+                         Please use eth_getTransactionReceipt to poll for the receipt."
+                    ),
+                }))
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(_elapsed) => Err(Self::Error::from_eth_err(TransactionTimeout {
+                    hash,
+                    duration: TIMEOUT_DURATION,
+                    message: format!(
+                        "Transaction {hash:?} was added to the mempool but wasn't processed in {TIMEOUT_DURATION:?}. \
+                         Please use eth_getTransactionReceipt to poll for the receipt."
+                    ),
+                })),
+            }
+        })
+    }
 
     /// Returns the transaction by hash.
     ///

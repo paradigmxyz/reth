@@ -48,6 +48,8 @@ where
     N: FullNodeComponents<Provider: CanonStateSubscriptions>,
     AddOns: RethRpcAddOns<N, EthApi: EthTransactions>,
     N::Types: NodeTypes<Primitives: FullNodePrimitives>,
+    <<AddOns as RethRpcAddOns<N>>::EthApi as reth_rpc_eth_api::RpcNodeCore>::Provider:
+        reth_chain_state::CanonStateSubscriptions,
 {
     let mut notifications = node.provider.canonical_state_stream();
 

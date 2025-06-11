@@ -74,6 +74,7 @@ where
         > + EthTransactions
         + TraceExt
         + 'static,
+    <Eth as reth_rpc_eth_api::RpcNodeCore>::Provider: reth_chain_state::CanonStateSubscriptions,
 {
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(

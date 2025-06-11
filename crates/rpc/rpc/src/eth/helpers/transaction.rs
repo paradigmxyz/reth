@@ -2,14 +2,12 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
-use futures::StreamExt;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
+    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError::TransactionTimeout};
+use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
@@ -44,50 +42,6 @@ where
             .map_err(Self::Error::from_eth_err)?;
 
         Ok(hash)
-    }
-
-    /// Decodes and recovers the transaction and submits it to the pool.
-    ///
-    /// And awaits the receipt.
-    async fn send_raw_transaction_sync(
-        &self,
-        tx: Bytes,
-    ) -> Result<RpcReceipt<Self::NetworkTypes>, Self::Error> {
-        let hash = self.send_raw_transaction(tx).await?;
-        let mut stream = self.provider().canonical_state_stream();
-        const TIMEOUT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(30);
-        match tokio::time::timeout(TIMEOUT_DURATION, async {
-            while let Some(notification) = stream.next().await {
-                let chain = notification.committed();
-                for block in chain.blocks_iter() {
-                    if block.body().contains_transaction(&hash) {
-                        if let Some(receipt) = self.transaction_receipt(hash).await? {
-                            return Ok(receipt);
-                        }
-                    }
-                }
-            }
-            Err(Self::Error::from_eth_err(TransactionTimeout {
-            hash,
-            duration: TIMEOUT_DURATION,
-            message: format!(
-                "Transaction {hash:?} was added to the mempool but stream ended before confirmation. \
-                 Please use eth_getTransactionReceipt to poll for the receipt."
-            ),
-        }))
-    })
-        .await
-        {
-            Ok(result) => result,
-            Err(_elapsed) => Err(Self::Error::from_eth_err(TransactionTimeout {
-            hash,
-            duration: TIMEOUT_DURATION,
-            message: format!(
-                "Transaction {hash:?} was added to the mempool but wasn't processed in {TIMEOUT_DURATION:?}. \
-                 Please use eth_getTransactionReceipt to poll for the receipt."
-            ),
-        })),
-        }
     }
 }
 
