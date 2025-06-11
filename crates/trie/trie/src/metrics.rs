@@ -89,6 +89,8 @@ pub struct TrieNodeIterMetrics {
     leaf_nodes_advanced_total: Counter,
     /// The number of leaf nodes returned by the iterator.
     leaf_nodes_returned_total: Counter,
+    /// The number of seeks avoided due to cursor position optimization.
+    seeks_avoided_total: Counter,
 }
 
 impl TrieNodeIterMetrics {
@@ -120,5 +122,10 @@ impl TrieNodeIterMetrics {
     /// Increment `leaf_nodes_returned_total`.
     pub fn inc_leaf_nodes_returned(&self) {
         self.leaf_nodes_returned_total.increment(1);
+    }
+
+    /// Increment `seeks_avoided_total`.
+    pub fn inc_seeks_avoided(&self) {
+        self.seeks_avoided_total.increment(1);
     }
 }

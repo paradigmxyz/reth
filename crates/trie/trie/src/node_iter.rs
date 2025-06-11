@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::HashedCursor, trie_cursor::TrieCursor, walker::TrieWalker, Nibbles, TrieType,
 };
-use alloy_primitives::B256;
+use alloy_primitives::{B256, U256};
 use reth_storage_errors::db::DatabaseError;
 use tracing::{instrument, trace};
 
@@ -72,6 +72,14 @@ pub struct TrieNodeIter<C, H: HashedCursor> {
     /// redundant [`Self::seek_hashed_entry`] call if the walker points to the same key that
     /// was just returned by `next()`.
     last_next_result: Option<(B256, H::Value)>,
+
+    /// Tracks the current position of the hashed cursor to avoid redundant seeks.
+    /// This is the key where the hashed cursor is currently positioned.
+    hashed_cursor_position: Option<B256>,
+
+    /// Indicates if the walker and hashed cursor are in sync.
+    /// When true, we can avoid seeks after walker advancement.
+    cursors_in_sync: bool,
 }
 
 impl<C, H: HashedCursor> TrieNodeIter<C, H>
@@ -101,6 +109,8 @@ where
             #[cfg(feature = "metrics")]
             metrics: crate::metrics::TrieNodeIterMetrics::new(trie_type),
             last_next_result: None,
+            hashed_cursor_position: None,
+            cursors_in_sync: false,
         }
     }
 
@@ -109,6 +119,38 @@ where
     pub const fn with_last_hashed_key(mut self, previous_hashed_key: B256) -> Self {
         self.previous_hashed_key = Some(previous_hashed_key);
         self
+    }
+
+    /// Optimized seek that avoids database operations when possible.
+    /// Returns the current entry if cursor is already positioned correctly.
+    fn seek_or_current(&mut self, key: B256) -> Result<Option<(B256, H::Value)>, DatabaseError> {
+        // Check if we're already at or past the target key
+        if let Some(pos) = self.hashed_cursor_position {
+            match pos.cmp(&key) {
+                std::cmp::Ordering::Equal => {
+                    // We're exactly at the key, return cached result if available
+                    if let Some(result) = self.last_next_result {
+                        trace!(target: "trie::node_iter", ?key, "avoiding seek - already at target");
+                        #[cfg(feature = "metrics")]
+                        self.metrics.inc_seeks_avoided();
+                        return Ok(Some(result));
+                    }
+                }
+                std::cmp::Ordering::Greater => {
+                    // We're past the key, no need to seek
+                    trace!(target: "trie::node_iter", ?key, ?pos, "avoiding seek - cursor ahead of target");
+                    #[cfg(feature = "metrics")]
+                    self.metrics.inc_seeks_avoided();
+                    return Ok(None);
+                }
+                std::cmp::Ordering::Less => {
+                    // We're before the key, need to seek
+                }
+            }
+        }
+
+        // Perform the seek
+        self.seek_hashed_entry(key)
     }
 
     /// Seeks the hashed cursor to the given key.
@@ -144,6 +186,10 @@ where
         let result = self.hashed_cursor.seek(key)?;
         self.last_seeked_hashed_entry = Some(SeekedHashedEntry { seeked_key: key, result });
 
+        // Update cursor position
+        self.hashed_cursor_position = result.as_ref().map(|(k, _)| *k).or(Some(key));
+        self.cursors_in_sync = false;
+
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_seeked();
@@ -159,6 +205,11 @@ where
 
         self.last_next_result = result.clone()?;
 
+        // Update cursor position
+        if let Ok(Some((key, _))) = &result {
+            self.hashed_cursor_position = Some(*key);
+        }
+
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_advanced();
@@ -173,6 +224,35 @@ where
     H: HashedCursor,
     H::Value: Copy,
 {
+    /// Synchronizes cursor positions after walker advancement.
+    /// This helps avoid redundant seeks when cursors are traversing the same path.
+    fn sync_cursors(&mut self, walker_advanced_to: Option<&Nibbles>) {
+        if let Some(walker_key) = walker_advanced_to {
+            // Check if walker and hashed cursor are traversing similar paths
+            if let Some(hashed_pos) = self.hashed_cursor_position {
+                let walker_packed = walker_key.pack();
+                if walker_packed.len() >= 32 {
+                    let walker_b256 = B256::from_slice(&walker_packed[..32]);
+                    // If positions are close, mark as synchronized
+                    // We consider positions close if they're within a small distance
+                    let distance_threshold = 1000u64;
+                    let walker_u256 = U256::from_be_bytes(walker_b256.0);
+                    let hashed_u256 = U256::from_be_bytes(hashed_pos.0);
+
+                    let distance = if walker_u256 >= hashed_u256 {
+                        walker_u256.saturating_sub(hashed_u256)
+                    } else {
+                        hashed_u256.saturating_sub(walker_u256)
+                    };
+
+                    if distance <= U256::from(distance_threshold) {
+                        self.cursors_in_sync = true;
+                        trace!(target: "trie::node_iter", ?walker_b256, ?hashed_pos, "cursors synchronized");
+                    }
+                }
+            }
+        }
+    }
     /// Return the next trie node to be added to the hash builder.
     ///
     /// Returns the nodes using this algorithm:
@@ -258,6 +338,11 @@ where
                     );
                     let can_skip_node = self.walker.can_skip_current_node;
                     self.walker.advance()?;
+
+                    // Sync cursor positions after walker advancement
+                    let walker_key = self.walker.key().cloned();
+                    self.sync_cursors(walker_key.as_ref());
+
                     trace!(
                         target: "trie::node_iter",
                         last = ?self.walker.stack.last(),
@@ -289,7 +374,8 @@ where
                         continue
                     }
 
-                    self.current_hashed_entry = self.seek_hashed_entry(seek_key)?;
+                    // Use optimized seek that avoids redundant database operations
+                    self.current_hashed_entry = self.seek_or_current(seek_key)?;
                 }
             }
         }
