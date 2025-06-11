@@ -174,7 +174,7 @@ where
     }
 
     /// Metered version of `new_payload_v1`.
-    async fn new_payload_v1_metered(
+    pub async fn new_payload_v1_metered(
         &self,
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {

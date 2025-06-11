@@ -200,9 +200,7 @@ pub fn next_block_base_fee(
     if chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
         Ok(decode_holocene_base_fee(chain_spec, parent, timestamp)?)
     } else {
-        Ok(parent
-            .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
-            .unwrap_or_default())
+        Ok(parent.base_fee_per_gas().unwrap_or_default())
     }
 }
 

@@ -364,7 +364,7 @@ impl From<Genesis> for OpChainSpec {
             // L1
             // we need to map the L1 hardforks to the activation timestamps of the correspondong op
             // hardforks
-            (EthereumHardfork::Shanghai.boxed(), genesis_info.canyon_time),
+            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (EthereumHardfork::Cancun.boxed(), genesis_info.ecotone_time),
             (EthereumHardfork::Prague.boxed(), genesis_info.isthmus_time),
             // OP

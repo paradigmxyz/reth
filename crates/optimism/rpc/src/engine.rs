@@ -3,15 +3,15 @@
 use alloy_eips::eip7685::Requests;
 use alloy_primitives::{BlockHash, B256, B64, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
-    ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV1,
+    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use derive_more::Constructor;
 use jsonrpsee::proc_macros::rpc;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
 use op_alloy_rpc_types_engine::{
-    OpExecutionData, OpExecutionPayloadV4, ProtocolVersion, ProtocolVersionFormatV0,
-    SuperchainSignal,
+    OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar, OpExecutionPayloadV4,
+    ProtocolVersion, ProtocolVersionFormatV0, SuperchainSignal,
 };
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{EngineTypes, EngineValidator};
@@ -29,6 +29,7 @@ pub const OP_ENGINE_CAPABILITIES: &[&str] = &[
     "engine_forkchoiceUpdatedV2",
     "engine_forkchoiceUpdatedV3",
     "engine_getClientVersionV1",
+    "engine_getPayloadV1",
     "engine_getPayloadV2",
     "engine_getPayloadV3",
     "engine_getPayloadV4",
@@ -60,6 +61,11 @@ pub const OP_STACK_SUPPORT: ProtocolVersion = ProtocolVersion::V0(ProtocolVersio
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "engine"), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "engine", client_bounds(Engine::PayloadAttributes: jsonrpsee::core::Serialize + Clone), server_bounds(Engine::PayloadAttributes: jsonrpsee::core::DeserializeOwned)))]
 pub trait OpEngineApi<Engine: EngineTypes> {
+    /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_newpayloadv1>
+    /// Caution: This should not accept the `withdrawals` field
+    #[method(name = "newPayloadV1")]
+    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus>;
+
     /// Sends the given payload to the execution layer client, as specified for the Shanghai fork.
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/584905270d8ad665718058060267061ecfd79ca5/src/engine/shanghai.md#engine_newpayloadv2>
@@ -144,6 +150,21 @@ pub trait OpEngineApi<Engine: EngineTypes> {
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,
     ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_getpayloadv1>
+    ///
+    /// Returns the most recent version of the payload that is available in the corresponding
+    /// payload build process at the time of receiving this call.
+    ///
+    /// Caution: This should not return the `withdrawals` field
+    ///
+    /// Note:
+    /// > Provider software MAY stop the corresponding build process after serving this call.
+    #[method(name = "getPayloadV1")]
+    async fn get_payload_v1(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<Engine::ExecutionPayloadEnvelopeV1>;
 
     /// Retrieves an execution payload from a previously started build process, as specified for the
     /// Shanghai fork.
@@ -262,6 +283,18 @@ where
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
+    /// Handler for `engine_newPayloadV1`
+    /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_newpayloadv1>
+    /// Caution: This should not accept the `withdrawals` field
+    async fn new_payload_v1(&self, payload: ExecutionPayloadV1) -> RpcResult<PayloadStatus> {
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV1");
+        let payload = OpExecutionData::new(
+            OpExecutionPayload::V1(payload),
+            OpExecutionPayloadSidecar::default(),
+        );
+        Ok(self.inner.new_payload_v1_metered(payload).await?)
+    }
+
     async fn new_payload_v2(&self, payload: ExecutionPayloadInputV2) -> RpcResult<PayloadStatus> {
         trace!(target: "rpc::engine", "Serving engine_newPayloadV2");
         let payload = OpExecutionData::v2(payload);
@@ -322,6 +355,14 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.inner.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+    }
+
+    async fn get_payload_v1(
+        &self,
+        payload_id: PayloadId,
+    ) -> RpcResult<EngineT::ExecutionPayloadEnvelopeV1> {
+        trace!(target: "rpc::engine", "Serving engine_getPayloadV1");
+        Ok(self.inner.get_payload_v1_metered(payload_id).await?)
     }
 
     async fn get_payload_v2(
