@@ -556,6 +556,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     terminate_message: None,
                     range_info: None,
                     local_range_info: self.local_range_info.clone(),
+                    range_update_interval: None,
                 };
 
                 self.spawn(session);

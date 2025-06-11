@@ -25,7 +25,8 @@ use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, EthVersion, NetworkPrimitives,
+    NewBlockPayload,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -119,6 +120,9 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// The eth69 range info for the local node (this node).
     /// This represents the range of blocks that this node can serve to other peers.
     pub(crate) local_range_info: BlockRangeInfo,
+    /// Optional interval for sending periodic range updates to the remote peer (eth69+)
+    /// Recommended frequency is ~2 minutes per spec
+    pub(crate) range_update_interval: Option<Interval>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -509,6 +513,15 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         // terminate the task
         Some(Poll::Ready(()))
     }
+
+    /// Creates an interval for sending range updates to the remote peer.
+    pub(crate) fn create_range_update_interval(conn: &EthRlpxConnection<N>) -> Option<Interval> {
+        (conn.version() > EthVersion::Eth69).then(|| {
+            let mut interval = tokio::time::interval(Duration::from_secs(120));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            interval
+        })
+    }
 }
 
 impl<N: NetworkPrimitives> Future for ActiveSession<N> {
@@ -520,6 +533,20 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         // if the session is terminate we have to send the termination message before we can close
         if let Some(terminate) = this.poll_terminate_message(cx) {
             return terminate
+        }
+
+        let is_disconnecting = this.is_disconnecting();
+        if let Some(interval) = &mut this.range_update_interval {
+            while interval.poll_tick(cx).is_ready() {
+                if !is_disconnecting {
+                    let update = EthMessage::BlockRangeUpdate(reth_eth_wire::BlockRangeUpdate {
+                        earliest: this.local_range_info.earliest(),
+                        latest: this.local_range_info.latest(),
+                        latest_hash: this.local_range_info.latest_hash(),
+                    });
+                    this.queued_outgoing.push_back(update.into());
+                }
+            }
         }
 
         if this.is_disconnecting() {
@@ -1006,6 +1033,7 @@ mod tests {
                             1000,
                             alloy_primitives::B256::ZERO,
                         ),
+                        range_update_interval: Self::create_range_update_interval(&conn),
                     }
                 }
                 ev => {
