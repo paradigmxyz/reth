@@ -153,7 +153,8 @@ where
     {
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task
-        let state_root_config = MultiProofConfig::new_from_input(consistent_view, trie_input);
+        let state_root_config =
+            MultiProofConfig::new_from_input(consistent_view, trie_input, Arc::default());
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(

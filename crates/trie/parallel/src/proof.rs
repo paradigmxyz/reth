@@ -10,6 +10,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
+use dashmap::DashMap;
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
@@ -26,7 +27,7 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted, MultiProof,
-    MultiProofTargets, Nibbles, StorageMultiProof, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    MultiProofTargets, Nibbles, RlpNode, StorageMultiProof, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -54,6 +55,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     collect_branch_node_masks: bool,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    rlp_node_cache: Arc<DashMap<Nibbles, RlpNode>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -74,6 +76,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             prefix_sets,
             collect_branch_node_masks: false,
             storage_proof_task_handle,
+            rlp_node_cache: Arc::default(),
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
@@ -82,6 +85,11 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
+        self
+    }
+
+    pub fn with_rlp_node_cache(mut self, cache: Arc<DashMap<Nibbles, RlpNode>>) -> Self {
+        self.rlp_node_cache = cache;
         self
     }
 }
@@ -234,7 +242,8 @@ where
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_masks);
+            .with_updates(self.collect_branch_node_masks)
+            .with_rlp_node_cache(self.rlp_node_cache);
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.

@@ -62,6 +62,7 @@ tracing.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true
 itertools.workspace = true
+dashmap.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }

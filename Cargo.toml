@@ -702,6 +702,7 @@ walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
 [patch.crates-io]
+alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "shekhirin/rlp-node-cache" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "main" }

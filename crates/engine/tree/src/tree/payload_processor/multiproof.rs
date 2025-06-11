@@ -7,6 +7,7 @@ use alloy_primitives::{
     map::{B256Set, HashSet},
     B256,
 };
+use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::Histogram;
 use reth_errors::ProviderError;
@@ -18,7 +19,7 @@ use reth_provider::{
 use reth_revm::state::EvmState;
 use reth_trie::{
     prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState,
-    HashedPostStateSorted, HashedStorage, MultiProofTargets, TrieInput,
+    HashedPostStateSorted, HashedStorage, MultiProofTargets, Nibbles, RlpNode, TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
@@ -78,6 +79,7 @@ pub(super) struct MultiProofConfig<Factory> {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
+    pub rlp_node_cache: Arc<DashMap<Nibbles, RlpNode>>,
 }
 
 impl<Factory> MultiProofConfig<Factory> {
@@ -85,12 +87,14 @@ impl<Factory> MultiProofConfig<Factory> {
     pub(super) fn new_from_input(
         consistent_view: ConsistentDbView<Factory>,
         input: TrieInput,
+        rlp_node_cache: Arc<DashMap<Nibbles, RlpNode>>,
     ) -> Self {
         Self {
             consistent_view,
             nodes_sorted: Arc::new(input.nodes.into_sorted()),
             state_sorted: Arc::new(input.state.into_sorted()),
             prefix_sets: Arc::new(input.prefix_sets),
+            rlp_node_cache,
         }
     }
 }
@@ -526,6 +530,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
+            .with_rlp_node_cache(config.rlp_node_cache)
             .decoded_multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
@@ -1137,7 +1142,13 @@ mod tests {
         let state_sorted = Arc::new(input.state.clone().into_sorted());
         let prefix_sets = Arc::new(input.prefix_sets);
 
-        MultiProofConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
+        MultiProofConfig {
+            consistent_view,
+            nodes_sorted,
+            state_sorted,
+            prefix_sets,
+            rlp_node_cache: Arc::default(),
+        }
     }
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<F>
