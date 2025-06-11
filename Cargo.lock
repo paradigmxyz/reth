@@ -892,7 +892,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.8.1"
-source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Fnybbles-uint#4c9315b5ef46faef27bf8e9cfaab84f54d660d06"
+source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Fnybbles-uint#3d6443236652c3f7698b3568668657bc1e7ca25f"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
