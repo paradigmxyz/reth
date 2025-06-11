@@ -5,6 +5,7 @@
 !/bin
 !/crates
 !/testing
+!/scripts
 !book.toml
 !Cargo.lock
 !Cargo.toml
