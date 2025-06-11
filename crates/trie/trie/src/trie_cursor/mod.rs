@@ -5,6 +5,9 @@ use reth_storage_errors::db::DatabaseError;
 /// In-memory implementations of trie cursors.
 mod in_memory;
 
+/// Cached implementations of trie cursors.
+pub mod cached;
+
 /// Cursor for iterating over a subtrie.
 pub mod subnode;
 
@@ -15,7 +18,7 @@ pub mod noop;
 #[cfg(test)]
 pub mod mock;
 
-pub use self::{in_memory::*, subnode::CursorSubNode};
+pub use self::{cached::*, in_memory::*, subnode::CursorSubNode};
 
 /// Factory for creating trie cursors.
 #[auto_impl::auto_impl(&)]
