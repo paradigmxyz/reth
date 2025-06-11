@@ -80,7 +80,7 @@
 //!
 //! 1. **Sender**: No bytecode (unless EIP-7702 delegated in Prague)
 //! 2. **Nonce**: ≥ account nonce
-//! 3. **Balance**: Covers value + (gas_limit × max_fee_per_gas)
+//! 3. **Balance**: Covers value + (`gas_limit` × `max_fee_per_gas`)
 //!
 //! ### Common Errors
 //!
@@ -99,7 +99,7 @@
 //!
 //! 1. **Pending**: Ready for inclusion (no gaps, sufficient balance/fees)
 //! 2. **Queued**: Future transactions (nonce gaps or insufficient balance)
-//! 3. **BaseFee**: Valid but below current base fee
+//! 3. **`BaseFee`**: Valid but below current base fee
 //! 4. **Blob**: EIP-4844 transactions not pending due to insufficient base fee or blob fee
 //!
 //! ### State Transitions
