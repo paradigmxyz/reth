@@ -3,7 +3,9 @@
 name: sync test
 
 on:
-  merge_group:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
 
 env:
   CARGO_TERM_COLOR: always
