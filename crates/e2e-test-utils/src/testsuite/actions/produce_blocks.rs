@@ -271,7 +271,10 @@ where
                 debug!("Fresh FCU result: {:?}", fresh_fcu_result);
 
                 // validate the fresh FCU status
-                expect_fcu_not_syncing_or_accepted(&fresh_fcu_result, "GenerateNextPayload (fresh)")?;
+                expect_fcu_not_syncing_or_accepted(
+                    &fresh_fcu_result,
+                    "GenerateNextPayload (fresh)",
+                )?;
 
                 if let Some(payload_id) = fresh_fcu_result.payload_id {
                     payload_id
