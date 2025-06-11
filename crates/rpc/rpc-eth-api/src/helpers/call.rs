@@ -116,8 +116,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             // Ensure only-increasing block number
                             if previous_block_number >= next_block_number {
                                 return Err(EthApiError::InvalidParams(format!(
-                                    "Block number must be strictly increasing. Attempted to simulate from {} to {}",
-                                    previous_block_number, next_block_number
+                                    "Block number must be strictly increasing. Attempted to simulate from {previous_block_number} to {next_block_number}",
                                 ))
                                 .into())
                             }
