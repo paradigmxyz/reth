@@ -10017,9 +10017,12 @@ dependencies = [
  "jsonrpsee-types",
  "op-alloy-consensus",
  "op-alloy-rpc-types",
+ "op-revm",
+ "reth-evm",
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-storage-api",
+ "revm-context",
  "serde",
  "thiserror 2.0.12",
 ]
