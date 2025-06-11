@@ -1,10 +1,10 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{BranchNodeCompact, Nibbles};
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use mini_moka::sync::Cache;
 use parking_lot::RwLock;
 use reth_storage_errors::db::DatabaseError;
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tracing::debug;
 
 /// Default cache size for account trie operations.
@@ -33,7 +33,7 @@ pub struct TrieCursorSharedCaches {
     /// Cache for account trie operations.
     pub(crate) account_cache: Arc<Cache<CacheKey, CacheValue>>,
     /// Per-address caches for storage trie operations.
-    pub(crate) storage_caches: Arc<RwLock<HashMap<B256, Arc<Cache<CacheKey, CacheValue>>>>>,
+    pub(crate) storage_caches: Arc<RwLock<B256Map<Arc<Cache<CacheKey, CacheValue>>>>>,
 }
 
 impl TrieCursorSharedCaches {
@@ -46,7 +46,7 @@ impl TrieCursorSharedCaches {
     pub fn with_account_cache_size(account_cache_size: u64) -> Self {
         Self {
             account_cache: Arc::new(Cache::new(account_cache_size)),
-            storage_caches: Arc::new(RwLock::new(HashMap::new())),
+            storage_caches: Arc::new(RwLock::new(B256Map::new())),
         }
     }
 
