@@ -49,7 +49,7 @@ impl Cache {
         // Remove entries for SeekExact and Seek operations with this path
         self.0.invalidate(&CacheKey::SeekExact(path.clone()));
         self.0.invalidate(&CacheKey::Seek(path.clone()));
-        
+
         // For Next operations, we need to invalidate entries where the last key
         // could be affected by this path change
         // Note: This is a conservative approach - we could optimize further
@@ -61,10 +61,11 @@ impl Cache {
         // Update SeekExact entries
         if let Some(existing) = self.0.get(&CacheKey::SeekExact(path.clone())) {
             if existing.is_some() {
-                self.0.insert(CacheKey::SeekExact(path.clone()), Some((path.clone(), node.clone())));
+                self.0
+                    .insert(CacheKey::SeekExact(path.clone()), Some((path.clone(), node.clone())));
             }
         }
-        
+
         // Update Seek entries - this is more complex as Seek might return this node
         // even if seeking for a different key
         if let Some(existing) = self.0.get(&CacheKey::Seek(path.clone())) {
@@ -140,37 +141,37 @@ impl TrieCursorSharedCaches {
             updates.removed_nodes.len(),
             updates.storage_tries.len()
         );
-        
+
         // Apply account trie updates
         // First, invalidate removed nodes
         for removed_path in &updates.removed_nodes {
             self.account_cache.invalidate_by_path(removed_path);
         }
-        
+
         // Then, update modified nodes
         for (path, node) in &updates.account_nodes {
             self.account_cache.update_by_path(path, node.clone());
         }
-        
+
         // Apply storage trie updates
         for (hashed_address, storage_updates) in &updates.storage_tries {
             if storage_updates.is_deleted {
                 // If the storage trie is deleted, remove the entire cache for this address
                 self.storage_caches.write().remove(hashed_address);
-            } else {
-                // Apply updates to existing storage cache
-                let storage_caches = self.storage_caches.read();
-                if let Some(cache) = storage_caches.get(hashed_address) {
-                    for removed_path in &storage_updates.removed_nodes {
-                        cache.invalidate_by_path(removed_path);
-                    }
-                    
-                    for (path, node) in &storage_updates.storage_nodes {
-                        cache.update_by_path(path, node.clone());
-                    }
-                }
-                // If there's no cache for this address yet, we don't need to do anything
             }
+
+            // Apply updates to existing storage cache
+            let storage_caches = self.storage_caches.read();
+            if let Some(cache) = storage_caches.get(hashed_address) {
+                for removed_path in &storage_updates.removed_nodes {
+                    cache.invalidate_by_path(removed_path);
+                }
+
+                for (path, node) in &storage_updates.storage_nodes {
+                    cache.update_by_path(path, node.clone());
+                }
+            }
+            // If there's no cache for this address yet, we don't need to do anything
         }
     }
 }
