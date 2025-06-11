@@ -20,7 +20,7 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
     proof::{ProofBlindedProviderFactory, StorageProof},
-    trie_cursor::InMemoryTrieCursorFactory,
+    trie_cursor::{CachedTrieCursorFactory, InMemoryTrieCursorFactory},
     updates::TrieUpdatesSorted,
     HashedPostStateSorted, Nibbles, StorageMultiProof,
 };
@@ -211,13 +211,13 @@ where
     fn create_factories(
         &self,
     ) -> (
-        InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>,
+        CachedTrieCursorFactory<InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>>,
         HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
     ) {
-        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+        let trie_cursor_factory = CachedTrieCursorFactory::new(InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(&self.tx),
             &self.task_ctx.nodes_sorted,
-        );
+        ));
 
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(&self.tx),

@@ -22,7 +22,7 @@ use reth_trie::{
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
-    trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
+    trie_cursor::{CachedTrieCursorFactory, InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted, MultiProof,
@@ -214,10 +214,10 @@ where
         }
 
         let provider_ro = self.view.provider_ro()?;
-        let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+        let trie_cursor_factory = CachedTrieCursorFactory::new(InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
             &self.nodes_sorted,
-        );
+        ));
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
             &self.state_sorted,
