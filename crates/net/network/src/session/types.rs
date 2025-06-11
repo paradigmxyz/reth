@@ -2,6 +2,7 @@
 
 use alloy_primitives::B256;
 use parking_lot::RwLock;
+use reth_eth_wire::BlockRangeUpdate;
 use std::{
     ops::RangeInclusive,
     sync::{
@@ -13,7 +14,7 @@ use std::{
 /// Information about the range of blocks available from a peer.
 ///
 /// This represents the announced `eth69`
-/// [`BlockRangeUpdate`](reth_eth_wire_types::BlockRangeUpdate) of a peer.
+/// [`BlockRangeUpdate`] of a peer.
 #[derive(Debug, Clone)]
 pub struct BlockRangeInfo {
     /// The inner range information.
@@ -65,6 +66,15 @@ impl BlockRangeInfo {
         self.inner.latest.store(latest, Ordering::Relaxed);
         *self.inner.latest_hash.write() = latest_hash;
     }
+
+    /// Converts the current range information to an Eth69 [`BlockRangeUpdate`] message.
+    pub fn to_message(&self) -> BlockRangeUpdate {
+        BlockRangeUpdate {
+            earliest: self.earliest(),
+            latest: self.latest(),
+            latest_hash: self.latest_hash(),
+        }
+    }
 }
 
 /// Inner structure containing the range information with atomic and thread-safe fields.
@@ -76,4 +86,40 @@ pub(crate) struct BlockRangeInfoInner {
     latest: AtomicU64,
     /// Latest available block's hash.
     latest_hash: RwLock<B256>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::B256;
+
+    #[test]
+    fn test_block_range_info_to_message() {
+        let earliest = 100;
+        let latest = 200;
+        let hash = B256::from([1; 32]);
+
+        let range_info = BlockRangeInfo::new(earliest, latest, hash);
+        let message = range_info.to_message();
+
+        assert_eq!(message.earliest, earliest);
+        assert_eq!(message.latest, latest);
+        assert_eq!(message.latest_hash, hash);
+    }
+
+    #[test]
+    fn test_block_range_info_update_and_to_message() {
+        let range_info = BlockRangeInfo::new(0, 0, B256::ZERO);
+
+        let new_earliest = 500;
+        let new_latest = 1000;
+        let new_hash = B256::from([42; 32]);
+
+        range_info.update(new_earliest, new_latest, new_hash);
+        let message = range_info.to_message();
+
+        assert_eq!(message.earliest, new_earliest);
+        assert_eq!(message.latest, new_latest);
+        assert_eq!(message.latest_hash, new_hash);
+    }
 }
