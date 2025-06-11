@@ -4,8 +4,8 @@ use alloy_primitives::B256;
 use mini_moka::sync::Cache;
 use parking_lot::RwLock;
 use reth_storage_errors::db::DatabaseError;
-use tracing::debug;
 use std::{collections::HashMap, sync::Arc};
+use tracing::debug;
 
 /// Default cache size for account trie operations.
 const DEFAULT_ACCOUNT_CACHE_SIZE: u64 = 10_000;
@@ -83,6 +83,12 @@ impl TrieCursorSharedCaches {
             })
             .clone();
         cache
+    }
+
+    /// Clear all caches.
+    pub fn clear(&self) {
+        self.account_cache.invalidate_all();
+        self.storage_caches.write().clear();
     }
 }
 

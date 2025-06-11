@@ -307,6 +307,11 @@ where
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
         })
     }
+
+    /// Clears the trie cursor caches.
+    pub fn clear_trie_cursor_caches(&self) {
+        self.trie_cursor_shared_caches.clear()
+    }
 }
 
 /// Handle to all the spawned tasks.
