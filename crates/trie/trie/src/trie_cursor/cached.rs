@@ -111,22 +111,7 @@ pub struct CachedTrieCursorFactory<CF> {
 
 impl<CF> CachedTrieCursorFactory<CF> {
     /// Create a new cached trie cursor factory with default cache sizes.
-    pub fn new(inner: CF) -> Self {
-        Self::with_capacity(inner, DEFAULT_ACCOUNT_CACHE_SIZE)
-    }
-
-    /// Create a new cached trie cursor factory with specified cache capacity for account
-    /// operations.
-    pub fn with_capacity(inner: CF, account_cache_size: u64) -> Self {
-        Self { inner, account_cache: Arc::new(Cache::new(account_cache_size)), shared_caches: None }
-    }
-
-    /// Create a new cached trie cursor factory with shared caches.
-    pub fn with_shared_caches(inner: CF, shared_caches: &TrieCursorSharedCaches) -> Self {
-        debug!(
-            target: "trie::cached_cursor",
-            "Creating CachedTrieCursorFactory with shared caches"
-        );
+    pub fn new(inner: CF, shared_caches: TrieCursorSharedCaches) -> Self {
         Self {
             inner,
             account_cache: Arc::clone(&shared_caches.account_cache),
@@ -166,12 +151,21 @@ pub struct CachedAccountTrieCursor<C> {
     cache: Arc<Cache<CacheKey, CacheValue>>,
     /// Last key returned by the cursor.
     last_key: Option<Nibbles>,
+    /// Metrics.
+    #[cfg(feature = "metrics")]
+    metrics: metrics::CachedTrieCursorMetrics,
 }
 
 impl<C> CachedAccountTrieCursor<C> {
     /// Create a new cached account trie cursor.
-    const fn new(inner: C, cache: Arc<Cache<CacheKey, CacheValue>>) -> Self {
-        Self { inner, cache, last_key: None }
+    fn new(inner: C, cache: Arc<Cache<CacheKey, CacheValue>>) -> Self {
+        Self {
+            inner,
+            cache,
+            last_key: None,
+            #[cfg(feature = "metrics")]
+            metrics: metrics::CachedTrieCursorMetrics::state(),
+        }
     }
 }
 
@@ -270,7 +264,6 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
 #[derive(Debug)]
 pub struct CachedStorageTrieCursor<C> {
     /// The hashed address of the account.
-    #[allow(dead_code)]
     hashed_address: B256,
     /// The underlying cursor.
     inner: C,
@@ -278,6 +271,9 @@ pub struct CachedStorageTrieCursor<C> {
     cache: StorageCache,
     /// Last key returned by the cursor.
     last_key: Option<Nibbles>,
+    /// Metrics.
+    #[cfg(feature = "metrics")]
+    metrics: metrics::CachedTrieCursorMetrics,
 }
 
 /// Storage cache can be either owned or shared.
@@ -318,16 +314,25 @@ impl<C> CachedStorageTrieCursor<C> {
             inner,
             cache: StorageCache::Owned(Cache::new(cache_size)),
             last_key: None,
+            #[cfg(feature = "metrics")]
+            metrics: metrics::CachedTrieCursorMetrics::storage(),
         }
     }
 
     /// Create a new cached storage trie cursor with an external cache.
-    const fn with_external_cache(
+    fn with_external_cache(
         hashed_address: B256,
         inner: C,
         cache: Arc<Cache<CacheKey, CacheValue>>,
     ) -> Self {
-        Self { hashed_address, inner, cache: StorageCache::Shared(cache), last_key: None }
+        Self {
+            hashed_address,
+            inner,
+            cache: StorageCache::Shared(cache),
+            last_key: None,
+            #[cfg(feature = "metrics")]
+            metrics: metrics::CachedTrieCursorMetrics::storage(),
+        }
     }
 }
 
@@ -428,6 +433,34 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
     }
 }
 
+#[cfg(feature = "metrics")]
+mod metrics {
+    use metrics::Gauge;
+    use reth_metrics::Metrics;
+
+    use crate::TrieType;
+
+    #[derive(Metrics)]
+    #[metrics(scope = "trie.cached_cursor")]
+    pub(super) struct CachedTrieCursorMetrics {
+        /// Number of cache hits
+        hits: Gauge,
+        /// Number of cache misses
+        misses: Gauge,
+    }
+    impl CachedTrieCursorMetrics {
+        /// Create new metrics for the state trie.
+        pub(super) fn state() -> Self {
+            Self::new_with_labels(&[("type", TrieType::State.as_str())])
+        }
+
+        /// Create new metrics for the storage trie.
+        pub(super) fn storage() -> Self {
+            Self::new_with_labels(&[("type", TrieType::Storage.as_str())])
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -435,7 +468,8 @@ mod tests {
 
     #[test]
     fn test_cached_account_cursor() {
-        let factory = CachedTrieCursorFactory::new(NoopTrieCursorFactory);
+        let factory =
+            CachedTrieCursorFactory::new(NoopTrieCursorFactory, TrieCursorSharedCaches::new());
         let mut cursor = factory.account_trie_cursor().unwrap();
 
         // First call should miss cache and return None (noop cursor)
@@ -448,7 +482,8 @@ mod tests {
 
     #[test]
     fn test_cached_storage_cursor() {
-        let factory = CachedTrieCursorFactory::new(NoopTrieCursorFactory);
+        let factory =
+            CachedTrieCursorFactory::new(NoopTrieCursorFactory, TrieCursorSharedCaches::new());
         let hashed_address = B256::from([1u8; 32]);
         let mut cursor = factory.storage_trie_cursor(hashed_address).unwrap();
 
@@ -462,7 +497,8 @@ mod tests {
 
     #[test]
     fn test_separate_storage_caches() {
-        let factory = CachedTrieCursorFactory::new(NoopTrieCursorFactory);
+        let factory =
+            CachedTrieCursorFactory::new(NoopTrieCursorFactory, TrieCursorSharedCaches::new());
 
         // Create two storage cursors for different addresses
         let addr1 = B256::from([1u8; 32]);

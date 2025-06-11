@@ -20,7 +20,7 @@ use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
     proof::{ProofBlindedProviderFactory, StorageProof},
-    trie_cursor::{CachedTrieCursorFactory, InMemoryTrieCursorFactory},
+    trie_cursor::{CachedTrieCursorFactory, InMemoryTrieCursorFactory, TrieCursorSharedCaches},
     updates::TrieUpdatesSorted,
     HashedPostStateSorted, Nibbles, StorageMultiProof,
 };
@@ -192,7 +192,6 @@ where
 pub struct ProofTaskTx<Tx> {
     /// The tx that is reused for proof calculations.
     tx: Tx,
-
     /// Trie updates, prefix sets, and state updates
     task_ctx: ProofTaskCtx,
 }
@@ -214,10 +213,13 @@ where
         CachedTrieCursorFactory<InMemoryTrieCursorFactory<'_, DatabaseTrieCursorFactory<'_, Tx>>>,
         HashedPostStateCursorFactory<'_, DatabaseHashedCursorFactory<'_, Tx>>,
     ) {
-        let trie_cursor_factory = CachedTrieCursorFactory::new(InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(&self.tx),
-            &self.task_ctx.nodes_sorted,
-        ));
+        let trie_cursor_factory = CachedTrieCursorFactory::new(
+            InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::new(&self.tx),
+                &self.task_ctx.nodes_sorted,
+            ),
+            self.task_ctx.shared_caches.clone().unwrap_or_default(),
+        );
 
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(&self.tx),
@@ -407,6 +409,8 @@ pub struct ProofTaskCtx {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     prefix_sets: Arc<TriePrefixSetsMut>,
+    /// Shared trie cursor caches.
+    shared_caches: Option<TrieCursorSharedCaches>,
 }
 
 impl ProofTaskCtx {
@@ -415,8 +419,9 @@ impl ProofTaskCtx {
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
+        shared_caches: Option<TrieCursorSharedCaches>,
     ) -> Self {
-        Self { nodes_sorted, state_sorted, prefix_sets }
+        Self { nodes_sorted, state_sorted, prefix_sets, shared_caches }
     }
 }
 

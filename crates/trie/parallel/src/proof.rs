@@ -226,8 +226,8 @@ where
         }
 
         let provider_ro = self.view.provider_ro()?;
-        let trie_cursor_factory = if let Some(ref shared_caches) = self.shared_caches {
-            CachedTrieCursorFactory::with_shared_caches(
+        let trie_cursor_factory = if let Some(shared_caches) = self.shared_caches.clone() {
+            CachedTrieCursorFactory::new(
                 InMemoryTrieCursorFactory::new(
                     DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
                     &self.nodes_sorted,
@@ -235,10 +235,13 @@ where
                 shared_caches,
             )
         } else {
-            CachedTrieCursorFactory::new(InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-                &self.nodes_sorted,
-            ))
+            CachedTrieCursorFactory::new(
+                InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                    &self.nodes_sorted,
+                ),
+                TrieCursorSharedCaches::new(),
+            )
         };
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
@@ -452,7 +455,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
 
         let task_ctx =
-            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+            ProofTaskCtx::new(Default::default(), Default::default(), Default::default(), None);
         let proof_task =
             ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
         let proof_task_handle = proof_task.handle();

@@ -164,6 +164,7 @@ where
             state_root_config.nodes_sorted.clone(),
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
+            state_root_config.shared_caches.clone(),
         );
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_task = ProofTaskManager::new(

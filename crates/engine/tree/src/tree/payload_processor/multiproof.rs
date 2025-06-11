@@ -1179,6 +1179,7 @@ mod tests {
             config.nodes_sorted.clone(),
             config.state_sorted.clone(),
             config.prefix_sets.clone(),
+            None,
         );
         let proof_task = ProofTaskManager::new(
             executor.handle().clone(),
