@@ -80,6 +80,7 @@ default = []
 js-tracer = ["reth-node-builder/js-tracer"]
 test-utils = [
     "reth-node-builder/test-utils",
+    "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
     "reth-consensus/test-utils",
     "reth-network/test-utils",
