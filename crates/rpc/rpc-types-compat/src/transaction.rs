@@ -1,20 +1,30 @@
 //! Compatibility functions for rpc `Transaction` type.
 
+use crate::fees::{CallFees, CallFeesError};
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction, TxEip4844,
 };
 use alloy_network::Network;
-use alloy_primitives::{Address, Signature};
-use alloy_rpc_types_eth::{request::TransactionRequest, Transaction, TransactionInfo};
+use alloy_primitives::{Address, Bytes, Signature, TxKind, U256};
+use alloy_rpc_types_eth::{
+    request::{TransactionInputError, TransactionRequest},
+    Transaction, TransactionInfo,
+};
 use core::error;
 use op_alloy_consensus::{
     transaction::{OpDepositInfo, OpTransactionInfo},
     OpTxEnvelope,
 };
 use op_alloy_rpc_types::OpTransactionRequest;
+use op_revm::OpTransaction;
+use reth_evm::{
+    revm::context_interface::{either::Either, Block},
+    ConfigureEvm, TxEnvFor,
+};
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction, TxTy};
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+use revm_context::{BlockEnv, CfgEnv, TxEnv};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
@@ -26,6 +36,9 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
 
     /// RPC transaction response type.
     type Transaction: Serialize + for<'de> Deserialize<'de> + Send + Sync + Unpin + Clone + Debug;
+
+    /// A set of variables for executing a transaction.
+    type TxEnv;
 
     /// RPC transaction error type.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
@@ -57,6 +70,15 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
         &self,
         request: TransactionRequest,
     ) -> Result<TxTy<Self::Primitives>, Self::Error>;
+
+    /// Creates a transaction environment for execution based on `request` with corresponding
+    /// `cfg_env` and `block_env`.
+    fn tx_env<Spec>(
+        &self,
+        request: TransactionRequest,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<Self::TxEnv, Self::Error>;
 }
 
 /// Converts `self` into `T`.
@@ -171,6 +193,137 @@ impl TryIntoSimTx<OpTxEnvelope> for TransactionRequest {
     }
 }
 
+/// Converts `self` into `T`.
+///
+/// Should create an executable transaction environment using [`TransactionRequest`].
+pub trait TryIntoTxEnv<T> {
+    /// An associated error that can occur during the conversion.
+    type Err;
+
+    /// Performs the conversion.
+    fn try_into_tx_env<Spec>(
+        self,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<T, Self::Err>;
+}
+
+/// An Ethereum specific transaction environment error than can occur during conversion from
+/// [`TransactionRequest`].
+#[derive(Debug, Error)]
+pub enum EthTxEnvError {
+    /// Error while decoding or validating transaction request fees.
+    #[error(transparent)]
+    CallFees(#[from] CallFeesError),
+    /// Both data and input fields are set and not equal.
+    #[error(transparent)]
+    Input(#[from] TransactionInputError),
+}
+
+impl TryIntoTxEnv<OpTransaction<TxEnv>> for TransactionRequest {
+    type Err = EthTxEnvError;
+
+    fn try_into_tx_env<Spec>(
+        self,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<OpTransaction<TxEnv>, Self::Err> {
+        Ok(OpTransaction {
+            base: self.try_into_tx_env(cfg_env, block_env)?,
+            enveloped_tx: Some(Bytes::new()),
+            deposit: Default::default(),
+        })
+    }
+}
+impl TryIntoTxEnv<TxEnv> for TransactionRequest {
+    type Err = EthTxEnvError;
+
+    fn try_into_tx_env<Spec>(
+        self,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<TxEnv, Self::Err> {
+        // Ensure that if versioned hashes are set, they're not empty
+        if self.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
+            return Err(CallFeesError::BlobTransactionMissingBlobHashes.into())
+        }
+
+        let tx_type = self.minimal_tx_type() as u8;
+
+        let Self {
+            from,
+            to,
+            gas_price,
+            max_fee_per_gas,
+            max_priority_fee_per_gas,
+            gas,
+            value,
+            input,
+            nonce,
+            access_list,
+            chain_id,
+            blob_versioned_hashes,
+            max_fee_per_blob_gas,
+            authorization_list,
+            transaction_type: _,
+            sidecar: _,
+        } = self;
+
+        let CallFees { max_priority_fee_per_gas, gas_price, max_fee_per_blob_gas } =
+            CallFees::ensure_fees(
+                gas_price.map(U256::from),
+                max_fee_per_gas.map(U256::from),
+                max_priority_fee_per_gas.map(U256::from),
+                U256::from(block_env.basefee),
+                blob_versioned_hashes.as_deref(),
+                max_fee_per_blob_gas.map(U256::from),
+                block_env.blob_gasprice().map(U256::from),
+            )?;
+
+        let gas_limit = gas.unwrap_or(
+            // Use maximum allowed gas limit. The reason for this
+            // is that both Erigon and Geth use pre-configured gas cap even if
+            // it's possible to derive the gas limit from the block:
+            // <https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/cmd/rpcdaemon/commands/trace_adhoc.go#L956
+            // https://github.com/ledgerwatch/erigon/blob/eae2d9a79cb70dbe30b3a6b79c436872e4605458/eth/ethconfig/config.go#L94>
+            block_env.gas_limit,
+        );
+
+        let chain_id = chain_id.unwrap_or(cfg_env.chain_id);
+
+        let caller = from.unwrap_or_default();
+
+        let nonce = nonce.unwrap_or_default();
+
+        let env = TxEnv {
+            tx_type,
+            gas_limit,
+            nonce,
+            caller,
+            gas_price: gas_price.saturating_to(),
+            gas_priority_fee: max_priority_fee_per_gas.map(|v| v.saturating_to()),
+            kind: to.unwrap_or(TxKind::Create),
+            value: value.unwrap_or_default(),
+            data: input.try_into_unique_input().map_err(EthTxEnvError::from)?.unwrap_or_default(),
+            chain_id: Some(chain_id),
+            access_list: access_list.unwrap_or_default(),
+            // EIP-4844 fields
+            blob_hashes: blob_versioned_hashes.unwrap_or_default(),
+            max_fee_per_blob_gas: max_fee_per_blob_gas
+                .map(|v| v.saturating_to())
+                .unwrap_or_default(),
+            // EIP-7702 fields
+            authorization_list: authorization_list
+                .unwrap_or_default()
+                .into_iter()
+                .map(Either::Left)
+                .collect(),
+        };
+
+        Ok(env)
+    }
+}
+
 /// Conversion into transaction RPC response failed.
 #[derive(Debug, Clone, Error)]
 #[error("Failed to convert transaction into RPC response: {0}")]
@@ -178,59 +331,64 @@ pub struct TransactionConversionError(String);
 
 /// Generic RPC response object converter for primitives `N` and network `E`.
 #[derive(Debug)]
-pub struct RpcConverter<N, E, Err, Map = ()> {
-    phantom: PhantomData<(N, E, Err)>,
+pub struct RpcConverter<N, E, Evm, Err, Map = ()> {
+    phantom: PhantomData<(N, E, Evm, Err)>,
     mapper: Map,
 }
 
-impl<N, E, Err> RpcConverter<N, E, Err, ()> {
+impl<N, E, Evm, Err> RpcConverter<N, E, Evm, Err, ()> {
     /// Creates a new [`RpcConverter`] with the default mapper.
     pub const fn new() -> Self {
         Self::with_mapper(())
     }
 }
 
-impl<N, E, Err, Map> RpcConverter<N, E, Err, Map> {
+impl<N, E, Evm, Err, Map> RpcConverter<N, E, Evm, Err, Map> {
     /// Creates a new [`RpcConverter`] with `mapper`.
     pub const fn with_mapper(mapper: Map) -> Self {
         Self { phantom: PhantomData, mapper }
     }
 
     /// Converts the generic types.
-    pub fn convert<N2, E2, Err2>(self) -> RpcConverter<N2, E2, Err2, Map> {
+    pub fn convert<N2, E2, Evm2, Err2>(self) -> RpcConverter<N2, E2, Evm2, Err2, Map> {
         RpcConverter::with_mapper(self.mapper)
     }
 
     /// Swaps the inner `mapper`.
-    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<N, E, Err, Map2> {
+    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<N, E, Evm, Err, Map2> {
         RpcConverter::with_mapper(mapper)
     }
 
     /// Converts the generic types and swaps the inner `mapper`.
-    pub fn convert_map<N2, E2, Err2, Map2>(self, mapper: Map2) -> RpcConverter<N2, E2, Err2, Map2> {
+    pub fn convert_map<N2, E2, Evm2, Err2, Map2>(
+        self,
+        mapper: Map2,
+    ) -> RpcConverter<N2, E2, Evm2, Err2, Map2> {
         self.convert().map(mapper)
     }
 }
 
-impl<N, E, Err, Map: Clone> Clone for RpcConverter<N, E, Err, Map> {
+impl<N, E, Evm, Err, Map: Clone> Clone for RpcConverter<N, E, Evm, Err, Map> {
     fn clone(&self) -> Self {
         Self::with_mapper(self.mapper.clone())
     }
 }
 
-impl<N, E, Err> Default for RpcConverter<N, E, Err> {
+impl<N, E, Evm, Err> Default for RpcConverter<N, E, Evm, Err> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N, E, Err, Map> TransactionCompat for RpcConverter<N, E, Err, Map>
+impl<N, E, Evm, Err, Map> TransactionCompat for RpcConverter<N, E, Evm, Err, Map>
 where
     N: NodePrimitives,
     E: Network + Unpin,
+    Evm: ConfigureEvm,
     TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + Clone + Debug,
-    TransactionRequest: TryIntoSimTx<TxTy<N>>,
+    TransactionRequest: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Err: From<TransactionConversionError>
+        + From<<TransactionRequest as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
         + for<'a> From<<Map as TxInfoMapper<&'a TxTy<N>>>::Err>
         + Error
         + Unpin
@@ -248,6 +406,7 @@ where
 {
     type Primitives = N;
     type Transaction = <E as Network>::TransactionResponse;
+    type TxEnv = TxEnvFor<Evm>;
     type Error = Err;
 
     fn fill(
@@ -266,5 +425,14 @@ where
         request: TransactionRequest,
     ) -> Result<TxTy<N>, Self::Error> {
         Ok(request.try_into_sim_tx().map_err(|e| TransactionConversionError(e.to_string()))?)
+    }
+
+    fn tx_env<Spec>(
+        &self,
+        request: TransactionRequest,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<Self::TxEnv, Self::Error> {
+        Ok(request.try_into_tx_env(cfg_env, block_env)?)
     }
 }
