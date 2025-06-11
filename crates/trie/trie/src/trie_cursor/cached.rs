@@ -2,8 +2,8 @@ use super::{TrieCursor, TrieCursorFactory};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
 use mini_moka::sync::Cache;
-use reth_storage_errors::db::DatabaseError;
 use parking_lot::RwLock;
+use reth_storage_errors::db::DatabaseError;
 use std::{collections::HashMap, sync::Arc};
 
 /// Default cache size for account trie operations.
@@ -14,7 +14,7 @@ const DEFAULT_STORAGE_CACHE_SIZE: u64 = 1_000;
 
 /// Cache key for trie cursor operations.
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub(crate) enum CacheKey {
+pub enum CacheKey {
     /// Seek exact operation with the given key.
     SeekExact(Nibbles),
     /// Seek operation with the given key.
@@ -24,7 +24,7 @@ pub(crate) enum CacheKey {
 }
 
 /// Cache value storing the result of a trie cursor operation.
-pub(crate) type CacheValue = Option<(Nibbles, BranchNodeCompact)>;
+pub type CacheValue = Option<(Nibbles, BranchNodeCompact)>;
 
 /// Shared caches for trie cursor operations.
 #[derive(Debug, Clone)]
@@ -50,7 +50,10 @@ impl TrieCursorSharedCaches {
     }
 
     /// Get or create a storage cache for the given hashed address.
-    pub fn get_or_create_storage_cache(&self, hashed_address: B256) -> Arc<Cache<CacheKey, CacheValue>> {
+    pub fn get_or_create_storage_cache(
+        &self,
+        hashed_address: B256,
+    ) -> Arc<Cache<CacheKey, CacheValue>> {
         // Try to get with read lock first
         {
             let caches = self.storage_caches.read();
@@ -58,7 +61,7 @@ impl TrieCursorSharedCaches {
                 return Arc::clone(cache);
             }
         }
-        
+
         // Need to create - acquire write lock
         let mut caches = self.storage_caches.write();
         caches
@@ -91,13 +94,10 @@ impl<CF> CachedTrieCursorFactory<CF> {
         Self::with_capacity(inner, DEFAULT_ACCOUNT_CACHE_SIZE)
     }
 
-    /// Create a new cached trie cursor factory with specified cache capacity for account operations.
+    /// Create a new cached trie cursor factory with specified cache capacity for account
+    /// operations.
     pub fn with_capacity(inner: CF, account_cache_size: u64) -> Self {
-        Self {
-            inner,
-            account_cache: Arc::new(Cache::new(account_cache_size)),
-            shared_caches: None,
-        }
+        Self { inner, account_cache: Arc::new(Cache::new(account_cache_size)), shared_caches: None }
     }
 
     /// Create a new cached trie cursor factory with shared caches.
@@ -126,11 +126,7 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for CachedTrieCursorFactory<CF> {
         let cursor = self.inner.storage_trie_cursor(hashed_address)?;
         if let Some(ref shared_caches) = self.shared_caches {
             let cache = shared_caches.get_or_create_storage_cache(hashed_address);
-            return Ok(CachedStorageTrieCursor::with_external_cache(
-                hashed_address,
-                cursor,
-                cache,
-            ));
+            return Ok(CachedStorageTrieCursor::with_external_cache(hashed_address, cursor, cache));
         }
         Ok(CachedStorageTrieCursor::new(hashed_address, cursor))
     }
@@ -149,7 +145,7 @@ pub struct CachedAccountTrieCursor<C> {
 
 impl<C> CachedAccountTrieCursor<C> {
     /// Create a new cached account trie cursor.
-    fn new(inner: C, cache: Arc<Cache<CacheKey, CacheValue>>) -> Self {
+    const fn new(inner: C, cache: Arc<Cache<CacheKey, CacheValue>>) -> Self {
         Self { inner, cache, last_key: None }
     }
 }
@@ -160,7 +156,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let cache_key = CacheKey::SeekExact(key.clone());
-        
+
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
             return Ok(cached);
@@ -177,7 +173,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let cache_key = CacheKey::Seek(key.clone());
-        
+
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
             return Ok(cached);
@@ -191,7 +187,7 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let cache_key = CacheKey::Next(self.last_key.clone());
-        
+
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
             return Ok(cached);
@@ -265,13 +261,12 @@ impl<C> CachedStorageTrieCursor<C> {
     }
 
     /// Create a new cached storage trie cursor with an external cache.
-    fn with_external_cache(hashed_address: B256, inner: C, cache: Arc<Cache<CacheKey, CacheValue>>) -> Self {
-        Self {
-            hashed_address,
-            inner,
-            cache: StorageCache::Shared(cache),
-            last_key: None,
-        }
+    const fn with_external_cache(
+        hashed_address: B256,
+        inner: C,
+        cache: Arc<Cache<CacheKey, CacheValue>>,
+    ) -> Self {
+        Self { hashed_address, inner, cache: StorageCache::Shared(cache), last_key: None }
     }
 }
 
@@ -281,7 +276,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let cache_key = CacheKey::SeekExact(key.clone());
-        
+
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
             return Ok(cached);
@@ -298,7 +293,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let cache_key = CacheKey::Seek(key.clone());
-        
+
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
             return Ok(cached);
@@ -312,7 +307,7 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
 
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let cache_key = CacheKey::Next(self.last_key.clone());
-        
+
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
             return Ok(cached);
@@ -365,7 +360,7 @@ mod tests {
     #[test]
     fn test_separate_storage_caches() {
         let factory = CachedTrieCursorFactory::new(NoopTrieCursorFactory);
-        
+
         // Create two storage cursors for different addresses
         let addr1 = B256::from([1u8; 32]);
         let addr2 = B256::from([2u8; 32]);
@@ -373,7 +368,7 @@ mod tests {
         let mut cursor2 = factory.storage_trie_cursor(addr2).unwrap();
 
         let key = Nibbles::unpack(B256::from([3u8; 32]));
-        
+
         // Operations on different cursors should not share cache
         assert!(cursor1.seek(key.clone()).unwrap().is_none());
         assert!(cursor2.seek(key).unwrap().is_none());

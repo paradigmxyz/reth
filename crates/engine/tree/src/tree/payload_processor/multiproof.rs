@@ -465,11 +465,11 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true);
-            
+
             if let Some(ref shared_caches) = config.shared_caches {
                 proof = proof.with_shared_caches(shared_caches.clone());
             }
-            
+
             let result = proof.decoded_storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
@@ -541,11 +541,11 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true);
-            
+
             if let Some(ref shared_caches) = config.shared_caches {
                 proof = proof.with_shared_caches(shared_caches.clone());
             }
-            
+
             let result = proof.decoded_multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
@@ -1157,7 +1157,13 @@ mod tests {
         let state_sorted = Arc::new(input.state.clone().into_sorted());
         let prefix_sets = Arc::new(input.prefix_sets);
 
-        MultiProofConfig { consistent_view, nodes_sorted, state_sorted, prefix_sets }
+        MultiProofConfig {
+            consistent_view,
+            nodes_sorted,
+            state_sorted,
+            prefix_sets,
+            shared_caches: None,
+        }
     }
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask<F>
