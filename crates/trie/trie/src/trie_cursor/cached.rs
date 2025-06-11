@@ -1,10 +1,9 @@
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::{map::B256Map, B256};
-use mini_moka::sync::Cache;
 use parking_lot::RwLock;
 use reth_storage_errors::db::DatabaseError;
-use std::sync::Arc;
+use std::{ops::Deref, sync::Arc};
 use tracing::debug;
 
 /// Default cache size for account trie operations.
@@ -27,44 +26,55 @@ pub enum CacheKey {
 /// Cache value storing the result of a trie cursor operation.
 pub type CacheValue = Option<(Nibbles, BranchNodeCompact)>;
 
+/// Cache for trie cursor.
+#[derive(Debug, Clone)]
+pub struct Cache(Arc<mini_moka::sync::Cache<CacheKey, CacheValue>>);
+
+impl Deref for Cache {
+    type Target = Arc<mini_moka::sync::Cache<CacheKey, CacheValue>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Cache {
+    /// Create a new cache with the given size.
+    pub fn new(size: u64) -> Self {
+        Self(Arc::new(mini_moka::sync::Cache::new(size)))
+    }
+}
+
 /// Shared caches for trie cursor operations.
 #[derive(Debug, Clone)]
 pub struct TrieCursorSharedCaches {
     /// Cache for account trie operations.
-    pub(crate) account_cache: Arc<Cache<CacheKey, CacheValue>>,
+    pub(crate) account_cache: Cache,
     /// Per-address caches for storage trie operations.
-    pub(crate) storage_caches: Arc<RwLock<B256Map<Arc<Cache<CacheKey, CacheValue>>>>>,
+    pub(crate) storage_caches: Arc<RwLock<B256Map<Cache>>>,
 }
 
 impl TrieCursorSharedCaches {
     /// Create new shared caches with default sizes.
     pub fn new() -> Self {
-        Self::with_account_cache_size(DEFAULT_ACCOUNT_CACHE_SIZE)
-    }
-
-    /// Create new shared caches with specified account cache size.
-    pub fn with_account_cache_size(account_cache_size: u64) -> Self {
         Self {
-            account_cache: Arc::new(Cache::new(account_cache_size)),
-            storage_caches: Arc::new(RwLock::new(B256Map::new())),
+            account_cache: Cache::new(DEFAULT_ACCOUNT_CACHE_SIZE),
+            storage_caches: Arc::new(RwLock::new(B256Map::default())),
         }
     }
 
     /// Get or create a storage cache for the given hashed address.
-    pub fn get_or_create_storage_cache(
-        &self,
-        hashed_address: B256,
-    ) -> Arc<Cache<CacheKey, CacheValue>> {
+    pub fn get_or_create_storage_cache(&self, hashed_address: B256) -> Cache {
         // Try to get with read lock first
         {
             let caches = self.storage_caches.read();
-            if let Some(cache) = caches.get(&hashed_address) {
+            if let Some(cache) = caches.get(&hashed_address).cloned() {
                 debug!(
                     target: "trie::cached_cursor",
                     "Reusing existing storage cache for address {:?}",
                     hashed_address
                 );
-                return Arc::clone(cache);
+                return cache;
             }
         }
 
@@ -79,7 +89,7 @@ impl TrieCursorSharedCaches {
                     hashed_address,
                     DEFAULT_STORAGE_CACHE_SIZE
                 );
-                Arc::new(Cache::new(DEFAULT_STORAGE_CACHE_SIZE))
+                Cache::new(DEFAULT_STORAGE_CACHE_SIZE)
             })
             .clone();
         cache
@@ -104,19 +114,15 @@ pub struct CachedTrieCursorFactory<CF> {
     /// The underlying cursor factory.
     inner: CF,
     /// Cache for account trie operations, shared across all account cursors.
-    account_cache: Arc<Cache<CacheKey, CacheValue>>,
+    account_cache: Cache,
     /// Optional reference to shared caches struct.
-    shared_caches: Option<TrieCursorSharedCaches>,
+    shared_caches: TrieCursorSharedCaches,
 }
 
 impl<CF> CachedTrieCursorFactory<CF> {
     /// Create a new cached trie cursor factory with default cache sizes.
     pub fn new(inner: CF, shared_caches: TrieCursorSharedCaches) -> Self {
-        Self {
-            inner,
-            account_cache: Arc::clone(&shared_caches.account_cache),
-            shared_caches: Some(shared_caches.clone()),
-        }
+        Self { inner, account_cache: shared_caches.account_cache.clone(), shared_caches }
     }
 }
 
@@ -126,7 +132,7 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for CachedTrieCursorFactory<CF> {
 
     fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
         let cursor = self.inner.account_trie_cursor()?;
-        Ok(CachedAccountTrieCursor::new(cursor, Arc::clone(&self.account_cache)))
+        Ok(CachedAccountTrieCursor::new(cursor, self.account_cache.clone()))
     }
 
     fn storage_trie_cursor(
@@ -134,11 +140,11 @@ impl<CF: TrieCursorFactory> TrieCursorFactory for CachedTrieCursorFactory<CF> {
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor, DatabaseError> {
         let cursor = self.inner.storage_trie_cursor(hashed_address)?;
-        if let Some(ref shared_caches) = self.shared_caches {
-            let cache = shared_caches.get_or_create_storage_cache(hashed_address);
-            return Ok(CachedStorageTrieCursor::with_external_cache(hashed_address, cursor, cache));
-        }
-        Ok(CachedStorageTrieCursor::new(hashed_address, cursor))
+        Ok(CachedStorageTrieCursor::new(
+            hashed_address,
+            cursor,
+            self.shared_caches.account_cache.clone(),
+        ))
     }
 }
 
@@ -148,7 +154,7 @@ pub struct CachedAccountTrieCursor<C> {
     /// The underlying cursor.
     inner: C,
     /// Shared cache for account trie operations.
-    cache: Arc<Cache<CacheKey, CacheValue>>,
+    cache: Cache,
     /// Last key returned by the cursor.
     last_key: Option<Nibbles>,
     /// Metrics.
@@ -158,7 +164,7 @@ pub struct CachedAccountTrieCursor<C> {
 
 impl<C> CachedAccountTrieCursor<C> {
     /// Create a new cached account trie cursor.
-    fn new(inner: C, cache: Arc<Cache<CacheKey, CacheValue>>) -> Self {
+    fn new(inner: C, cache: Cache) -> Self {
         Self {
             inner,
             cache,
@@ -274,37 +280,17 @@ pub struct CachedStorageTrieCursor<C> {
     /// The underlying cursor.
     inner: C,
     /// Cache for this specific storage trie's operations.
-    cache: Arc<Cache<CacheKey, CacheValue>>,
+    cache: Cache,
     /// Last key returned by the cursor.
     last_key: Option<Nibbles>,
     /// Metrics.
     #[cfg(feature = "metrics")]
     metrics: metrics::CachedTrieCursorMetrics,
 }
+
 impl<C> CachedStorageTrieCursor<C> {
     /// Create a new cached storage trie cursor with default cache size.
-    fn new(hashed_address: B256, inner: C) -> Self {
-        Self::with_capacity(hashed_address, inner, DEFAULT_STORAGE_CACHE_SIZE)
-    }
-
-    /// Create a new cached storage trie cursor with specified cache capacity.
-    fn with_capacity(hashed_address: B256, inner: C, cache_size: u64) -> Self {
-        Self {
-            hashed_address,
-            inner,
-            cache: Arc::new(Cache::new(cache_size)),
-            last_key: None,
-            #[cfg(feature = "metrics")]
-            metrics: metrics::CachedTrieCursorMetrics::storage(),
-        }
-    }
-
-    /// Create a new cached storage trie cursor with an external cache.
-    fn with_external_cache(
-        hashed_address: B256,
-        inner: C,
-        cache: Arc<Cache<CacheKey, CacheValue>>,
-    ) -> Self {
+    fn new(hashed_address: B256, inner: C, cache: Cache) -> Self {
         Self {
             hashed_address,
             inner,
