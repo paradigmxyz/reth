@@ -224,6 +224,7 @@ mod tests {
     // stage_test_suite_ext!(S3TestRunner, s3);
 
     #[derive(Default)]
+    #[allow(unused)]
     struct S3TestRunner {
         db: TestStageDB,
     }

@@ -22,7 +22,12 @@ pub mod primitives {
 
 /// Re-exported cli types
 #[cfg(feature = "cli")]
-pub use reth_optimism_cli as cli;
+pub mod cli {
+    #[doc(inline)]
+    pub use reth_cli_util::*;
+    #[doc(inline)]
+    pub use reth_optimism_cli::*;
+}
 
 /// Re-exported pool types
 #[cfg(feature = "pool")]
@@ -63,6 +68,16 @@ pub mod evm {
     pub use reth_revm as revm;
 }
 
+/// Re-exported exex types
+#[cfg(feature = "exex")]
+pub use reth_exex as exex;
+
+/// Re-exported from `tasks`.
+#[cfg(feature = "tasks")]
+pub mod tasks {
+    pub use reth_tasks::*;
+}
+
 /// Re-exported reth network types
 #[cfg(feature = "network")]
 pub mod network {
@@ -96,6 +111,8 @@ pub mod storage {
 pub mod node {
     #[doc(inline)]
     pub use reth_node_api as api;
+    #[cfg(feature = "node")]
+    pub use reth_node_builder as builder;
     #[doc(inline)]
     pub use reth_node_core as core;
     #[cfg(feature = "node")]

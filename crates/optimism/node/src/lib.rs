@@ -18,9 +18,10 @@ pub mod args;
 /// trait.
 pub mod engine;
 pub use engine::OpEngineTypes;
+pub use reth_optimism_payload_builder::{OpPayloadPrimitives, OpPayloadTypes};
 
 pub mod node;
-pub use node::{OpNetworkPrimitives, OpNode};
+pub use node::*;
 
 pub mod rpc;
 pub use rpc::OpEngineApiBuilder;
@@ -39,3 +40,5 @@ pub use reth_optimism_payload_builder::{
 };
 
 pub use reth_optimism_evm::*;
+
+pub use reth_optimism_storage::OpStorage;

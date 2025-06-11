@@ -2,10 +2,13 @@ use crate::{
     conditional::MaybeConditionalTransaction, estimated_da_size::DataAvailabilitySized,
     interop::MaybeInteropTransaction,
 };
-use alloy_consensus::{
-    transaction::Recovered, BlobTransactionSidecar, BlobTransactionValidationError, Typed2718,
+use alloy_consensus::{transaction::Recovered, BlobTransactionValidationError, Typed2718};
+use alloy_eips::{
+    eip2718::{Encodable2718, WithEncoded},
+    eip2930::AccessList,
+    eip7594::BlobTransactionSidecarVariant,
+    eip7702::SignedAuthorization,
 };
-use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use alloy_rpc_types_eth::erc4337::TransactionConditional;
 use c_kzg::KzgSettings;
@@ -15,9 +18,12 @@ use reth_primitives_traits::{InMemorySize, SignedTransaction};
 use reth_transaction_pool::{
     EthBlobTransactionSidecar, EthPoolTransaction, EthPooledTransaction, PoolTransaction,
 };
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc, OnceLock,
+use std::{
+    borrow::Cow,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
 };
 
 /// Marker for no-interop transactions
@@ -63,14 +69,14 @@ impl<Cons: SignedTransaction, Pooled> OpPooledTransaction<Cons, Pooled> {
         }
     }
 
-    /// Returns the estimated compressed size of a transaction in bytes scaled by 1e6.
+    /// Returns the estimated compressed size of a transaction in bytes.
     /// This value is computed based on the following formula:
-    /// `max(minTransactionSize, intercept + fastlzCoef*fastlzSize)`
+    /// `max(minTransactionSize, intercept + fastlzCoef*fastlzSize) / 1e6`
     /// Uses cached EIP-2718 encoded bytes to avoid recomputing the encoding for each estimation.
     pub fn estimated_compressed_size(&self) -> u64 {
         *self
             .estimated_tx_compressed_size
-            .get_or_init(|| op_alloy_flz::tx_estimated_size_fjord(self.encoded_2718()))
+            .get_or_init(|| op_alloy_flz::tx_estimated_size_fjord_bytes(self.encoded_2718()))
     }
 
     /// Returns lazily computed EIP-2718 encoded bytes of the transaction.
@@ -130,6 +136,11 @@ where
 
     fn into_consensus(self) -> Recovered<Self::Consensus> {
         self.inner.transaction
+    }
+
+    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
+        let encoding = self.encoded_2718().clone();
+        self.inner.transaction.into_encoded_with(encoding)
     }
 
     fn from_pooled(tx: Recovered<Self::Pooled>) -> Self {
@@ -256,21 +267,21 @@ where
 
     fn try_into_pooled_eip4844(
         self,
-        _sidecar: Arc<BlobTransactionSidecar>,
+        _sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         None
     }
 
     fn try_from_eip4844(
         _tx: Recovered<Self::Consensus>,
-        _sidecar: BlobTransactionSidecar,
+        _sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         None
     }
 
     fn validate_blob(
         &self,
-        _sidecar: &BlobTransactionSidecar,
+        _sidecar: &BlobTransactionSidecarVariant,
         _settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         Err(BlobTransactionValidationError::NotBlobTransaction(self.ty()))
@@ -282,13 +293,19 @@ where
 pub trait OpPooledTx:
     MaybeConditionalTransaction + MaybeInteropTransaction + PoolTransaction + DataAvailabilitySized
 {
+    /// Returns the EIP-2718 encoded bytes of the transaction.
+    fn encoded_2718(&self) -> Cow<'_, Bytes>;
 }
-impl<T> OpPooledTx for T where
-    T: MaybeConditionalTransaction
-        + MaybeInteropTransaction
-        + PoolTransaction
-        + DataAvailabilitySized
+
+impl<Cons, Pooled> OpPooledTx for OpPooledTransaction<Cons, Pooled>
+where
+    Cons: SignedTransaction + From<Pooled>,
+    Pooled: SignedTransaction + TryFrom<Cons>,
+    <Pooled as TryFrom<Cons>>::Error: core::error::Error,
 {
+    fn encoded_2718(&self) -> Cow<'_, Bytes> {
+        Cow::Borrowed(self.encoded_2718())
+    }
 }
 
 #[cfg(test)]
@@ -320,7 +337,7 @@ mod tests {
             source_hash: Default::default(),
             from: signer,
             to: TxKind::Create,
-            mint: None,
+            mint: 0,
             value: U256::ZERO,
             gas_limit: 0,
             is_system_transaction: false,

@@ -278,7 +278,7 @@ impl_compression_fixed_compact!(B256, Address);
 macro_rules! add_wrapper_struct {
     ($(($name:tt, $wrapper:tt)),+) => {
         $(
-            /// Wrapper struct so it can use StructFlags from Compact, when used as pure table values.
+            /// Wrapper struct so it can use `StructFlags` from Compact, when used as pure table values.
             #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
             #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
             #[add_arbitrary_tests(compact)]

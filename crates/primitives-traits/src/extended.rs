@@ -3,7 +3,7 @@ use crate::{
     transaction::signed::{RecoveryError, SignedTransaction},
 };
 use alloc::vec::Vec;
-use alloy_consensus::{transaction::SignerRecoverable, Transaction};
+use alloy_consensus::{transaction::SignerRecoverable, EthereumTxEnvelope, Transaction};
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
@@ -264,6 +264,12 @@ where
     }
 }
 
+impl<Eip4844, Tx> From<EthereumTxEnvelope<Eip4844>> for Extended<EthereumTxEnvelope<Eip4844>, Tx> {
+    fn from(value: EthereumTxEnvelope<Eip4844>) -> Self {
+        Self::BuiltIn(value)
+    }
+}
+
 #[cfg(feature = "op")]
 mod op {
     use crate::Extended;
@@ -272,13 +278,12 @@ mod op {
     use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
 
     impl<Tx> TryFrom<Extended<OpTxEnvelope, Tx>> for Extended<OpPooledTransaction, Tx> {
-        type Error = OpTxEnvelope;
+        type Error = <OpPooledTransaction as TryFrom<OpTxEnvelope>>::Error;
 
         fn try_from(value: Extended<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
             match value {
                 Extended::BuiltIn(tx) => {
-                    let converted_tx: OpPooledTransaction =
-                        tx.clone().try_into().map_err(|_| tx)?;
+                    let converted_tx: OpPooledTransaction = tx.try_into()?;
                     Ok(Self::BuiltIn(converted_tx))
                 }
                 Extended::Other(tx) => Ok(Self::Other(tx)),
@@ -289,6 +294,15 @@ mod op {
     impl<Tx> From<OpPooledTransaction> for Extended<OpTxEnvelope, Tx> {
         fn from(tx: OpPooledTransaction) -> Self {
             Self::BuiltIn(tx.into())
+        }
+    }
+
+    impl<Tx> From<Extended<OpPooledTransaction, Tx>> for Extended<OpTxEnvelope, Tx> {
+        fn from(tx: Extended<OpPooledTransaction, Tx>) -> Self {
+            match tx {
+                Extended::BuiltIn(tx) => Self::BuiltIn(tx.into()),
+                Extended::Other(tx) => Self::Other(tx),
+            }
         }
     }
 
@@ -307,6 +321,12 @@ mod op {
                     "Cannot convert custom transaction to OpPooledTransaction",
                 )),
             }
+        }
+    }
+
+    impl<Tx> From<OpTxEnvelope> for Extended<OpTxEnvelope, Tx> {
+        fn from(value: OpTxEnvelope) -> Self {
+            Self::BuiltIn(value)
         }
     }
 }

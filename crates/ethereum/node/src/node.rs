@@ -3,20 +3,22 @@
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
-use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_ethereum_primitives::{EthPrimitives, PooledTransaction, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
-use reth_network::{EthNetworkPrimitives, NetworkHandle, PeersInfo};
-use reth_node_api::{AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, TxTy};
+use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
+use reth_node_api::{
+    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
+};
 use reth_node_builder::{
     components::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
-        NetworkBuilder, PoolBuilder,
+        NetworkBuilder, PoolBuilder, TxPoolBuilder,
     },
     node::{FullNodeTypes, NodeTypes},
     rpc::{
@@ -26,7 +28,7 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
     PayloadTypes,
 };
-use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions, EthStorage};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
 use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -34,8 +36,8 @@ use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
-    blobstore::{DiskFileBlobStore, DiskFileBlobStoreConfig},
-    EthTransactionPool, PoolTransaction, TransactionPool, TransactionValidationTaskExecutor,
+    blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
+    TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
@@ -195,8 +197,8 @@ where
         );
 
         self.inner
-            .launch_add_ons_with(ctx, move |modules, _, _| {
-                modules.merge_if_module_configured(
+            .launch_add_ons_with(ctx, move |container| {
+                container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
                 )?;
@@ -275,18 +277,7 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
-        let alloy_rpc_types_eth::Block { header, transactions, withdrawals, .. } = rpc_block;
-        reth_ethereum_primitives::Block {
-            header: header.inner,
-            body: reth_ethereum_primitives::BlockBody {
-                transactions: transactions
-                    .into_transactions()
-                    .map(|tx| tx.inner.into_inner().into())
-                    .collect(),
-                ommers: Default::default(),
-                withdrawals,
-            },
-        }
+        rpc_block.into_consensus().convert_transactions()
     }
 }
 
@@ -330,11 +321,10 @@ where
     type Pool = EthTransactionPool<Node::Provider, DiskFileBlobStore>;
 
     async fn build_pool(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Pool> {
-        let data_dir = ctx.config().datadir();
         let pool_config = ctx.pool_config();
 
         let blob_cache_size = if let Some(blob_cache_size) = pool_config.blob_cache_size {
-            blob_cache_size
+            Some(blob_cache_size)
         } else {
             // get the current blob params for the current timestamp, fallback to default Cancun
             // params
@@ -347,13 +337,12 @@ where
 
             // Derive the blob cache size from the target blob count, to auto scale it by
             // multiplying it with the slot count for 2 epochs: 384 for pectra
-            (blob_params.target_blob_count * EPOCH_SLOTS * 2) as u32
+            Some((blob_params.target_blob_count * EPOCH_SLOTS * 2) as u32)
         };
 
-        let custom_config =
-            DiskFileBlobStoreConfig::default().with_max_cached_entries(blob_cache_size);
+        let blob_store =
+            reth_node_builder::components::create_blob_store_with_cache(ctx, blob_cache_size)?;
 
-        let blob_store = DiskFileBlobStore::open(data_dir.blobstore(), custom_config)?;
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
@@ -362,60 +351,12 @@ where
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
-        let transaction_pool =
-            reth_transaction_pool::Pool::eth_pool(validator, blob_store, pool_config);
+        let transaction_pool = TxPoolBuilder::new(ctx)
+            .with_validator(validator)
+            .build_and_spawn_maintenance_task(blob_store, pool_config)?;
+
         info!(target: "reth::cli", "Transaction pool initialized");
-
-        // spawn txpool maintenance task
-        {
-            let pool = transaction_pool.clone();
-            let chain_events = ctx.provider().canonical_state_stream();
-            let client = ctx.provider().clone();
-            // Only spawn backup task if not disabled
-            if !ctx.config().txpool.disable_transactions_backup {
-                // Use configured backup path or default to data dir
-                let transactions_path = ctx
-                    .config()
-                    .txpool
-                    .transactions_backup_path
-                    .clone()
-                    .unwrap_or_else(|| data_dir.txpool_transactions());
-
-                let transactions_backup_config =
-                    reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
-
-                ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
-                    "local transactions backup task",
-                    |shutdown| {
-                        reth_transaction_pool::maintain::backup_local_transactions_task(
-                            shutdown,
-                            pool.clone(),
-                            transactions_backup_config,
-                        )
-                    },
-                );
-            }
-
-            // spawn the maintenance task
-            ctx.task_executor().spawn_critical(
-                "txpool maintenance task",
-                reth_transaction_pool::maintain::maintain_transaction_pool_future(
-                    client,
-                    pool,
-                    chain_events,
-                    ctx.task_executor().clone(),
-                    reth_transaction_pool::maintain::MaintainPoolConfig {
-                        max_tx_lifetime: transaction_pool.config().max_queued_lifetime,
-                        no_local_exemptions: transaction_pool
-                            .config()
-                            .local_transactions_config
-                            .no_exemptions,
-                        ..Default::default()
-                    },
-                ),
-            );
-            debug!(target: "reth::cli", "Spawned txpool maintenance task");
-        }
+        debug!(target: "reth::cli", "Spawned txpool maintenance task");
 
         Ok(transaction_pool)
     }
@@ -429,13 +370,13 @@ pub struct EthereumNetworkBuilder {
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for EthereumNetworkBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
-    Pool: TransactionPool<
-            Transaction: PoolTransaction<Consensus = TxTy<Node::Types>, Pooled = PooledTransaction>,
-        > + Unpin
+    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + Unpin
         + 'static,
 {
-    type Network = NetworkHandle<EthNetworkPrimitives>;
+    type Network =
+        NetworkHandle<BasicNetworkPrimitives<PrimitivesTy<Node::Types>, PoolPooledTx<Pool>>>;
 
     async fn build_network(
         self,
