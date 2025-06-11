@@ -161,6 +161,11 @@ impl ResolveNatInterval {
         Self::with_interval(resolver, interval)
     }
 
+    /// Returns the resolver used by this interval
+    pub const fn resolver(&self) -> &NatResolver {
+        &self.resolver
+    }
+
     /// Completes when the next [`IpAddr`] in the interval has been reached.
     pub async fn tick(&mut self) -> Option<IpAddr> {
         poll_fn(|cx| self.poll_tick(cx)).await
