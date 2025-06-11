@@ -3382,6 +3382,7 @@ dependencies = [
  "revm-primitives",
  "serde",
  "test-fuzz",
+ "thiserror 2.0.12",
 ]
 
 [[package]]
