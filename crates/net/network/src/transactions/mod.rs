@@ -249,7 +249,7 @@ pub struct TransactionsManager<
     N: NetworkPrimitives = EthNetworkPrimitives,
     PBundle: TransactionPolicies = NetworkPolicies<
         TransactionPropagationKind,
-        ShardedMempoolAnnouncementFilter,
+        ShardedMempoolAnnouncementFilter<StrictEthAnnouncementFilter>,
     >,
 > {
     /// Access to the transaction pool.

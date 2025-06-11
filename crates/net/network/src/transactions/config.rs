@@ -250,36 +250,20 @@ where
 
 /// Sharded mempool announcement filtering policy
 #[derive(Debug, Clone)]
-pub struct ShardedMempoolAnnouncementFilter {
+pub struct ShardedMempoolAnnouncementFilter<T> {
+    pub inner: T,
     pub shard_bits: u8,
     pub node_id: Option<B256>,
 }
 
-impl Default for ShardedMempoolAnnouncementFilter {
-    fn default() -> Self {
-        Self {
-            shard_bits: 4,
-            node_id: None,
-        }
-    }
-}
-
-impl ShardedMempoolAnnouncementFilter {
-    pub fn new_with_node_id(node_id: B256) -> Self {
-        Self {
-            shard_bits: 4,
-            node_id: Some(node_id),
-        }
-    }
-}
-
-impl AnnouncementFilteringPolicy for ShardedMempoolAnnouncementFilter {
-    fn decide_on_announcement(&self, ty: u8, hash: &B256, _size: usize) -> AnnouncementAcceptance {
+impl<T: AnnouncementFilteringPolicy> AnnouncementFilteringPolicy for ShardedMempoolAnnouncementFilter<T> {
+    fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
         // Only apply sharding to blob transactions (type 3)
         if ty != 3 {
-            return AnnouncementAcceptance::Accept;
+            return self.inner.decide_on_announcement(ty, hash, size);
         }
-
+        
+        // Ta logique de sharding reste identique
         let Some(our_node_id) = self.node_id.as_ref() else {
             return AnnouncementAcceptance::Accept;
         };
@@ -292,6 +276,30 @@ impl AnnouncementFilteringPolicy for ShardedMempoolAnnouncementFilter {
             AnnouncementAcceptance::Accept
         } else {
             AnnouncementAcceptance::Ignore
+        }
+    }
+}
+
+impl<T> ShardedMempoolAnnouncementFilter<T> {
+    pub fn new(inner: T, shard_bits: u8, node_id: Option<B256>) -> Self {
+        Self { inner, shard_bits, node_id }
+    }
+    
+    pub fn new_with_node_id(inner: T, node_id: B256) -> Self {
+        Self {
+            inner,
+            shard_bits: 4,
+            node_id: Some(node_id),
+        }
+    }
+}
+
+impl<T: Default> Default for ShardedMempoolAnnouncementFilter<T> {
+    fn default() -> Self {
+        Self {
+            inner: T::default(),
+            shard_bits: 4,
+            node_id: None,
         }
     }
 }
