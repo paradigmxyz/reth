@@ -515,9 +515,12 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     }
 
     /// Creates an interval for sending range updates to the remote peer.
-    pub(crate) fn create_range_update_interval(conn: &EthRlpxConnection<N>) -> Option<Interval> {
+    fn create_range_update_interval(
+        conn: &EthRlpxConnection<N>,
+        range_update_interval: Duration,
+    ) -> Option<Interval> {
         (conn.version() > EthVersion::Eth69).then(|| {
-            let mut interval = tokio::time::interval(Duration::from_secs(120));
+            let mut interval = tokio::time::interval(range_update_interval);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             interval
         })
@@ -536,7 +539,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         }
 
         let is_disconnecting = this.is_disconnecting();
-        if let Some(interval) = &mut this.range_update_interval {
+        if let Some(mut interval) =
+            Self::create_range_update_interval(&this.conn, Duration::from_secs(120))
+        {
             while interval.poll_tick(cx).is_ready() {
                 if !is_disconnecting {
                     let update = EthMessage::BlockRangeUpdate(reth_eth_wire::BlockRangeUpdate {
@@ -1002,6 +1007,11 @@ mod tests {
 
                     self.to_sessions.push(commands_to_session);
 
+                    let range_update_interval = ActiveSession::create_range_update_interval(
+                        &conn,
+                        Duration::from_secs(120),
+                    );
+
                     ActiveSession {
                         next_id: 0,
                         remote_peer_id: peer_id,
@@ -1033,7 +1043,7 @@ mod tests {
                             1000,
                             alloy_primitives::B256::ZERO,
                         ),
-                        range_update_interval: Self::create_range_update_interval(&conn),
+                        range_update_interval,
                     }
                 }
                 ev => {
