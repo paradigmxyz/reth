@@ -392,35 +392,56 @@ maxperf-no-asm: ## Builds `reth` with the most aggressive optimisations, minus t
 
 # Directory for PGO data
 PGO_DATA_DIR ?= $(CARGO_TARGET_DIR)/pgo-data
+PGO_TARGET_BIN ?= $(CARGO_TARGET_DIR)/pgo/reth
 BOLT_DATA_DIR ?= $(CARGO_TARGET_DIR)/bolt-data
 
-# Check for required tools
-.PHONY: pgo-check-deps
-pgo-check-deps: ## Check if required tools are installed.
-	@command -v cargo-pgo >/dev/null 2>&1 || { echo "Error: cargo-pgo not found. Install with: cargo install cargo-pgo"; exit 1; }
+# Check for required PGO tools
+.PHONY: pgo-check-deps-pgo
+pgo-check-deps-pgo: ## Check if required tools are installed.
+	@command cargo pgo -V >/dev/null 2>&1 || { echo "Error: cargo-pgo not found. Install with: cargo install cargo-pgo"; exit 1; }
+	#@command -v llvm-profdata >/dev/null 2>&1 || { echo "Error: llvm-profdata not found. Please install llvm-profdata for profiling."; exit 1; }
+	#@command -v perf >/dev/null 2>&1 || { echo "Error: perf not found. Please install perf for profiling."; exit 1; }
+	#@command -v merge-fdata >/dev/null 2>&1 || { echo "Error: merge-fdata not found. Please install llvm-tools or llvm-profdata."; exit 1; }
+
+# Check for required BOLT tools
+.PHONY: pgo-check-deps-bolt
+pgo-check-deps-bolt: ## Check if required tools are installed.
 	@command -v llvm-bolt >/dev/null 2>&1 || { echo "Error: llvm-bolt not found. Please install LLVM tools with BOLT support."; exit 1; }
-	@command -v perf >/dev/null 2>&1 || { echo "Error: perf not found. Please install perf for profiling."; exit 1; }
-	@command -v merge-fdata >/dev/null 2>&1 || { echo "Error: merge-fdata not found. Please install llvm-tools or llvm-profdata."; exit 1; }
 
 .PHONY: pgo-build-instrumented
-pgo-build-instrumented: pgo-check-deps ## Build reth with PGO instrumentation.
+pgo-build-instrumented: pgo-check-deps-pgo ## Build reth with PGO instrumentation.
 	@echo "Building reth with PGO instrumentation using cargo-pgo..."
 	@mkdir -p $(PGO_DATA_DIR)
-	CARGO_PGO_DATA_DIR=$(PGO_DATA_DIR) \
-		cargo pgo build --profile maxperf --features "$(FEATURES)" --bin reth
+	cargo pgo build -- --profile maxperf --features "$(FEATURES)" --bin reth
+
+	# cargo pgo always places the binary into a subdirectory based on the target
+	# platform, there's no obvious way to get it to not do so.
+	mkdir -p $(shell dirname $(PGO_TARGET_BIN))
+	cp $(CARGO_TARGET_DIR)/$(shell rustc -vV | sed -n 's|host: ||p')/maxperf/reth $(PGO_TARGET_BIN)
 
 .PHONY: pgo-run
 pgo-run: ## Run reth to collect PGO data. You must set PGO_RUN_CMD environment variable.
-	@test -n "$(PGO_RUN_CMD)" || { echo "Error: PGO_RUN_CMD must be set. Example: PGO_RUN_CMD='timeout 300 ./target/maxperf/reth node --datadir $(CARGO_TARGET_DIR)/pgo-datadir --chain mainnet'"; exit 1; }
-	@echo "Running reth to collect PGO data..."
-	CARGO_PGO_DATA_DIR=$(PGO_DATA_DIR) \
-		cargo pgo run --profile maxperf --features "$(FEATURES)" --bin reth -- $(PGO_RUN_CMD)
+	@echo "Running reth in the background to collect PGO data..."
+	timeout 300 $(PGO_TARGET_BIN) node \
+		--datadir $(PGO_DATA_DIR) \
+		--chain hoodi \
+		& echo $$! > $(PGO_DATA_DIR)/pid
+
+	@echo "Waiting for jwt.hex file to be created by reth process"
+	@while [ ! -f $(PGO_DATA_DIR)/jwt.hex ]; do sleep 1; done
+
+	# Run the bench script then kill the node
+	./scripts/pgo-hoodi-benchmark.sh http://127.0.0.1:8551 $(PGO_DATA_DIR)/jwt.hex
+
+	@echo "Killing node and waiting for it to exit"
+	kill $$(cat $(PGO_DATA_DIR)/pid)
+	# Can't use the wait builtin because make does whacky things with shells
+	@while [ -e /proc/$$(cat $(PGO_DATA_DIR)/pid) ]; do sleep 1; done
 
 .PHONY: pgo-optimize
 pgo-optimize: ## Build PGO-optimized reth binary.
 	@echo "Building PGO-optimized reth..."
-	CARGO_PGO_DATA_DIR=$(PGO_DATA_DIR) \
-		cargo pgo optimize --profile maxperf --features "$(FEATURES)" --bin reth
+	cargo pgo optimize build -- --profile maxperf --features "$(FEATURES)" --bin reth
 
 .PHONY: bolt-prepare
 bolt-prepare: pgo-optimize ## Prepare for BOLT optimization by collecting performance data.
@@ -463,7 +484,7 @@ pgo-clean: ## Clean PGO and BOLT data and temporary directories.
 	rm -f $(CARGO_TARGET_DIR)/maxperf/reth-bolt
 
 .PHONY: pgo-bolt
-pgo-bolt: pgo-clean pgo-build-instrumented pgo-run pgo-optimize bolt-optimize ## Run full PGO+BOLT workflow: instrument, collect PGO data, optimize with PGO, then optimize with BOLT.
+pgo-bolt: pgo-check-deps-bolt pgo-clean pgo-build-instrumented pgo-run pgo-optimize bolt-optimize ## Run full PGO+BOLT workflow: instrument, collect PGO data, optimize with PGO, then optimize with BOLT.
 	@echo "PGO+BOLT build complete!"
 	@echo "PGO-optimized binary: $(CARGO_TARGET_DIR)/maxperf/reth"
 	@echo "BOLT-optimized binary: $(CARGO_TARGET_DIR)/maxperf/reth-bolt"
