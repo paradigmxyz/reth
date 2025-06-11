@@ -13,7 +13,7 @@ use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
-use tracing::trace;
+use tracing::{trace, trace_span};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::{StateRootMetrics, TrieRootMetrics};
@@ -159,7 +159,7 @@ where
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
-                let walker = TrieWalker::from_stack(
+                let walker = TrieWalker::state_trie_from_stack(
                     trie_cursor,
                     state.walker_stack,
                     self.prefix_sets.account_prefix_set,
@@ -171,8 +171,9 @@ where
             }
             None => {
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
-                let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
-                    .with_deletions_retained(retain_updates);
+                let walker =
+                    TrieWalker::state_trie(trie_cursor, self.prefix_sets.account_prefix_set)
+                        .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
                 (hash_builder, node_iter)
             }
@@ -395,7 +396,10 @@ where
         self,
         retain_updates: bool,
     ) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
-        trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
+        let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_address = ?self.hashed_address);
+        let _enter = span.enter();
+
+        trace!(target: "trie::storage_root", "calculating storage root");
 
         let mut hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
@@ -407,8 +411,8 @@ where
 
         let mut tracker = TrieTracker::default();
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-        let walker =
-            TrieWalker::new(trie_cursor, self.prefix_set).with_deletions_retained(retain_updates);
+        let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set)
+            .with_deletions_retained(retain_updates);
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 

@@ -14,7 +14,7 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_primitives_traits::{Block, BlockBody, FullBlock, SealedBlock, SealedHeader};
-use std::{collections::HashMap, io, path::Path, sync::Arc};
+use std::{collections::HashMap, io, ops::RangeInclusive, path::Path, sync::Arc};
 use thiserror::Error;
 use tokio::{fs::File, io::AsyncReadExt};
 use tokio_stream::StreamExt;
@@ -354,10 +354,11 @@ impl<B: FullBlock> BodiesClient for FileClient<B> {
     type Body = B::Body;
     type Output = BodiesFut<B::Body>;
 
-    fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority_and_range_hint(
         &self,
         hashes: Vec<B256>,
         _priority: Priority,
+        _range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         // this just searches the buffer, and fails if it can't find the block
         let mut bodies = Vec::new();

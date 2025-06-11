@@ -24,6 +24,9 @@ humantime-serde = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 eyre = { workspace = true, optional = true }
 
+# value objects
+url.workspace = true
+
 [features]
 serde = [
     "dep:serde",
@@ -34,6 +37,7 @@ serde = [
     "reth-prune-types/serde",
     "reth-stages-types/serde",
     "alloy-primitives/serde",
+    "url/serde",
 ]
 
 [dev-dependencies]

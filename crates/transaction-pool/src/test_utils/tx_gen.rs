@@ -5,7 +5,7 @@ use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
 use rand::{Rng, RngCore};
 use reth_chainspec::MAINNET;
 use reth_ethereum_primitives::{Transaction, TransactionSigned};
-use reth_primitives_traits::crypto::secp256k1::sign_message;
+use reth_primitives_traits::{crypto::secp256k1::sign_message, SignedTransaction};
 
 /// A generator for transactions for testing purposes.
 #[derive(Debug)]
@@ -99,8 +99,10 @@ impl<R: RngCore> TransactionGenerator<R> {
 
     /// Generates and returns a pooled EIP-1559 transaction with a random signer.
     pub fn gen_eip1559_pooled(&mut self) -> EthPooledTransaction {
-        EthPooledTransaction::try_from_consensus(self.gen_eip1559().try_into_recovered().unwrap())
-            .unwrap()
+        EthPooledTransaction::try_from_consensus(
+            SignedTransaction::try_into_recovered(self.gen_eip1559()).unwrap(),
+        )
+        .unwrap()
     }
 
     /// Generates and returns a pooled EIP-4844 transaction with a random signer.

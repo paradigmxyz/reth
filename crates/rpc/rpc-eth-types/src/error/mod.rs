@@ -13,6 +13,7 @@ use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
+use reth_rpc_types_compat::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
@@ -230,6 +231,37 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     }
 }
 
+impl From<TransactionConversionError> for EthApiError {
+    fn from(_: TransactionConversionError) -> Self {
+        Self::TransactionConversionError
+    }
+}
+
+impl From<EthTxEnvError> for EthApiError {
+    fn from(value: EthTxEnvError) -> Self {
+        match value {
+            EthTxEnvError::CallFees(CallFeesError::BlobTransactionMissingBlobHashes) => {
+                Self::InvalidTransaction(
+                    RpcInvalidTransactionError::BlobTransactionMissingBlobHashes,
+                )
+            }
+            EthTxEnvError::CallFees(CallFeesError::FeeCapTooLow) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::FeeCapTooLow)
+            }
+            EthTxEnvError::CallFees(CallFeesError::ConflictingFeeFieldsInRequest) => {
+                Self::ConflictingFeeFieldsInRequest
+            }
+            EthTxEnvError::CallFees(CallFeesError::TipAboveFeeCap) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::TipAboveFeeCap)
+            }
+            EthTxEnvError::CallFees(CallFeesError::TipVeryHigh) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::TipVeryHigh)
+            }
+            EthTxEnvError::Input(err) => Self::TransactionInputError(err),
+        }
+    }
+}
+
 #[cfg(feature = "js-tracer")]
 impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
     fn from(error: revm_inspectors::tracing::js::JsInspectorError) -> Self {
@@ -381,6 +413,9 @@ pub enum RpcInvalidTransactionError {
     /// Thrown if the transaction gas exceeds the limit
     #[error("intrinsic gas too high")]
     GasTooHigh,
+    /// Thrown if the transaction gas limit exceeds the maximum
+    #[error("gas limit too high")]
+    GasLimitTooHigh,
     /// Thrown if a transaction is not supported in the current network configuration.
     #[error("transaction type not supported")]
     TxTypeNotSupported,
@@ -580,7 +615,11 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::Eip2930NotSupported |
             InvalidTransaction::Eip1559NotSupported |
             InvalidTransaction::Eip4844NotSupported |
-            InvalidTransaction::Eip7702NotSupported => Self::TxTypeNotSupported,
+            InvalidTransaction::Eip7702NotSupported |
+            InvalidTransaction::Eip7873NotSupported => Self::TxTypeNotSupported,
+            InvalidTransaction::Eip7873MissingTarget => {
+                Self::other(internal_rpc_err(err.to_string()))
+            }
         }
     }
 }
@@ -613,6 +652,7 @@ impl From<InvalidTransactionError> for RpcInvalidTransactionError {
             InvalidTransactionError::TipAboveFeeCap => Self::TipAboveFeeCap,
             InvalidTransactionError::FeeCapTooLow => Self::FeeCapTooLow,
             InvalidTransactionError::SignerAccountHasBytecode => Self::SenderNoEOA,
+            InvalidTransactionError::GasLimitTooHigh => Self::GasLimitTooHigh,
         }
     }
 }

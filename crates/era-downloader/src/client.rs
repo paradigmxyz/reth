@@ -1,11 +1,15 @@
+use crate::BLOCKS_PER_FILE;
+use alloy_primitives::{hex, hex::ToHexExt, BlockNumber};
 use bytes::Bytes;
-use eyre::OptionExt;
+use eyre::{eyre, OptionExt};
 use futures_util::{stream::StreamExt, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl, Url};
+use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
     fs::{self, File},
     io::{self, AsyncBufReadExt, AsyncWriteExt},
+    join, try_join,
 };
 
 /// Accesses the network over HTTP.
@@ -38,12 +42,23 @@ pub struct EraClient<Http> {
     client: Http,
     url: Url,
     folder: Box<Path>,
+    start_from: Option<u64>,
 }
 
 impl<Http: HttpClient + Clone> EraClient<Http> {
+    const CHECKSUMS: &'static str = "checksums.txt";
+
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
     pub const fn new(client: Http, url: Url, folder: Box<Path>) -> Self {
-        Self { client, url, folder }
+        Self { client, url, folder, start_from: None }
+    }
+
+    /// Overrides the starting ERA file based on `block_number`.
+    ///
+    /// The normal behavior is that the index is recovered based on files contained in the `folder`.
+    pub const fn start_from(mut self, block_number: BlockNumber) -> Self {
+        self.start_from.replace(block_number / BLOCKS_PER_FILE);
+        self
     }
 
     /// Performs a GET request on `url` and stores the response body into a file located within
@@ -60,11 +75,50 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
             .ok_or_eyre("empty path segments")?;
         let path = path.join(file_name);
 
-        let mut stream = client.get(url).await?;
-        let mut file = File::create(&path).await?;
+        let number =
+            self.file_name_to_number(file_name).ok_or_eyre("Cannot parse number from file name")?;
 
-        while let Some(item) = stream.next().await {
-            io::copy(&mut item?.as_ref(), &mut file).await?;
+        let mut tries = 1..3;
+        let mut actual_checksum: eyre::Result<_>;
+        loop {
+            actual_checksum = async {
+                let mut file = File::create(&path).await?;
+                let mut stream = client.get(url.clone()).await?;
+                let mut hasher = Sha256::new();
+
+                while let Some(item) = stream.next().await.transpose()? {
+                    io::copy(&mut item.as_ref(), &mut file).await?;
+                    hasher.update(item);
+                }
+
+                Ok(hasher.finalize().to_vec())
+            }
+            .await;
+
+            if actual_checksum.is_ok() || tries.next().is_none() {
+                break;
+            }
+        }
+
+        let actual_checksum = actual_checksum?;
+
+        let file = File::open(self.folder.join(Self::CHECKSUMS)).await?;
+        let reader = io::BufReader::new(file);
+        let mut lines = reader.lines();
+
+        for _ in 0..number {
+            lines.next_line().await?;
+        }
+        let expected_checksum =
+            lines.next_line().await?.ok_or_else(|| eyre!("Missing hash for number {number}"))?;
+        let expected_checksum = hex::decode(expected_checksum)?;
+
+        if actual_checksum != expected_checksum {
+            return Err(eyre!(
+                "Checksum mismatch, got: {}, expected: {}",
+                actual_checksum.encode_hex(),
+                expected_checksum.encode_hex()
+            ));
         }
 
         Ok(path.into_boxed_path())
@@ -72,6 +126,10 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
 
     /// Recovers index of file following the latest downloaded file from a different run.
     pub async fn recover_index(&self) -> u64 {
+        if let Some(block_number) = self.start_from {
+            return block_number;
+        }
+
         let mut max = None;
 
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
@@ -99,25 +157,56 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let mut count = 0usize;
 
         if let Ok(mut dir) = fs::read_dir(&self.folder).await {
-            while let Ok(Some(_)) = dir.next_entry().await {
-                count += 1;
+            while let Ok(Some(entry)) = dir.next_entry().await {
+                if entry.path().extension() == Some("era1".as_ref()) {
+                    count += 1;
+                }
             }
         }
 
-        count.saturating_sub(2)
+        count
     }
 
     /// Fetches the list of ERA1 files from `url` and stores it in a file located within `folder`.
     pub async fn fetch_file_list(&self) -> eyre::Result<()> {
-        let mut stream = self.client.get(self.url.clone()).await?;
-        let path = self.folder.to_path_buf().join("index.html");
-        let mut file = File::create(&path).await?;
+        let (mut index, mut checksums) = try_join!(
+            self.client.get(self.url.clone()),
+            self.client.get(self.url.clone().join(Self::CHECKSUMS)?),
+        )?;
 
-        while let Some(item) = stream.next().await {
-            io::copy(&mut item?.as_ref(), &mut file).await?;
+        let index_path = self.folder.to_path_buf().join("index.html");
+        let checksums_path = self.folder.to_path_buf().join(Self::CHECKSUMS);
+
+        let (mut index_file, mut checksums_file) =
+            try_join!(File::create(&index_path), File::create(&checksums_path))?;
+
+        loop {
+            let (index, checksums) = join!(index.next(), checksums.next());
+            let (index, checksums) = (index.transpose()?, checksums.transpose()?);
+
+            if index.is_none() && checksums.is_none() {
+                break;
+            }
+            let index_file = &mut index_file;
+            let checksums_file = &mut checksums_file;
+
+            try_join!(
+                async move {
+                    if let Some(index) = index {
+                        io::copy(&mut index.as_ref(), index_file).await?;
+                    }
+                    Ok::<(), eyre::Error>(())
+                },
+                async move {
+                    if let Some(checksums) = checksums {
+                        io::copy(&mut checksums.as_ref(), checksums_file).await?;
+                    }
+                    Ok::<(), eyre::Error>(())
+                },
+            )?;
         }
 
-        let file = File::open(&path).await?;
+        let file = File::open(&index_path).await?;
         let reader = io::BufReader::new(file);
         let mut lines = reader.lines();
 

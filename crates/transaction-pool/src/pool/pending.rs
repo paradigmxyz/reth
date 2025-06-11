@@ -132,11 +132,12 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// # Panics
     ///
     /// if the transaction is already included
-    pub(crate) fn best_with_unlocked(
+    pub(crate) fn best_with_unlocked_and_attributes(
         &self,
         unlocked: Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
         base_fee: u64,
-    ) -> BestTransactions<T> {
+        base_fee_per_blob_gas: u64,
+    ) -> BestTransactionsWithFees<T> {
         let mut best = self.best();
         let mut submission_id = self.submission_id;
         for tx in unlocked {
@@ -151,7 +152,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
             best.all.insert(tx_id, transaction);
         }
 
-        best
+        BestTransactionsWithFees { best, base_fee, base_fee_per_blob_gas }
     }
 
     /// Returns an iterator over all transactions in the pool
@@ -521,11 +522,18 @@ impl<T: TransactionOrdering> PendingPool<T> {
 
     /// Get transactions by sender
     pub(crate) fn get_txs_by_sender(&self, sender: SenderId) -> Vec<TransactionId> {
+        self.iter_txs_by_sender(sender).copied().collect()
+    }
+
+    /// Returns an iterator over all transaction with the sender id
+    pub(crate) fn iter_txs_by_sender(
+        &self,
+        sender: SenderId,
+    ) -> impl Iterator<Item = &TransactionId> + '_ {
         self.by_id
             .range((sender.start_bound(), Unbounded))
             .take_while(move |(other, _)| sender == other.sender)
-            .map(|(tx_id, _)| *tx_id)
-            .collect()
+            .map(|(tx_id, _)| tx_id)
     }
 
     /// Retrieves a transaction with the given ID from the pool, if it exists.

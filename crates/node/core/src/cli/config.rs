@@ -1,9 +1,14 @@
 //! Config traits for various node components.
 
+use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M;
 use alloy_primitives::Bytes;
+use reth_chainspec::{Chain, ChainKind, NamedChain};
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
 use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
+
+/// 60M gas limit
+const ETHEREUM_BLOCK_GAS_LIMIT_60M: u64 = 60_000_000;
 
 /// A trait that provides payload builder settings.
 ///
@@ -25,10 +30,24 @@ pub trait PayloadBuilderConfig {
     fn deadline(&self) -> Duration;
 
     /// Target gas limit for built blocks.
-    fn gas_limit(&self) -> u64;
+    fn gas_limit(&self) -> Option<u64>;
 
     /// Maximum number of tasks to spawn for building a payload.
     fn max_payload_tasks(&self) -> usize;
+
+    /// Returns the configured gas limit if set, or a chain-specific default.
+    fn gas_limit_for(&self, chain: Chain) -> u64 {
+        if let Some(limit) = self.gas_limit() {
+            return limit;
+        }
+
+        match chain.kind() {
+            ChainKind::Named(
+                NamedChain::Mainnet | NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi,
+            ) => ETHEREUM_BLOCK_GAS_LIMIT_60M,
+            _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,
+        }
+    }
 }
 
 /// A trait that represents the configured network and can be used to apply additional configuration

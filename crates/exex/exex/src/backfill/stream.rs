@@ -6,7 +6,10 @@ use futures::{
     StreamExt,
 };
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::{BlockExecutionError, BlockExecutionOutput, BlockExecutorProvider};
+use reth_evm::{
+    execute::{BlockExecutionError, BlockExecutionOutput},
+    ConfigureEvm,
+};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{BlockReader, Chain, StateProviderFactory};
@@ -50,7 +53,7 @@ type BatchBlockStreamItem<N = EthPrimitives> = Chain<N>;
 /// processed asynchronously but in order within a specified range.
 #[derive(Debug)]
 pub struct StreamBackfillJob<E, P, T> {
-    executor: E,
+    evm_config: E,
     provider: P,
     prune_modes: PruneModes,
     range: RangeInclusive<BlockNumber>,
@@ -115,7 +118,7 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, SingleBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
     type Item = BackfillJobResult<SingleBlockStreamItem<E::Primitives>>;
@@ -134,7 +137,7 @@ where
             // Spawn a new task for that block
             debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?block_number, "Spawning new single block backfill task");
             let job = Box::new(SingleBlockBackfillJob {
-                executor: this.executor.clone(),
+                evm_config: this.evm_config.clone(),
                 provider: this.provider.clone(),
                 range: block_number..=block_number,
                 stream_parallelism: this.parallelism,
@@ -148,7 +151,7 @@ where
 
 impl<E, P> Stream for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider<Primitives: NodePrimitives<Block = P::Block>> + Clone + 'static,
+    E: ConfigureEvm<Primitives: NodePrimitives<Block = P::Block>> + 'static,
     P: BlockReader + StateProviderFactory + Clone + Unpin + 'static,
 {
     type Item = BackfillJobResult<BatchBlockStreamItem<E::Primitives>>;
@@ -173,7 +176,7 @@ where
                 // Spawn a new task for that range
                 debug!(target: "exex::backfill", tasks = %this.tasks.len(), ?range, "Spawning new block batch backfill task");
                 let job = Box::new(BackfillJob {
-                    executor: this.executor.clone(),
+                    evm_config: this.evm_config.clone(),
                     provider: this.provider.clone(),
                     prune_modes: this.prune_modes.clone(),
                     thresholds: this.thresholds.clone(),
@@ -200,7 +203,7 @@ where
 impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, SingleBlockStreamItem> {
     fn from(job: SingleBlockBackfillJob<E, P>) -> Self {
         Self {
-            executor: job.executor,
+            evm_config: job.evm_config,
             provider: job.provider,
             prune_modes: PruneModes::default(),
             range: job.range,
@@ -214,12 +217,12 @@ impl<E, P> From<SingleBlockBackfillJob<E, P>> for StreamBackfillJob<E, P, Single
 
 impl<E, P> From<BackfillJob<E, P>> for StreamBackfillJob<E, P, BatchBlockStreamItem<E::Primitives>>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     fn from(job: BackfillJob<E, P>) -> Self {
         let batch_size = job.thresholds.max_blocks.map_or(DEFAULT_BATCH_SIZE, |max| max as usize);
         Self {
-            executor: job.executor,
+            evm_config: job.evm_config,
             provider: job.provider,
             prune_modes: job.prune_modes,
             range: job.range,
@@ -244,7 +247,7 @@ mod tests {
     };
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory_with_chain_spec,
@@ -262,7 +265,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthExecutorProvider::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;
@@ -299,7 +302,7 @@ mod tests {
 
         let chain_spec = chain_spec(address);
 
-        let executor = EthExecutorProvider::ethereum(chain_spec.clone());
+        let executor = EthEvmConfig::ethereum(chain_spec.clone());
         let provider_factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
         init_genesis(&provider_factory)?;
         let blockchain_db = BlockchainProvider::new(provider_factory.clone())?;

@@ -55,6 +55,14 @@ pub struct RollupArgs {
         default_value_t = SafetyLevel::CrossUnsafe,
     )]
     pub supervisor_safety_level: SafetyLevel,
+
+    /// Optional headers to use when connecting to the sequencer.
+    #[arg(long = "rollup.sequencer-headers", requires = "sequencer")]
+    pub sequencer_headers: Vec<String>,
+
+    /// Minimum suggested priority fee (tip) in wei, default `1_000_000`
+    #[arg(long, default_value_t = 1_000_000)]
+    pub min_suggested_priority_fee: u64,
 }
 
 impl Default for RollupArgs {
@@ -68,6 +76,8 @@ impl Default for RollupArgs {
             enable_tx_conditional: false,
             supervisor_http: DEFAULT_SUPERVISOR_URL.to_string(),
             supervisor_safety_level: SafetyLevel::CrossUnsafe,
+            sequencer_headers: Vec::new(),
+            min_suggested_priority_fee: 1_000_000,
         }
     }
 }

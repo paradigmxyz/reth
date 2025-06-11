@@ -19,6 +19,7 @@
       - [`reth db clear static-file`](./reth/db/clear/static-file.md)
     - [`reth db version`](./reth/db/version.md)
     - [`reth db path`](./reth/db/path.md)
+  - [`reth download`](./reth/download.md)
   - [`reth stage`](./reth/stage.md)
     - [`reth stage run`](./reth/stage/run.md)
     - [`reth stage drop`](./reth/stage/drop.md)

@@ -5,7 +5,10 @@ use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
-use alloy_evm::{block::ExecutableTx, Evm, EvmEnv, EvmFactory};
+use alloy_evm::{
+    block::{CommitChanges, ExecutableTx},
+    Evm, EvmEnv, EvmFactory,
+};
 use alloy_primitives::B256;
 use core::fmt::Debug;
 pub use reth_execution_errors::{
@@ -129,36 +132,6 @@ pub trait Executor<DB: Database>: Sized {
     fn size_hint(&self) -> usize;
 }
 
-/// A type that can create a new executor for block execution.
-pub trait BlockExecutorProvider: Clone + Debug + Send + Sync + Unpin + 'static {
-    /// Receipt type.
-    type Primitives: NodePrimitives;
-
-    /// An executor that can execute a single block given a database.
-    ///
-    /// # Verification
-    ///
-    /// The on [`Executor::execute`] the executor is expected to validate the execution output of
-    /// the input, this includes:
-    /// - Cumulative gas used must match the input's gas used.
-    /// - Receipts must match the input's receipts root.
-    ///
-    /// It is not expected to validate the state trie root, this must be done by the caller using
-    /// the returned state.
-    type Executor<DB: Database>: Executor<
-        DB,
-        Primitives = Self::Primitives,
-        Error = BlockExecutionError,
-    >;
-
-    /// Creates a new executor for single block execution.
-    ///
-    /// This is used to execute a single block and get the changed state.
-    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
-    where
-        DB: Database;
-}
-
 /// Helper type for the output of executing a block.
 #[derive(Debug, Clone)]
 pub struct ExecuteOutput<R> {
@@ -237,19 +210,35 @@ pub trait BlockBuilder {
     /// Invokes [`BlockExecutor::apply_pre_execution_changes`].
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError>;
 
+    /// Invokes [`BlockExecutor::execute_transaction_with_commit_condition`] and saves the
+    /// transaction in internal state only if the transaction was committed.
+    fn execute_transaction_with_commit_condition(
+        &mut self,
+        tx: impl ExecutorTx<Self::Executor>,
+        f: impl FnOnce(
+            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
+        ) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError>;
+
     /// Invokes [`BlockExecutor::execute_transaction_with_result_closure`] and saves the
     /// transaction in internal state.
     fn execute_transaction_with_result_closure(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
         f: impl FnOnce(&ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>),
-    ) -> Result<u64, BlockExecutionError>;
+    ) -> Result<u64, BlockExecutionError> {
+        self.execute_transaction_with_commit_condition(tx, |res| {
+            f(res);
+            CommitChanges::Yes
+        })
+        .map(Option::unwrap_or_default)
+    }
 
     /// Invokes [`BlockExecutor::execute_transaction`] and saves the transaction in
     /// internal state.
     fn execute_transaction(
         &mut self,
-        tx: Recovered<TxTy<Self::Primitives>>,
+        tx: impl ExecutorTx<Self::Executor>,
     ) -> Result<u64, BlockExecutionError> {
         self.execute_transaction_with_result_closure(tx, |_| ())
     }
@@ -346,15 +335,21 @@ where
         self.executor.apply_pre_execution_changes()
     }
 
-    fn execute_transaction_with_result_closure(
+    fn execute_transaction_with_commit_condition(
         &mut self,
         tx: impl ExecutorTx<Self::Executor>,
-        f: impl FnOnce(&ExecutionResult<<F::EvmFactory as EvmFactory>::HaltReason>),
-    ) -> Result<u64, BlockExecutionError> {
-        let gas_used =
-            self.executor.execute_transaction_with_result_closure(tx.as_executable(), f)?;
-        self.transactions.push(tx.into_recovered());
-        Ok(gas_used)
+        f: impl FnOnce(
+            &ExecutionResult<<<Self::Executor as BlockExecutor>::Evm as Evm>::HaltReason>,
+        ) -> CommitChanges,
+    ) -> Result<Option<u64>, BlockExecutionError> {
+        if let Some(gas_used) =
+            self.executor.execute_transaction_with_commit_condition(tx.as_executable(), f)?
+        {
+            self.transactions.push(tx.into_recovered());
+            Ok(Some(gas_used))
+        } else {
+            Ok(None)
+        }
     }
 
     fn finish(
@@ -405,44 +400,6 @@ where
     }
 }
 
-impl<F> Clone for BasicBlockExecutorProvider<F>
-where
-    F: Clone,
-{
-    fn clone(&self) -> Self {
-        Self { strategy_factory: self.strategy_factory.clone() }
-    }
-}
-
-/// A generic block executor provider that can create executors using a strategy factory.
-#[derive(Debug)]
-pub struct BasicBlockExecutorProvider<F> {
-    strategy_factory: F,
-}
-
-impl<F> BasicBlockExecutorProvider<F> {
-    /// Creates a new `BasicBlockExecutorProvider` with the given strategy factory.
-    pub const fn new(strategy_factory: F) -> Self {
-        Self { strategy_factory }
-    }
-}
-
-impl<F> BlockExecutorProvider for BasicBlockExecutorProvider<F>
-where
-    F: ConfigureEvm + 'static,
-{
-    type Primitives = F::Primitives;
-
-    type Executor<DB: Database> = BasicBlockExecutor<F, DB>;
-
-    fn executor<DB>(&self, db: DB) -> Self::Executor<DB>
-    where
-        DB: Database,
-    {
-        BasicBlockExecutor::new(self.strategy_factory.clone(), db)
-    }
-}
-
 /// A generic block executor that uses a [`BlockExecutor`] to
 /// execute blocks.
 #[expect(missing_debug_implementations)]
@@ -475,13 +432,10 @@ where
         block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
-        let mut strategy = self.strategy_factory.executor_for_block(&mut self.db, block);
-
-        strategy.apply_pre_execution_changes()?;
-        for tx in block.transactions_recovered() {
-            strategy.execute_transaction(tx)?;
-        }
-        let result = strategy.apply_post_execution_changes()?;
+        let result = self
+            .strategy_factory
+            .executor_for_block(&mut self.db, block)
+            .execute_block(block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
@@ -496,16 +450,11 @@ where
     where
         H: OnStateHook + 'static,
     {
-        let mut strategy = self
+        let result = self
             .strategy_factory
             .executor_for_block(&mut self.db, block)
-            .with_state_hook(Some(Box::new(state_hook)));
-
-        strategy.apply_pre_execution_changes()?;
-        for tx in block.transactions_recovered() {
-            strategy.execute_transaction(tx)?;
-        }
-        let result = strategy.apply_post_execution_changes()?;
+            .with_state_hook(Some(Box::new(state_hook)))
+            .execute_block(block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
@@ -538,11 +487,8 @@ mod tests {
     #[derive(Clone, Debug, Default)]
     struct TestExecutorProvider;
 
-    impl BlockExecutorProvider for TestExecutorProvider {
-        type Primitives = EthPrimitives;
-        type Executor<DB: Database> = TestExecutor<DB>;
-
-        fn executor<DB>(&self, _db: DB) -> Self::Executor<DB>
+    impl TestExecutorProvider {
+        fn executor<DB>(&self, _db: DB) -> TestExecutor<DB>
         where
             DB: Database,
         {

@@ -33,8 +33,39 @@ pub struct TrieWalker<C> {
 }
 
 impl<C> TrieWalker<C> {
+    /// Constructs a new `TrieWalker` for the state trie from existing stack and a cursor.
+    pub fn state_trie_from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
+        Self::from_stack(
+            cursor,
+            stack,
+            changes,
+            #[cfg(feature = "metrics")]
+            crate::TrieType::State,
+        )
+    }
+
+    /// Constructs a new `TrieWalker` for the storage trie from existing stack and a cursor.
+    pub fn storage_trie_from_stack(
+        cursor: C,
+        stack: Vec<CursorSubNode>,
+        changes: PrefixSet,
+    ) -> Self {
+        Self::from_stack(
+            cursor,
+            stack,
+            changes,
+            #[cfg(feature = "metrics")]
+            crate::TrieType::Storage,
+        )
+    }
+
     /// Constructs a new `TrieWalker` from existing stack and a cursor.
-    pub fn from_stack(cursor: C, stack: Vec<CursorSubNode>, changes: PrefixSet) -> Self {
+    fn from_stack(
+        cursor: C,
+        stack: Vec<CursorSubNode>,
+        changes: PrefixSet,
+        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
+    ) -> Self {
         let mut this = Self {
             cursor,
             changes,
@@ -42,7 +73,7 @@ impl<C> TrieWalker<C> {
             can_skip_current_node: false,
             removed_keys: None,
             #[cfg(feature = "metrics")]
-            metrics: WalkerMetrics::default(),
+            metrics: WalkerMetrics::new(trie_type),
         };
         this.update_skip_node();
         this
@@ -86,9 +117,17 @@ impl<C> TrieWalker<C> {
         self.stack.last().map(|n| n.full_key())
     }
 
-    /// Returns the current hash in the trie if any.
+    /// Returns the current hash in the trie, if any.
     pub fn hash(&self) -> Option<B256> {
         self.stack.last().and_then(|n| n.hash())
+    }
+
+    /// Returns the current hash in the trie, if any.
+    ///
+    /// Differs from [`Self::hash`] in that it returns `None` if the subnode is positioned at the
+    /// child without a hash mask bit set. [`Self::hash`] panics in that case.
+    pub fn maybe_hash(&self) -> Option<B256> {
+        self.stack.last().and_then(|n| n.maybe_hash())
     }
 
     /// Indicates whether the children of the current node are present in the trie.
@@ -128,8 +167,32 @@ impl<C> TrieWalker<C> {
 }
 
 impl<C: TrieCursor> TrieWalker<C> {
+    /// Constructs a new [`TrieWalker`] for the state trie.
+    pub fn state_trie(cursor: C, changes: PrefixSet) -> Self {
+        Self::new(
+            cursor,
+            changes,
+            #[cfg(feature = "metrics")]
+            crate::TrieType::State,
+        )
+    }
+
+    /// Constructs a new [`TrieWalker`] for the storage trie.
+    pub fn storage_trie(cursor: C, changes: PrefixSet) -> Self {
+        Self::new(
+            cursor,
+            changes,
+            #[cfg(feature = "metrics")]
+            crate::TrieType::Storage,
+        )
+    }
+
     /// Constructs a new `TrieWalker`, setting up the initial state of the stack and cursor.
-    pub fn new(cursor: C, changes: PrefixSet) -> Self {
+    fn new(
+        cursor: C,
+        changes: PrefixSet,
+        #[cfg(feature = "metrics")] trie_type: crate::TrieType,
+    ) -> Self {
         // Initialize the walker with a single empty stack element.
         let mut this = Self {
             cursor,
@@ -138,7 +201,7 @@ impl<C: TrieCursor> TrieWalker<C> {
             can_skip_current_node: false,
             removed_keys: None,
             #[cfg(feature = "metrics")]
-            metrics: WalkerMetrics::default(),
+            metrics: WalkerMetrics::new(trie_type),
         };
 
         // Set up the root node of the trie in the stack, if it exists.
@@ -188,6 +251,8 @@ impl<C: TrieCursor> TrieWalker<C> {
     fn node(&mut self, exact: bool) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         let key = self.key().expect("key must exist").clone();
         let entry = if exact { self.cursor.seek_exact(key)? } else { self.cursor.seek(key)? };
+        #[cfg(feature = "metrics")]
+        self.metrics.inc_branch_nodes_seeked();
 
         if let Some((_, node)) = &entry {
             assert!(!node.state_mask.is_empty());

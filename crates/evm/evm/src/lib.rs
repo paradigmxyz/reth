@@ -17,13 +17,21 @@
 
 extern crate alloc;
 
-use crate::execute::BasicBlockBuilder;
+use crate::execute::{BasicBlockBuilder, Executor};
 use alloc::vec::Vec;
-use alloy_eips::{eip2930::AccessList, eip4895::Withdrawals};
-use alloy_evm::block::{BlockExecutorFactory, BlockExecutorFor};
+use alloy_eips::{
+    eip2718::{EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
+    eip2930::AccessList,
+    eip4895::Withdrawals,
+};
+use alloy_evm::{
+    block::{BlockExecutorFactory, BlockExecutorFor},
+    precompiles::PrecompilesMap,
+};
 use alloy_primitives::{Address, B256};
 use core::{error::Error, fmt::Debug};
-use execute::{BlockAssembler, BlockBuilder};
+use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
@@ -109,6 +117,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
             Tx: TransactionEnv
                     + FromRecoveredTx<TxTy<Self::Primitives>>
                     + FromTxWithEncoded<TxTy<Self::Primitives>>,
+            Precompiles = PrecompilesMap,
         >,
     >;
 
@@ -270,6 +279,24 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         let ctx = self.context_for_next_block(parent, attributes);
         Ok(self.create_block_builder(evm, parent, ctx))
     }
+
+    /// Returns a new [`BasicBlockExecutor`].
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn executor<DB: Database>(
+        &self,
+        db: DB,
+    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
+        BasicBlockExecutor::new(self, db)
+    }
+
+    /// Returns a new [`BasicBlockExecutor`].
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn batch_executor<DB: Database>(
+        &self,
+        db: DB,
+    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
+        BasicBlockExecutor::new(self, db)
+    }
 }
 
 /// Represents additional attributes required to configure the next block.
@@ -342,6 +369,12 @@ impl TransactionEnv for TxEnv {
 
     fn set_access_list(&mut self, access_list: AccessList) {
         self.access_list = access_list;
+
+        if self.tx_type == LEGACY_TX_TYPE_ID {
+            // if this was previously marked as legacy tx, this must be upgraded to eip2930 with an
+            // accesslist
+            self.tx_type = EIP2930_TX_TYPE_ID;
+        }
     }
 }
 

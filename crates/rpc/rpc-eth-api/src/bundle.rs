@@ -55,7 +55,7 @@ pub trait EthBundleApi {
     /// The `eth_sendPrivateRawTransaction` method can be used to send private transactions to
     /// the RPC endpoint. Private transactions are protected from frontrunning and kept
     /// private until included in a block. A request to this endpoint needs to follow
-    /// the standard eth_sendRawTransaction
+    /// the standard `eth_sendRawTransaction`
     #[method(name = "sendPrivateRawTransaction")]
     async fn send_private_raw_transaction(&self, bytes: Bytes) -> jsonrpsee::core::RpcResult<B256>;
 
@@ -63,7 +63,7 @@ pub trait EthBundleApi {
     /// submitted for future blocks.
     ///
     /// A transaction can only be cancelled if the request is signed by the same key as the
-    /// eth_sendPrivateTransaction call submitting the transaction in first place.
+    /// `eth_sendPrivateTransaction` call submitting the transaction in first place.
     #[method(name = "cancelPrivateTransaction")]
     async fn cancel_private_transaction(
         &self,

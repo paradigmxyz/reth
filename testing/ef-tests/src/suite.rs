@@ -21,7 +21,7 @@ pub trait Suite {
     /// - `BlockchainTests/TransitionTests`
     fn suite_name(&self) -> String;
 
-    /// Load an run each contained test case.
+    /// Load and run each contained test case.
     ///
     /// # Note
     ///

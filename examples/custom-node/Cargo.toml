@@ -8,17 +8,13 @@ license.workspace = true
 [dependencies]
 # reth
 reth-chain-state.workspace = true
-
 reth-codecs.workspace = true
-
 reth-network-peers.workspace = true
-
 reth-node-builder.workspace = true
 reth-optimism-forks.workspace = true
-
-reth-op = { workspace = true, features = ["node"] }
+reth-db-api.workspace = true
+reth-op = { workspace = true, features = ["node", "pool"] }
 reth-payload-builder.workspace = true
-
 reth-rpc-api.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-ethereum = { workspace = true, features = ["node-api", "network", "evm", "pool"] }
@@ -35,6 +31,7 @@ alloy-genesis.workspace = true
 alloy-op-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
+alloy-serde.workspace = true
 alloy-rpc-types-engine.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
@@ -47,12 +44,17 @@ eyre.workspace = true
 jsonrpsee.workspace = true
 serde.workspace = true
 
+modular-bitfield.workspace = true
+
+[dev-dependencies]
+test-fuzz.workspace = true
+
 [features]
-default = []
 arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
+    "alloy-serde/arbitrary",
     "op-alloy-consensus/arbitrary",
     "op-alloy-rpc-types-engine/arbitrary",
     "reth-codecs/arbitrary",
@@ -60,4 +62,7 @@ arbitrary = [
     "revm-primitives/arbitrary",
     "revm/arbitrary",
     "reth-ethereum/arbitrary",
+    "alloy-rpc-types-engine/arbitrary",
+    "reth-db-api/arbitrary",
 ]
+default = []

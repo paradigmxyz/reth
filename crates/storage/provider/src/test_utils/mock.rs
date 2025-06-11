@@ -3,10 +3,10 @@ use crate::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     ChainSpecProvider, ChangeSetReader, EthStorage, HeaderProvider, ReceiptProviderIdExt,
     StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::{constants::EMPTY_ROOT_HASH, transaction::TransactionMeta, Header};
-use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
     TxHash, TxNumber, B256, U256,
@@ -24,13 +24,14 @@ use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{
     Account, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    SignerRecoverable,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, DBProvider, DatabaseProviderFactory, HashedPostStateProvider,
-    NodePrimitivesProvider, OmmersProvider, StageCheckpointReader, StateCommitmentProvider,
-    StateProofProvider, StorageRootProvider,
+    NodePrimitivesProvider, StageCheckpointReader, StateCommitmentProvider, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -56,6 +57,8 @@ pub struct MockEthProvider<
     pub blocks: Arc<Mutex<HashMap<B256, T::Block>>>,
     /// Local header store
     pub headers: Arc<Mutex<HashMap<B256, Header>>>,
+    /// Local receipt store indexed by block number
+    pub receipts: Arc<Mutex<HashMap<BlockNumber, Vec<Receipt>>>>,
     /// Local account store
     pub accounts: Arc<Mutex<HashMap<Address, ExtendedAccount>>>,
     /// Local chain spec
@@ -74,6 +77,7 @@ where
         Self {
             blocks: self.blocks.clone(),
             headers: self.headers.clone(),
+            receipts: self.receipts.clone(),
             accounts: self.accounts.clone(),
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
@@ -89,6 +93,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
         Self {
             blocks: Default::default(),
             headers: Default::default(),
+            receipts: Default::default(),
             accounts: Default::default(),
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
@@ -140,6 +145,18 @@ impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSp
         }
     }
 
+    /// Add receipts to local receipt store
+    pub fn add_receipts(&self, block_number: BlockNumber, receipts: Vec<Receipt>) {
+        self.receipts.lock().insert(block_number, receipts);
+    }
+
+    /// Add multiple receipts to local receipt store
+    pub fn extend_receipts(&self, iter: impl IntoIterator<Item = (BlockNumber, Vec<Receipt>)>) {
+        for (block_number, receipts) in iter {
+            self.add_receipts(block_number, receipts);
+        }
+    }
+
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
@@ -153,6 +170,7 @@ impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSp
         MockEthProvider {
             blocks: self.blocks,
             headers: self.headers,
+            receipts: self.receipts,
             accounts: self.accounts,
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
@@ -500,9 +518,22 @@ where
 
     fn receipts_by_block(
         &self,
-        _block: BlockHashOrNumber,
+        block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        Ok(None)
+        let receipts_lock = self.receipts.lock();
+
+        match block {
+            BlockHashOrNumber::Hash(hash) => {
+                // Find block number by hash first
+                let headers_lock = self.headers.lock();
+                if let Some(header) = headers_lock.get(&hash) {
+                    Ok(receipts_lock.get(&header.number).cloned())
+                } else {
+                    Ok(None)
+                }
+            }
+            BlockHashOrNumber::Number(number) => Ok(receipts_lock.get(&number).cloned()),
+        }
     }
 
     fn receipts_by_tx_range(
@@ -510,6 +541,29 @@ where
         _range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>> {
         Ok(vec![])
+    }
+
+    fn receipts_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        let receipts_lock = self.receipts.lock();
+        let headers_lock = self.headers.lock();
+
+        let mut result = Vec::new();
+        for block_number in block_range {
+            // Only include blocks that exist in headers (i.e., have been added to the provider)
+            if headers_lock.values().any(|header| header.number == block_number) {
+                if let Some(block_receipts) = receipts_lock.get(&block_number) {
+                    result.push(block_receipts.clone());
+                } else {
+                    // If block exists but no receipts found, add empty vec
+                    result.push(vec![]);
+                }
+            }
+        }
+
+        Ok(result)
     }
 }
 
@@ -615,11 +669,7 @@ impl<ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(None)
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
@@ -690,13 +740,6 @@ where
         match self.block_by_id(id)? {
             None => Ok(None),
             Some(block) => Ok(Some(block.header)),
-        }
-    }
-
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Header>>> {
-        match id {
-            BlockId::Number(num) => self.ommers_by_number_or_tag(num),
-            BlockId::Hash(hash) => self.ommers(BlockHashOrNumber::Hash(hash.block_hash)),
         }
     }
 }
@@ -901,29 +944,6 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
     }
 }
 
-impl<T: NodePrimitives, ChainSpec: Send + Sync> WithdrawalsProvider
-    for MockEthProvider<T, ChainSpec>
-{
-    fn withdrawals_by_block(
-        &self,
-        _id: BlockHashOrNumber,
-        _timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        Ok(None)
-    }
-}
-
-impl<T, ChainSpec> OmmersProvider for MockEthProvider<T, ChainSpec>
-where
-    T: NodePrimitives,
-    ChainSpec: Send + Sync,
-    Self: HeaderProvider,
-{
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        Ok(None)
-    }
-}
-
 impl<T: NodePrimitives, ChainSpec: Send + Sync> BlockBodyIndicesProvider
     for MockEthProvider<T, ChainSpec>
 {
@@ -967,4 +987,75 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> NodePrimitivesProvider
     for MockEthProvider<T, ChainSpec>
 {
     type Primitives = T;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::BlockHash;
+    use reth_ethereum_primitives::Receipt;
+
+    #[test]
+    fn test_mock_provider_receipts() {
+        let provider = MockEthProvider::new();
+
+        let block_hash = BlockHash::random();
+        let block_number = 1u64;
+        let header = Header { number: block_number, ..Default::default() };
+
+        let receipt1 = Receipt { cumulative_gas_used: 21000, success: true, ..Default::default() };
+        let receipt2 = Receipt { cumulative_gas_used: 42000, success: true, ..Default::default() };
+        let receipts = vec![receipt1, receipt2];
+
+        provider.add_header(block_hash, header);
+        provider.add_receipts(block_number, receipts.clone());
+
+        let result = provider.receipts_by_block(block_hash.into()).unwrap();
+        assert_eq!(result, Some(receipts.clone()));
+
+        let result = provider.receipts_by_block(block_number.into()).unwrap();
+        assert_eq!(result, Some(receipts.clone()));
+
+        let range_result = provider.receipts_by_block_range(1..=1).unwrap();
+        assert_eq!(range_result, vec![receipts]);
+
+        let non_existent = provider.receipts_by_block(BlockHash::random().into()).unwrap();
+        assert_eq!(non_existent, None);
+
+        let empty_range = provider.receipts_by_block_range(10..=20).unwrap();
+        assert_eq!(empty_range, Vec::<Vec<Receipt>>::new());
+    }
+
+    #[test]
+    fn test_mock_provider_receipts_multiple_blocks() {
+        let provider = MockEthProvider::new();
+
+        let block1_hash = BlockHash::random();
+        let block2_hash = BlockHash::random();
+        let block1_number = 1u64;
+        let block2_number = 2u64;
+
+        let header1 = Header { number: block1_number, ..Default::default() };
+        let header2 = Header { number: block2_number, ..Default::default() };
+
+        let receipts1 =
+            vec![Receipt { cumulative_gas_used: 21000, success: true, ..Default::default() }];
+        let receipts2 =
+            vec![Receipt { cumulative_gas_used: 42000, success: true, ..Default::default() }];
+
+        provider.add_header(block1_hash, header1);
+        provider.add_header(block2_hash, header2);
+        provider.add_receipts(block1_number, receipts1.clone());
+        provider.add_receipts(block2_number, receipts2.clone());
+
+        let range_result = provider.receipts_by_block_range(1..=2).unwrap();
+        assert_eq!(range_result.len(), 2);
+        assert_eq!(range_result[0], receipts1);
+        assert_eq!(range_result[1], receipts2);
+
+        let partial_range = provider.receipts_by_block_range(1..=1).unwrap();
+        assert_eq!(partial_range.len(), 1);
+        assert_eq!(partial_range[0], receipts1);
+    }
 }

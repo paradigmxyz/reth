@@ -42,16 +42,23 @@ pub use invalid_block_hook::InvalidBlockHook;
 pub mod config;
 pub use config::*;
 
-/// This type defines the versioned types of the engine API.
+/// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 ///
 /// This includes the execution payload types and payload attributes that are used to trigger a
 /// payload job. Hence this trait is also [`PayloadTypes`].
+///
+/// Implementations of this type are intended to be stateless and just define the types as
+/// associated types.
+/// This type is intended for non-ethereum chains that closely mirror the ethereum engine API spec,
+/// but may have different payload, for example opstack, but structurally equivalent otherwise (same
+/// engine API RPC endpoints for example).
 pub trait EngineTypes:
     PayloadTypes<
         BuiltPayload: TryInto<Self::ExecutionPayloadEnvelopeV1>
                           + TryInto<Self::ExecutionPayloadEnvelopeV2>
                           + TryInto<Self::ExecutionPayloadEnvelopeV3>
-                          + TryInto<Self::ExecutionPayloadEnvelopeV4>,
+                          + TryInto<Self::ExecutionPayloadEnvelopeV4>
+                          + TryInto<Self::ExecutionPayloadEnvelopeV5>,
     > + DeserializeOwned
     + Serialize
 {
@@ -81,6 +88,14 @@ pub trait EngineTypes:
         + 'static;
     /// Execution Payload V4 envelope type.
     type ExecutionPayloadEnvelopeV4: DeserializeOwned
+        + Serialize
+        + Clone
+        + Unpin
+        + Send
+        + Sync
+        + 'static;
+    /// Execution Payload V5 envelope type.
+    type ExecutionPayloadEnvelopeV5: DeserializeOwned
         + Serialize
         + Clone
         + Unpin
