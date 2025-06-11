@@ -4,6 +4,7 @@ use alloy_primitives::B256;
 use mini_moka::sync::Cache;
 use parking_lot::RwLock;
 use reth_storage_errors::db::DatabaseError;
+use tracing::debug;
 use std::{collections::HashMap, sync::Arc};
 
 /// Default cache size for account trie operations.
@@ -58,16 +59,30 @@ impl TrieCursorSharedCaches {
         {
             let caches = self.storage_caches.read();
             if let Some(cache) = caches.get(&hashed_address) {
+                debug!(
+                    target: "trie::cached_cursor",
+                    "Reusing existing storage cache for address {:?}",
+                    hashed_address
+                );
                 return Arc::clone(cache);
             }
         }
 
         // Need to create - acquire write lock
         let mut caches = self.storage_caches.write();
-        caches
+        let cache = caches
             .entry(hashed_address)
-            .or_insert_with(|| Arc::new(Cache::new(DEFAULT_STORAGE_CACHE_SIZE)))
-            .clone()
+            .or_insert_with(|| {
+                debug!(
+                    target: "trie::cached_cursor",
+                    "Creating new storage cache for address {:?} with size {}",
+                    hashed_address,
+                    DEFAULT_STORAGE_CACHE_SIZE
+                );
+                Arc::new(Cache::new(DEFAULT_STORAGE_CACHE_SIZE))
+            })
+            .clone();
+        cache
     }
 }
 
@@ -102,6 +117,10 @@ impl<CF> CachedTrieCursorFactory<CF> {
 
     /// Create a new cached trie cursor factory with shared caches.
     pub fn with_shared_caches(inner: CF, shared_caches: &TrieCursorSharedCaches) -> Self {
+        debug!(
+            target: "trie::cached_cursor",
+            "Creating CachedTrieCursorFactory with shared caches"
+        );
         Self {
             inner,
             account_cache: Arc::clone(&shared_caches.account_cache),
@@ -159,12 +178,24 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            debug!(
+                target: "trie::cached_cursor",
+                "Account cursor cache hit: seek_exact(key={:?}) -> found={}",
+                key,
+                cached.is_some()
+            );
             return Ok(cached);
         }
 
-        let result = self.inner.seek_exact(key)?;
+        let result = self.inner.seek_exact(key.clone())?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        debug!(
+            target: "trie::cached_cursor",
+            "Account cursor cache miss: seek_exact(key={:?}) -> found={} (fetched from db)",
+            key,
+            result.is_some()
+        );
         Ok(result)
     }
 
@@ -176,12 +207,24 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            debug!(
+                target: "trie::cached_cursor",
+                "Account cursor cache hit: seek(key={:?}) -> found={}",
+                key,
+                cached.is_some()
+            );
             return Ok(cached);
         }
 
-        let result = self.inner.seek(key)?;
+        let result = self.inner.seek(key.clone())?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        debug!(
+            target: "trie::cached_cursor",
+            "Account cursor cache miss: seek(key={:?}) -> found={} (fetched from db)",
+            key,
+            result.is_some()
+        );
         Ok(result)
     }
 
@@ -190,12 +233,24 @@ impl<C: TrieCursor> TrieCursor for CachedAccountTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            debug!(
+                target: "trie::cached_cursor",
+                "Account cursor cache hit: next(last_key={:?}) -> found={}",
+                self.last_key,
+                cached.is_some()
+            );
             return Ok(cached);
         }
 
         let result = self.inner.next()?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        debug!(
+            target: "trie::cached_cursor",
+            "Account cursor cache miss: next(last_key={:?}) -> found={} (fetched from db)",
+            self.last_key,
+            result.is_some()
+        );
         Ok(result)
     }
 
@@ -279,12 +334,26 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            debug!(
+                target: "trie::cached_cursor",
+                "Storage cursor cache hit for addr {:?}: seek_exact(key={:?}) -> found={}",
+                self.hashed_address,
+                key,
+                cached.is_some()
+            );
             return Ok(cached);
         }
 
-        let result = self.inner.seek_exact(key)?;
+        let result = self.inner.seek_exact(key.clone())?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        debug!(
+            target: "trie::cached_cursor",
+            "Storage cursor cache miss for addr {:?}: seek_exact(key={:?}) -> found={} (fetched from db)",
+            self.hashed_address,
+            key,
+            result.is_some()
+        );
         Ok(result)
     }
 
@@ -296,12 +365,26 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            debug!(
+                target: "trie::cached_cursor",
+                "Storage cursor cache hit for addr {:?}: seek(key={:?}) -> found={}",
+                self.hashed_address,
+                key,
+                cached.is_some()
+            );
             return Ok(cached);
         }
 
-        let result = self.inner.seek(key)?;
+        let result = self.inner.seek(key.clone())?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        debug!(
+            target: "trie::cached_cursor",
+            "Storage cursor cache miss for addr {:?}: seek(key={:?}) -> found={} (fetched from db)",
+            self.hashed_address,
+            key,
+            result.is_some()
+        );
         Ok(result)
     }
 
@@ -310,12 +393,26 @@ impl<C: TrieCursor> TrieCursor for CachedStorageTrieCursor<C> {
 
         if let Some(cached) = self.cache.get(&cache_key) {
             self.last_key = cached.as_ref().map(|(nibbles, _)| nibbles.clone());
+            debug!(
+                target: "trie::cached_cursor",
+                "Storage cursor cache hit for addr {:?}: next(last_key={:?}) -> found={}",
+                self.hashed_address,
+                self.last_key,
+                cached.is_some()
+            );
             return Ok(cached);
         }
 
         let result = self.inner.next()?;
         self.last_key = result.as_ref().map(|(nibbles, _)| nibbles.clone());
         self.cache.insert(cache_key, result.clone());
+        debug!(
+            target: "trie::cached_cursor",
+            "Storage cursor cache miss for addr {:?}: next(last_key={:?}) -> found={} (fetched from db)",
+            self.hashed_address,
+            self.last_key,
+            result.is_some()
+        );
         Ok(result)
     }
 
