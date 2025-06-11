@@ -36,6 +36,7 @@ tracing = { workspace = true, features = ["attributes"] }
 auto_impl.workspace = true
 itertools.workspace = true
 mini-moka.workspace = true
+parking_lot.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

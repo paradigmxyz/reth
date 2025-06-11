@@ -17,8 +17,9 @@ use reth_provider::{
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState,
-    HashedPostStateSorted, HashedStorage, MultiProofTargets, TrieInput,
+    prefix_set::TriePrefixSetsMut, trie_cursor::TrieCursorSharedCaches, updates::TrieUpdatesSorted,
+    DecodedMultiProof, HashedPostState, HashedPostStateSorted, HashedStorage, MultiProofTargets,
+    TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
@@ -78,6 +79,8 @@ pub(super) struct MultiProofConfig<Factory> {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
+    /// Optional shared trie cursor caches.
+    pub shared_caches: Option<TrieCursorSharedCaches>,
 }
 
 impl<Factory> MultiProofConfig<Factory> {
@@ -91,7 +94,14 @@ impl<Factory> MultiProofConfig<Factory> {
             nodes_sorted: Arc::new(input.nodes.into_sorted()),
             state_sorted: Arc::new(input.state.into_sorted()),
             prefix_sets: Arc::new(input.prefix_sets),
+            shared_caches: None,
         }
+    }
+
+    /// Set the shared trie cursor caches.
+    pub(super) fn with_shared_caches(mut self, shared_caches: TrieCursorSharedCaches) -> Self {
+        self.shared_caches = Some(shared_caches);
+        self
     }
 }
 
@@ -447,15 +457,20 @@ where
                 "Starting dedicated storage proof calculation",
             );
             let start = Instant::now();
-            let result = ParallelProof::new(
+            let mut proof = ParallelProof::new(
                 config.consistent_view,
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
                 storage_proof_task_handle.clone(),
             )
-            .with_branch_node_masks(true)
-            .decoded_storage_proof(hashed_address, proof_targets);
+            .with_branch_node_masks(true);
+            
+            if let Some(ref shared_caches) = config.shared_caches {
+                proof = proof.with_shared_caches(shared_caches.clone());
+            }
+            
+            let result = proof.decoded_storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",
@@ -518,15 +533,20 @@ where
                 "Starting multiproof calculation",
             );
             let start = Instant::now();
-            let result = ParallelProof::new(
+            let mut proof = ParallelProof::new(
                 config.consistent_view,
                 config.nodes_sorted,
                 config.state_sorted,
                 config.prefix_sets,
                 storage_proof_task_handle.clone(),
             )
-            .with_branch_node_masks(true)
-            .decoded_multiproof(proof_targets);
+            .with_branch_node_masks(true);
+            
+            if let Some(ref shared_caches) = config.shared_caches {
+                proof = proof.with_shared_caches(shared_caches.clone());
+            }
+            
+            let result = proof.decoded_multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
                 target: "engine::root",

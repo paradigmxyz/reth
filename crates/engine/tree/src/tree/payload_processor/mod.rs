@@ -23,7 +23,7 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::TrieInput;
+use reth_trie::{trie_cursor::TrieCursorSharedCaches, TrieInput};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
@@ -67,6 +67,8 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// Shared trie cursor caches.
+    trie_cursor_shared_caches: TrieCursorSharedCaches,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -91,6 +93,7 @@ where
             evm_config,
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
+            trie_cursor_shared_caches: TrieCursorSharedCaches::new(),
             _marker: Default::default(),
         }
     }
@@ -153,7 +156,8 @@ where
     {
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task
-        let state_root_config = MultiProofConfig::new_from_input(consistent_view, trie_input);
+        let state_root_config = MultiProofConfig::new_from_input(consistent_view, trie_input)
+            .with_shared_caches(self.trie_cursor_shared_caches.clone());
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(

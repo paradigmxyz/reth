@@ -22,7 +22,10 @@ use reth_trie::{
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
     proof::StorageProof,
-    trie_cursor::{CachedTrieCursorFactory, InMemoryTrieCursorFactory, TrieCursorFactory},
+    trie_cursor::{
+        CachedTrieCursorFactory, InMemoryTrieCursorFactory, TrieCursorFactory,
+        TrieCursorSharedCaches,
+    },
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted, MultiProof,
@@ -54,6 +57,8 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     collect_branch_node_masks: bool,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
+    /// Optional shared trie cursor caches.
+    shared_caches: Option<TrieCursorSharedCaches>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -74,6 +79,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             prefix_sets,
             collect_branch_node_masks: false,
             storage_proof_task_handle,
+            shared_caches: None,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
@@ -82,6 +88,12 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
+        self
+    }
+
+    /// Set the shared trie cursor caches.
+    pub fn with_shared_caches(mut self, shared_caches: TrieCursorSharedCaches) -> Self {
+        self.shared_caches = Some(shared_caches);
         self
     }
 }
@@ -214,10 +226,20 @@ where
         }
 
         let provider_ro = self.view.provider_ro()?;
-        let trie_cursor_factory = CachedTrieCursorFactory::new(InMemoryTrieCursorFactory::new(
-            DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
-            &self.nodes_sorted,
-        ));
+        let trie_cursor_factory = if let Some(ref shared_caches) = self.shared_caches {
+            CachedTrieCursorFactory::with_shared_caches(
+                InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                    &self.nodes_sorted,
+                ),
+                shared_caches,
+            )
+        } else {
+            CachedTrieCursorFactory::new(InMemoryTrieCursorFactory::new(
+                DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                &self.nodes_sorted,
+            ))
+        };
         let hashed_cursor_factory = HashedPostStateCursorFactory::new(
             DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
             &self.state_sorted,
