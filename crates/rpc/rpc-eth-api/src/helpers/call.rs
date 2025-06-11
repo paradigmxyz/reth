@@ -112,6 +112,16 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             .and_then(|b| b.block_overrides.as_ref())
                             .and_then(|block| block.number)
                         {
+                            // Ensure only-increasing block number
+                            if previous_block_number >= next_block_number {
+                                return Err(EthApiError::InvalidParams(format!(
+                                    "Block number must be strictly increasing. Attempted to simulate from {} to {}",
+                                    previous_block_number, next_block_number
+                                ))
+                                .into())
+                            }
+
+                            // Fill in the gaps if present
                             let gap_block_number = previous_block_number + U256::ONE;
                             if next_block_number > gap_block_number {
                                 block_state_calls.push(SimBlock::default().with_block_overrides(
