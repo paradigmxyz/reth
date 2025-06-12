@@ -44,7 +44,7 @@ impl From<HashBuilderState> for HashBuilder {
             updated_branch_nodes: None,
             proof_retainer: None,
             rlp_buf: Vec::with_capacity(32),
-            rlp_node_cache: std::sync::Arc::new(Default::default()),
+            rlp_node_cache: None,
         }
     }
 }

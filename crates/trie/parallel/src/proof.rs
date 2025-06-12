@@ -55,7 +55,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     collect_branch_node_masks: bool,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
-    rlp_node_cache: Arc<DashMap<Nibbles, RlpNode>>,
+    rlp_node_cache: Option<Arc<DashMap<Nibbles, RlpNode>>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -76,7 +76,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             prefix_sets,
             collect_branch_node_masks: false,
             storage_proof_task_handle,
-            rlp_node_cache: Arc::default(),
+            rlp_node_cache: None,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
@@ -89,7 +89,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
     }
 
     pub fn with_rlp_node_cache(mut self, cache: Arc<DashMap<Nibbles, RlpNode>>) -> Self {
-        self.rlp_node_cache = cache;
+        self.rlp_node_cache = Some(cache);
         self
     }
 }
@@ -242,8 +242,11 @@ where
         let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_masks)
-            .with_rlp_node_cache(self.rlp_node_cache);
+            .with_updates(self.collect_branch_node_masks);
+
+        if let Some(rlp_node_cache) = self.rlp_node_cache {
+            hash_builder = hash_builder.with_rlp_node_cache(rlp_node_cache);
+        }
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
