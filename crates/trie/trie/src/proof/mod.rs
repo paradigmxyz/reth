@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
@@ -12,9 +14,10 @@ use alloy_primitives::{
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
+use dashmap::DashMap;
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
-    proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
+    proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, RlpNode, StorageMultiProof,
 };
 
 mod blinded;
@@ -35,6 +38,7 @@ pub struct Proof<T, H> {
     prefix_sets: TriePrefixSetsMut,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
+    rlp_node_cache: Option<Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>>,
 }
 
 impl<T, H> Proof<T, H> {
@@ -45,6 +49,7 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
             collect_branch_node_masks: false,
+            rlp_node_cache: None,
         }
     }
 
@@ -55,6 +60,7 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
+            rlp_node_cache: self.rlp_node_cache,
         }
     }
 
@@ -65,6 +71,7 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
+            rlp_node_cache: self.rlp_node_cache,
         }
     }
 
@@ -77,6 +84,15 @@ impl<T, H> Proof<T, H> {
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
+        self
+    }
+
+    /// Set the RLP node cache.
+    pub fn with_rlp_node_cache(
+        mut self,
+        rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+    ) -> Self {
+        self.rlp_node_cache = Some(rlp_node_cache);
         self
     }
 }
@@ -118,6 +134,10 @@ where
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
+
+        if let Some(rlp_node_cache) = self.rlp_node_cache.clone() {
+            hash_builder = hash_builder.with_rlp_node_cache(rlp_node_cache);
+        }
 
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.

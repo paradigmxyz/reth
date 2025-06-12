@@ -10359,6 +10359,7 @@ dependencies = [
  "alloy-trie",
  "auto_impl",
  "codspeed-criterion-compat",
+ "dashmap 6.1.0",
  "itertools 0.14.0",
  "metrics",
  "parking_lot",

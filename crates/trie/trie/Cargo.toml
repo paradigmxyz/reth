@@ -35,6 +35,7 @@ tracing = { workspace = true, features = ["attributes"] }
 # misc
 auto_impl.workspace = true
 itertools.workspace = true
+dashmap.workspace = true
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

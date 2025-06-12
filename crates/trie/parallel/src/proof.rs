@@ -441,8 +441,12 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let task_ctx =
-            ProofTaskCtx::new(Default::default(), Default::default(), Default::default());
+        let task_ctx = ProofTaskCtx::new(
+            Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        );
         let proof_task =
             ProofTaskManager::new(rt.handle().clone(), consistent_view.clone(), task_ctx, 1);
         let proof_task_handle = proof_task.handle();

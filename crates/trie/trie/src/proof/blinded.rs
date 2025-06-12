@@ -1,8 +1,9 @@
 use super::{Proof, StorageProof};
 use crate::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use alloy_primitives::{map::HashSet, B256};
+use dashmap::DashMap;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
-use reth_trie_common::{prefix_set::TriePrefixSetsMut, MultiProofTargets, Nibbles};
+use reth_trie_common::{prefix_set::TriePrefixSetsMut, MultiProofTargets, Nibbles, RlpNode};
 use reth_trie_sparse::blinded::{
     pad_path_to_key, BlindedProvider, BlindedProviderFactory, RevealedNode,
 };
@@ -18,6 +19,7 @@ pub struct ProofBlindedProviderFactory<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
+    account_rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
 }
 
 impl<T, H> ProofBlindedProviderFactory<T, H> {
@@ -26,8 +28,14 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
+        rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
     ) -> Self {
-        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
+        Self {
+            trie_cursor_factory,
+            hashed_cursor_factory,
+            prefix_sets,
+            account_rlp_node_cache: rlp_node_cache,
+        }
     }
 }
 
@@ -44,6 +52,7 @@ where
             trie_cursor_factory: self.trie_cursor_factory.clone(),
             hashed_cursor_factory: self.hashed_cursor_factory.clone(),
             prefix_sets: self.prefix_sets.clone(),
+            rlp_node_cache: self.account_rlp_node_cache.clone(),
         }
     }
 
@@ -66,6 +75,7 @@ pub struct ProofBlindedAccountProvider<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
+    rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
 }
 
 impl<T, H> ProofBlindedAccountProvider<T, H> {
@@ -74,8 +84,9 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
+        rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
     ) -> Self {
-        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets }
+        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets, rlp_node_cache }
     }
 }
 
@@ -92,6 +103,7 @@ where
             Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
                 .with_prefix_sets_mut(self.prefix_sets.as_ref().clone())
                 .with_branch_node_masks(true)
+                .with_rlp_node_cache(self.rlp_node_cache.clone())
                 .multiproof(targets)
                 .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.account_subtree.into_inner().remove(path);
