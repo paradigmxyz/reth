@@ -160,7 +160,13 @@ impl EthApiError {
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
     pub const fn is_gas_too_high(&self) -> bool {
-        matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh))
+        matches!(
+            self,
+            Self::InvalidTransaction(
+                RpcInvalidTransactionError::GasTooHigh |
+                    RpcInvalidTransactionError::GasLimitTooHigh
+            )
+        )
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooLow`]
