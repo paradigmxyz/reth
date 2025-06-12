@@ -211,6 +211,8 @@ where
                 self.last_block_hashes.split_off(self.last_block_hashes.len() - 64);
         }
 
+        self.update_forkchoice_state().await?;
+
         Ok(())
     }
 }
