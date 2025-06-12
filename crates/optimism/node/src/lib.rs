@@ -18,7 +18,6 @@ pub mod args;
 /// trait.
 pub mod engine;
 pub use engine::OpEngineTypes;
-pub use reth_optimism_payload_builder::{OpPayloadPrimitives, OpPayloadTypes};
 
 pub mod node;
 pub use node::*;
@@ -35,8 +34,9 @@ pub use reth_optimism_txpool as txpool;
 #[cfg(feature = "test-utils")]
 pub mod utils;
 
-pub use reth_optimism_payload_builder::{
+pub use reth_optimism_payload_builder::{ self as payload,
     OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder, OpPayloadBuilderAttributes,
+    OpPayloadPrimitives, OpPayloadTypes, config::OpDAConfig
 };
 
 pub use reth_optimism_evm::*;
