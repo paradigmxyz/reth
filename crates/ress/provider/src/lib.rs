@@ -175,6 +175,8 @@ where
         let (mut hashed_state, bytecodes) = db.into_state_and_bytecodes();
         hashed_state.extend(record.hashed_state);
 
+        debug!(target: "reth::ress_provider", %block_hash, ?hashed_state, "Collected hashed state");
+
         // Gather the state witness.
         let state = if hashed_state.is_empty() {
             // If no state was accessed, at least the root node must be present.
