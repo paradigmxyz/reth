@@ -256,7 +256,7 @@ impl Discv4 {
             Discv4Service::new(socket, local_addr, local_node_record, secret_key, config);
 
         // resolve the external address immediately
-        service.resolve_external_ip().await;
+        service.resolve_external_ip();
 
         let discv4 = service.handle();
         Ok((discv4, service))
@@ -625,10 +625,10 @@ impl Discv4Service {
         self.lookup_interval = tokio::time::interval(duration);
     }
 
-    /// Frocefully resolves the external ip and updates it if successful.
-    async fn resolve_external_ip(&mut self) {
+    /// Sets the external Ip to the configured external IP if [`NatResolver::ExternalIp`].
+    fn resolve_external_ip(&mut self) {
         if let Some(r) = &self.resolve_external_ip_interval {
-            if let Some(external_ip) = r.resolver().external_addr().await {
+            if let Some(external_ip) = r.resolver().as_external_ip() {
                 self.set_external_ip_addr(external_ip);
             }
         }
