@@ -43,7 +43,7 @@ pub async fn main() -> eyre::Result<()> {
 
     let mut state = HashMap::new();
 
-    for i in 0..1_000_000 {
+    for i in 0..100_000 {
         let address = Address::random();
         let mut bytecode = Vec::new();
         bytecode.extend_from_slice(&(i as u64).to_be_bytes());
@@ -70,10 +70,12 @@ pub async fn main() -> eyre::Result<()> {
 
     let tester = Tester::deploy(&provider).await?;
 
-    let accounts =
-        state.keys().choose_multiple(&mut rand::rng(), 10000).into_iter().copied().collect();
+    for _ in 0..100 {
+        let accounts =
+            state.keys().choose_multiple(&mut rand::rng(), 4000).into_iter().copied().collect();
 
-    assert!(tester.call(accounts).send().await?.get_receipt().await?.status());
+        assert!(tester.call(accounts).send().await?.get_receipt().await?.status());
+    }
 
     Ok(())
 }

@@ -1940,11 +1940,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             // Sort accounts by address.
             account_block_reverts.par_sort_by_key(|a| a.0);
 
+            let can_append = account_changeset_cursor.last()?.is_none_or(|(b, _)| b < block_number);
+
             for (address, info) in account_block_reverts {
-                account_changeset_cursor.append_dup(
-                    block_number,
-                    AccountBeforeTx { address, info: info.map(Into::into) },
-                )?;
+                if can_append {
+                    account_changeset_cursor.append_dup(
+                        block_number,
+                        AccountBeforeTx { address, info: info.map(Into::into) },
+                    )?;
+                } else {
+                    account_changeset_cursor.upsert(
+                        block_number,
+                        &AccountBeforeTx { address, info: info.map(Into::into) },
+                    )?;
+                }
             }
         }
 
