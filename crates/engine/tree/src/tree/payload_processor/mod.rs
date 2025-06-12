@@ -311,13 +311,14 @@ where
         })
     }
 
-    pub(crate) fn record_account_rlp_node_cache_metrics(&self) {
+    pub(crate) fn clear_account_rlp_node_cache(&self) {
         self.trie_metrics
             .account_rlp_node_cache_hits
             .increment(self.account_rlp_node_cache.hits() as f64);
         self.trie_metrics
             .account_rlp_node_cache_misses
             .increment(self.account_rlp_node_cache.misses() as f64);
+        self.account_rlp_node_cache.clear();
     }
 }
 

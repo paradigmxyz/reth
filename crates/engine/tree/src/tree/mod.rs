@@ -2361,7 +2361,7 @@ where
 
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
-        self.payload_processor.record_account_rlp_node_cache_metrics();
+        self.payload_processor.clear_account_rlp_node_cache();
 
         let is_fork = ensure_ok!(self.is_fork(block.sealed_header()));
 
