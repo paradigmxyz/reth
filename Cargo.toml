@@ -702,6 +702,10 @@ walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
 [patch.crates-io]
+nybbles = { git = "https://github.com/alloy-rs/nybbles", branch = "alexey/uint-repr" }
+alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "alexey/nybbles-uint" }
+# nybbles = { git = "https://github.com/alloy-rs/nybbles", rev = "2faa4461df34ac1eae02068d549dfefdaacb30a7" }
+# alloy-trie = { git = "https://github.com/alloy-rs/trie", rev = "ffa891e618ce9daea765802382d396cda1eb664b" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
