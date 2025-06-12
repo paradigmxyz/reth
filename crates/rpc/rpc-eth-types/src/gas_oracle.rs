@@ -2,7 +2,7 @@
 //! previous blocks.
 
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction};
+use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction, TxReceipt};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
@@ -49,7 +49,7 @@ pub struct GasPriceOracleConfig {
     pub max_reward_percentile_count: u64,
 
     /// The default gas price to use if there are no blocks to use
-    pub default: Option<U256>,
+    pub default: Option<U256>, // TODO: never used, remove this ?
 
     /// The maximum gas price to use for the estimate
     pub max_price: Option<U256>,
@@ -271,6 +271,67 @@ where
         }
 
         Ok(Some((parent_hash, prices)))
+    }
+
+    /// Suggests a gas price based on median of tip values
+    pub async fn op_suggest_tip_cap(&self, min_suggested_priority_fee: U256) -> EthResult<U256> {
+        let header = self
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+
+        let mut inner = self.inner.lock().await;
+
+        // if we have stored a last price, then we check whether or not it was for the same head
+        if inner.last_price.block_hash == header.hash() {
+            return Ok(inner.last_price.price);
+        }
+
+        let mut suggestion = min_suggested_priority_fee;
+
+        // find the maximum gas used by any of the transactions in the block to use as the
+        // capacity margin for the block, if no receipts are found return the
+        // suggested_min_priority_fee
+        let Some(max_gas_used) = self
+            .cache
+            .get_receipts(header.hash())
+            .await?
+            .ok_or(EthApiError::ReceiptsNotFound(BlockId::latest()))?
+            .iter()
+            .map(|r| r.cumulative_gas_used())
+            .max()
+        else {
+            return Ok(suggestion);
+        };
+
+        // sanity check the max gas used value
+        if max_gas_used > header.gas_limit() {
+            return Ok(suggestion);
+        }
+
+        // if the block is at capacity, the suggestion must be increased
+        if header.gas_used() + max_gas_used > header.gas_limit() {
+            let Some(median_tip) = self.get_block_median_tip(header.hash()).await? else {
+                return Ok(suggestion);
+            };
+
+            let new_suggestion = median_tip + median_tip / U256::from(10);
+
+            if new_suggestion > suggestion {
+                suggestion = new_suggestion;
+            }
+        }
+
+        // constrain to the max price
+        if let Some(max_price) = self.oracle_config.max_price {
+            if suggestion > max_price {
+                suggestion = max_price;
+            }
+        }
+
+        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };
+
+        Ok(suggestion)
     }
 
     /// Get the median tip value for the given block. This is useful for determining
