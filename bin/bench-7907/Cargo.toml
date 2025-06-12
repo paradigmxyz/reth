@@ -1,0 +1,68 @@
+[package]
+name = "bench-7907"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Benchmarks bytecode loading"
+default-run = "bench-7907"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-ethereum-cli.workspace = true
+reth-chainspec.workspace = true
+reth-primitives.workspace = true
+reth-db = { workspace = true, features = ["mdbx"] }
+reth-provider.workspace = true
+reth-evm.workspace = true
+reth-revm.workspace = true
+reth-transaction-pool.workspace = true
+reth-cli-runner.workspace = true
+reth-cli-util.workspace = true
+reth-consensus-common.workspace = true
+reth-rpc-builder.workspace = true
+reth-rpc.workspace = true
+reth-rpc-types-compat.workspace = true
+reth-rpc-api = { workspace = true, features = ["client"] }
+reth-rpc-eth-types.workspace = true
+reth-rpc-server-types.workspace = true
+reth-network = { workspace = true, features = ["serde"] }
+reth-network-api.workspace = true
+reth-tasks.workspace = true
+reth-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-node-api.workspace = true
+reth-node-core.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-node-ethereum = { workspace = true, features = ["js-tracer"] }
+reth-node-builder.workspace = true
+reth-node-metrics.workspace = true
+reth-consensus.workspace = true
+reth-tokio-util.workspace = true
+reth-ress-protocol.workspace = true
+reth-ress-provider.workspace = true
+
+# alloy
+alloy = { version = "1.0.9", features = ["full", "signer-local"] }
+
+# tracing
+tracing.workspace = true
+
+# async
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+
+# misc
+aquamarine.workspace = true
+clap = { workspace = true, features = ["derive", "env"] }
+eyre.workspace = true
+rand.workspace = true
+
+[[bin]]
+name = "bench-7907"
+path = "src/main.rs"

@@ -1,0 +1,3 @@
+[submodule "bin/bench-7907/contracts/lib/forge-std"]
+	path = bin/bench-7907/contracts/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
