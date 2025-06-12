@@ -18,7 +18,7 @@ rpc-compat:
 
   # after https://github.com/paradigmxyz/reth/pull/16742 we start the node in
   # syncing mode, the test expects syncing to be false on start
-  - eth_syncing/check-syncing
+  - eth_syncing/check-syncing (reth)
 
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
