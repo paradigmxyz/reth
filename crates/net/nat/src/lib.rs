@@ -235,7 +235,8 @@ async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
 }
 
 async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
-    let response = reqwest::get(url).await.ok()?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().ok()?;
+    let response = client.get(url).send().await.ok()?;
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
     text.trim().parse().ok()
