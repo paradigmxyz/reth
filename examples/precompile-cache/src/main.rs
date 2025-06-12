@@ -166,7 +166,7 @@ impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = EthEvmConfig<MyEvmFactory>;
+    type EVM = EthEvmConfig<ChainSpec, MyEvmFactory>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
