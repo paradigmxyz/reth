@@ -24,7 +24,8 @@ pub async fn main() -> eyre::Result<()> {
     let tester = Tester::deploy(&provider).await?;
 
     for _ in 0..1000 {
-        let sizes = (0..5).map(|_| rand::random::<U256>() % U256::from(20_000)).collect::<Vec<_>>();
+        let sizes =
+            (0..10).map(|_| rand::random::<U256>() % U256::from(20_000)).collect::<Vec<_>>();
         let receipt = tester.deployContracts(sizes).send().await.unwrap().get_receipt().await?;
         assert!(receipt.status());
     }
