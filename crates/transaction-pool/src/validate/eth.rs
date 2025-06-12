@@ -1077,13 +1077,7 @@ impl ForkTracker {
 
     /// Returns the max initcode size.
     pub fn max_initcode_size(&self) -> Option<usize> {
-        if self.is_osaka_activated() {
-            Some(revm_primitives::eip7907::MAX_INITCODE_SIZE)
-        } else if self.is_shanghai_activated() {
-            Some(revm_primitives::eip3860::MAX_INITCODE_SIZE)
-        } else {
-            None
-        }
+        self.is_shanghai_activated().then_some(revm_primitives::eip3860::MAX_INITCODE_SIZE)
     }
 }
 
