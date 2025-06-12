@@ -96,6 +96,8 @@ where
 
     /// Generate execution witness for the target block hash.
     pub fn generate_execution_witness(&self, block_hash: B256) -> ProviderResult<ExecutionWitness> {
+        debug!(target: "reth::ress_provider", %block_hash, "Generating witness for block");
+
         if let Some(witness) = self.witness_cache.lock().get(&block_hash).cloned() {
             return Ok(witness.as_ref().clone())
         }
@@ -143,6 +145,8 @@ where
                 }
             };
         };
+
+        debug!(target: "reth::ress_provider", %block_hash, ancestors_len = executed_ancestors.len(), "Executing the block");
 
         // Execute all gathered blocks to gather accesses state.
         let mut db = StateWitnessRecorderDatabase::new(StateProviderDatabase::new(
