@@ -9,7 +9,7 @@ use alloy_primitives::{
 };
 use dashmap::DashMap;
 use derive_more::derive::Deref;
-use metrics::Histogram;
+use metrics::{Gauge, Histogram};
 use reth_errors::ProviderError;
 use reth_metrics::Metrics;
 use reth_provider::{
@@ -611,6 +611,11 @@ pub(crate) struct MultiProofTaskMetrics {
     pub first_update_wait_time_histogram: Histogram,
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
+
+    /// RLP node cache hits.
+    pub account_rlp_node_cache_hits: Gauge,
+    /// RLP node cache misses.
+    pub account_rlp_node_cache_misses: Gauge,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant

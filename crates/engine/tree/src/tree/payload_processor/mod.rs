@@ -23,7 +23,7 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::TrieInput;
+use reth_trie::{hash_builder::RlpNodeCache, TrieInput};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
@@ -67,6 +67,7 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    account_rlp_node_cache: RlpNodeCache,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -91,6 +92,7 @@ where
             evm_config,
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
+            account_rlp_node_cache: Default::default(),
             _marker: Default::default(),
         }
     }
@@ -153,15 +155,18 @@ where
     {
         let (to_sparse_trie, sparse_trie_rx) = channel();
         // spawn multiproof task
-        let state_root_config =
-            MultiProofConfig::new_from_input(consistent_view, trie_input, Default::default());
+        let state_root_config = MultiProofConfig::new_from_input(
+            consistent_view,
+            trie_input,
+            self.account_rlp_node_cache.clone(),
+        );
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(
             state_root_config.nodes_sorted.clone(),
             state_root_config.state_sorted.clone(),
             state_root_config.prefix_sets.clone(),
-            state_root_config.rlp_node_cache.clone(),
+            self.account_rlp_node_cache.clone(),
         );
         let max_proof_task_concurrency = config.max_proof_task_concurrency() as usize;
         let proof_task = ProofTaskManager::new(
@@ -304,6 +309,15 @@ where
             let cache = ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
         })
+    }
+
+    pub(crate) fn record_account_rlp_node_cache_metrics(&self) {
+        self.trie_metrics
+            .account_rlp_node_cache_hits
+            .increment(self.account_rlp_node_cache.hits() as f64);
+        self.trie_metrics
+            .account_rlp_node_cache_misses
+            .increment(self.account_rlp_node_cache.misses() as f64);
     }
 }
 
