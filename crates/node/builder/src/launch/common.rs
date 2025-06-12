@@ -273,8 +273,12 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     /// Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
     pub fn ensure_etl_datadir(mut self) -> Self {
         if self.toml_config_mut().stages.etl.dir.is_none() {
-            self.toml_config_mut().stages.etl.dir =
-                Some(EtlConfig::from_datadir(self.data_dir().data_dir()))
+            let etl_path = EtlConfig::from_datadir(self.data_dir().data_dir());
+            // Remove etl-path files on launch
+            if let Err(err) = fs::remove_dir_all(&etl_path) {
+                warn!(target: "reth::cli", ?etl_path, %err, "Failed to remove ETL path on launch");
+            }
+            self.toml_config_mut().stages.etl.dir = Some(etl_path);
         }
 
         self
