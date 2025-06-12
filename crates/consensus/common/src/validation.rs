@@ -12,7 +12,7 @@ use reth_primitives_traits::{
 };
 
 /// The maximum RLP length of a block, defined in [EIP-7934](https://eips.ethereum.org/EIPS/eip-7934).
-pub const MAX_RLP_BLOCK_SIZE: usize = 9_961_472;
+pub const MAX_RLP_BLOCK_SIZE: usize = 8_388_608;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
