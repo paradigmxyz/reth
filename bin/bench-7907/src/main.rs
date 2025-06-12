@@ -1,21 +1,25 @@
 use alloy::{
-    primitives::{Address, Bytes},
+    primitives::{keccak256, Address, Bytes, B256},
     providers::ProviderBuilder,
     signers::local::PrivateKeySigner,
     sol,
 };
 use alloy_genesis::GenesisAccount;
-use rand::seq::IteratorRandom;
+use rand::seq::{IndexedRandom, IteratorRandom};
 use reth_chainspec::DEV;
-use reth_db::open_db;
+use reth_db::{open_db, tables};
+use reth_db::cursor::DbCursorRW;
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_node_ethereum::EthereumNode;
 use reth_provider::{providers::StaticFileProvider, DatabaseProviderFactory};
 use reth_revm::primitives::b256;
+use reth_db::transaction::DbTxMut;
+use reth_primitives::Bytecode;
+use reth_db::transaction::DbTx;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::Arc, time::Instant,
 };
 
 sol! {
@@ -39,43 +43,59 @@ pub async fn main() -> eyre::Result<()> {
         .static_file(StaticFileProvider::read_only(&db_path.join("static_files"), false).unwrap())
         .build_provider_factory();
 
-    let provider = provider_factory.database_provider_rw()?;
+    let num_bytecodes = std::env::var("NUM_BYTECODES")?.parse()?;
+    let num_reads = std::env::var("NUM_READS")?.parse()?;
+    let code_size = std::env::var("CODE_SIZE")?.parse()?;
 
-    let mut state = HashMap::new();
+    let mut bytecodes = BTreeMap::new();
 
-    for i in 0..100_000 {
+    for i in 0..num_bytecodes {
         let address = Address::random();
         let mut bytecode = Vec::new();
         bytecode.extend_from_slice(&(i as u64).to_be_bytes());
+        bytecode.extend(std::iter::repeat(0).take(code_size));
 
-        let extra_bytes = rand::random::<u64>() % 20000;
-        bytecode.extend(std::iter::repeat(0).take(extra_bytes as usize));
+        bytecodes.insert(B256::random(), Bytes::from(bytecode));
 
-        state.insert(
-            address,
-            GenesisAccount { code: Some(Bytes::from(bytecode)), ..Default::default() },
-        );
+        if i % 10000 == 0 {
+            println!("{}", i);
+        }
     }
 
-    insert_genesis_state(&provider, state.iter())?;
-    insert_genesis_hashes(&provider, state.iter())?;
-    insert_genesis_history(&provider, state.iter())?;
+    let provider = provider_factory.database_provider_rw()?;
+    provider.tx_ref().clear::<tables::Bytecodes>()?;
+    provider.commit()?;
+
+    let provider = provider_factory.database_provider_rw()?;
+    let mut cursor = provider.tx_ref().cursor_write::<tables::Bytecodes>()?;
+
+    let mut hashes = Vec::new();
+
+    let mut i = 0;
+    for (hash, bytecode) in bytecodes {
+        cursor.append(hash, &Bytecode::new_raw_checked(bytecode)?)?;
+        hashes.push(hash);
+
+        i += 1;
+        if i % 10000 == 0 {
+            println!("{}", i);
+        }
+    }
 
     provider.commit()?;
 
-    let signer = PrivateKeySigner::from_bytes(&b256!(
-        "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-    ))?;
-    let provider = ProviderBuilder::new().wallet(signer).connect("http://localhost:8545").await?;
+    let hashes = hashes.choose_multiple(&mut rand::rng(), num_reads);
 
-    let tester = Tester::deploy(&provider).await?;
+    let provider = provider_factory.database_provider_ro()?;
 
-    for _ in 0..100 {
-        let accounts =
-            state.keys().choose_multiple(&mut rand::rng(), 4000).into_iter().copied().collect();
+    let instant = Instant::now();
 
-        assert!(tester.call(accounts).send().await?.get_receipt().await?.status());
+    for hash in hashes {
+        provider.tx_ref().get::<tables::Bytecodes>(*hash)?;
     }
+
+    let duration = instant.elapsed();
+    println!("Time taken: {:?}, time per read: {:?}", duration, duration / num_reads as u32);
 
     Ok(())
 }
