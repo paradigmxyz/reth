@@ -34,9 +34,9 @@ pub use reth_optimism_txpool as txpool;
 #[cfg(feature = "test-utils")]
 pub mod utils;
 
-pub use reth_optimism_payload_builder::{ self as payload,
-    OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder, OpPayloadBuilderAttributes,
-    OpPayloadPrimitives, OpPayloadTypes, config::OpDAConfig
+pub use reth_optimism_payload_builder::{
+    self as payload, config::OpDAConfig, OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder,
+    OpPayloadBuilderAttributes, OpPayloadPrimitives, OpPayloadTypes,
 };
 
 pub use reth_optimism_evm::*;
