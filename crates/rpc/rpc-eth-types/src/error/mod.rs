@@ -61,6 +61,14 @@ pub enum EthApiError {
     /// Header range not found for start block hash/number/tag to end block hash/number/tag
     #[error("header range not found, start block {0:?}, end block {1:?}")]
     HeaderRangeNotFound(BlockId, BlockId),
+    /// Thrown when historical data is not available because it has been pruned
+    ///
+    /// This error is intended for use as a standard response when historical data is
+    /// requested that has been pruned according to the node's data retention policy.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-4444>
+    #[error("pruned history unavailable")]
+    PrunedHistoryUnavailable,
     /// Receipts not found for block hash/number/tag
     #[error("receipts not found")]
     ReceiptsNotFound(BlockId),
@@ -225,6 +233,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
+            EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
         }
