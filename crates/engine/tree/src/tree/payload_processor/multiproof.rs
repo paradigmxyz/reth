@@ -18,8 +18,9 @@ use reth_provider::{
 };
 use reth_revm::state::EvmState;
 use reth_trie::{
-    prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted, DecodedMultiProof, HashedPostState,
-    HashedPostStateSorted, HashedStorage, MultiProofTargets, Nibbles, RlpNode, TrieInput,
+    hash_builder::RlpNodeCache, prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted,
+    DecodedMultiProof, HashedPostState, HashedPostStateSorted, HashedStorage, MultiProofTargets,
+    Nibbles, RlpNode, TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
@@ -79,7 +80,7 @@ pub(super) struct MultiProofConfig<Factory> {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
-    pub rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+    pub rlp_node_cache: RlpNodeCache,
 }
 
 impl<Factory> MultiProofConfig<Factory> {
@@ -87,7 +88,7 @@ impl<Factory> MultiProofConfig<Factory> {
     pub(super) fn new_from_input(
         consistent_view: ConsistentDbView<Factory>,
         input: TrieInput,
-        rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+        rlp_node_cache: RlpNodeCache,
     ) -> Self {
         Self {
             consistent_view,

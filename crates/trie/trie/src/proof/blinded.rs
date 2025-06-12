@@ -1,9 +1,9 @@
 use super::{Proof, StorageProof};
 use crate::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use alloy_primitives::{map::HashSet, B256};
-use dashmap::DashMap;
+use alloy_trie::RlpNodeCache;
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
-use reth_trie_common::{prefix_set::TriePrefixSetsMut, MultiProofTargets, Nibbles, RlpNode};
+use reth_trie_common::{prefix_set::TriePrefixSetsMut, MultiProofTargets, Nibbles};
 use reth_trie_sparse::blinded::{
     pad_path_to_key, BlindedProvider, BlindedProviderFactory, RevealedNode,
 };
@@ -19,7 +19,7 @@ pub struct ProofBlindedProviderFactory<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
-    account_rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+    account_rlp_node_cache: RlpNodeCache,
 }
 
 impl<T, H> ProofBlindedProviderFactory<T, H> {
@@ -28,14 +28,9 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+        account_rlp_node_cache: RlpNodeCache,
     ) -> Self {
-        Self {
-            trie_cursor_factory,
-            hashed_cursor_factory,
-            prefix_sets,
-            account_rlp_node_cache: rlp_node_cache,
-        }
+        Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets, account_rlp_node_cache }
     }
 }
 
@@ -75,7 +70,7 @@ pub struct ProofBlindedAccountProvider<T, H> {
     hashed_cursor_factory: H,
     /// A set of prefix sets that have changes.
     prefix_sets: Arc<TriePrefixSetsMut>,
-    rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+    rlp_node_cache: RlpNodeCache,
 }
 
 impl<T, H> ProofBlindedAccountProvider<T, H> {
@@ -84,7 +79,7 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+        rlp_node_cache: RlpNodeCache,
     ) -> Self {
         Self { trie_cursor_factory, hashed_cursor_factory, prefix_sets, rlp_node_cache }
     }

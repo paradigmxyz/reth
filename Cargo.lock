@@ -892,7 +892,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.8.1"
-source = "git+https://github.com/alloy-rs/trie?branch=shekhirin%2Frlp-node-cache#fa545b9a3a6bc815e90e9542158845e78ddd66cd"
+source = "git+https://github.com/alloy-rs/trie?branch=shekhirin%2Frlp-node-cache#d72266ed83820916c696750a99c38f8bbad74afa"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -10359,7 +10359,6 @@ dependencies = [
  "alloy-trie",
  "auto_impl",
  "codspeed-criterion-compat",
- "dashmap 6.1.0",
  "itertools 0.14.0",
  "metrics",
  "parking_lot",
@@ -10446,7 +10445,6 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "codspeed-criterion-compat",
- "dashmap 6.1.0",
  "derive_more",
  "itertools 0.14.0",
  "metrics",

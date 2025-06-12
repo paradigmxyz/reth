@@ -10,7 +10,6 @@
 
 use crate::root::ParallelStateRootError;
 use alloy_primitives::{map::B256Set, B256};
-use dashmap::DashMap;
 use reth_db_api::transaction::DbTx;
 use reth_execution_errors::SparseTrieError;
 use reth_provider::{
@@ -18,12 +17,13 @@ use reth_provider::{
     ProviderResult, StateCommitmentProvider,
 };
 use reth_trie::{
+    hash_builder::RlpNodeCache,
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
     proof::{ProofBlindedProviderFactory, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted, Nibbles, RlpNode, StorageMultiProof,
+    HashedPostStateSorted, Nibbles, StorageMultiProof,
 };
 use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -411,7 +411,7 @@ pub struct ProofTaskCtx {
     /// if we have cached nodes for them.
     prefix_sets: Arc<TriePrefixSetsMut>,
     /// The cache of account RLP nodes.
-    account_rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+    account_rlp_node_cache: RlpNodeCache,
 }
 
 impl ProofTaskCtx {
@@ -420,7 +420,7 @@ impl ProofTaskCtx {
         nodes_sorted: Arc<TrieUpdatesSorted>,
         state_sorted: Arc<HashedPostStateSorted>,
         prefix_sets: Arc<TriePrefixSetsMut>,
-        account_rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
+        account_rlp_node_cache: RlpNodeCache,
     ) -> Self {
         Self { nodes_sorted, state_sorted, prefix_sets, account_rlp_node_cache }
     }

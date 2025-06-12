@@ -10,7 +10,6 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::{BufMut, Encodable};
-use dashmap::DashMap;
 use itertools::Itertools;
 use reth_execution_errors::StorageRootError;
 use reth_provider::{
@@ -19,6 +18,7 @@ use reth_provider::{
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
+    hash_builder::RlpNodeCache,
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSetsMut},
@@ -27,7 +27,7 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     walker::TrieWalker,
     DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostStateSorted, MultiProof,
-    MultiProofTargets, Nibbles, RlpNode, StorageMultiProof, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    MultiProofTargets, Nibbles, StorageMultiProof, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::proof::ProofRetainer;
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -55,7 +55,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     collect_branch_node_masks: bool,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
-    rlp_node_cache: Option<Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>>,
+    rlp_node_cache: Option<RlpNodeCache>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -88,7 +88,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         self
     }
 
-    pub fn with_rlp_node_cache(mut self, cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>) -> Self {
+    pub fn with_rlp_node_cache(mut self, cache: RlpNodeCache) -> Self {
         self.rlp_node_cache = Some(cache);
         self
     }
