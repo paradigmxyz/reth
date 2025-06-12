@@ -58,19 +58,19 @@ pub trait EstimateCall: Call {
         let tx_request_gas_limit = request.gas;
         let tx_request_gas_price = request.gas_price;
         // the gas limit of the corresponding block
-        let block_env_gas_limit = evm_env.block_env.gas_limit;
+        let max_gas_limit = evm_env.cfg_env.tx_gas_limit_cap.unwrap_or(evm_env.block_env.gas_limit);
 
         // Determine the highest possible gas limit, considering both the request's specified limit
         // and the block's limit.
         let mut highest_gas_limit = tx_request_gas_limit
             .map(|mut tx_gas_limit| {
-                if block_env_gas_limit < tx_gas_limit {
+                if max_gas_limit < tx_gas_limit {
                     // requested gas limit is higher than the allowed gas limit, capping
-                    tx_gas_limit = block_env_gas_limit;
+                    tx_gas_limit = max_gas_limit;
                 }
                 tx_gas_limit
             })
-            .unwrap_or(block_env_gas_limit);
+            .unwrap_or(max_gas_limit);
 
         // Configure the evm env
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
@@ -128,7 +128,7 @@ pub trait EstimateCall: Call {
                 if err.is_gas_too_high() &&
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
-                return Err(self.map_out_of_gas_err(block_env_gas_limit, evm_env, tx_env, &mut db))
+                return Err(self.map_out_of_gas_err(max_gas_limit, evm_env, tx_env, &mut db))
             }
             Err(err) if err.is_gas_too_low() => {
                 // This failed because the configured gas cost of the tx was lower than what
@@ -155,7 +155,7 @@ pub trait EstimateCall: Call {
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
                 return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
-                    Err(self.map_out_of_gas_err(block_env_gas_limit, evm_env, tx_env, &mut db))
+                    Err(self.map_out_of_gas_err(max_gas_limit, evm_env, tx_env, &mut db))
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
@@ -279,7 +279,7 @@ pub trait EstimateCall: Call {
     #[inline]
     fn map_out_of_gas_err<DB>(
         &self,
-        env_gas_limit: u64,
+        max_gas_limit: u64,
         evm_env: EvmEnvFor<Self::Evm>,
         mut tx_env: TxEnvFor<Self::Evm>,
         db: &mut DB,
@@ -289,7 +289,7 @@ pub trait EstimateCall: Call {
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
-        tx_env.set_gas_limit(env_gas_limit);
+        tx_env.set_gas_limit(max_gas_limit);
         let res = match self.transact(db, evm_env, tx_env) {
             Ok(res) => res,
             Err(err) => return err,
