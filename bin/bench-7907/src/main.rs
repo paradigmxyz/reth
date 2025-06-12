@@ -61,6 +61,8 @@ pub async fn main() -> eyre::Result<()> {
     insert_genesis_hashes(&provider, state.iter())?;
     insert_genesis_history(&provider, state.iter())?;
 
+    provider.commit()?;
+
     let signer = PrivateKeySigner::from_bytes(&b256!(
         "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
     ))?;
