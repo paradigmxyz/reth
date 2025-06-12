@@ -18,6 +18,7 @@ reth-ethereum-cli.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
+reth-db-common.workspace = true
 reth-provider.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
@@ -50,6 +51,7 @@ reth-ress-provider.workspace = true
 
 # alloy
 alloy = { version = "1.0.9", features = ["full", "signer-local"] }
+alloy-genesis.workspace = true
 
 # tracing
 tracing.workspace = true

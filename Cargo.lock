@@ -1538,6 +1538,7 @@ name = "bench-7907"
 version = "1.4.8"
 dependencies = [
  "alloy",
+ "alloy-genesis",
  "aquamarine",
  "clap",
  "eyre",
@@ -1548,6 +1549,7 @@ dependencies = [
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
+ "reth-db-common",
  "reth-ethereum-cli",
  "reth-ethereum-payload-builder",
  "reth-ethereum-primitives",
