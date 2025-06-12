@@ -55,7 +55,7 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     collect_branch_node_masks: bool,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
-    rlp_node_cache: Option<Arc<DashMap<Nibbles, RlpNode>>>,
+    rlp_node_cache: Option<Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>>,
     #[cfg(feature = "metrics")]
     metrics: ParallelTrieMetrics,
 }
@@ -88,7 +88,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
         self
     }
 
-    pub fn with_rlp_node_cache(mut self, cache: Arc<DashMap<Nibbles, RlpNode>>) -> Self {
+    pub fn with_rlp_node_cache(mut self, cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>) -> Self {
         self.rlp_node_cache = Some(cache);
         self
     }

@@ -35,7 +35,7 @@ derive_more.workspace = true
 rayon.workspace = true
 itertools.workspace = true
 tokio = { workspace = true, features = ["rt"] }
-dashmap.workspace = true
+dashmap = "6"
 
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }

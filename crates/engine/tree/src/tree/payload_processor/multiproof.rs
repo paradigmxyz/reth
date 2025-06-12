@@ -79,7 +79,7 @@ pub(super) struct MultiProofConfig<Factory> {
     /// invalidate the in-memory nodes, not all keys from `state_sorted` might be present here,
     /// if we have cached nodes for them.
     pub prefix_sets: Arc<TriePrefixSetsMut>,
-    pub rlp_node_cache: Arc<DashMap<Nibbles, RlpNode>>,
+    pub rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
 }
 
 impl<Factory> MultiProofConfig<Factory> {
@@ -87,7 +87,7 @@ impl<Factory> MultiProofConfig<Factory> {
     pub(super) fn new_from_input(
         consistent_view: ConsistentDbView<Factory>,
         input: TrieInput,
-        rlp_node_cache: Arc<DashMap<Nibbles, RlpNode>>,
+        rlp_node_cache: Arc<DashMap<Nibbles, (RlpNode, Vec<u8>)>>,
     ) -> Self {
         Self {
             consistent_view,
