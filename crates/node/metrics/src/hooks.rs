@@ -45,6 +45,7 @@ impl Default for HooksBuilder {
                 Box::new(|| Collector::default().collect()),
                 Box::new(collect_memory_stats),
                 Box::new(collect_io_stats),
+                Box::new(collect_disk_stats),
             ],
         }
     }
@@ -164,3 +165,86 @@ fn collect_io_stats() {
 
 #[cfg(not(target_os = "linux"))]
 const fn collect_io_stats() {}
+
+
+#[cfg(not(target_os = "linux"))]
+const fn collect_io_stats() {}
+#[cfg(target_os = "linux")]
+fn collect_disk_stats() {
+    use metrics::{counter, gauge};
+    use tracing::error;
+
+    let Ok(diskstats) = procfs::diskstats()
+        .map_err(|error| error!(%error, "Failed to read disk statistics from /proc/diskstats"))
+    else {
+        return
+    };
+
+    for disk in diskstats {
+        // Skip loop devices and ram disks typically
+        if disk.name.starts_with("loop") || disk.name.starts_with("ram") {
+            continue;
+        }
+
+        let device_name = &disk.name;
+
+        // Read operations
+        counter!("disk.reads", "device" => device_name.clone())
+            .absolute(disk.reads);
+        counter!("disk.merged", "device" => device_name.clone())
+            .absolute(disk.merged);
+        counter!("disk.sectors_read", "device" => device_name.clone())
+            .absolute(disk.sectors_read);
+        gauge!("disk.time_reading", "device" => device_name.clone())
+            .set(disk.time_reading as f64);
+
+        // Write operations
+        counter!("disk.writes", "device" => device_name.clone())
+            .absolute(disk.writes);
+        counter!("disk.writes_merged", "device" => device_name.clone())
+            .absolute(disk.writes_merged);
+        counter!("disk.sectors_written", "device" => device_name.clone())
+            .absolute(disk.sectors_written);
+        gauge!("disk.time_writing", "device" => device_name.clone())
+            .set(disk.time_writing as f64);
+
+        // I/O operations in progress and time
+        gauge!("disk.in_progress", "device" => device_name.clone())
+            .set(disk.in_progress as f64);
+        gauge!("disk.time_in_progress", "device" => device_name.clone())
+            .set(disk.time_in_progress as f64);
+        gauge!("disk.weighted_time_in_progress", "device" => device_name.clone())
+            .set(disk.weighted_time_in_progress as f64);
+
+        // Discard operations (if available, since kernel 4.18)
+        if let Some(discards) = disk.discards {
+            counter!("disk.discards", "device" => device_name.clone())
+                .absolute(discards);
+        }
+        if let Some(discards_merged) = disk.discards_merged {
+            counter!("disk.discards_merged", "device" => device_name.clone())
+                .absolute(discards_merged);
+        }
+        if let Some(sectors_discarded) = disk.sectors_discarded {
+            counter!("disk.sectors_discarded", "device" => device_name.clone())
+                .absolute(sectors_discarded);
+        }
+        if let Some(time_discarding) = disk.time_discarding {
+            gauge!("disk.time_discarding", "device" => device_name.clone())
+                .set(time_discarding as f64);
+        }
+
+        // Flush operations (if available, since kernel 5.5)
+        if let Some(flushes) = disk.flushes {
+            counter!("disk.flushes", "device" => device_name.clone())
+                .absolute(flushes);
+        }
+        if let Some(time_flushing) = disk.time_flushing {
+            gauge!("disk.time_flushing", "device" => device_name.clone())
+                .set(time_flushing as f64);
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+const fn collect_disk_stats() {}
