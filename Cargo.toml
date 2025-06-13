@@ -11,6 +11,7 @@ exclude = [".github/"]
 members = [
     "bin/reth-bench/",
     "bin/reth/",
+    "crates/alloy-provider/",
     "crates/chain-state/",
     "crates/chainspec/",
     "crates/cli/cli/",
@@ -319,6 +320,7 @@ codegen-units = 1
 # reth
 op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
+reth-alloy-provider = { path = "crates/alloy-provider" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }
 reth-chain-state = { path = "crates/chain-state" }
