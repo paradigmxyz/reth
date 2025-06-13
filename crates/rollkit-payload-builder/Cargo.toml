@@ -1,0 +1,50 @@
+[package]
+name = "rollkit-payload-builder"
+version = "0.1.0"
+edition = "2021"
+description = "Payload builder for Rollkit Reth node"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+reth-basic-payload-builder = { path = "../payload/basic" }
+reth-engine-tree = { path = "../engine/tree" }
+reth-ethereum = { path = "../ethereum/reth" }
+reth-evm = { path = "../evm/evm" }
+reth-execution-types = { path = "../evm/execution-types" }
+reth-execution-errors = { path = "../evm/execution-errors" }
+reth-payload-builder = { path = "../payload/builder" }
+reth-payload-primitives = { path = "../payload/primitives" }
+reth-primitives = { path = "../primitives" }
+reth-provider = { path = "../storage/provider", features = ["test-utils"] }
+reth-tasks = { path = "../tasks" }
+reth-node-builder = { path = "../node/builder" }
+reth-node-core = { path = "../node/core" }
+reth-primitives-traits = { path = "../primitives-traits" }
+reth-db = { path = "../storage/db" }
+reth-network = { path = "../net/network" }
+reth-rpc = { path = "../rpc/rpc" }
+reth-transaction-pool = { path = "../transaction-pool" }
+reth-ethereum-engine-primitives = { path = "../ethereum/engine-primitives" }
+
+# Alloy primitives
+alloy-primitives = "1.1.0"
+alloy-consensus = "1.0.9"
+alloy-rlp = "0.3.10"
+
+# Standard library dependencies
+tokio = { version = "1.36", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+async-trait = "0.1"
+futures = "0.3"
+thiserror = "1.0"
+tracing = "0.1"
+eyre = "0.6"
+
+[lints]
+workspace = true
+
+[[example]]
+name = "rollkit_node"
+path = "examples/rollkit_node.rs"
+required-features = ["full"]

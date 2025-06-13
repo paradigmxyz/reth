@@ -134,6 +134,7 @@ members = [
     "crates/trie/parallel/",
     "crates/trie/sparse",
     "crates/trie/trie",
+    "crates/rollkit-payload-builder",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -164,7 +165,7 @@ members = [
     "examples/custom-beacon-withdrawals",
     "testing/ef-tests/",
     "testing/testing-utils",
-    "crates/tracing-otlp",
+    "crates/tracing-otlp"
 ]
 default-members = ["bin/reth"]
 exclude = ["book/sources", "book/cli"]
