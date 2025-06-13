@@ -33,7 +33,7 @@ use std::{
 use tracing::{debug, error, trace};
 
 /// The size of proof targets chunk to spawn in one calculation.
-const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 10;
+const MULTIPROOF_TARGETS_CHUNK_SIZE: usize = 50;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
