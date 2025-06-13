@@ -7,7 +7,7 @@ use crate::ExecutionProof;
 use alloy_consensus::Header;
 use alloy_primitives::{
     bytes::{Buf, BufMut},
-    BlockHash, B256,
+    BlockHash, Bytes, B256,
 };
 use alloy_rlp::{BytesMut, Decodable, Encodable};
 use reth_eth_wire::{message::RequestPair, protocol::Protocol, Capability};
@@ -16,22 +16,22 @@ use reth_ress_protocol::{GetHeaders, NodeType};
 
 /// An Ress protocol message, containing a message ID and payload.
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct ZkRessProtocolMessage<T> {
+pub struct ZkRessProtocolMessage {
     /// The unique identifier representing the type of the Ress message.
     pub message_type: ZkRessMessageID,
     /// The content of the message, including specific data based on the message type.
-    pub message: ZkRessMessage<T>,
+    pub message: ZkRessMessage,
 }
 
 #[cfg(any(test, feature = "arbitrary"))]
-impl<'a, T: arbitrary::Arbitrary<'a>> arbitrary::Arbitrary<'a> for ZkRessProtocolMessage<T> {
+impl<'a> arbitrary::Arbitrary<'a> for ZkRessProtocolMessage {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-        let message: ZkRessMessage<T> = u.arbitrary()?;
+        let message: ZkRessMessage = u.arbitrary()?;
         Ok(Self { message_type: message.message_id(), message })
     }
 }
 
-impl<T: ExecutionProof> ZkRessProtocolMessage<T> {
+impl ZkRessProtocolMessage {
     /// Returns the capability for the flavor of `zkress` protocol.
     pub const fn capability(name: &'static str, version: usize) -> Capability {
         Capability::new_static(name, version)
@@ -77,7 +77,7 @@ impl<T: ExecutionProof> ZkRessProtocolMessage<T> {
     }
 
     /// Execution proof response.
-    pub const fn proof(request_id: u64, proof: T) -> Self {
+    pub const fn proof(request_id: u64, proof: Bytes) -> Self {
         ZkRessMessage::Proof(RequestPair { request_id, message: proof }).into_protocol_message()
     }
 
@@ -106,7 +106,7 @@ impl<T: ExecutionProof> ZkRessProtocolMessage<T> {
     }
 }
 
-impl<T: Encodable> Encodable for ZkRessProtocolMessage<T> {
+impl Encodable for ZkRessProtocolMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         self.message_type.encode(out);
         self.message.encode(out);
@@ -172,7 +172,7 @@ impl Decodable for ZkRessMessageID {
 /// Represents a message in the ress protocol.
 #[derive(PartialEq, Eq, Clone, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub enum ZkRessMessage<T> {
+pub enum ZkRessMessage {
     /// Represents a node type message required for handshake.
     NodeType(NodeType),
 
@@ -189,10 +189,10 @@ pub enum ZkRessMessage<T> {
     /// Represents a proof request message.
     GetProof(RequestPair<BlockHash>),
     /// Represents a proof response message.
-    Proof(RequestPair<T>),
+    Proof(RequestPair<Bytes>),
 }
 
-impl<T> ZkRessMessage<T> {
+impl ZkRessMessage {
     /// Return [`ZkRessMessageID`] that corresponds to the given message.
     pub const fn message_id(&self) -> ZkRessMessageID {
         match self {
@@ -207,19 +207,19 @@ impl<T> ZkRessMessage<T> {
     }
 
     /// Convert message into [`ZkRessProtocolMessage`].
-    pub const fn into_protocol_message(self) -> ZkRessProtocolMessage<T> {
+    pub const fn into_protocol_message(self) -> ZkRessProtocolMessage {
         let message_type = self.message_id();
         ZkRessProtocolMessage { message_type, message: self }
     }
 }
 
-impl<T> From<ZkRessMessage<T>> for ZkRessProtocolMessage<T> {
-    fn from(value: ZkRessMessage<T>) -> Self {
+impl From<ZkRessMessage> for ZkRessProtocolMessage {
+    fn from(value: ZkRessMessage) -> Self {
         value.into_protocol_message()
     }
 }
 
-impl<T: Encodable> Encodable for ZkRessMessage<T> {
+impl Encodable for ZkRessMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::NodeType(node_type) => node_type.encode(out),
@@ -250,7 +250,6 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
-    use reth_ress_protocol::ExecutionStateWitness;
     use std::fmt;
     use strum::EnumCount;
 
@@ -265,7 +264,7 @@ mod tests {
 
     #[test]
     fn protocol_message_count() {
-        let protocol = ZkRessProtocolMessage::<ExecutionStateWitness>::protocol("zkress", 1);
+        let protocol = ZkRessProtocolMessage::protocol("zkress", 1);
         assert_eq!(protocol.messages(), ZkRessMessageID::COUNT as u8);
     }
 
@@ -276,7 +275,7 @@ mod tests {
         }
 
         #[test]
-        fn message_roundtrip(message in arb::<ZkRessProtocolMessage::<ExecutionStateWitness>>()) {
+        fn message_roundtrip(message in arb::<ZkRessProtocolMessage>()) {
             let encoded = alloy_rlp::encode(&message);
             let decoded = ZkRessProtocolMessage::decode_message(&mut &encoded[..]);
             assert_eq!(Ok(message), decoded);

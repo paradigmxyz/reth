@@ -1,31 +1,20 @@
 //! Miscellaneous test utilities.
 
-use crate::{ExecutionProof, ZkRessProtocolProvider};
+use crate::ZkRessProtocolProvider;
 use alloy_consensus::Header;
-use alloy_primitives::{map::B256HashMap, B256};
+use alloy_primitives::{map::B256HashMap, Bytes, B256};
 use reth_ethereum_primitives::BlockBody;
 use reth_storage_errors::provider::ProviderResult;
 use std::{
-    marker::PhantomData,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 /// Noop implementation of [`ZkRessProtocolProvider`].
-#[derive(Clone, Debug)]
-pub struct NoopZkRessProtocolProvider<T> {
-    __phantom: PhantomData<T>,
-}
+#[derive(Clone, Default, Debug)]
+pub struct NoopZkRessProtocolProvider;
 
-impl<T> Default for NoopZkRessProtocolProvider<T> {
-    fn default() -> Self {
-        Self { __phantom: PhantomData }
-    }
-}
-
-impl<T: ExecutionProof> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T> {
-    type Proof = T;
-
+impl ZkRessProtocolProvider for NoopZkRessProtocolProvider {
     fn header(&self, _block_hash: B256) -> ProviderResult<Option<Header>> {
         Ok(None)
     }
@@ -34,21 +23,21 @@ impl<T: ExecutionProof> ZkRessProtocolProvider for NoopZkRessProtocolProvider<T>
         Ok(None)
     }
 
-    async fn proof(&self, _block_hash: B256) -> ProviderResult<Self::Proof> {
-        Ok(T::default())
+    async fn proof(&self, _block_hash: B256) -> ProviderResult<Bytes> {
+        Ok(Default::default())
     }
 }
 
 /// Mock implementation of [`ZkRessProtocolProvider`].
 #[derive(Clone, Default, Debug)]
-pub struct MockRessProtocolProvider<T> {
+pub struct MockRessProtocolProvider {
     headers: Arc<Mutex<B256HashMap<Header>>>,
     block_bodies: Arc<Mutex<B256HashMap<BlockBody>>>,
-    proofs: Arc<Mutex<B256HashMap<T>>>,
+    proofs: Arc<Mutex<B256HashMap<Bytes>>>,
     proof_delay: Option<Duration>,
 }
 
-impl<T> MockRessProtocolProvider<T> {
+impl MockRessProtocolProvider {
     /// Configure proof response delay.
     pub const fn with_proof_delay(mut self, delay: Duration) -> Self {
         self.proof_delay = Some(delay);
@@ -76,19 +65,17 @@ impl<T> MockRessProtocolProvider<T> {
     }
 
     /// Insert proof.
-    pub fn add_proof(&self, block_hash: B256, proof: T) {
+    pub fn add_proof(&self, block_hash: B256, proof: Bytes) {
         self.proofs.lock().unwrap().insert(block_hash, proof);
     }
 
     /// Extend proofs from iterator.
-    pub fn extend_proofs(&self, proofs: impl IntoIterator<Item = (B256, T)>) {
+    pub fn extend_proofs(&self, proofs: impl IntoIterator<Item = (B256, Bytes)>) {
         self.proofs.lock().unwrap().extend(proofs);
     }
 }
 
-impl<T: ExecutionProof> ZkRessProtocolProvider for MockRessProtocolProvider<T> {
-    type Proof = T;
-
+impl ZkRessProtocolProvider for MockRessProtocolProvider {
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         Ok(self.headers.lock().unwrap().get(&block_hash).cloned())
     }
@@ -97,7 +84,7 @@ impl<T: ExecutionProof> ZkRessProtocolProvider for MockRessProtocolProvider<T> {
         Ok(self.block_bodies.lock().unwrap().get(&block_hash).cloned())
     }
 
-    async fn proof(&self, block_hash: B256) -> ProviderResult<Self::Proof> {
+    async fn proof(&self, block_hash: B256) -> ProviderResult<Bytes> {
         if let Some(delay) = self.proof_delay {
             tokio::time::sleep(delay).await;
         }

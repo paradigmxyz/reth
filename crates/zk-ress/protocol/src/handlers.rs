@@ -21,8 +21,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::*;
 
 /// The events that can be emitted by our custom protocol.
-#[derive(Debug)]
-pub enum ProtocolEvent<T> {
+#[derive(Clone, Debug)]
+pub enum ProtocolEvent {
     /// Connection established.
     Established {
         /// Connection direction.
@@ -30,7 +30,7 @@ pub enum ProtocolEvent<T> {
         /// Peer ID.
         peer_id: PeerId,
         /// Sender part for forwarding commands.
-        to_connection: mpsc::UnboundedSender<ZkRessPeerRequest<T>>,
+        to_connection: mpsc::UnboundedSender<ZkRessPeerRequest>,
     },
     /// Number of max active connections exceeded. New connection was rejected.
     MaxActiveConnectionsExceeded {
@@ -40,34 +40,17 @@ pub enum ProtocolEvent<T> {
 }
 
 /// Protocol state is an helper struct to store the protocol events.
-pub struct ProtocolState<T> {
+#[derive(Clone, Debug)]
+pub struct ProtocolState {
     /// Protocol event sender.
-    pub events_sender: mpsc::UnboundedSender<ProtocolEvent<T>>,
+    pub events_sender: mpsc::UnboundedSender<ProtocolEvent>,
     /// The number of active connections.
     pub active_connections: Arc<AtomicU64>,
 }
 
-impl<T> Clone for ProtocolState<T> {
-    fn clone(&self) -> Self {
-        Self {
-            events_sender: self.events_sender.clone(),
-            active_connections: self.active_connections.clone(),
-        }
-    }
-}
-
-impl<T> fmt::Debug for ProtocolState<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ProtocolState")
-            .field("events_sender", &self.events_sender)
-            .field("active_connections", &self.active_connections)
-            .finish()
-    }
-}
-
-impl<T> ProtocolState<T> {
+impl ProtocolState {
     /// Create new protocol state.
-    pub fn new(events_sender: mpsc::UnboundedSender<ProtocolEvent<T>>) -> Self {
+    pub fn new(events_sender: mpsc::UnboundedSender<ProtocolEvent>) -> Self {
         Self { events_sender, active_connections: Arc::default() }
     }
 
@@ -78,7 +61,7 @@ impl<T> ProtocolState<T> {
 }
 
 /// The protocol handler takes care of incoming and outgoing connections.
-pub struct ZkRessProtocolHandler<P: ZkRessProtocolProvider> {
+pub struct ZkRessProtocolHandler<P> {
     /// Name of the protocol.
     pub protocol_name: &'static str,
     /// Version of the protocol.
@@ -92,7 +75,7 @@ pub struct ZkRessProtocolHandler<P: ZkRessProtocolProvider> {
     /// The maximum number of active connections.
     pub max_active_connections: u64,
     /// Current state of the protocol.
-    pub state: ProtocolState<P::Proof>,
+    pub state: ProtocolState,
 }
 
 impl<P: ZkRessProtocolProvider> fmt::Debug for ZkRessProtocolHandler<P> {
@@ -123,7 +106,6 @@ impl<P: ZkRessProtocolProvider + Clone> Clone for ZkRessProtocolHandler<P> {
 impl<P> ProtocolHandler for ZkRessProtocolHandler<P>
 where
     P: ZkRessProtocolProvider + Clone + Unpin + 'static,
-    P::Proof: Default + fmt::Debug,
 {
     type ConnectionHandler = Self;
 
@@ -171,12 +153,11 @@ where
 impl<P> ConnectionHandler for ZkRessProtocolHandler<P>
 where
     P: ZkRessProtocolProvider + Clone + Unpin + 'static,
-    P::Proof: Default + fmt::Debug,
 {
     type Connection = ZkRessProtocolConnection<P>;
 
     fn protocol(&self) -> Protocol {
-        ZkRessProtocolMessage::<P::Proof>::protocol(self.protocol_name, self.protocol_version)
+        ZkRessProtocolMessage::protocol(self.protocol_name, self.protocol_version)
     }
 
     fn on_unsupported_by_peer(

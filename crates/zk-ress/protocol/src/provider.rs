@@ -1,6 +1,5 @@
-use crate::ExecutionProof;
 use alloy_consensus::Header;
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rlp::Encodable;
 use reth_ethereum_primitives::BlockBody;
 use reth_network::eth_requests::{MAX_BODIES_SERVE, MAX_HEADERS_SERVE, SOFT_RESPONSE_LIMIT};
@@ -10,9 +9,6 @@ use std::future::Future;
 
 /// A provider trait for ress protocol.
 pub trait ZkRessProtocolProvider: Send + Sync {
-    /// The zk-ress proof type.
-    type Proof: ExecutionProof;
-
     /// Return block header by hash.
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>>;
 
@@ -57,5 +53,5 @@ pub trait ZkRessProtocolProvider: Send + Sync {
     }
 
     /// Return execution proof by block hash.
-    fn proof(&self, block_hash: B256) -> impl Future<Output = ProviderResult<Self::Proof>> + Send;
+    fn proof(&self, block_hash: B256) -> impl Future<Output = ProviderResult<Bytes>> + Send;
 }

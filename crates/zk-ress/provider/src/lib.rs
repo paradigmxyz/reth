@@ -71,8 +71,6 @@ where
     P: BlockReader<Block = Block> + StateProviderFactory + Clone + 'static,
     E: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
-    type Proof = Bytes;
-
     fn header(&self, block_hash: B256) -> ProviderResult<Option<Header>> {
         trace!(target: "reth::zk_ress_provider", %block_hash, "Serving header");
         Ok(self.ress_provider.block_by_hash(block_hash)?.map(|b| b.header().clone()))
@@ -83,7 +81,7 @@ where
         Ok(self.ress_provider.block_by_hash(block_hash)?.map(|b| b.body().clone()))
     }
 
-    async fn proof(&self, block_hash: B256) -> ProviderResult<Self::Proof> {
+    async fn proof(&self, block_hash: B256) -> ProviderResult<Bytes> {
         let witness = self.ress_provider.execution_witness(block_hash).await?;
 
         match self.prover {

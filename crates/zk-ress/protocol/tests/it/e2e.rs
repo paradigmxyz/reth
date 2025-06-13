@@ -1,4 +1,4 @@
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use futures::StreamExt;
 use reth_network::{test_utils::Testnet, NetworkEventListenerProvider, Peers};
 use reth_network_api::{
@@ -6,7 +6,7 @@ use reth_network_api::{
     test_utils::PeersHandleProvider,
 };
 use reth_provider::test_utils::MockEthProvider;
-use reth_ress_protocol::{ExecutionStateWitness, GetHeaders, NodeType};
+use reth_ress_protocol::{GetHeaders, NodeType};
 use reth_zk_ress_protocol::{
     test_utils::{MockRessProtocolProvider, NoopZkRessProtocolProvider},
     ProtocolEvent, ProtocolState, ZkRessPeerRequest, ZkRessProtocolHandler,
@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 async fn disconnect_on_stateful_pair() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionStateWitness>::default();
+    let protocol_provider = NoopZkRessProtocolProvider;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
@@ -90,7 +90,7 @@ async fn disconnect_on_stateful_pair() {
 async fn message_exchange() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionStateWitness>::default();
+    let protocol_provider = NoopZkRessProtocolProvider;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
@@ -159,7 +159,7 @@ async fn message_exchange() {
     // send get proof message from peer0 to peer1
     let (tx, rx) = oneshot::channel();
     peer0_conn.send(ZkRessPeerRequest::GetProof { block_hash: B256::ZERO, tx }).unwrap();
-    assert_eq!(rx.await.unwrap(), Default::default());
+    assert_eq!(rx.await.unwrap(), Bytes::default());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -168,8 +168,7 @@ async fn proof_fetching_does_not_block() {
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
 
     let proof_delay = Duration::from_millis(100);
-    let protocol_provider =
-        MockRessProtocolProvider::<ExecutionStateWitness>::default().with_proof_delay(proof_delay);
+    let protocol_provider = MockRessProtocolProvider::default().with_proof_delay(proof_delay);
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
@@ -238,7 +237,7 @@ async fn proof_fetching_does_not_block() {
     assert!(headers_requested_at.elapsed() < proof_delay);
 
     // await for proof response
-    assert_eq!(proof_rx.await.unwrap(), Default::default());
+    assert_eq!(proof_rx.await.unwrap(), Bytes::default());
     assert!(proof_requested_at.elapsed() >= proof_delay);
 }
 
@@ -246,7 +245,7 @@ async fn proof_fetching_does_not_block() {
 async fn max_active_connections() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(3, MockEthProvider::default()).await;
-    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionStateWitness>::default();
+    let protocol_provider = NoopZkRessProtocolProvider;
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];

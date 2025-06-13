@@ -1,6 +1,6 @@
 use crate::{ZkRessMessage, ZkRessProtocolMessage, ZkRessProtocolProvider};
 use alloy_consensus::Header;
-use alloy_primitives::{bytes::BytesMut, BlockHash, B256};
+use alloy_primitives::{bytes::BytesMut, BlockHash, Bytes, B256};
 use futures::{stream::FuturesUnordered, Stream, StreamExt};
 use reth_eth_wire::{message::RequestPair, multiplex::ProtocolConnection};
 use reth_ethereum_primitives::BlockBody;
@@ -24,10 +24,7 @@ use tracing::*;
 
 /// The connection handler for the custom `RLPx` protocol.
 #[derive(Debug)]
-pub struct ZkRessProtocolConnection<P>
-where
-    P: ZkRessProtocolProvider,
-{
+pub struct ZkRessProtocolConnection<P> {
     /// Provider.
     provider: P,
     /// The type of this node..
@@ -39,7 +36,7 @@ where
     /// Protocol connection.
     conn: ProtocolConnection,
     /// Stream of incoming commands.
-    commands: UnboundedReceiverStream<ZkRessPeerRequest<P::Proof>>,
+    commands: UnboundedReceiverStream<ZkRessPeerRequest>,
     /// The total number of active connections.
     active_connections: Arc<AtomicU64>,
     /// Flag indicating whether the node type was sent to the peer.
@@ -49,9 +46,9 @@ where
     /// Incremental counter for request ids.
     next_id: u64,
     /// Collection of inflight requests.
-    inflight_requests: HashMap<u64, ZkRessPeerRequest<P::Proof>>,
+    inflight_requests: HashMap<u64, ZkRessPeerRequest>,
     /// Pending proof responses.
-    pending_proofs: FuturesUnordered<ProofFut<P::Proof>>,
+    pending_proofs: FuturesUnordered<ProofFut>,
 }
 
 impl<P> ZkRessProtocolConnection<P>
@@ -65,7 +62,7 @@ where
         peers_handle: PeersHandle,
         peer_id: PeerId,
         conn: ProtocolConnection,
-        commands: UnboundedReceiverStream<ZkRessPeerRequest<P::Proof>>,
+        commands: UnboundedReceiverStream<ZkRessPeerRequest>,
         active_connections: Arc<AtomicU64>,
     ) -> Self {
         Self {
@@ -96,10 +93,7 @@ where
         self.peers_handle.reputation_change(self.peer_id, ReputationChangeKind::BadMessage);
     }
 
-    fn on_command(
-        &mut self,
-        command: ZkRessPeerRequest<P::Proof>,
-    ) -> ZkRessProtocolMessage<P::Proof> {
+    fn on_command(&mut self, command: ZkRessPeerRequest) -> ZkRessProtocolMessage {
         let next_id = self.next_id();
         let message = match &command {
             ZkRessPeerRequest::GetHeaders { request, .. } => {
@@ -120,7 +114,6 @@ where
 impl<P> ZkRessProtocolConnection<P>
 where
     P: ZkRessProtocolProvider + Clone + 'static,
-    P::Proof: Default,
 {
     fn on_headers_request(&self, request: GetHeaders) -> Vec<Header> {
         match self.provider.headers(request) {
@@ -145,8 +138,8 @@ where
     fn on_proof_response(
         &self,
         request: RequestPair<B256>,
-        proof_result: ProviderResult<P::Proof>,
-    ) -> ZkRessProtocolMessage<P::Proof> {
+        proof_result: ProviderResult<Bytes>,
+    ) -> ZkRessProtocolMessage {
         let peer_id = self.peer_id;
         let block_hash = request.message;
         let proof = match proof_result {
@@ -162,7 +155,7 @@ where
         ZkRessProtocolMessage::proof(request.request_id, proof)
     }
 
-    fn on_ress_message(&mut self, msg: ZkRessProtocolMessage<P::Proof>) -> OnRessMessageOutcome {
+    fn on_ress_message(&mut self, msg: ZkRessProtocolMessage) -> OnRessMessageOutcome {
         match msg.message {
             ZkRessMessage::NodeType(node_type) => {
                 if !self.node_type.is_valid_connection(&node_type) {
@@ -174,15 +167,14 @@ where
                 let request = req.message;
                 trace!(target: "ress::net::connection", peer_id = %self.peer_id, ?request, "serving headers");
                 let header = self.on_headers_request(request);
-                let response = ZkRessProtocolMessage::<P::Proof>::headers(req.request_id, header);
+                let response = ZkRessProtocolMessage::headers(req.request_id, header);
                 return OnRessMessageOutcome::Response(response.encoded());
             }
             ZkRessMessage::GetBlockBodies(req) => {
                 let request = req.message;
                 trace!(target: "ress::net::connection", peer_id = %self.peer_id, ?request, "serving block bodies");
                 let bodies = self.on_block_bodies_request(request);
-                let response =
-                    ZkRessProtocolMessage::<P::Proof>::block_bodies(req.request_id, bodies);
+                let response = ZkRessProtocolMessage::block_bodies(req.request_id, bodies);
                 return OnRessMessageOutcome::Response(response.encoded());
             }
             ZkRessMessage::GetProof(req) => {
@@ -226,7 +218,7 @@ where
     }
 }
 
-impl<P: ZkRessProtocolProvider> Drop for ZkRessProtocolConnection<P> {
+impl<P> Drop for ZkRessProtocolConnection<P> {
     fn drop(&mut self) {
         let _ = self
             .active_connections
@@ -237,7 +229,6 @@ impl<P: ZkRessProtocolProvider> Drop for ZkRessProtocolConnection<P> {
 impl<P> Stream for ZkRessProtocolConnection<P>
 where
     P: ZkRessProtocolProvider + Clone + Unpin + 'static,
-    P::Proof: Default + fmt::Debug,
 {
     type Item = BytesMut;
 
@@ -250,9 +241,7 @@ where
 
         if !this.node_type_sent {
             this.node_type_sent = true;
-            return Poll::Ready(Some(
-                ZkRessProtocolMessage::<P::Proof>::node_type(this.node_type).encoded(),
-            ))
+            return Poll::Ready(Some(ZkRessProtocolMessage::node_type(this.node_type).encoded()))
         }
 
         'conn: loop {
@@ -302,11 +291,11 @@ where
     }
 }
 
-type ProofFut<T> = Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<T>)> + Send>>;
+type ProofFut = Pin<Box<dyn Future<Output = (RequestPair<B256>, ProviderResult<Bytes>)> + Send>>;
 
 /// Ress peer request.
 #[derive(Debug)]
-pub enum ZkRessPeerRequest<T> {
+pub enum ZkRessPeerRequest {
     /// Get block headers.
     GetHeaders {
         /// The request for block headers.
@@ -326,7 +315,7 @@ pub enum ZkRessPeerRequest<T> {
         /// Target block hash that we want to get proof for.
         block_hash: BlockHash,
         /// The sender for the response.
-        tx: oneshot::Sender<T>,
+        tx: oneshot::Sender<Bytes>,
     },
 }
 
