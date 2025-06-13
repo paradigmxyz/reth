@@ -36,6 +36,8 @@ sol! {
 #[tokio::main]
 pub async fn main() -> eyre::Result<()> {
     let db_path = PathBuf::from(std::env::var("RETH_DB_PATH")?);
+    std::fs::remove_dir_all(&db_path.join("db"))?;
+    std::fs::create_dir_all(&db_path.join("db"))?;
     let db = open_db(Path::new(&db_path.join("db")), Default::default())?;
     let provider_factory = EthereumNode::provider_factory_builder()
         .db(Arc::new(db))
@@ -88,14 +90,20 @@ pub async fn main() -> eyre::Result<()> {
 
     let provider = provider_factory.database_provider_ro()?;
 
-    let instant = Instant::now();
+    let mut durations = Vec::new();
 
     for hash in hashes {
+        let instant = Instant::now();
         provider.tx_ref().get::<tables::Bytecodes>(*hash)?;
+        let elapsed = instant.elapsed();
+
+        durations.push(elapsed);
     }
 
-    let duration = instant.elapsed();
-    println!("Time taken: {:?}, time per read: {:?}", duration, duration / num_reads as u32);
+    for percentile in [10, 25, 50, 75, 90] {
+        let duration = durations.select_nth_unstable(percentile * num_reads / 100).1;
+        println!("{}th percentile: {:?}", percentile, duration);
+    }
 
     Ok(())
 }
