@@ -9,6 +9,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
+use reth_fs_util as fs;
 use reth_node_core::version::SHORT_VERSION;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
@@ -85,6 +86,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                 self.env.datadir.resolve_datadir(self.env.chain.chain()).data_dir().join("era");
 
             let folder = folder.into_boxed_path();
+
+            fs::create_dir_all(&folder)?;
+
             let client = EraClient::new(Client::new(), url, folder);
             let stream = EraStream::new(client, EraStreamConfig::default());
 
