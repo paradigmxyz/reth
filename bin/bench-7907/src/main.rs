@@ -4,7 +4,6 @@ use alloy::{
     primitives::{Bytes, B256},
     sol,
 };
-use rand::seq::IteratorRandom;
 use reth_chainspec::DEV;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -85,22 +84,15 @@ pub async fn main() -> eyre::Result<()> {
 
         provider.commit()?;
     }
-    let hashes = provider_factory
-        .database_provider_ro()?
-        .tx_ref()
-        .cursor_read::<tables::Bytecodes>()?
-        .walk(None)?
-        .choose_multiple(&mut rand::rng(), num_reads)
-        .into_iter()
-        .map(|result| result.map(|(hash, _)| hash));
 
     let provider = provider_factory.database_provider_ro()?;
 
     let mut durations = Vec::new();
 
-    for (i, hash) in hashes.enumerate() {
+    for i in 0..num_reads {
+        let mut cursor = provider.tx_ref().cursor_read::<tables::Bytecodes>()?;
         let instant = Instant::now();
-        provider.tx_ref().get::<tables::Bytecodes>(hash?)?;
+        cursor.seek(B256::random())?;
         let elapsed = instant.elapsed();
 
         durations.push(elapsed);
