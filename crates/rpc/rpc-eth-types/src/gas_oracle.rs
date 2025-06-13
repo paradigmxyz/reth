@@ -49,7 +49,7 @@ pub struct GasPriceOracleConfig {
     pub max_reward_percentile_count: u64,
 
     /// The default gas price to use if there are no blocks to use
-    pub default: Option<U256>, // TODO: never used, remove this ?
+    pub default: Option<U256>,
 
     /// The maximum gas price to use for the estimate
     pub max_price: Option<U256>,
@@ -273,7 +273,15 @@ where
         Ok(Some((parent_hash, prices)))
     }
 
-    /// Suggests a gas price based on median of tip values
+    /// Suggests a max priority fee value using a simplified and more predictable algorithm
+    /// appropriate for chains like Optimism with a single known block builder.
+    ///
+    /// It returns either:
+    /// - The minimum suggested priority fee when blocks have capacity
+    /// - 10% above the median effective priority fee from the last block when at capacity
+    ///
+    /// A block is considered at capacity if its total gas used plus the maximum single transaction
+    /// gas would exceed the block's gas limit.
     pub async fn op_suggest_tip_cap(&self, min_suggested_priority_fee: U256) -> EthResult<U256> {
         let header = self
             .provider
@@ -303,11 +311,6 @@ where
         else {
             return Ok(suggestion);
         };
-
-        // sanity check the max gas used value
-        if max_gas_used > header.gas_limit() {
-            return Ok(suggestion);
-        }
 
         // if the block is at capacity, the suggestion must be increased
         if header.gas_used() + max_gas_used > header.gas_limit() {
