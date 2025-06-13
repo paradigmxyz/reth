@@ -13490,6 +13490,38 @@ dependencies = [
 ]
 
 [[package]]
+name = "wormhole"
+version = "0.1.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-op-evm",
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-engine",
+ "bytes",
+ "eyre",
+ "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
+ "op-revm",
+ "reth-codecs",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-op",
+ "reth-optimism-forks",
+ "reth-optimism-node",
+ "reth-optimism-payload-builder",
+ "reth-optimism-rpc",
+ "reth-optimism-txpool",
+ "reth-primitives-traits",
+ "reth-transaction-pool",
+ "reth-trie-db",
+ "revm",
+ "serde",
+]
+
+[[package]]
 name = "write16"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

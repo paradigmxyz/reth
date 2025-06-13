@@ -1,0 +1,50 @@
+[package]
+name = "wormhole"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+# No custom features needed for this example
+
+[dependencies]
+# Core Reth dependencies
+reth-op = { workspace = true, features = ["full", "cli", "evm"] }
+reth-node-api.workspace = true
+reth-node-builder.workspace = true
+reth-optimism-node.workspace = true
+reth-optimism-txpool.workspace = true
+reth-transaction-pool.workspace = true
+reth-primitives-traits = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-codecs.workspace = true
+reth-trie-db.workspace = true
+reth-optimism-forks.workspace = true
+
+# Alloy dependencies
+alloy-consensus.workspace = true
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+alloy-rlp.workspace = true
+alloy-evm.workspace = true
+alloy-op-evm.workspace = true
+alloy-rpc-types-engine.workspace = true
+
+# OP dependencies
+op-alloy-consensus.workspace = true
+op-alloy-rpc-types-engine.workspace = true
+op-revm.workspace = true
+reth-optimism-payload-builder.workspace = true
+reth-optimism-rpc.workspace = true
+
+# REVM
+revm.workspace = true
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+
+# Misc
+bytes.workspace = true
+eyre.workspace = true
+
+[dev-dependencies]
+# Empty for this example

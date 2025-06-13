@@ -146,6 +146,7 @@ members = [
     "examples/custom-payload-builder/",
     "examples/custom-rlpx-subprotocol",
     "examples/custom-node",
+    "examples/wormhole",
     "examples/db-access",
     "examples/engine-api-access",
     "examples/exex-hello-world",
