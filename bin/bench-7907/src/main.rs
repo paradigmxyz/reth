@@ -4,7 +4,7 @@ use alloy::{
     primitives::{Bytes, B256},
     sol,
 };
-use rand::seq::{IndexedRandom, IteratorRandom};
+use rand::seq::IteratorRandom;
 use reth_chainspec::DEV;
 use reth_db::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -45,7 +45,7 @@ pub async fn main() -> eyre::Result<()> {
     let insert_bytecodes: bool = std::env::var("INSERT_BYTECODES")?.parse()?;
     let num_reads = std::env::var("NUM_READS")?.parse()?;
 
-    let hashes = if insert_bytecodes {
+    if insert_bytecodes {
         let num_bytecodes = std::env::var("NUM_BYTECODES")?.parse()?;
         let code_size = std::env::var("CODE_SIZE")?.parse()?;
 
@@ -75,12 +75,9 @@ pub async fn main() -> eyre::Result<()> {
         let provider = provider_factory.database_provider_rw()?;
         let mut cursor = provider.tx_ref().cursor_write::<tables::Bytecodes>()?;
 
-        let mut hashes = Vec::new();
-
         let mut i = 0;
         for (hash, bytecode) in bytecodes {
             cursor.append(hash, &Bytecode::new_raw_checked(bytecode)?)?;
-            hashes.push(hash);
 
             i += 1;
             if i % 10000 == 0 {
@@ -89,19 +86,15 @@ pub async fn main() -> eyre::Result<()> {
         }
 
         provider.commit()?;
-
-        hashes.choose_multiple(&mut rand::rng(), num_reads).copied().collect::<Vec<_>>()
-    } else {
-        provider_factory
-            .database_provider_ro()?
-            .tx_ref()
-            .cursor_read::<tables::Bytecodes>()?
-            .walk(None)?
-            .choose_multiple(&mut rand::rng(), num_reads)
-            .into_iter()
-            .map(|result| result.map(|(hash, _)| hash))
-            .collect::<Result<Vec<_>, _>>()?
-    };
+    }
+    let hashes = provider_factory
+        .database_provider_ro()?
+        .tx_ref()
+        .cursor_read::<tables::Bytecodes>()?
+        .walk(None)?
+        .choose_multiple(&mut rand::rng(), num_reads)
+        .into_iter()
+        .map(|result| result.map(|(hash, _)| hash));
 
     let provider = provider_factory.database_provider_ro()?;
 
@@ -109,7 +102,7 @@ pub async fn main() -> eyre::Result<()> {
 
     for hash in hashes {
         let instant = Instant::now();
-        provider.tx_ref().get::<tables::Bytecodes>(hash)?;
+        provider.tx_ref().get::<tables::Bytecodes>(hash?)?;
         let elapsed = instant.elapsed();
 
         durations.push(elapsed);
