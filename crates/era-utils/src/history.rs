@@ -17,8 +17,8 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, BlockWriter, ProviderError, StaticFileProviderFactory,
-    StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, writer::UnifiedStorageWriter, BlockWriter,
+    ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_stages_types::{
     CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
@@ -58,7 +58,7 @@ where
     PF: DatabaseProviderFactory<
         ProviderRW: BlockWriter<Block = B>
             + DBProvider
-            + NodePrimitivesProvider<Primitives: NodePrimitives<Block = B, BlockHeader = BH, BlockBody = BB>>
+            + StaticFileProviderFactory<Primitives: NodePrimitives<Block = B, BlockHeader = BH, BlockBody = BB>>
             + StageCheckpointWriter,
     > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
 {
@@ -76,41 +76,40 @@ where
 
     // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
     // when poll_execute_ready is polled.
-    let mut last_header_number = static_file_provider
+    let mut height = static_file_provider
         .get_highest_static_file_block(StaticFileSegment::Headers)
         .unwrap_or_default();
 
     // Find the latest total difficulty
     let mut td = static_file_provider
-        .header_td_by_number(last_header_number)?
-        .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
-
-    // Although headers were downloaded in reverse order, the collector iterates it in ascending
-    // order
-    let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
-    let mut total = 0;
+        .header_td_by_number(height)?
+        .ok_or(ProviderError::TotalDifficultyNotFound(height))?;
 
     while let Some(meta) = rx.recv()? {
-        let from = last_header_number;
+        let from = height;
         let provider = provider_factory.database_provider_rw()?;
 
-        last_header_number =
-            process(&meta?, &mut writer, &provider, hash_collector, &mut td, last_header_number..)?;
+        height = process(
+            &meta?,
+            &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
+            &provider,
+            hash_collector,
+            &mut td,
+            height..,
+        )?;
 
-        total += 1;
-        save_stage_checkpoints(&provider, from, last_header_number, 1, total)?;
+        save_stage_checkpoints(&provider, from, height, height, height)?;
 
-        writer.commit()?;
-        provider.commit()?;
+        UnifiedStorageWriter::commit(provider)?;
     }
 
     let provider = provider_factory.database_provider_rw()?;
 
     build_index(&provider, hash_collector)?;
 
-    provider.commit()?;
+    UnifiedStorageWriter::commit(provider)?;
 
-    Ok(last_header_number)
+    Ok(height)
 }
 
 /// Saves progress of ERA import into stages sync.
