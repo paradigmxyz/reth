@@ -1,25 +1,24 @@
+#![allow(missing_docs)]
+
 use alloy::{
-    primitives::{keccak256, Address, Bytes, B256},
-    providers::ProviderBuilder,
-    signers::local::PrivateKeySigner,
+    primitives::{Bytes, B256},
     sol,
 };
-use alloy_genesis::GenesisAccount;
 use rand::seq::{IndexedRandom, IteratorRandom};
 use reth_chainspec::DEV;
-use reth_db::{open_db, tables};
-use reth_db::cursor::DbCursorRW;
-use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
+use reth_db::{
+    cursor::{DbCursorRO, DbCursorRW},
+    open_db, tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_node_ethereum::EthereumNode;
-use reth_provider::{providers::StaticFileProvider, DatabaseProviderFactory};
-use reth_revm::primitives::b256;
-use reth_db::transaction::DbTxMut;
 use reth_primitives::Bytecode;
-use reth_db::transaction::DbTx;
+use reth_provider::{providers::StaticFileProvider, DatabaseProviderFactory};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::Arc, time::Instant,
+    sync::Arc,
+    time::Instant,
 };
 
 sol! {
@@ -36,57 +35,73 @@ sol! {
 #[tokio::main]
 pub async fn main() -> eyre::Result<()> {
     let db_path = PathBuf::from(std::env::var("RETH_DB_PATH")?);
-    std::fs::remove_dir_all(&db_path.join("db"))?;
-    std::fs::create_dir_all(&db_path.join("db"))?;
     let db = open_db(Path::new(&db_path.join("db")), Default::default())?;
     let provider_factory = EthereumNode::provider_factory_builder()
         .db(Arc::new(db))
         .chainspec(DEV.clone())
-        .static_file(StaticFileProvider::read_only(&db_path.join("static_files"), false).unwrap())
+        .static_file(StaticFileProvider::read_only(db_path.join("static_files"), false).unwrap())
         .build_provider_factory();
 
-    let num_bytecodes = std::env::var("NUM_BYTECODES")?.parse()?;
+    let insert_bytecodes: bool = std::env::var("INSERT_BYTECODES")?.parse()?;
     let num_reads = std::env::var("NUM_READS")?.parse()?;
-    let code_size = std::env::var("CODE_SIZE")?.parse()?;
 
-    let mut bytecodes = BTreeMap::new();
+    let hashes = if insert_bytecodes {
+        let num_bytecodes = std::env::var("NUM_BYTECODES")?.parse()?;
+        let code_size = std::env::var("CODE_SIZE")?.parse()?;
 
-    for i in 0..num_bytecodes {
-        let address = Address::random();
-        let mut bytecode = Vec::new();
-        bytecode.extend_from_slice(&(i as u64).to_be_bytes());
-        bytecode.extend(std::iter::repeat(0).take(code_size));
+        println!("RETH_DB_PATH: {}", db_path.display());
+        println!("NUM_BYTECODES: {}", num_bytecodes);
+        println!("NUM_READS: {}", num_reads);
+        println!("CODE_SIZE: {}", code_size);
 
-        bytecodes.insert(B256::random(), Bytes::from(bytecode));
+        let mut bytecodes = BTreeMap::new();
 
-        if i % 10000 == 0 {
-            println!("{}", i);
+        for i in 0..num_bytecodes {
+            let mut bytecode = Vec::new();
+            bytecode.extend_from_slice(&(i as u64).to_be_bytes());
+            bytecode.extend(std::iter::repeat_n(0, code_size));
+
+            bytecodes.insert(B256::random(), Bytes::from(bytecode));
+
+            if i % 10000 == 0 {
+                println!("generated {} bytecodes", i);
+            }
         }
-    }
 
-    let provider = provider_factory.database_provider_rw()?;
-    provider.tx_ref().clear::<tables::Bytecodes>()?;
-    provider.commit()?;
+        let provider = provider_factory.database_provider_rw()?;
+        provider.tx_ref().clear::<tables::Bytecodes>()?;
+        provider.commit()?;
 
-    let provider = provider_factory.database_provider_rw()?;
-    let mut cursor = provider.tx_ref().cursor_write::<tables::Bytecodes>()?;
+        let provider = provider_factory.database_provider_rw()?;
+        let mut cursor = provider.tx_ref().cursor_write::<tables::Bytecodes>()?;
 
-    let mut hashes = Vec::new();
+        let mut hashes = Vec::new();
 
-    let mut i = 0;
-    for (hash, bytecode) in bytecodes {
-        cursor.append(hash, &Bytecode::new_raw_checked(bytecode)?)?;
-        hashes.push(hash);
+        let mut i = 0;
+        for (hash, bytecode) in bytecodes {
+            cursor.append(hash, &Bytecode::new_raw_checked(bytecode)?)?;
+            hashes.push(hash);
 
-        i += 1;
-        if i % 10000 == 0 {
-            println!("{}", i);
+            i += 1;
+            if i % 10000 == 0 {
+                println!("appeneded {} bytecodes", i);
+            }
         }
-    }
 
-    provider.commit()?;
+        provider.commit()?;
 
-    let hashes = hashes.choose_multiple(&mut rand::rng(), num_reads);
+        hashes.choose_multiple(&mut rand::rng(), num_reads).copied().collect::<Vec<_>>()
+    } else {
+        provider_factory
+            .database_provider_ro()?
+            .tx_ref()
+            .cursor_read::<tables::Bytecodes>()?
+            .walk(None)?
+            .choose_multiple(&mut rand::rng(), num_reads)
+            .into_iter()
+            .map(|result| result.map(|(hash, _)| hash))
+            .collect::<Result<Vec<_>, _>>()?
+    };
 
     let provider = provider_factory.database_provider_ro()?;
 
@@ -94,7 +109,7 @@ pub async fn main() -> eyre::Result<()> {
 
     for hash in hashes {
         let instant = Instant::now();
-        provider.tx_ref().get::<tables::Bytecodes>(*hash)?;
+        provider.tx_ref().get::<tables::Bytecodes>(hash)?;
         let elapsed = instant.elapsed();
 
         durations.push(elapsed);
