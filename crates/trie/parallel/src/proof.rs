@@ -213,7 +213,50 @@ where
             storage_proofs.insert(hashed_address, receiver);
         }
 
-        let provider_ro = self.view.provider_ro()?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let view = self.view.clone();
+        let nodes_sorted = self.nodes_sorted.clone();
+        let state_sorted = self.state_sorted.clone();
+        tokio::task::spawn_blocking(move || {
+            let result: Result<(), ProviderError> = (|| {
+                let provider_ro = view.provider_ro()?;
+                let trie_cursor_factory = InMemoryTrieCursorFactory::new(
+                    DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
+                    &nodes_sorted,
+                );
+                let hashed_cursor_factory = HashedPostStateCursorFactory::new(
+                    DatabaseHashedCursorFactory::new(provider_ro.tx_ref()),
+                    &state_sorted,
+                );
+
+                // Create the walker.
+                let walker = TrieWalker::state_trie(
+                    trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
+                    prefix_sets.account_prefix_set,
+                )
+                .with_deletions_retained(true);
+
+                let mut account_node_iter = TrieNodeIter::state_trie(
+                    walker,
+                    hashed_cursor_factory
+                        .hashed_account_cursor()
+                        .map_err(ProviderError::Database)?,
+                );
+
+                while let Some(account_node) = account_node_iter.try_next()? {
+                    tx.send(Ok(account_node)).unwrap();
+                }
+
+                Ok(())
+            })();
+
+            match result {
+                Ok(()) => {}
+                Err(err) => tx.send(Err(err)).unwrap(),
+            }
+        });
+
+        let provider_ro = self.view.provider_ro().unwrap();
         let trie_cursor_factory = InMemoryTrieCursorFactory::new(
             DatabaseTrieCursorFactory::new(provider_ro.tx_ref()),
             &self.nodes_sorted,
@@ -223,32 +266,21 @@ where
             &self.state_sorted,
         );
 
-        // Create the walker.
-        let walker = TrieWalker::state_trie(
-            trie_cursor_factory.account_trie_cursor().map_err(ProviderError::Database)?,
-            prefix_sets.account_prefix_set,
-        )
-        .with_deletions_retained(true);
-
-        // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
-        let mut hash_builder = HashBuilder::default()
-            .with_proof_retainer(retainer)
-            .with_updates(self.collect_branch_node_masks);
-
         // Initialize all storage multiproofs as empty.
         // Storage multiproofs for non empty tries will be overwritten if necessary.
         let mut storages: B256Map<_> =
             targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
-        let mut account_node_iter = TrieNodeIter::state_trie(
-            walker,
-            hashed_cursor_factory.hashed_account_cursor().map_err(ProviderError::Database)?,
-        );
-        while let Some(account_node) =
-            account_node_iter.try_next().map_err(ProviderError::Database)?
-        {
-            match account_node {
+
+        // Create a hash builder to rebuild the root node since it is not available in the
+        // database.
+        let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
+        let mut hash_builder = HashBuilder::default()
+            .with_proof_retainer(retainer)
+            .with_updates(self.collect_branch_node_masks);
+
+        while let Ok(result) = rx.recv() {
+            match result? {
                 TrieElement::Branch(node) => {
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
@@ -296,6 +328,7 @@ where
                 }
             }
         }
+
         let _ = hash_builder.root();
 
         let stats = tracker.finish();
