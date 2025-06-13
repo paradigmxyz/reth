@@ -4,7 +4,7 @@ mod client;
 
 pub use client::FetchClient;
 
-use crate::{message::BlockRequest, transform::header::HeaderTransform};
+use crate::{message::BlockRequest, session::BlockRangeInfo, transform::header::HeaderTransform};
 use alloy_primitives::B256;
 use futures::StreamExt;
 use reth_eth_wire::{EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives};

@@ -22,6 +22,11 @@ alloy-rpc-types-eth = { workspace = true, default-features = false, features = [
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 
+# scroll
+reth-scroll-primitives.workspace = true
+scroll-alloy-consensus.workspace = true
+scroll-alloy-rpc-types.workspace = true
+
 # optimism
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types.workspace = true

@@ -12,7 +12,7 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-# Alloy
+# alloy
 alloy-rlp.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
@@ -20,6 +20,7 @@ alloy-primitives = { workspace = true, features = ["rlp"] }
 
 # misc
 derive_more = { workspace = true, features = ["display"] }
+serde_with.workspace = true
 
 # arbitrary
 arbitrary = { workspace = true, features = ["derive"], optional = true }

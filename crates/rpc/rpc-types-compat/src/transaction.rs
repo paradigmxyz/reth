@@ -14,7 +14,10 @@ use op_alloy_consensus::{
 use op_alloy_rpc_types::OpTransactionRequest;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction, TxTy};
+use reth_scroll_primitives::ScrollReceipt;
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+use scroll_alloy_consensus::{ScrollAdditionalInfo, ScrollTransactionInfo, ScrollTxEnvelope};
+use scroll_alloy_rpc_types::ScrollTransactionRequest;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
@@ -139,6 +142,25 @@ pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
     Ok(OpTransactionInfo::new(tx_info, deposit_meta))
 }
 
+/// Creates [`ScrollTransactionInfo`] by adding [`ScrollAdditionalInfo`] to [`TransactionInfo`] if
+/// `tx` is not a L1 message.
+pub fn try_into_scroll_tx_info<T: ReceiptProvider<Receipt = ScrollReceipt>>(
+    provider: &T,
+    tx: &ScrollTxEnvelope,
+    tx_info: TransactionInfo,
+) -> Result<ScrollTransactionInfo, ProviderError> {
+    let additional_info = if tx.is_l1_message() {
+        None
+    } else {
+        provider
+            .receipt_by_hash(*tx.tx_hash())?
+            .map(|receipt| ScrollAdditionalInfo { l1_fee: receipt.l1_fee() })
+    }
+    .unwrap_or_default();
+
+    Ok(ScrollTransactionInfo::new(tx_info, additional_info))
+}
+
 impl IntoRpcTx<op_alloy_rpc_types::Transaction> for OpTxEnvelope {
     type TxInfo = OpTransactionInfo;
 
@@ -151,6 +173,18 @@ impl IntoRpcTx<op_alloy_rpc_types::Transaction> for OpTxEnvelope {
     }
 }
 
+impl IntoRpcTx<scroll_alloy_rpc_types::Transaction> for ScrollTxEnvelope {
+    type TxInfo = ScrollTransactionInfo;
+
+    fn into_rpc_tx(
+        self,
+        signer: Address,
+        tx_info: Self::TxInfo,
+    ) -> scroll_alloy_rpc_types::Transaction {
+        scroll_alloy_rpc_types::Transaction::from_transaction(self.with_signer(signer), tx_info)
+    }
+}
+
 impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
     fn try_into_sim_tx(self) -> Result<EthereumTxEnvelope<TxEip4844>, ValueError<Self>> {
         Self::build_typed_simulate_transaction(self)
@@ -160,6 +194,20 @@ impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
 impl TryIntoSimTx<OpTxEnvelope> for TransactionRequest {
     fn try_into_sim_tx(self) -> Result<OpTxEnvelope, ValueError<Self>> {
         let request: OpTransactionRequest = self.into();
+        let tx = request.build_typed_tx().map_err(|request| {
+            ValueError::new(request.as_ref().clone(), "Required fields missing")
+        })?;
+
+        // Create an empty signature for the transaction.
+        let signature = Signature::new(Default::default(), Default::default(), false);
+
+        Ok(tx.into_signed(signature).into())
+    }
+}
+
+impl TryIntoSimTx<ScrollTxEnvelope> for TransactionRequest {
+    fn try_into_sim_tx(self) -> Result<ScrollTxEnvelope, ValueError<Self>> {
+        let request: ScrollTransactionRequest = self.into();
         let tx = request.build_typed_tx().map_err(|request| {
             ValueError::new(request.as_ref().clone(), "Required fields missing")
         })?;

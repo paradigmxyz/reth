@@ -1,10 +1,10 @@
 //! Scroll specific types related to transactions.
 
-use alloy_consensus::{Transaction as _, Typed2718};
+use alloy_consensus::{transaction::Recovered, Transaction as _, Typed2718};
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, BlockHash, Bytes, ChainId, TxKind, B256, U256};
 use alloy_serde::OtherFields;
-use scroll_alloy_consensus::ScrollTxEnvelope;
+use scroll_alloy_consensus::{ScrollTransactionInfo, ScrollTxEnvelope};
 use serde::{Deserialize, Serialize};
 
 mod request;
@@ -21,6 +21,37 @@ pub struct Transaction {
     #[deref]
     #[deref_mut]
     pub inner: alloy_rpc_types_eth::Transaction<ScrollTxEnvelope>,
+}
+
+impl Transaction {
+    /// Returns a rpc [`Transaction`] with a [`OpTransactionInfo`] and
+    /// [`Recovered<OpTxEnvelope>`] as input.
+    pub fn from_transaction(
+        tx: Recovered<ScrollTxEnvelope>,
+        tx_info: ScrollTransactionInfo,
+    ) -> Self {
+        let base_fee = tx_info.inner.base_fee;
+        let effective_gas_price = if tx.is_l1_message() {
+            // For l1 messages, we set the `gasPrice` field to 0 in rpc
+            0
+        } else {
+            base_fee
+                .map(|base_fee| {
+                    tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
+                })
+                .unwrap_or_else(|| tx.max_fee_per_gas())
+        };
+
+        Self {
+            inner: alloy_rpc_types_eth::Transaction {
+                inner: tx,
+                block_hash: tx_info.inner.block_hash,
+                block_number: tx_info.inner.block_number,
+                transaction_index: tx_info.inner.index,
+                effective_gas_price: Some(effective_gas_price),
+            },
+        }
+    }
 }
 
 impl Typed2718 for Transaction {

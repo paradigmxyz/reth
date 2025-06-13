@@ -14,7 +14,7 @@ use once_cell as _;
 extern crate alloc;
 
 pub mod transaction;
-pub use transaction::{signed::ScrollTransactionSigned, tx_type::ScrollTxType};
+pub use transaction::{tx_type::ScrollTxType, ScrollTransactionSigned};
 
 use reth_primitives_traits::Block;
 
