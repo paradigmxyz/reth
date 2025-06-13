@@ -15,7 +15,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
     // Directory where the ERA1 files will be downloaded to
     let folder = tempdir().unwrap();
-    let folder = folder.path().to_owned().into_boxed_path();
+    let folder = folder.path();
 
     let client = EraClient::new(ClientWithFakeIndex(Client::new()), url, folder);
 
