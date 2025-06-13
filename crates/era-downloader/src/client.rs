@@ -49,8 +49,8 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
     const CHECKSUMS: &'static str = "checksums.txt";
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
-    pub const fn new(client: Http, url: Url, folder: Box<Path>) -> Self {
-        Self { client, url, folder, start_from: None }
+    pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
+        Self { client, url, folder: folder.into(), start_from: None }
     }
 
     /// Overrides the starting ERA file based on `block_number`.
@@ -254,11 +254,7 @@ mod tests {
 
     impl EraClient<Client> {
         fn empty() -> Self {
-            Self::new(
-                Client::new(),
-                Url::from_str("file:///").unwrap(),
-                PathBuf::new().into_boxed_path(),
-            )
+            Self::new(Client::new(), Url::from_str("file:///").unwrap(), PathBuf::new())
         }
     }
 

@@ -13,7 +13,7 @@ use test_case::test_case;
 async fn test_getting_file_url_after_fetching_file_list(url: &str) {
     let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
-    let folder = folder.path().to_owned().into_boxed_path();
+    let folder = folder.path();
     let client = EraClient::new(StubClient, base_url.clone(), folder);
 
     client.fetch_file_list().await.unwrap();
@@ -31,7 +31,7 @@ async fn test_getting_file_url_after_fetching_file_list(url: &str) {
 async fn test_getting_file_after_fetching_file_list(url: &str) {
     let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
-    let folder = folder.path().to_owned().into_boxed_path();
+    let folder = folder.path();
     let mut client = EraClient::new(StubClient, base_url, folder);
 
     client.fetch_file_list().await.unwrap();
