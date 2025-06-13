@@ -7,7 +7,6 @@ use alloy_primitives::{
     map::{B256Set, HashSet},
     B256,
 };
-use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_errors::ProviderError;
@@ -20,7 +19,7 @@ use reth_revm::state::EvmState;
 use reth_trie::{
     hash_builder::RlpNodeCache, prefix_set::TriePrefixSetsMut, updates::TrieUpdatesSorted,
     DecodedMultiProof, HashedPostState, HashedPostStateSorted, HashedStorage, MultiProofTargets,
-    Nibbles, RlpNode, TrieInput,
+    TrieInput,
 };
 use reth_trie_parallel::{proof::ParallelProof, proof_task::ProofTaskManagerHandle};
 use std::{
