@@ -398,7 +398,9 @@ pub struct EthereumConsensusBuilder {
 
 impl<Node> ConsensusBuilder<Node> for EthereumConsensusBuilder
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
+    Node: FullNodeTypes<
+        Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks, Primitives = EthPrimitives>,
+    >,
 {
     type Consensus = Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>>;
 
