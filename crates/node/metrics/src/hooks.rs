@@ -166,9 +166,6 @@ fn collect_io_stats() {
 #[cfg(not(target_os = "linux"))]
 const fn collect_io_stats() {}
 
-
-#[cfg(not(target_os = "linux"))]
-const fn collect_io_stats() {}
 #[cfg(target_os = "linux")]
 fn collect_disk_stats() {
     use metrics::{counter, gauge};
@@ -189,28 +186,21 @@ fn collect_disk_stats() {
         let device_name = &disk.name;
 
         // Read operations
-        counter!("disk.reads", "device" => device_name.clone())
-            .absolute(disk.reads);
-        counter!("disk.merged", "device" => device_name.clone())
-            .absolute(disk.merged);
-        counter!("disk.sectors_read", "device" => device_name.clone())
-            .absolute(disk.sectors_read);
-        gauge!("disk.time_reading", "device" => device_name.clone())
-            .set(disk.time_reading as f64);
+        counter!("disk.reads", "device" => device_name.clone()).absolute(disk.reads);
+        counter!("disk.merged", "device" => device_name.clone()).absolute(disk.merged);
+        counter!("disk.sectors_read", "device" => device_name.clone()).absolute(disk.sectors_read);
+        gauge!("disk.time_reading", "device" => device_name.clone()).set(disk.time_reading as f64);
 
         // Write operations
-        counter!("disk.writes", "device" => device_name.clone())
-            .absolute(disk.writes);
+        counter!("disk.writes", "device" => device_name.clone()).absolute(disk.writes);
         counter!("disk.writes_merged", "device" => device_name.clone())
             .absolute(disk.writes_merged);
         counter!("disk.sectors_written", "device" => device_name.clone())
             .absolute(disk.sectors_written);
-        gauge!("disk.time_writing", "device" => device_name.clone())
-            .set(disk.time_writing as f64);
+        gauge!("disk.time_writing", "device" => device_name.clone()).set(disk.time_writing as f64);
 
         // I/O operations in progress and time
-        gauge!("disk.in_progress", "device" => device_name.clone())
-            .set(disk.in_progress as f64);
+        gauge!("disk.in_progress", "device" => device_name.clone()).set(disk.in_progress as f64);
         gauge!("disk.time_in_progress", "device" => device_name.clone())
             .set(disk.time_in_progress as f64);
         gauge!("disk.weighted_time_in_progress", "device" => device_name.clone())
@@ -218,8 +208,7 @@ fn collect_disk_stats() {
 
         // Discard operations (if available, since kernel 4.18)
         if let Some(discards) = disk.discards {
-            counter!("disk.discards", "device" => device_name.clone())
-                .absolute(discards);
+            counter!("disk.discards", "device" => device_name.clone()).absolute(discards);
         }
         if let Some(discards_merged) = disk.discards_merged {
             counter!("disk.discards_merged", "device" => device_name.clone())
@@ -236,12 +225,10 @@ fn collect_disk_stats() {
 
         // Flush operations (if available, since kernel 5.5)
         if let Some(flushes) = disk.flushes {
-            counter!("disk.flushes", "device" => device_name.clone())
-                .absolute(flushes);
+            counter!("disk.flushes", "device" => device_name.clone()).absolute(flushes);
         }
         if let Some(time_flushing) = disk.time_flushing {
-            gauge!("disk.time_flushing", "device" => device_name.clone())
-                .set(time_flushing as f64);
+            gauge!("disk.time_flushing", "device" => device_name.clone()).set(time_flushing as f64);
         }
     }
 }

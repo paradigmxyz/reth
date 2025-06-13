@@ -205,7 +205,7 @@ const fn describe_io_stats() {}
 #[cfg(target_os = "linux")]
 fn describe_disk_stats() {
     use metrics::{describe_counter, Unit};
-    
+
     // Read operations
     describe_counter!("disk.reads", "Number of read operations completed");
     describe_counter!("disk.merged", "Number of read operations merged");
@@ -221,7 +221,11 @@ fn describe_disk_stats() {
     // I/O operations in progress and time
     describe_gauge!("disk.in_progress", "Number of I/O operations currently in progress");
     describe_gauge!("disk.time_in_progress", Unit::Milliseconds, "Time spent doing I/Os");
-    describe_gauge!("disk.weighted_time_in_progress", Unit::Milliseconds, "Weighted time spent doing I/Os");
+    describe_gauge!(
+        "disk.weighted_time_in_progress",
+        Unit::Milliseconds,
+        "Weighted time spent doing I/Os"
+    );
 
     // Discard operations (available since kernel 4.18)
     describe_counter!("disk.discards", "Number of discard operations completed");
