@@ -2,7 +2,8 @@
 
 use crate::fees::{CallFees, CallFeesError};
 use alloy_consensus::{
-    error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction, TxEip4844,
+    error::ValueError, transaction::Recovered, EthereumTxEnvelope, Extended, SignableTransaction,
+    Transaction as ConsensusTransaction, TxEip4844,
 };
 use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, Signature, TxKind, U256};
@@ -92,6 +93,33 @@ pub trait IntoRpcTx<T> {
 
     /// Performs the conversion.
     fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> T;
+}
+
+impl<BuiltIn, Other> IntoRpcTx<Transaction<Self>> for Extended<BuiltIn, Other>
+where
+    BuiltIn: ConsensusTransaction,
+    Other: ConsensusTransaction,
+{
+    type TxInfo = TransactionInfo;
+
+    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> Transaction<Self> {
+        let TransactionInfo {
+            block_hash, block_number, index: transaction_index, base_fee, ..
+        } = tx_info;
+        let effective_gas_price = base_fee
+            .map(|base_fee| {
+                self.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
+            })
+            .unwrap_or_else(|| self.max_fee_per_gas());
+
+        Transaction {
+            inner: Recovered::new_unchecked(self, signer),
+            block_hash,
+            block_number,
+            transaction_index,
+            effective_gas_price: Some(effective_gas_price),
+        }
+    }
 }
 
 /// Converts `self` into `T`.
