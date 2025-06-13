@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 use std::{future::Future, path::Path, str::FromStr};
 use tokio::{
     fs::{self, File},
-    io::{self, AsyncBufReadExt, AsyncWriteExt},
+    io::{self, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt},
     join, try_join,
 };
 
@@ -65,50 +65,34 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
             .ok_or_eyre("empty path segments")?;
         let path = path.join(file_name);
 
-        let number =
-            self.file_name_to_number(file_name).ok_or_eyre("Cannot parse number from file name")?;
+        if !self.is_downloaded(file_name, &path).await? {
+            let number = self
+                .file_name_to_number(file_name)
+                .ok_or_eyre("Cannot parse number from file name")?;
 
-        let mut tries = 1..3;
-        let mut actual_checksum: eyre::Result<_>;
-        loop {
-            actual_checksum = async {
-                let mut file = File::create(&path).await?;
-                let mut stream = client.get(url.clone()).await?;
-                let mut hasher = Sha256::new();
+            let mut tries = 1..3;
+            let mut actual_checksum: eyre::Result<_>;
+            loop {
+                actual_checksum = async {
+                    let mut file = File::create(&path).await?;
+                    let mut stream = client.get(url.clone()).await?;
+                    let mut hasher = Sha256::new();
 
-                while let Some(item) = stream.next().await.transpose()? {
-                    io::copy(&mut item.as_ref(), &mut file).await?;
-                    hasher.update(item);
+                    while let Some(item) = stream.next().await.transpose()? {
+                        io::copy(&mut item.as_ref(), &mut file).await?;
+                        hasher.update(item);
+                    }
+
+                    Ok(hasher.finalize().to_vec())
                 }
+                .await;
 
-                Ok(hasher.finalize().to_vec())
+                if actual_checksum.is_ok() || tries.next().is_none() {
+                    break;
+                }
             }
-            .await;
 
-            if actual_checksum.is_ok() || tries.next().is_none() {
-                break;
-            }
-        }
-
-        let actual_checksum = actual_checksum?;
-
-        let file = File::open(self.folder.join(Self::CHECKSUMS)).await?;
-        let reader = io::BufReader::new(file);
-        let mut lines = reader.lines();
-
-        for _ in 0..number {
-            lines.next_line().await?;
-        }
-        let expected_checksum =
-            lines.next_line().await?.ok_or_else(|| eyre!("Missing hash for number {number}"))?;
-        let expected_checksum = hex::decode(expected_checksum)?;
-
-        if actual_checksum != expected_checksum {
-            return Err(eyre!(
-                "Checksum mismatch, got: {}, expected: {}",
-                actual_checksum.encode_hex(),
-                expected_checksum.encode_hex()
-            ));
+            self.assert_checksum(number, actual_checksum?).await?;
         }
 
         Ok(path.into_boxed_path())
@@ -227,9 +211,88 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         Ok(lines.next_line().await?)
     }
 
+    async fn is_downloaded(&self, name: &str, path: impl AsRef<Path>) -> eyre::Result<bool> {
+        let path = path.as_ref();
+
+        match File::open(path).await {
+            Ok(file) => {
+                let number = self
+                    .file_name_to_number(name)
+                    .ok_or_else(|| eyre!("Cannot parse ERA number from {name}"))?;
+
+                let actual_checksum = checksum(file).await?;
+                let is_verified = self.verify_checksum(number, actual_checksum).await?;
+
+                if !is_verified {
+                    fs::remove_file(path).await?;
+                }
+
+                Ok(is_verified)
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(e)?,
+        }
+    }
+
+    async fn verify_checksum(&self, number: usize, actual_checksum: Vec<u8>) -> eyre::Result<bool> {
+        Ok(actual_checksum == self.expected_checksum(number).await?)
+    }
+
+    async fn assert_checksum(&self, number: usize, actual_checksum: Vec<u8>) -> eyre::Result<()> {
+        let expected_checksum = self.expected_checksum(number).await?;
+
+        if actual_checksum == expected_checksum {
+            Ok(())
+        } else {
+            Err(eyre!(
+                "Checksum mismatch, got: {}, expected: {}",
+                actual_checksum.encode_hex(),
+                expected_checksum.encode_hex()
+            ))
+        }
+    }
+
+    async fn expected_checksum(&self, number: usize) -> eyre::Result<Vec<u8>> {
+        let file = File::open(self.folder.join(Self::CHECKSUMS)).await?;
+        let reader = io::BufReader::new(file);
+        let mut lines = reader.lines();
+
+        for _ in 0..number {
+            lines.next_line().await?;
+        }
+        let expected_checksum =
+            lines.next_line().await?.ok_or_else(|| eyre!("Missing hash for number {number}"))?;
+        let expected_checksum = hex::decode(expected_checksum)?;
+
+        Ok(expected_checksum)
+    }
+
     fn file_name_to_number(&self, file_name: &str) -> Option<usize> {
         file_name.split('-').nth(1).and_then(|v| usize::from_str(v).ok())
     }
+}
+
+async fn checksum(mut reader: impl AsyncRead + Unpin) -> eyre::Result<Vec<u8>> {
+    let mut hasher = Sha256::new();
+
+    // Create a buffer to read data into, sized for performance.
+    let mut data = vec![0; 64 * 1024];
+
+    loop {
+        // Read data from the reader into the buffer.
+        let len = reader.read(&mut data).await?;
+        if len == 0 {
+            break;
+        } // Exit loop if no more data.
+
+        // Update the hash with the data read.
+        hasher.update(&data[..len]);
+    }
+
+    // Finalize the hash after all data has been processed.
+    let hash = hasher.finalize().to_vec();
+
+    Ok(hash)
 }
 
 #[cfg(test)]
