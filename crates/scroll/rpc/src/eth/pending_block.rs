@@ -40,13 +40,14 @@ where
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
         Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                SignedTx = ProviderTx<Self::Provider>,
-                BlockHeader = ProviderHeader<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-                Block = ProviderBlock<Self::Provider>,
-            >,
+            Primitives = <Self as RpcNodeCore>::Primitives,
             NextBlockEnvCtx = ScrollNextBlockEnvAttributes,
+        >,
+        Primitives: NodePrimitives<
+            BlockHeader = ProviderHeader<Self::Provider>,
+            SignedTx = ProviderTx<Self::Provider>,
+            Receipt = ProviderReceipt<Self::Provider>,
+            Block = ProviderBlock<Self::Provider>,
         >,
     >,
 {

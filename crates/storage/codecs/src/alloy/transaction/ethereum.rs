@@ -112,7 +112,8 @@ impl<Eip4844: Compact + Transaction + RlpEcdsaEncodableTx> Envelope
     }
 }
 
-pub(super) trait CompactEnvelope: Sized {
+/// Wraps the [`Compact`] trait.
+pub trait CompactEnvelope: Sized {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where

@@ -6,6 +6,7 @@ use crate::{
     fetch::{BlockResponseOutcome, FetchAction, StateFetcher},
     message::{BlockRequest, NewBlockMessage, PeerResponse, PeerResponseResult},
     peers::{PeerAction, PeersManager},
+    session::BlockRangeInfo,
     transform::header::HeaderTransform,
     FetchClient,
 };
