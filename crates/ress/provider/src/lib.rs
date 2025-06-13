@@ -197,7 +197,7 @@ where
 
         let witness = ExecutionWitness {
             state,
-            bytecodes: bytecodes.values().map(Bytecode::bytes).collect(),
+            bytecodes: bytecodes.values().map(Bytecode::original_bytes).collect(),
         };
 
         // Insert witness into the cache.
