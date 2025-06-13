@@ -45,7 +45,7 @@ pub fn read_dir(
 
     entries.sort_by(|(left, _), (right, _)| left.cmp(right));
 
-    Ok(stream::iter(entries.into_iter().skip((start_from / BLOCKS_PER_FILE) as usize).map(
+    Ok(stream::iter(entries.into_iter().skip(start_from as usize / BLOCKS_PER_FILE).map(
         move |(_, path)| {
             let expected_checksum =
                 checksums.next().transpose()?.ok_or_eyre("Got less checksums than ERA files")?;
