@@ -12,7 +12,7 @@
 //! let url = Url::from_str("file:///")?;
 //!
 //! // Directory where the ERA1 files will be downloaded to
-//! let folder = PathBuf::new().into_boxed_path();
+//! let folder = PathBuf::new();
 //!
 //! let client = EraClient::new(Client::new(), url, folder);
 //!

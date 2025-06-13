@@ -85,8 +85,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
             let folder =
                 self.env.datadir.resolve_datadir(self.env.chain.chain()).data_dir().join("era");
 
-            let folder = folder.into_boxed_path();
-
             fs::create_dir_all(&folder)?;
 
             let client = EraClient::new(Client::new(), url, folder);

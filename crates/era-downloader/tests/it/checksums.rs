@@ -14,8 +14,8 @@ use test_case::test_case;
 async fn test_invalid_checksum_returns_error(url: &str) {
     let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
-    let folder = folder.path().to_owned().into_boxed_path();
-    let client = EraClient::new(FailingClient, base_url, folder.clone());
+    let folder = folder.path();
+    let client = EraClient::new(FailingClient, base_url, folder);
 
     let mut stream = EraStream::new(
         client,
