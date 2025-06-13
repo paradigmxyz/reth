@@ -67,7 +67,7 @@ impl MetricServer {
         Collector::default().describe();
         describe_memory_stats();
         describe_io_stats();
-
+        describe_disk_stats();
         version_info.register_version_metrics();
         chain_spec_info.register_chain_spec_metrics();
 
@@ -201,6 +201,45 @@ fn describe_io_stats() {
 
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
+
+#[cfg(target_os = "linux")]
+fn describe_disk_stats() {
+    use metrics::{describe_counter, Unit};
+    
+    // Read operations
+    describe_counter!("disk.reads", "Number of read operations completed");
+    describe_counter!("disk.merged", "Number of read operations merged");
+    describe_counter!("disk.sectors_read", "Number of sectors read");
+    describe_gauge!("disk.time_reading", Unit::Milliseconds, "Time spent reading");
+
+    // Write operations
+    describe_counter!("disk.writes", "Number of write operations completed");
+    describe_counter!("disk.writes_merged", "Number of write operations merged");
+    describe_counter!("disk.sectors_written", "Number of sectors written");
+    describe_gauge!("disk.time_writing", Unit::Milliseconds, "Time spent writing");
+
+    // I/O operations in progress and time
+    describe_gauge!("disk.in_progress", "Number of I/O operations currently in progress");
+    describe_gauge!("disk.time_in_progress", Unit::Milliseconds, "Time spent doing I/Os");
+    describe_gauge!("disk.weighted_time_in_progress", Unit::Milliseconds, "Weighted time spent doing I/Os");
+
+    // Discard operations (available since kernel 4.18)
+    describe_counter!("disk.discards", "Number of discard operations completed");
+    describe_counter!("disk.discards_merged", "Number of discard operations merged");
+    describe_counter!("disk.sectors_discarded", "Number of sectors discarded");
+    describe_gauge!("disk.time_discarding", Unit::Milliseconds, "Time spent discarding");
+
+    // Flush operations (available since kernel 5.5)
+    describe_counter!("disk.flushes", "Number of flush operations completed");
+    describe_gauge!("disk.time_flushing", Unit::Milliseconds, "Time spent flushing");
+
+    // Your existing metrics
+    describe_gauge!("disk.read_bytes", Unit::Bytes, "Bytes read");
+    describe_gauge!("disk.write_bytes", Unit::Bytes, "Bytes written");
+}
+
+#[cfg(not(target_os = "linux"))]
+const fn describe_disk_stats() {}
 
 #[cfg(test)]
 mod tests {
