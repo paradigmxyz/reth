@@ -1,4 +1,4 @@
-use crate::{client::HttpClient, EraClient};
+use crate::{client::HttpClient, EraClient, BLOCKS_PER_FILE};
 use alloy_primitives::BlockNumber;
 use futures_util::{stream::FuturesOrdered, FutureExt, Stream, StreamExt};
 use reqwest::Url;
@@ -24,7 +24,7 @@ use std::{
 pub struct EraStreamConfig {
     max_files: usize,
     max_concurrent_downloads: usize,
-    start_from: Option<BlockNumber>,
+    start_from: Option<usize>,
 }
 
 impl Default for EraStreamConfig {
@@ -47,11 +47,8 @@ impl EraStreamConfig {
     }
 
     /// Overrides the starting ERA file index to be the first one that contains `block_number`.
-    ///
-    /// The normal behavior is that the ERA file index is recovered from the last file inside the
-    /// download folder.
     pub const fn start_from(mut self, block_number: BlockNumber) -> Self {
-        self.start_from.replace(block_number);
+        self.start_from.replace(block_number as usize / BLOCKS_PER_FILE);
         self
     }
 }
@@ -93,11 +90,12 @@ impl<Http> EraStream<Http> {
                 client,
                 files_count: Box::pin(async move { usize::MAX }),
                 next_url: Box::pin(async move { Ok(None) }),
-                recover_index: Box::pin(async move { 0 }),
+                recover_index: Box::pin(async move { None }),
                 fetch_file_list: Box::pin(async move { Ok(()) }),
                 state: Default::default(),
                 max_files: config.max_files,
-                index: 0,
+                index: config.start_from.unwrap_or_default(),
+                last: None,
                 downloading: 0,
             },
         }
@@ -223,11 +221,12 @@ struct StartingStream<Http> {
     client: EraClient<Http>,
     files_count: Pin<Box<dyn Future<Output = usize> + Send + Sync + 'static>>,
     next_url: Pin<Box<dyn Future<Output = eyre::Result<Option<Url>>> + Send + Sync + 'static>>,
-    recover_index: Pin<Box<dyn Future<Output = u64> + Send + Sync + 'static>>,
+    recover_index: Pin<Box<dyn Future<Output = Option<usize>> + Send + Sync + 'static>>,
     fetch_file_list: Pin<Box<dyn Future<Output = eyre::Result<()>> + Send + Sync + 'static>>,
     state: State,
     max_files: usize,
-    index: u64,
+    index: usize,
+    last: Option<usize>,
     downloading: usize,
 }
 
@@ -274,15 +273,18 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
         }
 
         if self.state == State::RecoverIndex {
-            if let Poll::Ready(index) = self.recover_index.poll_unpin(cx) {
-                self.index = index;
+            if let Poll::Ready(last) = self.recover_index.poll_unpin(cx) {
+                self.last = last;
                 self.count_files();
             }
         }
 
         if self.state == State::CountFiles {
             if let Poll::Ready(downloaded) = self.files_count.poll_unpin(cx) {
-                let max_missing = self.max_files.saturating_sub(downloaded + self.downloading);
+                let max_missing = self
+                    .max_files
+                    .saturating_sub(downloaded + self.downloading)
+                    .max(self.last.unwrap_or_default().saturating_sub(self.index));
                 self.state = State::Missing(max_missing);
             }
         }
@@ -349,7 +351,7 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static> StartingStream<Http> {
         self.state = State::CountFiles;
     }
 
-    fn next_url(&mut self, index: u64, max_missing: usize) {
+    fn next_url(&mut self, index: usize, max_missing: usize) {
         let client = self.client.clone();
 
         Pin::new(&mut self.next_url).set(Box::pin(async move { client.url(index).await }));
