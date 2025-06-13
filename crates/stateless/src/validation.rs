@@ -134,19 +134,25 @@ where
     ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
-    let current_block = current_block
-        .try_into_recovered()
-        .map_err(|err| StatelessValidationError::SignerRecovery(Box::new(err)))?;
+    let current_block = track_cycles!(
+        "recover-signers",
+        current_block
+            .try_into_recovered()
+            .map_err(|err| StatelessValidationError::SignerRecovery(Box::new(err)))?
+    );
 
-    let mut ancestor_headers: Vec<Header> = witness
-        .headers
-        .iter()
-        .map(|serialized_header| {
-            let bytes = serialized_header.as_ref();
-            Header::decode(&mut &bytes[..])
-                .map_err(|_| StatelessValidationError::HeaderDeserializationFailed)
-        })
-        .collect::<Result<_, _>>()?;
+    let mut ancestor_headers: Vec<Header> = track_cycles!(
+        "decode-headers",
+        witness
+            .headers
+            .iter()
+            .map(|serialized_header| {
+                let bytes = serialized_header.as_ref();
+                Header::decode(&mut &bytes[..])
+                    .map_err(|_| StatelessValidationError::HeaderDeserializationFailed)
+            })
+            .collect::<Result<_, _>>()?
+    );
     // Sort the headers by their block number to ensure that they are in
     // ascending order.
     ancestor_headers.sort_by_key(|header| header.number());
@@ -169,30 +175,37 @@ where
     };
 
     // First verify that the pre-state reads are correct
-    let (mut trie, bytecode) = StatelessTrie::new(&witness, pre_state_root)?;
+    let (mut trie, bytecode) =
+        track_cycles!("verify-witness", StatelessTrie::new(&witness, pre_state_root)?);
 
     // Create an in-memory database that will use the reads to validate the block
     let db = WitnessDatabase::new(&trie, bytecode, ancestor_hashes);
 
     // Execute the block
     let executor = evm_config.executor(db);
-    let output = executor
-        .execute(&current_block)
-        .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?;
+    let output = track_cycles!(
+        "block-execution",
+        executor
+            .execute(&current_block)
+            .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?
+    );
 
     // Post validation checks
     validate_block_post_execution(&current_block, &chain_spec, &output.receipts, &output.requests)
         .map_err(StatelessValidationError::ConsensusValidationFailed)?;
 
     // Compute and check the post state root
-    let hashed_state = HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
-    let state_root = trie.calculate_state_root(hashed_state)?;
-    if state_root != current_block.state_root {
-        return Err(StatelessValidationError::PostStateRootMismatch {
-            got: state_root,
-            expected: current_block.state_root,
-        });
-    }
+    track_cycles!("post-state-compute", {
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
+        let state_root = trie.calculate_state_root(hashed_state)?;
+        if state_root != current_block.state_root {
+            return Err(StatelessValidationError::PostStateRootMismatch {
+                got: state_root,
+                expected: current_block.state_root,
+            });
+        }
+    });
 
     // Return block hash
     Ok(current_block.hash_slow())
