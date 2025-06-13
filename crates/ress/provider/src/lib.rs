@@ -16,7 +16,7 @@ use reth_errors::{ProviderError, ProviderResult};
 use reth_ethereum_primitives::{Block, BlockBody, EthPrimitives};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{Block as _, Header, RecoveredBlock};
-use reth_ress_protocol::{ExecutionWitness, RessProtocolProvider};
+use reth_ress_protocol::{ExecutionStateWitness, RessProtocolProvider};
 use reth_revm::{
     database::StateProviderDatabase, db::State, state::Bytecode, witness::ExecutionWitnessRecord,
 };
@@ -43,7 +43,7 @@ pub struct RethRessProtocolProvider<P, E> {
     task_spawner: Box<dyn TaskSpawner>,
     max_witness_window: u64,
     witness_semaphore: Arc<Semaphore>,
-    witness_cache: Arc<Mutex<LruMap<B256, Arc<ExecutionWitness>>>>,
+    witness_cache: Arc<Mutex<LruMap<B256, Arc<ExecutionStateWitness>>>>,
     pending_state: PendingState<EthPrimitives>,
 }
 
@@ -95,7 +95,10 @@ where
     }
 
     /// Generate execution witness for the target block hash.
-    pub fn generate_execution_witness(&self, block_hash: B256) -> ProviderResult<ExecutionWitness> {
+    pub fn generate_execution_witness(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<ExecutionStateWitness> {
         debug!(target: "reth::ress_provider", %block_hash, "Generating witness for block");
 
         if let Some(witness) = self.witness_cache.lock().get(&block_hash).cloned() {
@@ -195,7 +198,7 @@ where
             witness_state_provider.witness(trie_input, hashed_state)?
         };
 
-        let witness = ExecutionWitness {
+        let witness = ExecutionStateWitness {
             state,
             bytecodes: bytecodes.values().map(Bytecode::original_bytes).collect(),
         };
@@ -207,7 +210,10 @@ where
     }
 
     /// Spawn execution witness creation task onto the runtime.
-    pub async fn execution_witness(&self, block_hash: B256) -> ProviderResult<ExecutionWitness> {
+    pub async fn execution_witness(
+        &self,
+        block_hash: B256,
+    ) -> ProviderResult<ExecutionStateWitness> {
         let _permit = self.witness_semaphore.acquire().await.map_err(ProviderError::other)?;
         let this = self.clone();
         let (tx, rx) = oneshot::channel();

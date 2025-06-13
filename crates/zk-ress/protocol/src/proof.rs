@@ -1,6 +1,6 @@
 use alloy_primitives::Bytes;
 use alloy_rlp::{Decodable, Encodable};
-use reth_ress_protocol::ExecutionWitness;
+use reth_ress_protocol::ExecutionStateWitness;
 
 /// A trait for zk-ress execution proofs.
 pub trait ExecutionProof:
@@ -18,7 +18,7 @@ impl ExecutionProof for Bytes {
     }
 }
 
-impl ExecutionProof for ExecutionWitness {
+impl ExecutionProof for ExecutionStateWitness {
     fn is_empty(&self) -> bool {
         self.state.is_empty() && self.bytecodes.is_empty()
     }

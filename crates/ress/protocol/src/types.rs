@@ -4,10 +4,10 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable, RlpDecodable, RlpEncodable};
 
-/// Full execution witness with trie nodes and bytecodes accessed in the block.
+/// Full execution state witness with trie nodes and bytecodes accessed in the block.
 #[derive(RlpEncodable, RlpDecodable, PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct ExecutionWitness {
+pub struct ExecutionStateWitness {
     /// State trie nodes.
     pub state: Vec<Bytes>,
     /// Bytecodes.

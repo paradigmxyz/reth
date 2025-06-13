@@ -6,7 +6,7 @@ use reth_network_api::{
     test_utils::PeersHandleProvider,
 };
 use reth_provider::test_utils::MockEthProvider;
-use reth_ress_protocol::{ExecutionWitness, GetHeaders, NodeType};
+use reth_ress_protocol::{ExecutionStateWitness, GetHeaders, NodeType};
 use reth_zk_ress_protocol::{
     test_utils::{MockRessProtocolProvider, NoopZkRessProtocolProvider},
     ProtocolEvent, ProtocolState, ZkRessPeerRequest, ZkRessProtocolHandler,
@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 async fn disconnect_on_stateful_pair() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionWitness>::default();
+    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionStateWitness>::default();
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
@@ -90,7 +90,7 @@ async fn disconnect_on_stateful_pair() {
 async fn message_exchange() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(2, MockEthProvider::default()).await;
-    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionWitness>::default();
+    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionStateWitness>::default();
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
@@ -169,7 +169,7 @@ async fn proof_fetching_does_not_block() {
 
     let proof_delay = Duration::from_millis(100);
     let protocol_provider =
-        MockRessProtocolProvider::<ExecutionWitness>::default().with_proof_delay(proof_delay);
+        MockRessProtocolProvider::<ExecutionStateWitness>::default().with_proof_delay(proof_delay);
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];
@@ -246,7 +246,7 @@ async fn proof_fetching_does_not_block() {
 async fn max_active_connections() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::create_with(3, MockEthProvider::default()).await;
-    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionWitness>::default();
+    let protocol_provider = NoopZkRessProtocolProvider::<ExecutionStateWitness>::default();
 
     let (tx, mut from_peer0) = mpsc::unbounded_channel();
     let peer0 = &mut net.peers_mut()[0];

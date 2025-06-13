@@ -250,7 +250,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use proptest_arbitrary_interop::arb;
-    use reth_ress_protocol::ExecutionWitness;
+    use reth_ress_protocol::ExecutionStateWitness;
     use std::fmt;
     use strum::EnumCount;
 
@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn protocol_message_count() {
-        let protocol = ZkRessProtocolMessage::<ExecutionWitness>::protocol("zkress", 1);
+        let protocol = ZkRessProtocolMessage::<ExecutionStateWitness>::protocol("zkress", 1);
         assert_eq!(protocol.messages(), ZkRessMessageID::COUNT as u8);
     }
 
@@ -276,7 +276,7 @@ mod tests {
         }
 
         #[test]
-        fn message_roundtrip(message in arb::<ZkRessProtocolMessage::<ExecutionWitness>>()) {
+        fn message_roundtrip(message in arb::<ZkRessProtocolMessage::<ExecutionStateWitness>>()) {
             let encoded = alloy_rlp::encode(&message);
             let decoded = ZkRessProtocolMessage::decode_message(&mut &encoded[..]);
             assert_eq!(Ok(message), decoded);
