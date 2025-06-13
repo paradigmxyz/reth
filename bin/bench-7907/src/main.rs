@@ -87,7 +87,7 @@ pub async fn main() -> eyre::Result<()> {
 
     let provider = provider_factory.database_provider_ro()?;
 
-    let mut durations = Vec::new();
+    // let mut durations = Vec::new();
 
     for i in 0..num_reads {
         let mut cursor = provider.tx_ref().cursor_read::<tables::Bytecodes>()?;
@@ -95,16 +95,16 @@ pub async fn main() -> eyre::Result<()> {
         cursor.seek(B256::random())?;
         let elapsed = instant.elapsed();
 
-        durations.push(elapsed);
+        // durations.push(elapsed);
         if i % 10000 == 0 {
             println!("read {} bytecodes", i);
         }
     }
 
-    for percentile in [10, 25, 50, 75, 90] {
-        let duration = durations.select_nth_unstable(percentile * num_reads / 100).1;
-        println!("{}th percentile: {:?}", percentile, duration);
-    }
+    // for percentile in [10, 25, 50, 75, 90] {
+    //     let duration = durations.select_nth_unstable(percentile * num_reads / 100).1;
+    //     println!("{}th percentile: {:?}", percentile, duration);
+    // }
 
     Ok(())
 }
