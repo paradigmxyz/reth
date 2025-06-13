@@ -892,7 +892,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.8.1"
-source = "git+https://github.com/alloy-rs/trie?branch=shekhirin%2Frlp-node-cache#14837ad0a130386f222a11c1ac33dc884144ac1b"
+source = "git+https://github.com/alloy-rs/trie?branch=shekhirin%2Frlp-node-cache#36115d7783dd0456f4d8a8050b12b0939a8276f2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
