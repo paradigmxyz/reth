@@ -63,6 +63,7 @@ std = [
     "rand/std",
     "derive_more/std",
     "serde_json/std",
+    "serde_with/std",
 ]
 k256 = [
     "alloy-primitives/k256",
