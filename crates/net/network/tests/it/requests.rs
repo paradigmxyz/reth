@@ -345,7 +345,7 @@ async fn test_eth69_get_receipts() {
         let result = rx.await.unwrap();
         let receipts_response = match result {
             Ok(resp) => resp,
-            Err(e) => panic!("Failed to get receipts response: {:?}", e),
+            Err(e) => panic!("Failed to get receipts response: {e:?}"),
         };
         assert_eq!(receipts_response.0.len(), 1);
         assert_eq!(receipts_response.0[0].len(), 2);
