@@ -75,13 +75,11 @@ pub async fn main() -> eyre::Result<()> {
         let provider = provider_factory.database_provider_rw()?;
         let mut cursor = provider.tx_ref().cursor_write::<tables::Bytecodes>()?;
 
-        let mut i = 0;
-        for (hash, bytecode) in bytecodes {
+        for (i, (hash, bytecode)) in bytecodes.into_iter().enumerate() {
             cursor.append(hash, &Bytecode::new_raw_checked(bytecode)?)?;
 
-            i += 1;
             if i % 10000 == 0 {
-                println!("appeneded {} bytecodes", i);
+                println!("appended {} bytecodes", i);
             }
         }
 
@@ -100,12 +98,15 @@ pub async fn main() -> eyre::Result<()> {
 
     let mut durations = Vec::new();
 
-    for hash in hashes {
+    for (i, hash) in hashes.enumerate() {
         let instant = Instant::now();
         provider.tx_ref().get::<tables::Bytecodes>(hash?)?;
         let elapsed = instant.elapsed();
 
         durations.push(elapsed);
+        if i % 10000 == 0 {
+            println!("read {} bytecodes", i);
+        }
     }
 
     for percentile in [10, 25, 50, 75, 90] {
