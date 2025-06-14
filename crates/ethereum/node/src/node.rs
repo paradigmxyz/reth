@@ -31,9 +31,11 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
-use reth_rpc::eth::core::EthApiFor;
-use reth_rpc_api::eth::FullEthApiServer;
+use reth_rpc::{eth::core::EthApiFor, ValidationApi};
+use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
+use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
+use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
@@ -226,7 +228,25 @@ where
         self,
         ctx: reth_node_api::AddOnsContext<'_, N>,
     ) -> eyre::Result<Self::Handle> {
-        self.inner.launch_add_ons(ctx).await
+        let validation_api = ValidationApi::new(
+            ctx.node.provider().clone(),
+            Arc::new(ctx.node.consensus().clone()),
+            ctx.node.evm_config().clone(),
+            ctx.config.rpc.flashbots_config(),
+            Box::new(ctx.node.task_executor().clone()),
+            Arc::new(EthereumEngineValidator::new(ctx.config.chain.clone())),
+        );
+
+        self.inner
+            .launch_add_ons_with(ctx, move |container| {
+                container.modules.merge_if_module_configured(
+                    RethRpcModule::Flashbots,
+                    validation_api.into_rpc(),
+                )?;
+
+                Ok(())
+            })
+            .await
     }
 }
 
