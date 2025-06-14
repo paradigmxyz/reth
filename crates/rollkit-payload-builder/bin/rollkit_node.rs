@@ -18,7 +18,7 @@ use alloy_rpc_types::{
     Withdrawal,
 };
 use clap::Parser;
-use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
+use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig, HeaderForPayload};
 use reth_ethereum_cli::Cli;
 use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum::{
@@ -42,13 +42,13 @@ use reth_ethereum::{
         EthEvmConfig, EthereumEthApiBuilder,
     },
     pool::{PoolTransaction, TransactionPool},
-    primitives::{RecoveredBlock, SealedBlock},
+    primitives::{RecoveredBlock, SealedBlock, Header},
     TransactionSigned,
 };
 use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
-
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
+use reth_provider::HeaderProvider;
 use reth_revm::cached::CachedReads;
 use reth_trie_db::MerklePatriciaTrie;
 use rollkit_payload_builder::{
@@ -419,7 +419,7 @@ impl Default for RollkitPayloadBuilderBuilder {
 }
 
 /// The rollkit engine payload builder that integrates with the rollkit payload builder
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct RollkitEnginePayloadBuilder<Pool, Client> 
 where
     Pool: Clone,
@@ -432,7 +432,7 @@ where
 
 impl<Pool, Client> PayloadBuilder for RollkitEnginePayloadBuilder<Pool, Client>
 where
-    Client: reth_ethereum::provider::StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + Send + Sync + 'static,
+    Client: reth_ethereum::provider::StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + HeaderProvider<Header = Header> + Clone + Send + Sync + 'static,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = RollkitEnginePayloadBuilderAttributes;
@@ -443,7 +443,7 @@ where
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let BuildArguments { cached_reads: _, config, cancel: _, best_payload } = args;
-        let PayloadConfig { parent_header: _, attributes } = config;
+        let PayloadConfig { parent_header, attributes } = config;
 
         // Convert Engine API attributes to Rollkit payload attributes
         let rollkit_attrs = RollkitPayloadAttributes::new(
@@ -452,12 +452,14 @@ where
             attributes.timestamp(),
             attributes.prev_randao(),
             attributes.suggested_fee_recipient(),
+            attributes.parent(),
+            parent_header.number + 1,
         );
 
         // Build the payload using the rollkit payload builder
         let rt = tokio::runtime::Handle::current();
         let sealed_block = rt.block_on(self.rollkit_builder.build_payload(rollkit_attrs))
-            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
+            .map_err(|e| PayloadBuilderError::other(e))?;
 
         // Convert to EthBuiltPayload
         let gas_used = sealed_block.gas_used;
@@ -479,9 +481,9 @@ where
 
     fn build_empty_payload(
         &self,
-        config: PayloadConfig<Self::Attributes>,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        let PayloadConfig { parent_header: _, attributes } = config;
+        let PayloadConfig { parent_header, attributes } = config;
 
         // Create empty rollkit attributes (no transactions)
         let rollkit_attrs = RollkitPayloadAttributes::new(
@@ -490,12 +492,14 @@ where
             attributes.timestamp(),
             attributes.prev_randao(),
             attributes.suggested_fee_recipient(),
+            attributes.parent(),
+            parent_header.number + 1,
         );
 
         // Build empty payload
         let rt = tokio::runtime::Handle::current();
         let sealed_block = rt.block_on(self.rollkit_builder.build_payload(rollkit_attrs))
-            .map_err(|e| PayloadBuilderError::Other(e.into()))?;
+            .map_err(|e| PayloadBuilderError::other(e))?;
 
         let gas_used = sealed_block.gas_used;
         Ok(EthBuiltPayload::new(
@@ -526,9 +530,9 @@ where
         self,
         ctx: &BuilderContext<Node>,
         pool: Pool,
-        _evm_config: EthEvmConfig,
+        evm_config: EthEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        let rollkit_builder = Arc::new(RollkitPayloadBuilder::new(Arc::new(ctx.provider().clone())));
+        let rollkit_builder = Arc::new(RollkitPayloadBuilder::new(Arc::new(ctx.provider().clone()), evm_config));
         
         Ok(RollkitEnginePayloadBuilder {
             rollkit_builder,

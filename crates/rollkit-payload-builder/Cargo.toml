@@ -6,73 +6,75 @@ description = "Payload builder for Rollkit Reth node"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-reth-basic-payload-builder = { path = "../payload/basic" }
-reth-engine-tree = { path = "../engine/tree" }
-reth-ethereum = { path = "../ethereum/reth", features = ["node-api", "rpc", "pool", "provider", "tasks", "node"] }
-reth-evm = { path = "../evm/evm" }
-reth-revm = { path = "../revm" }
-reth-execution-types = { path = "../evm/execution-types" }
-reth-execution-errors = { path = "../evm/execution-errors" }
-reth-payload-builder = { path = "../payload/builder" }
-reth-payload-primitives = { path = "../payload/primitives" }
-reth-primitives = { path = "../primitives" }
-reth-provider = { path = "../storage/provider", features = ["test-utils"] }
-reth-tasks = { path = "../tasks" }
-reth-node-builder = { path = "../node/builder" }
-reth-node-core = { path = "../node/core" }
-reth-primitives-traits = { path = "../primitives-traits" }
-reth-db = { path = "../storage/db" }
-reth-network = { path = "../net/network" }
-reth-rpc = { path = "../rpc/rpc" }
-reth-transaction-pool = { path = "../transaction-pool" }
-reth-ethereum-engine-primitives = { path = "../ethereum/engine-primitives" }
-reth-ethereum-payload-builder = { path = "../ethereum/payload" }
-reth-trie-db = { path = "../trie/db" }
-reth-engine-local = { path = "../engine/local" }
+# Reth dependencies
+reth-primitives = { workspace = true }
+reth-primitives-traits = { workspace = true }
+reth-provider = { workspace = true }
+reth-evm = { workspace = true }
+reth-node-types = { workspace = true }
+reth-payload-builder-primitives = { workspace = true }
+reth-revm = { workspace = true }
+reth-execution-types = { workspace = true }
+reth-evm-ethereum = { workspace = true }
+reth-errors = { workspace = true }
+reth-node-builder = { workspace = true }
+reth-node-core = { workspace = true }
+reth-ethereum-cli = { workspace = true }
+reth-payload-builder = { workspace = true }
+reth-payload-primitives = { workspace = true }
+reth-basic-payload-builder = { workspace = true }
+reth-rpc-builder = { workspace = true }
+reth-rpc-api = { workspace = true }
+reth-rpc-engine-api = { workspace = true }
+reth-engine-primitives = { workspace = true }
+reth-chainspec = { workspace = true }
+reth-cli-util = { workspace = true }
+reth-engine-local = { workspace = true }
+reth-ethereum-payload-builder = { workspace = true }
+reth-trie-db = { workspace = true }
+reth-ethereum = { workspace = true, features = ["node", "evm", "pool", "cli"] }
+reth-ethereum-primitives = { workspace = true }
 
-# Alloy dependencies (using workspace versions)
+# Alloy dependencies
 alloy-primitives = { workspace = true }
 alloy-consensus = { workspace = true }
 alloy-rlp = { workspace = true }
+alloy-rpc-types = { workspace = true, features = ["engine"] }
 alloy-eips = { workspace = true }
 
-# Standard library dependencies
-tokio = { version = "1.36", features = ["full"] }
+# Standard library
+tokio = { workspace = true, features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 async-trait = "0.1"
-futures = "0.3"
+futures = { workspace = true }
 thiserror = "1.0"
 tracing = "0.1"
 eyre = "0.6"
-reqwest = { version = "0.11", features = ["json"] }
-chrono = { version = "0.4", features = ["serde"] }
-rand = "0.8"
-clap = { workspace = true, features = ["derive"] }
+clap = { workspace = true, features = ["derive", "env"] }
 
-# Reth CLI dependencies
-reth-cli = { path = "../cli/cli" }
-reth-ethereum-cli = { path = "../ethereum/cli" }
-reth-cli-util = { path = "../cli/util" }
-
-# Reth dependencies for testing
-reth-tracing = { path = "../tracing" }
-reth-rpc-api = { path = "../rpc/rpc-api" }
-reth-rpc-types-compat = { path = "../rpc/rpc-types-compat" }
+[dev-dependencies]
+# Test dependencies
+reth-testing-utils = { workspace = true }
+reth-chainspec = { workspace = true }
+reth-db = { workspace = true }
+reth-trie-db = { workspace = true }
+reth-evm-ethereum = { workspace = true }
+reth-transaction-pool = { workspace = true }
+reth-consensus = { workspace = true }
+reth-payload-builder = { workspace = true }
+reth-tasks = { workspace = true }
+reth-node-core = { workspace = true }
+reth-node-builder = { workspace = true }
+reth-tracing = { workspace = true }
 alloy-genesis = { workspace = true }
-alloy-rpc-types = { workspace = true, features = ["engine"] }
-
-[lints]
-workspace = true
+tempfile = "3.0"
 
 [[bin]]
 name = "rollkit-reth"
 path = "bin/rollkit_node.rs"
 
-[[example]]
-name = "rollkit_node"
-path = "examples/rollkit_node.rs"
+[lints]
+workspace = true
 
-[[example]]
-name = "test_rollkit_engine_api"
-path = "examples/test_rollkit_engine_api.rs"
+

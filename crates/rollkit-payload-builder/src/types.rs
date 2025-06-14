@@ -15,6 +15,10 @@ pub struct RollkitPayloadAttributes {
     pub prev_randao: B256,
     /// Suggested fee recipient
     pub suggested_fee_recipient: Address,
+    /// Parent block hash
+    pub parent_hash: B256,
+    /// Block number
+    pub block_number: u64,
 }
 
 impl RollkitPayloadAttributes {
@@ -25,6 +29,8 @@ impl RollkitPayloadAttributes {
         timestamp: u64,
         prev_randao: B256,
         suggested_fee_recipient: Address,
+        parent_hash: B256,
+        block_number: u64,
     ) -> Self {
         Self {
             transactions,
@@ -32,15 +38,15 @@ impl RollkitPayloadAttributes {
             timestamp,
             prev_randao,
             suggested_fee_recipient,
+            parent_hash,
+            block_number,
         }
     }
 
     /// Validates the payload attributes
     pub fn validate(&self) -> Result<(), PayloadAttributesError> {
-        if self.transactions.is_empty() {
-            return Err(PayloadAttributesError::EmptyTransactions);
-        }
-
+        // For rollkit, empty transactions are allowed (empty blocks are valid)
+        
         if let Some(gas_limit) = self.gas_limit {
             if gas_limit == 0 {
                 return Err(PayloadAttributesError::InvalidGasLimit);
