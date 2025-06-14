@@ -20,7 +20,7 @@ alloy-primitives = { workspace = true, features = ["rlp"] }
 
 # misc
 derive_more = { workspace = true, features = ["display"] }
-serde_with.workspace = true
+serde_with = { workspace = true, optional = true }
 
 # arbitrary
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -100,6 +100,7 @@ serde = [
     "reth-codecs?/serde",
 ]
 serde-bincode-compat = [
+    "dep:serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
 ]

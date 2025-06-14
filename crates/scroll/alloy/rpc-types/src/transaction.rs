@@ -24,8 +24,8 @@ pub struct Transaction {
 }
 
 impl Transaction {
-    /// Returns a rpc [`Transaction`] with a [`OpTransactionInfo`] and
-    /// [`Recovered<OpTxEnvelope>`] as input.
+    /// Returns a rpc [`Transaction`] with a [`ScrollTransactionInfo`] and
+    /// [`Recovered<ScrollTxEnvelope>`] as input.
     pub fn from_transaction(
         tx: Recovered<ScrollTxEnvelope>,
         tx_info: ScrollTransactionInfo,

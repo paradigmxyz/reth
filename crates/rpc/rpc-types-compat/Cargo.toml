@@ -23,7 +23,7 @@ alloy-consensus.workspace = true
 alloy-network.workspace = true
 
 # scroll
-reth-scroll-primitives.workspace = true
+reth-scroll-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
 scroll-alloy-consensus.workspace = true
 scroll-alloy-rpc-types.workspace = true
 

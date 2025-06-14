@@ -12,6 +12,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, Bytes, Signature, TxKind, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
+#[cfg(feature = "reth-codec")]
 use reth_codecs::{
     Compact,
     __private::bytes::BufMut,
@@ -423,6 +424,7 @@ impl ScrollTxEnvelope {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 impl ToTxCompact for ScrollTxEnvelope {
     fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>)) {
         match self {
@@ -435,6 +437,7 @@ impl ToTxCompact for ScrollTxEnvelope {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 impl FromTxCompact for ScrollTxEnvelope {
     type TxType = ScrollTxType;
 
@@ -469,8 +472,10 @@ impl FromTxCompact for ScrollTxEnvelope {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 const L1_MESSAGE_SIGNATURE: Signature = Signature::new(U256::ZERO, U256::ZERO, false);
 
+#[cfg(feature = "reth-codec")]
 impl Envelope for ScrollTxEnvelope {
     fn signature(&self) -> &Signature {
         match self {
@@ -487,6 +492,7 @@ impl Envelope for ScrollTxEnvelope {
     }
 }
 
+#[cfg(feature = "reth-codec")]
 impl Compact for ScrollTxEnvelope {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where

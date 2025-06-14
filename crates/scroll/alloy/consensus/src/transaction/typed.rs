@@ -4,8 +4,7 @@ use alloy_consensus::{
     TxEip2930, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{eip2930::AccessList, Encodable2718};
-use alloy_primitives::{Address, Bytes, ChainId, Signature, TxHash, TxKind, B256};
-use reth_codecs::__private::bytes::BufMut;
+use alloy_primitives::{bytes::BufMut, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256};
 #[cfg(feature = "reth-codec")]
 use {
     reth_codecs::{Compact, __private::bytes},
