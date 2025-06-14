@@ -2,6 +2,7 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
+use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
@@ -13,8 +14,9 @@ use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool}
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt> + reth_rpc_eth_api::helpers::LoadReceipt,
+    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>> + CanonStateSubscriptions,
+    Self::Provider: CanonStateSubscriptions + reth_chainspec::ChainSpecProvider,
 {
     #[inline]
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {

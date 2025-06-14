@@ -82,6 +82,7 @@ impl<Eth> EthSimBundle<Eth> {
 impl<Eth> EthSimBundle<Eth>
 where
     Eth: EthTransactions + LoadBlock + Call + 'static,
+    <Eth as reth_rpc_eth_api::RpcNodeCore>::Provider: reth_chain_state::CanonStateSubscriptions,
 {
     /// Flattens a potentially nested bundle into a list of individual transactions in a
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
@@ -413,6 +414,7 @@ where
 impl<Eth> MevSimApiServer for EthSimBundle<Eth>
 where
     Eth: EthTransactions + LoadBlock + Call + 'static,
+    <Eth as reth_rpc_eth_api::RpcNodeCore>::Provider: reth_chain_state::CanonStateSubscriptions,
 {
     async fn sim_bundle(
         &self,

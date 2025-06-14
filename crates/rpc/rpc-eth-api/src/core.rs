@@ -1,5 +1,6 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
+
 use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2930::AccessListResult, BlockId, BlockNumberOrTag};
 use alloy_json_rpc::RpcObject;
@@ -18,8 +19,9 @@ use tracing::trace;
 
 use crate::{
     helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
-    RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
+    RpcBlock, RpcHeader, RpcNodeCore, RpcReceipt, RpcTransaction,
 };
+use reth_chain_state::CanonStateSubscriptions;
 
 /// Helper trait, unifies functionality that must be supported to implement all RPC methods for
 /// server.
@@ -31,17 +33,21 @@ pub trait FullEthApiServer:
         RpcHeader<Self::NetworkTypes>,
     > + FullEthApi
     + Clone
+where
+    <Self as RpcNodeCore>::Provider: CanonStateSubscriptions,
 {
 }
 
-impl<T> FullEthApiServer for T where
+impl<T> FullEthApiServer for T
+where
     T: EthApiServer<
             RpcTransaction<T::NetworkTypes>,
             RpcBlock<T::NetworkTypes>,
             RpcReceipt<T::NetworkTypes>,
             RpcHeader<T::NetworkTypes>,
         > + FullEthApi
-        + Clone
+        + Clone,
+    <T as RpcNodeCore>::Provider: CanonStateSubscriptions,
 {
 }
 
@@ -384,6 +390,7 @@ impl<T>
 where
     T: FullEthApi,
     jsonrpsee_types::error::ErrorObject<'static>: From<T::Error>,
+    <T as crate::RpcNodeCore>::Provider: reth_chain_state::CanonStateSubscriptions,
 {
     /// Handler for: `eth_protocolVersion`
     async fn protocol_version(&self) -> RpcResult<U64> {
