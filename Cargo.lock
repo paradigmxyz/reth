@@ -7991,6 +7991,7 @@ dependencies = [
  "reth-fs-util",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-stages-types",
  "reth-storage-api",
  "tempfile",
  "tokio",

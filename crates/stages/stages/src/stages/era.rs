@@ -13,10 +13,7 @@ use reth_provider::{
     BlockReader, BlockWriter, DBProvider, HeaderProvider, StageCheckpointWriter,
     StaticFileProviderFactory, StaticFileWriter,
 };
-use reth_stages_api::{
-    CheckpointBlockRange, EntitiesCheckpoint, ExecInput, ExecOutput, HeadersCheckpoint, Stage,
-    StageError, UnwindInput, UnwindOutput,
-};
+use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::ProviderError;
 use std::{
@@ -205,22 +202,12 @@ where
                 self.hash_collector.clear();
             }
 
-            provider.save_stage_checkpoint(
-                StageId::Headers,
-                StageCheckpoint::new(height).with_headers_stage_checkpoint(HeadersCheckpoint {
-                    block_range: CheckpointBlockRange {
-                        from: input.checkpoint().block_number,
-                        to: height,
-                    },
-                    progress: EntitiesCheckpoint { processed: height, total: input.target() },
-                }),
-            )?;
-            provider.save_stage_checkpoint(
-                StageId::Bodies,
-                StageCheckpoint::new(height).with_entities_stage_checkpoint(EntitiesCheckpoint {
-                    processed: height,
-                    total: input.target(),
-                }),
+            era::save_stage_checkpoints(
+                &provider,
+                input.checkpoint().block_number,
+                height,
+                height,
+                input.target(),
             )?;
 
             height
