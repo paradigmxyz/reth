@@ -36,7 +36,8 @@ impl<ChainSpec> EthereumEngineValidator<ChainSpec> {
     }
 }
 
-impl <ChainSpec>PayloadValidator for EthereumEngineValidator<ChainSpec> where
+impl<ChainSpec> PayloadValidator for EthereumEngineValidator<ChainSpec>
+where
     ChainSpec: EthChainSpec + EthereumHardforks + 'static,
 {
     type Block = Block;
