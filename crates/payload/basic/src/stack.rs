@@ -201,6 +201,7 @@ where
                     config: PayloadConfig {
                         parent_header: args.config.parent_header.clone(),
                         attributes: left_attr.clone(),
+                        keep_alive: args.config.keep_alive,
                     },
                     cancel: args.cancel.clone(),
                     best_payload: args.best_payload.clone().and_then(|payload| {
@@ -220,6 +221,7 @@ where
                     config: PayloadConfig {
                         parent_header: args.config.parent_header.clone(),
                         attributes: right_attr.clone(),
+                        keep_alive: args.config.keep_alive,
                     },
                     cancel: args.cancel.clone(),
                     best_payload: args.best_payload.clone().and_then(|payload| {
@@ -245,6 +247,7 @@ where
                 let left_config = PayloadConfig {
                     parent_header: config.parent_header.clone(),
                     attributes: left_attr,
+                    keep_alive: config.keep_alive,
                 };
                 self.left.build_empty_payload(left_config).map(Either::Left)
             }
@@ -252,6 +255,7 @@ where
                 let right_config = PayloadConfig {
                     parent_header: config.parent_header.clone(),
                     attributes: right_attr,
+                    keep_alive: config.keep_alive,
                 };
                 self.right.build_empty_payload(right_config).map(Either::Right)
             }
