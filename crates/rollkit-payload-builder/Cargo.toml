@@ -26,10 +26,10 @@ reth-rpc = { path = "../rpc/rpc" }
 reth-transaction-pool = { path = "../transaction-pool" }
 reth-ethereum-engine-primitives = { path = "../ethereum/engine-primitives" }
 
-# Alloy primitives
-alloy-primitives = "1.1.0"
-alloy-consensus = "1.0.9"
-alloy-rlp = "0.3.10"
+# Alloy primitives (using workspace versions)
+alloy-primitives = { workspace = true }
+alloy-consensus = { workspace = true }
+alloy-rlp = { workspace = true }
 
 # Standard library dependencies
 tokio = { version = "1.36", features = ["full"] }
@@ -40,6 +40,15 @@ futures = "0.3"
 thiserror = "1.0"
 tracing = "0.1"
 eyre = "0.6"
+reqwest = { version = "0.11", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Reth dependencies for testing
+reth-tracing = { path = "../tracing" }
+reth-rpc-api = { path = "../rpc/rpc-api" }
+reth-rpc-types-compat = { path = "../rpc/rpc-types-compat" }
+alloy-genesis = { workspace = true }
+alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 [lints]
 workspace = true
@@ -47,4 +56,7 @@ workspace = true
 [[example]]
 name = "rollkit_node"
 path = "examples/rollkit_node.rs"
-required-features = ["full"]
+
+[[example]]
+name = "test_rollkit_engine_api"
+path = "examples/test_rollkit_engine_api.rs"
