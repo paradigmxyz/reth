@@ -402,9 +402,11 @@ where
                 Some(block.clone()),
                 None,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _, _| {
-                    let mut traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                move |tx_info, ctx| {
+                    let mut traces = ctx
+                        .inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
                     traces.retain(|trace| matcher.matches(&trace.trace));
                     Ok(Some(traces))
                 },
@@ -469,9 +471,9 @@ where
             block_id,
             None,
             TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, _, _, _| {
+            |tx_info, ctx| {
                 let traces =
-                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                    ctx.inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );
@@ -506,14 +508,16 @@ where
                 block_id,
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
-                move |tx_info, inspector, res, state, db| {
-                    let mut full_trace =
-                        inspector.into_parity_builder().into_trace_results(&res, &trace_types);
+                move |tx_info, ctx| {
+                    let mut full_trace = ctx
+                        .inspector
+                        .into_parity_builder()
+                        .into_trace_results(&ctx.result, &trace_types);
 
                     // If statediffs were requested, populate them with the account balance and
                     // nonce from pre-state
                     if let Some(ref mut state_diff) = full_trace.state_diff {
-                        populate_state_diff(state_diff, db, state.iter())
+                        populate_state_diff(state_diff, &ctx.db, ctx.state.iter())
                             .map_err(Eth::Error::from_eth_err)?;
                     }
 
@@ -541,10 +545,10 @@ where
                 block_id,
                 None,
                 OpcodeGasInspector::default,
-                move |tx_info, inspector, _res, _, _| {
+                move |tx_info, ctx| {
                     let trace = TransactionOpcodeGas {
                         transaction_hash: tx_info.hash.expect("tx hash is set"),
-                        opcode_gas: inspector.opcode_gas_iter().collect(),
+                        opcode_gas: ctx.inspector.opcode_gas_iter().collect(),
                     };
                     Ok(trace)
                 },
