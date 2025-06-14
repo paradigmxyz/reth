@@ -1,20 +1,14 @@
-//! This example shows how to implement a custom Rollkit node with transactions passable via the Engine API.
+//! Rollkit node binary with standard reth CLI support and custom Engine API functionality.
 //!
-//! The Rollkit node supports passing transactions through the `engine_forkchoiceUpdatedV3` method,
-//! similar to how Optimism handles sequencer transactions.
-//!
-//! Custom payload attributes can be supported by implementing:
-//! - [PayloadAttributes] for payload attributes types used as arguments to `engine_forkchoiceUpdated`
-//! - [PayloadBuilderAttributes] for payload attributes types that describe running payload jobs
-//!
-//! This example integrates with the rollkit payload builder to execute transactions passed
-//! through the Engine API.
+//! This node supports all standard reth CLI flags and functionality, with a customized
+//! `engine_forkchoiceUpdatedV3` method that uses the rollkit payload builder for handling
+//! transactions passed through the Engine API.
 
-#![warn(unused_crate_dependencies)]
+#![allow(missing_docs, rustdoc::missing_crate_level_docs)]
 
 use alloy_eips::eip4895::Withdrawals;
-use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256, Bytes};
+use alloy_primitives::{Address, B256, Bytes, U256};
+use alloy_rlp::Decodable;
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -23,10 +17,12 @@ use alloy_rpc_types::{
     },
     Withdrawal,
 };
+use clap::Parser;
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
+use reth_ethereum_cli::Cli;
 use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum::{
-    chainspec::{Chain, ChainSpec, ChainSpecProvider},
+    chainspec::{ChainSpec, ChainSpecProvider},
     node::{
         api::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
@@ -37,9 +33,8 @@ use reth_ethereum::{
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
             rpc::{EngineValidatorBuilder, RpcAddOns},
-            BuilderContext, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
+            BuilderContext, Node, NodeAdapter, NodeComponentsBuilder,
         },
-        core::{args::RpcServerArgs, node_config::NodeConfig},
         node::{
             EthereumConsensusBuilder, EthereumExecutorBuilder, EthereumNetworkBuilder,
             EthereumPoolBuilder,
@@ -48,23 +43,51 @@ use reth_ethereum::{
     },
     pool::{PoolTransaction, TransactionPool},
     primitives::{RecoveredBlock, SealedBlock},
-    provider::{EthStorage, StateProviderFactory},
-    rpc::types::engine::ExecutionPayload,
-    tasks::TaskManager,
-    Block, EthPrimitives, TransactionSigned,
+    TransactionSigned,
 };
-use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
+use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
+
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
-use reth_primitives::{Transaction, TransactionSigned as PrimitiveTransactionSigned};
-use reth_tracing::{RethTracer, Tracer};
+use reth_revm::cached::CachedReads;
 use reth_trie_db::MerklePatriciaTrie;
 use rollkit_payload_builder::{
-    PayloadAttributesError, RollkitPayloadAttributes,
-    RollkitPayloadBuilder, RollkitPayloadBuilderConfig,
+    PayloadAttributesError, RollkitPayloadAttributes, RollkitPayloadBuilder,
+    RollkitPayloadBuilderConfig,
 };
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, sync::Arc};
+use std::sync::Arc;
 use thiserror::Error;
+use tracing::info;
+
+#[global_allocator]
+static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
+
+/// Rollkit-specific command line arguments
+#[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RollkitArgs {
+    /// Enable rollkit mode
+    #[arg(long, default_value = "false")]
+    pub rollkit: bool,
+
+    /// Maximum gas limit for rollkit payloads
+    #[arg(long, default_value = "30000000")]
+    pub rollkit_gas_limit: u64,
+
+    /// Enable transaction passthrough via Engine API
+    #[arg(long, default_value = "true")]
+    pub engine_tx_passthrough: bool,
+}
+
+impl Default for RollkitArgs {
+    fn default() -> Self {
+        Self {
+            rollkit: false,
+            rollkit_gas_limit: 30_000_000,
+            engine_tx_passthrough: true,
+        }
+    }
+}
 
 /// Rollkit payload attributes that support passing transactions via Engine API
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -132,7 +155,7 @@ impl PayloadBuilderAttributes for RollkitEnginePayloadBuilderAttributes {
         if let Some(tx_bytes_vec) = attributes.transactions {
             for tx_bytes in tx_bytes_vec {
                 // Decode the transaction from bytes
-                let tx = TransactionSigned::decode_enveloped(&mut tx_bytes.as_ref())
+                let tx = TransactionSigned::decode(&mut tx_bytes.as_ref())
                     .map_err(|e| RollkitEngineError::InvalidTransactionData(e.to_string()))?;
                 transactions.push(tx);
             }
@@ -191,7 +214,7 @@ impl PayloadTypes for RollkitEngineTypes {
         >,
     ) -> ExecutionData {
         let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+            reth_ethereum::rpc::types::engine::ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
         ExecutionData { payload, sidecar }
     }
 }
@@ -224,7 +247,7 @@ impl RollkitEngineValidator {
 }
 
 impl PayloadValidator for RollkitEngineValidator {
-    type Block = Block;
+    type Block = reth_ethereum::Block;
     type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
@@ -265,7 +288,7 @@ where
         if let Some(ref transactions) = attributes.transactions {
             if transactions.is_empty() {
                 return Err(EngineObjectValidationError::invalid_params(
-                    "Empty transactions list provided"
+                    RollkitEngineError::InvalidTransactionData("Empty transactions list provided".to_string())
                 ));
             }
         }
@@ -294,7 +317,7 @@ where
         Types: NodeTypes<
             Payload = RollkitEngineTypes,
             ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
+            Primitives = reth_ethereum::EthPrimitives,
         >,
     >,
 {
@@ -308,13 +331,23 @@ where
 /// Rollkit node type
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
-pub struct RollkitNode;
+pub struct RollkitNode {
+    /// Rollkit-specific arguments
+    pub args: RollkitArgs,
+}
+
+impl RollkitNode {
+    /// Create a new rollkit node with the given arguments
+    pub const fn new(args: RollkitArgs) -> Self {
+        Self { args }
+    }
+}
 
 impl NodeTypes for RollkitNode {
-    type Primitives = EthPrimitives;
+    type Primitives = reth_ethereum::EthPrimitives;
     type ChainSpec = ChainSpec;
     type StateCommitment = MerklePatriciaTrie;
-    type Storage = EthStorage;
+    type Storage = reth_ethereum::provider::EthStorage;
     type Payload = RollkitEngineTypes;
 }
 
@@ -327,8 +360,8 @@ where
         Types: NodeTypes<
             Payload = RollkitEngineTypes,
             ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-            Storage = EthStorage,
+            Primitives = reth_ethereum::EthPrimitives,
+            Storage = reth_ethereum::provider::EthStorage,
         >,
     >,
 {
@@ -349,7 +382,7 @@ where
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
             .executor(EthereumExecutorBuilder::default())
-            .payload(BasicPayloadServiceBuilder::default())
+            .payload(BasicPayloadServiceBuilder::new(RollkitPayloadBuilderBuilder::new(&self.args)))
             .network(EthereumNetworkBuilder::default())
             .consensus(EthereumConsensusBuilder::default())
     }
@@ -360,62 +393,46 @@ where
 }
 
 /// Rollkit payload service builder that integrates with the rollkit payload builder
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct RollkitPayloadBuilderBuilder {
-    config: Option<RollkitPayloadBuilderConfig>,
+    config: RollkitPayloadBuilderConfig,
 }
 
 impl RollkitPayloadBuilderBuilder {
-    /// Create a new builder with custom config
-    pub fn with_config(config: RollkitPayloadBuilderConfig) -> Self {
-        Self { config: Some(config) }
+    /// Create a new builder with rollkit args
+    pub fn new(args: &RollkitArgs) -> Self {
+        let config = RollkitPayloadBuilderConfig {
+            max_transactions: 1000,
+            max_gas_limit: args.rollkit_gas_limit,
+            min_gas_price: 1_000_000_000, // 1 Gwei
+            enable_tx_validation: args.engine_tx_passthrough,
+        };
+        Self { config }
     }
 }
 
-impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig> for RollkitPayloadBuilderBuilder
-where
-    Node: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = RollkitEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-        >,
-    >,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
-        + Unpin
-        + 'static,
-{
-    type PayloadBuilder = RollkitEnginePayloadBuilder<Pool, Node::Provider>;
-
-    async fn build_payload_builder(
-        self,
-        ctx: &BuilderContext<Node>,
-        pool: Pool,
-        _evm_config: EthEvmConfig,
-    ) -> eyre::Result<Self::PayloadBuilder> {
-        let config = self.config.unwrap_or_default();
-        let rollkit_builder = RollkitPayloadBuilder::new(ctx.provider().clone());
-        
-        Ok(RollkitEnginePayloadBuilder {
-            rollkit_builder,
-            pool,
-            config,
-        })
+impl Default for RollkitPayloadBuilderBuilder {
+    fn default() -> Self {
+        Self::new(&RollkitArgs::default())
     }
 }
 
 /// The rollkit engine payload builder that integrates with the rollkit payload builder
-#[derive(Debug, Clone)]
-pub struct RollkitEnginePayloadBuilder<Pool, Client> {
-    rollkit_builder: RollkitPayloadBuilder<Client>,
+#[derive(Clone)]
+pub struct RollkitEnginePayloadBuilder<Pool, Client> 
+where
+    Pool: Clone,
+    Client: Clone,
+{
+    rollkit_builder: Arc<RollkitPayloadBuilder<Client>>,
     pool: Pool,
     config: RollkitPayloadBuilderConfig,
 }
 
 impl<Pool, Client> PayloadBuilder for RollkitEnginePayloadBuilder<Pool, Client>
 where
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
+    Client: reth_ethereum::provider::StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + Send + Sync + 'static,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
 {
     type Attributes = RollkitEnginePayloadBuilderAttributes;
@@ -443,20 +460,21 @@ where
             .map_err(|e| PayloadBuilderError::Other(e.into()))?;
 
         // Convert to EthBuiltPayload
+        let gas_used = sealed_block.gas_used;
         let built_payload = EthBuiltPayload::new(
             PayloadId::new([0u8; 8]), // Generate proper payload ID
-            sealed_block,
+            Arc::new(sealed_block),
+            U256::from(gas_used), // Block gas used
             None, // No blob sidecar for rollkit
-            reth_ethereum::primitives::constants::KECCAK_EMPTY,
         );
 
         if let Some(best) = best_payload {
             if built_payload.fees() <= best.fees() {
-                return Ok(BuildOutcome::Aborted { fees: built_payload.fees(), cached_reads: None });
+                return Ok(BuildOutcome::Aborted { fees: built_payload.fees(), cached_reads: CachedReads::default() });
             }
         }
 
-        Ok(BuildOutcome::Better { payload: built_payload, cached_reads: None })
+        Ok(BuildOutcome::Better { payload: built_payload, cached_reads: CachedReads::default() })
     }
 
     fn build_empty_payload(
@@ -479,62 +497,67 @@ where
         let sealed_block = rt.block_on(self.rollkit_builder.build_payload(rollkit_attrs))
             .map_err(|e| PayloadBuilderError::Other(e.into()))?;
 
+        let gas_used = sealed_block.gas_used;
         Ok(EthBuiltPayload::new(
             PayloadId::new([0u8; 8]),
-            sealed_block,
+            Arc::new(sealed_block),
+            U256::from(gas_used),
             None,
-            reth_ethereum::primitives::constants::KECCAK_EMPTY,
         ))
     }
 }
 
-/// Helper function to create a rollkit node with default configuration
-pub async fn create_rollkit_node<Client>(
-    client: Arc<Client>,
-) -> eyre::Result<RollkitPayloadBuilder<Client>>
+impl<Node, Pool> PayloadBuilderBuilder<Node, Pool, EthEvmConfig> for RollkitPayloadBuilderBuilder
 where
-    Client: StateProviderFactory + Send + Sync + 'static,
+    Node: FullNodeTypes<
+        Types: NodeTypes<
+            Payload = RollkitEngineTypes,
+            ChainSpec = ChainSpec,
+            Primitives = reth_ethereum::EthPrimitives,
+        >,
+    >,
+    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + Unpin
+        + 'static,
 {
-    Ok(RollkitPayloadBuilder::new(client))
+    type PayloadBuilder = RollkitEnginePayloadBuilder<Pool, Node::Provider>;
+
+    async fn build_payload_builder(
+        self,
+        ctx: &BuilderContext<Node>,
+        pool: Pool,
+        _evm_config: EthEvmConfig,
+    ) -> eyre::Result<Self::PayloadBuilder> {
+        let rollkit_builder = Arc::new(RollkitPayloadBuilder::new(Arc::new(ctx.provider().clone())));
+        
+        Ok(RollkitEnginePayloadBuilder {
+            rollkit_builder,
+            pool,
+            config: self.config,
+        })
+    }
 }
 
-/// Helper function to create a rollkit node with custom configuration
-pub async fn create_rollkit_node_with_config<Client>(
-    client: Arc<Client>,
-    _config: RollkitPayloadBuilderConfig,
-) -> eyre::Result<RollkitPayloadBuilder<Client>>
-where
-    Client: StateProviderFactory + Send + Sync + 'static,
-{
-    Ok(RollkitPayloadBuilder::new(client))
-}
+fn main() {
+    reth_cli_util::sigsegv_handler::install();
 
-#[tokio::main]
-async fn main() -> eyre::Result<()> {
-    let _guard = RethTracer::new().init()?;
+    // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
+    if std::env::var_os("RUST_BACKTRACE").is_none() {
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
 
-    let tasks = TaskManager::current();
+    if let Err(err) =
+        Cli::<EthereumChainSpecParser, RollkitArgs>::parse().run(async move |builder, rollkit_args| {
+            info!(target: "reth::cli", "Launching Rollkit node");
+            let handle =
+                builder.node(RollkitNode::new(rollkit_args)).launch().await?;
 
-    // Create rollkit genesis
-    let spec = ChainSpec::builder()
-        .chain(Chain::mainnet())
-        .genesis(Genesis::default())
-        .london_activated()
-        .paris_activated()
-        .shanghai_activated()
-        .build();
-
-    // Create node config
-    let node_config =
-        NodeConfig::test().with_rpc(RpcServerArgs::default().with_http()).with_chain(spec);
-
-    let handle = NodeBuilder::new(node_config)
-        .testing_node(tasks.executor())
-        .launch_node(RollkitNode::default())
-        .await
-        .unwrap();
-
-    println!("Rollkit Node started");
-
-    handle.node_exit_future.await
+            info!(target: "reth::cli", "Rollkit node started with custom Engine API support");
+            
+            handle.node_exit_future.await
+        })
+    {
+        eprintln!("Error: {err:?}");
+        std::process::exit(1);
+    }
 } 

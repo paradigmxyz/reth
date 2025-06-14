@@ -8,8 +8,9 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 reth-basic-payload-builder = { path = "../payload/basic" }
 reth-engine-tree = { path = "../engine/tree" }
-reth-ethereum = { path = "../ethereum/reth" }
+reth-ethereum = { path = "../ethereum/reth", features = ["node-api", "rpc", "pool", "provider", "tasks", "node"] }
 reth-evm = { path = "../evm/evm" }
+reth-revm = { path = "../revm" }
 reth-execution-types = { path = "../evm/execution-types" }
 reth-execution-errors = { path = "../evm/execution-errors" }
 reth-payload-builder = { path = "../payload/builder" }
@@ -25,11 +26,15 @@ reth-network = { path = "../net/network" }
 reth-rpc = { path = "../rpc/rpc" }
 reth-transaction-pool = { path = "../transaction-pool" }
 reth-ethereum-engine-primitives = { path = "../ethereum/engine-primitives" }
+reth-ethereum-payload-builder = { path = "../ethereum/payload" }
+reth-trie-db = { path = "../trie/db" }
+reth-engine-local = { path = "../engine/local" }
 
-# Alloy primitives (using workspace versions)
+# Alloy dependencies (using workspace versions)
 alloy-primitives = { workspace = true }
 alloy-consensus = { workspace = true }
 alloy-rlp = { workspace = true }
+alloy-eips = { workspace = true }
 
 # Standard library dependencies
 tokio = { version = "1.36", features = ["full"] }
@@ -43,6 +48,12 @@ eyre = "0.6"
 reqwest = { version = "0.11", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8"
+clap = { workspace = true, features = ["derive"] }
+
+# Reth CLI dependencies
+reth-cli = { path = "../cli/cli" }
+reth-ethereum-cli = { path = "../ethereum/cli" }
+reth-cli-util = { path = "../cli/util" }
 
 # Reth dependencies for testing
 reth-tracing = { path = "../tracing" }
@@ -53,6 +64,10 @@ alloy-rpc-types = { workspace = true, features = ["engine"] }
 
 [lints]
 workspace = true
+
+[[bin]]
+name = "rollkit-reth"
+path = "bin/rollkit_node.rs"
 
 [[example]]
 name = "rollkit_node"

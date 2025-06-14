@@ -6,6 +6,19 @@ A custom payload builder for Reth that integrates with Rollkit, supporting trans
 
 The Rollkit Payload Builder extends Reth to support custom payload building patterns similar to Optimism's sequencer transactions. It allows transactions to be passed directly through the Engine API, enabling integration with rollup sequencers and other Layer 2 solutions.
 
+## Quick Start
+
+```bash
+# 1. Build the rollkit-reth binary
+cargo build --bin rollkit-reth
+
+# 2. Run the rollkit node with basic configuration
+./target/debug/rollkit-reth node --rollkit --chain dev --http
+
+# 3. The node will start with rollkit-specific Engine API support
+# and accept transactions via engine_forkchoiceUpdatedV3
+```
+
 ## Key Features
 
 - **Engine API Integration**: Supports `engine_forkchoiceUpdatedV3` with transaction passing
@@ -24,16 +37,79 @@ The implementation follows the custom-engine-types pattern from Reth, consisting
 4. **RollkitEngineValidator**: Custom validator for rollkit-specific validation rules
 5. **RollkitNode**: Complete node implementation with all components
 
-## Usage
+## Building and Usage
+
+### Building the Rollkit Node
+
+The rollkit node is built as a standard reth binary with rollkit-specific functionality:
+
+```bash
+# Build in debug mode (faster compilation, for development)
+cargo build --bin rollkit-reth
+
+# Build in release mode (optimized, for production)
+cargo build --release --bin rollkit-reth
+```
+
+The binary will be created in:
+- Debug mode: `target/debug/rollkit-reth`
+- Release mode: `target/release/rollkit-reth`
 
 ### Running the Rollkit Node
 
-```bash
-# Run the basic rollkit node
-cargo run --example rollkit_node
+The `rollkit-reth` binary supports all standard reth CLI commands and flags, plus rollkit-specific extensions:
 
-# Run with custom configuration
-RUST_LOG=debug cargo run --example rollkit_node
+```bash
+# Show help and available commands
+./target/debug/rollkit-reth --help
+
+# Show node-specific options (including rollkit flags)
+./target/debug/rollkit-reth node --help
+
+# Run basic rollkit node with default settings
+./target/debug/rollkit-reth node --rollkit
+
+# Run with custom rollkit configuration
+./target/debug/rollkit-reth node \
+  --rollkit \
+  --rollkit-gas-limit 50000000 \
+  --engine-tx-passthrough \
+  --http \
+  --http.api eth,engine,net
+
+# Run with full logging and custom chain
+RUST_LOG=debug ./target/debug/rollkit-reth node \
+  --chain dev \
+  --rollkit \
+  --rollkit-gas-limit 30000000 \
+  --http \
+  --ws
+```
+
+### Rollkit-Specific CLI Flags
+
+The rollkit node adds these additional flags to the standard reth CLI:
+
+- `--rollkit`: Enable rollkit mode
+- `--rollkit-gas-limit <GAS_LIMIT>`: Maximum gas limit for rollkit payloads (default: 30000000)
+- `--engine-tx-passthrough`: Enable transaction passthrough via Engine API (default: true)
+
+### Standard Reth Commands
+
+All standard reth commands work with the rollkit node:
+
+```bash
+# Initialize database
+./target/debug/rollkit-reth init --chain dev
+
+# Database debugging
+./target/debug/rollkit-reth db stats
+
+# Import blocks
+./target/debug/rollkit-reth import <file>
+
+# Configuration management
+./target/debug/rollkit-reth config
 ```
 
 ### Running Engine API Tests
@@ -164,13 +240,27 @@ cargo run --example test_rollkit_engine_api
 ### Building
 
 ```bash
+# Build the rollkit-reth binary
+cargo build --bin rollkit-reth
+
+# Build with release optimizations
+cargo build --release --bin rollkit-reth
+
+# Build library for development
 cargo build
 ```
 
 ### Running with Debug Logging
 
 ```bash
-RUST_LOG=debug,rollkit_payload_builder=trace cargo run --example rollkit_node
+# Run with detailed logging
+RUST_LOG=debug,rollkit_payload_builder=trace ./target/debug/rollkit-reth node --rollkit
+
+# Run with trace-level logging for rollkit components
+RUST_LOG=trace ./target/debug/rollkit-reth node --rollkit --chain dev --http
+
+# Run examples with debug logging
+RUST_LOG=debug cargo run --example rollkit_node
 ```
 
 ### Adding Custom Validation
