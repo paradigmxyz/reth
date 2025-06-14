@@ -46,6 +46,9 @@ let config = AlloyRethProviderConfig {
 let db_provider = AlloyRethProvider::new_with_config(provider, EthereumNode, config);
 ```
 
+## Technical Details
+
+The provider uses `alloy_network::AnyNetwork` for network operations, providing compatibility with various Ethereum-based networks while maintaining the expected block structure with headers.
 
 ## License
 

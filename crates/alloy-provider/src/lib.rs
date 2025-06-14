@@ -8,7 +8,7 @@
 //! ## Features
 //!
 //! - Implements `StateProviderFactory` for remote RPC state access
-//! - Supports Ethereum networks
+//! - Supports Ethereum and Optimism network
 //! - Useful for testing without requiring a full database
 //! - Can be used with reth ExEx (Execution Extensions) for testing
 
@@ -21,7 +21,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxNumber, B256, U256};
-use alloy_provider::Provider;
+use alloy_provider::{network::Network, Provider};
 use alloy_rpc_types::BlockId;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
@@ -74,47 +74,57 @@ impl AlloyRethProviderConfig {
 /// This provider implements reth's `StateProviderFactory` and related traits,
 /// allowing it to be used as a drop-in replacement for database-backed providers
 /// in scenarios where RPC access is preferred (e.g., testing).
+///
+/// The provider type is generic over the network type N (defaulting to `AnyNetwork`),
+/// but the current implementation is specialized for `alloy_network::AnyNetwork`
+/// as it needs to access block header fields directly.
 #[derive(Clone)]
-pub struct AlloyRethProvider<P, N: NodeTypes> {
+pub struct AlloyRethProvider<P, Node, N = alloy_network::AnyNetwork>
+where
+    Node: NodeTypes,
+{
     /// The underlying Alloy provider
     provider: P,
     /// Node types marker
-    node_types: std::marker::PhantomData<N>,
+    node_types: std::marker::PhantomData<Node>,
+    /// Network marker
+    network: std::marker::PhantomData<N>,
     /// Broadcast channel for canon state notifications
-    canon_state_notification: broadcast::Sender<CanonStateNotification<PrimitivesTy<N>>>,
+    canon_state_notification: broadcast::Sender<CanonStateNotification<PrimitivesTy<Node>>>,
     /// Configuration for the provider
     config: AlloyRethProviderConfig,
     /// Cached chain spec
-    chain_spec: Arc<N::ChainSpec>,
+    chain_spec: Arc<Node::ChainSpec>,
 }
 
-impl<P, N: NodeTypes> std::fmt::Debug for AlloyRethProvider<P, N> {
+impl<P, Node: NodeTypes, N> std::fmt::Debug for AlloyRethProvider<P, Node, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AlloyRethProvider").field("config", &self.config).finish()
     }
 }
 
-impl<P, N: NodeTypes> AlloyRethProvider<P, N> {
+impl<P, Node: NodeTypes, N> AlloyRethProvider<P, Node, N> {
     /// Creates a new `AlloyRethProvider` with default configuration
-    pub fn new(provider: P, _node_types: N) -> Self
+    pub fn new(provider: P,) -> Self
     where
-        N::ChainSpec: Default,
+        Node::ChainSpec: Default,
     {
-        Self::new_with_config(provider, _node_types, AlloyRethProviderConfig::default())
+        Self::new_with_config(provider, AlloyRethProviderConfig::default())
     }
 
     /// Creates a new `AlloyRethProvider` with custom configuration
-    pub fn new_with_config(provider: P, _node_types: N, config: AlloyRethProviderConfig) -> Self
+    pub fn new_with_config(provider: P, config: AlloyRethProviderConfig) -> Self
     where
-        N::ChainSpec: Default,
+        Node::ChainSpec: Default,
     {
         let (canon_state_notification, _) = broadcast::channel(1);
         Self {
             provider,
             node_types: std::marker::PhantomData,
+            network: std::marker::PhantomData,
             canon_state_notification,
             config,
-            chain_spec: Arc::new(N::ChainSpec::default()),
+            chain_spec: Arc::new(Node::ChainSpec::default()),
         }
     }
 
@@ -127,13 +137,16 @@ impl<P, N: NodeTypes> AlloyRethProvider<P, N> {
     }
 }
 
-impl<P, N> AlloyRethProvider<P, N>
+impl<P, Node> AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     /// Helper function to create a state provider for a given block ID
-    fn create_state_provider(&self, block_id: BlockId) -> AlloyRethStateProvider<P, N> {
+    fn create_state_provider(
+        &self,
+        block_id: BlockId,
+    ) -> AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork> {
         AlloyRethStateProvider::with_chain_spec(
             self.provider.clone(),
             block_id,
@@ -150,10 +163,15 @@ where
     }
 }
 
-impl<P, N> BlockHashReader for AlloyRethProvider<P, N>
+// Implementation note: While the types are generic over Network N, the trait implementations
+// are specialized for AnyNetwork because they need to access block header fields.
+// This allows the types to be instantiated with any network while the actual functionality
+// requires AnyNetwork. Future improvements could add trait bounds for networks with
+// compatible block structures.
+impl<P, Node> BlockHashReader for AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn block_hash(&self, number: BlockNumber) -> Result<Option<B256>, ProviderError> {
         let block = self.block_on_async(async {
@@ -172,10 +190,10 @@ where
     }
 }
 
-impl<P, N> BlockNumReader for AlloyRethProvider<P, N>
+impl<P, Node> BlockNumReader for AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn chain_info(&self) -> Result<reth_chainspec::ChainInfo, ProviderError> {
         // For RPC provider, we can't get full chain info
@@ -200,10 +218,10 @@ where
     }
 }
 
-impl<P, N> BlockIdReader for AlloyRethProvider<P, N>
+impl<P, Node> BlockIdReader for AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn block_number_for_id(&self, block_id: BlockId) -> Result<Option<BlockNumber>, ProviderError> {
         match block_id {
@@ -242,10 +260,10 @@ where
     }
 }
 
-impl<P, N> StateProviderFactory for AlloyRethProvider<P, N>
+impl<P, Node> StateProviderFactory for AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
         trace!(target: "alloy-provider", "Getting latest state provider");
@@ -319,14 +337,14 @@ where
     }
 }
 
-impl<P, N> DatabaseProviderFactory for AlloyRethProvider<P, N>
+impl<P, Node> DatabaseProviderFactory for AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     type DB = DatabaseMock;
-    type ProviderRW = AlloyRethStateProvider<P, N>;
-    type Provider = AlloyRethStateProvider<P, N>;
+    type ProviderRW = AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>;
+    type Provider = AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>;
 
     fn database_provider_ro(&self) -> Result<Self::Provider, ProviderError> {
         // RPC provider returns a new state provider
@@ -347,10 +365,10 @@ where
     }
 }
 
-impl<P, N> CanonChainTracker for AlloyRethProvider<P, N>
+impl<P, Node> CanonChainTracker for AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     type Header = alloy_consensus::Header;
     fn on_forkchoice_update_received(&self, _update: &ForkchoiceState) {
@@ -374,20 +392,21 @@ where
     }
 }
 
-impl<P, N> NodePrimitivesProvider for AlloyRethProvider<P, N>
+impl<P, Node, N> NodePrimitivesProvider for AlloyRethProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Send + Sync,
+    N: Send + Sync,
+    Node: NodeTypes,
 {
-    type Primitives = PrimitivesTy<N>;
+    type Primitives = PrimitivesTy<Node>;
 }
 
-impl<P, N> CanonStateSubscriptions for AlloyRethProvider<P, N>
+impl<P, Node> CanonStateSubscriptions for AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
-    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<PrimitivesTy<N>> {
+    fn subscribe_to_canonical_state(&self) -> CanonStateNotifications<PrimitivesTy<Node>> {
         trace!(target: "alloy-provider", "Subscribing to canonical state notifications");
         self.canon_state_notification.subscribe()
     }
@@ -395,23 +414,25 @@ where
     // canonical_state_stream has a default implementation in the trait
 }
 
-impl<P, N> ChainSpecProvider for AlloyRethProvider<P, N>
+impl<P, Node, N> ChainSpecProvider for AlloyRethProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
-    N::ChainSpec: Default,
+    P: Send + Sync,
+    N: Send + Sync,
+    Node: NodeTypes,
+    Node::ChainSpec: Default,
 {
-    type ChainSpec = N::ChainSpec;
+    type ChainSpec = Node::ChainSpec;
 
     fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.chain_spec.clone()
     }
 }
 
-impl<P, N> BlockchainTreePendingStateProvider for AlloyRethProvider<P, N>
+impl<P, Node> BlockchainTreePendingStateProvider
+    for AlloyRethProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn pending_state_provider(
         &self,
@@ -430,18 +451,25 @@ where
 
 /// State provider implementation that fetches state via RPC
 #[derive(Clone)]
-pub struct AlloyRethStateProvider<P, N: NodeTypes> {
+pub struct AlloyRethStateProvider<P, Node, N = alloy_network::AnyNetwork>
+where
+    Node: NodeTypes,
+{
     /// The underlying Alloy provider
     provider: P,
     /// The block ID to fetch state at
     block_id: BlockId,
     /// Node types marker
-    node_types: std::marker::PhantomData<N>,
+    node_types: std::marker::PhantomData<Node>,
+    /// Network marker
+    network: std::marker::PhantomData<N>,
     /// Cached chain spec (shared with parent provider)
-    chain_spec: Option<Arc<N::ChainSpec>>,
+    chain_spec: Option<Arc<Node::ChainSpec>>,
 }
 
-impl<P: std::fmt::Debug, N: NodeTypes> std::fmt::Debug for AlloyRethStateProvider<P, N> {
+impl<P: std::fmt::Debug, Node: NodeTypes, N> std::fmt::Debug
+    for AlloyRethStateProvider<P, Node, N>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AlloyRethStateProvider")
             .field("provider", &self.provider)
@@ -450,26 +478,33 @@ impl<P: std::fmt::Debug, N: NodeTypes> std::fmt::Debug for AlloyRethStateProvide
     }
 }
 
-impl<P: Clone, N: NodeTypes> AlloyRethStateProvider<P, N> {
+impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
     /// Creates a new state provider for the given block
     pub const fn new(
         provider: P,
         block_id: BlockId,
-        _primitives: std::marker::PhantomData<N>,
+        _primitives: std::marker::PhantomData<Node>,
     ) -> Self {
-        Self { provider, block_id, node_types: std::marker::PhantomData, chain_spec: None }
+        Self {
+            provider,
+            block_id,
+            node_types: std::marker::PhantomData,
+            network: std::marker::PhantomData,
+            chain_spec: None,
+        }
     }
 
     /// Creates a new state provider with a cached chain spec
     pub const fn with_chain_spec(
         provider: P,
         block_id: BlockId,
-        chain_spec: Arc<N::ChainSpec>,
+        chain_spec: Arc<Node::ChainSpec>,
     ) -> Self {
         Self {
             provider,
             block_id,
             node_types: std::marker::PhantomData,
+            network: std::marker::PhantomData,
             chain_spec: Some(chain_spec),
         }
     }
@@ -488,6 +523,7 @@ impl<P: Clone, N: NodeTypes> AlloyRethStateProvider<P, N> {
             provider: self.provider.clone(),
             block_id,
             node_types: self.node_types,
+            network: self.network,
             chain_spec: self.chain_spec.clone(),
         }
     }
@@ -495,7 +531,8 @@ impl<P: Clone, N: NodeTypes> AlloyRethStateProvider<P, N> {
     /// Get account information from RPC
     fn get_account(&self, address: Address) -> Result<Option<Account>, ProviderError>
     where
-        P: Provider<alloy_network::AnyNetwork> + Clone + 'static,
+        P: Provider<N> + Clone + 'static,
+        N: Network,
     {
         self.block_on_async(async {
             // Get account info in a single RPC call
@@ -529,10 +566,10 @@ impl<P: Clone, N: NodeTypes> AlloyRethStateProvider<P, N> {
     }
 }
 
-impl<P, N> StateProvider for AlloyRethStateProvider<P, N>
+impl<P, Node> StateProvider for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn storage(
         &self,
@@ -586,20 +623,21 @@ where
     }
 }
 
-impl<P, N> AccountReader for AlloyRethStateProvider<P, N>
+impl<P, Node, N> AccountReader for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn basic_account(&self, address: &Address) -> Result<Option<Account>, ProviderError> {
         self.get_account(*address)
     }
 }
 
-impl<P, N> StateRootProvider for AlloyRethStateProvider<P, N>
+impl<P, Node> StateRootProvider for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn state_root(&self, _state: HashedPostState) -> Result<B256, ProviderError> {
         // Return the state root from the block
@@ -634,10 +672,10 @@ where
     }
 }
 
-impl<P, N> StorageReader for AlloyRethStateProvider<P, N>
+impl<P, Node> StorageReader for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn plain_state_storages(
         &self,
@@ -672,10 +710,11 @@ where
     }
 }
 
-impl<P, N> reth_storage_api::StorageRootProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> reth_storage_api::StorageRootProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn storage_root(
         &self,
@@ -705,10 +744,11 @@ where
     }
 }
 
-impl<P, N> reth_storage_api::StateProofProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> reth_storage_api::StateProofProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn proof(
         &self,
@@ -736,10 +776,11 @@ where
     }
 }
 
-impl<P, N> reth_storage_api::HashedPostStateProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> reth_storage_api::HashedPostStateProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
         // Return empty hashed post state for RPC provider
@@ -747,12 +788,13 @@ where
     }
 }
 
-impl<P, N> StateReader for AlloyRethStateProvider<P, N>
+impl<P, Node, N> StateReader for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
-    type Receipt = ReceiptTy<N>;
+    type Receipt = ReceiptTy<Node>;
 
     fn get_state(
         &self,
@@ -763,10 +805,11 @@ where
     }
 }
 
-impl<P, N> DBProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> DBProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     type Tx = TxMock;
 
@@ -794,10 +837,10 @@ where
     }
 }
 
-impl<P, N> BlockNumReader for AlloyRethStateProvider<P, N>
+impl<P, Node> BlockNumReader for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn chain_info(&self) -> Result<ChainInfo, ProviderError> {
         self.block_on_async(async {
@@ -832,10 +875,10 @@ where
     }
 }
 
-impl<P, N> BlockHashReader for AlloyRethStateProvider<P, N>
+impl<P, Node> BlockHashReader for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn block_hash(&self, number: u64) -> Result<Option<B256>, ProviderError> {
         self.block_on_async(async {
@@ -858,10 +901,10 @@ where
     }
 }
 
-impl<P, N> BlockIdReader for AlloyRethStateProvider<P, N>
+impl<P, Node> BlockIdReader for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
     fn block_number_for_id(
         &self,
@@ -883,12 +926,12 @@ where
     }
 }
 
-impl<P, N> BlockReader for AlloyRethStateProvider<P, N>
+impl<P, Node> BlockReader for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
-    type Block = BlockTy<N>;
+    type Block = BlockTy<Node>;
 
     fn find_block_by_hash(
         &self,
@@ -927,7 +970,7 @@ where
         &self,
         _id: alloy_rpc_types::BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
-    ) -> Result<Option<RecoveredBlock<BlockTy<N>>>, ProviderError> {
+    ) -> Result<Option<RecoveredBlock<BlockTy<Node>>>, ProviderError> {
         Ok(None)
     }
 
@@ -941,7 +984,7 @@ where
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
-    ) -> Result<Vec<RecoveredBlock<BlockTy<N>>>, ProviderError> {
+    ) -> Result<Vec<RecoveredBlock<BlockTy<Node>>>, ProviderError> {
         Ok(Vec::new())
     }
 
@@ -953,12 +996,12 @@ where
     }
 }
 
-impl<P, N> TransactionsProvider for AlloyRethStateProvider<P, N>
+impl<P, Node> TransactionsProvider for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
-    type Transaction = TxTy<N>;
+    type Transaction = TxTy<Node>;
 
     fn transaction_id(&self, _tx_hash: B256) -> Result<Option<TxNumber>, ProviderError> {
         Ok(None)
@@ -1023,12 +1066,12 @@ where
     }
 }
 
-impl<P, N> ReceiptProvider for AlloyRethStateProvider<P, N>
+impl<P, Node> ReceiptProvider for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
-    type Receipt = ReceiptTy<N>;
+    type Receipt = ReceiptTy<Node>;
 
     fn receipt(&self, _id: TxNumber) -> Result<Option<Self::Receipt>, ProviderError> {
         Ok(None)
@@ -1060,12 +1103,12 @@ where
     }
 }
 
-impl<P, N> HeaderProvider for AlloyRethStateProvider<P, N>
+impl<P, Node> HeaderProvider for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    Node: NodeTypes,
 {
-    type Header = HeaderTy<N>;
+    type Header = HeaderTy<Node>;
 
     fn header(&self, _block_hash: &BlockHash) -> Result<Option<Self::Header>, ProviderError> {
         Ok(None)
@@ -1093,30 +1136,31 @@ where
     fn sealed_header(
         &self,
         _number: BlockNumber,
-    ) -> Result<Option<SealedHeader<HeaderTy<N>>>, ProviderError> {
+    ) -> Result<Option<SealedHeader<HeaderTy<Node>>>, ProviderError> {
         Ok(None)
     }
 
     fn sealed_headers_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Vec<SealedHeader<HeaderTy<N>>>, ProviderError> {
+    ) -> Result<Vec<SealedHeader<HeaderTy<Node>>>, ProviderError> {
         Ok(Vec::new())
     }
 
     fn sealed_headers_while(
         &self,
         _range: impl RangeBounds<BlockNumber>,
-        _predicate: impl FnMut(&SealedHeader<HeaderTy<N>>) -> bool,
-    ) -> Result<Vec<SealedHeader<HeaderTy<N>>>, ProviderError> {
+        _predicate: impl FnMut(&SealedHeader<HeaderTy<Node>>) -> bool,
+    ) -> Result<Vec<SealedHeader<HeaderTy<Node>>>, ProviderError> {
         Ok(Vec::new())
     }
 }
 
-impl<P, N> PruneCheckpointReader for AlloyRethStateProvider<P, N>
+impl<P, Node, N> PruneCheckpointReader for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn get_prune_checkpoint(
         &self,
@@ -1130,10 +1174,11 @@ where
     }
 }
 
-impl<P, N> StageCheckpointReader for AlloyRethStateProvider<P, N>
+impl<P, Node, N> StageCheckpointReader for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>, ProviderError> {
         Ok(None)
@@ -1151,10 +1196,11 @@ where
     }
 }
 
-impl<P, N> ChangeSetReader for AlloyRethStateProvider<P, N>
+impl<P, Node, N> ChangeSetReader for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn account_block_changeset(
         &self,
@@ -1164,11 +1210,11 @@ where
     }
 }
 
-impl<P, N> StateProviderFactory for AlloyRethStateProvider<P, N>
+impl<P, Node> StateProviderFactory for AlloyRethStateProvider<P, Node, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug + Send + Sync,
-    N: NodeTypes + 'static,
-    N::ChainSpec: Send + Sync,
+    Node: NodeTypes + 'static,
+    Node::ChainSpec: Send + Sync,
     Self: Clone + 'static,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
@@ -1229,28 +1275,30 @@ where
     }
 }
 
-impl<P, N> ChainSpecProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> ChainSpecProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
-    N::ChainSpec: Default,
+    P: Send + Sync + std::fmt::Debug,
+    N: Send + Sync,
+    Node: NodeTypes,
+    Node::ChainSpec: Default,
 {
-    type ChainSpec = N::ChainSpec;
+    type ChainSpec = Node::ChainSpec;
 
     fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         if let Some(chain_spec) = &self.chain_spec {
             chain_spec.clone()
         } else {
             // Fallback for when chain_spec is not provided
-            Arc::new(N::ChainSpec::default())
+            Arc::new(Node::ChainSpec::default())
         }
     }
 }
 
-impl<P, N> ExecutionDataProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> ExecutionDataProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn execution_outcome(&self) -> &ExecutionOutcome {
         unimplemented!("execution outcome not available for RPC provider")
@@ -1261,10 +1309,11 @@ where
     }
 }
 
-impl<P, N> reth_provider::BlockExecutionForkProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> reth_provider::BlockExecutionForkProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn canonical_fork(&self) -> alloy_eips::BlockNumHash {
         // For RPC provider, we don't have fork information
@@ -1275,20 +1324,22 @@ where
 // Note: FullExecutionDataProvider is already implemented via the blanket implementation
 // for types that implement both ExecutionDataProvider and BlockExecutionForkProvider
 
-impl<P, N> StatsReader for AlloyRethStateProvider<P, N>
+impl<P, Node, N> StatsReader for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn count_entries<T: reth_db_api::table::Table>(&self) -> Result<usize, ProviderError> {
         Ok(0)
     }
 }
 
-impl<P, N> BlockBodyIndicesProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> BlockBodyIndicesProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn block_body_indices(
         &self,
@@ -1305,18 +1356,20 @@ where
     }
 }
 
-impl<P, N> NodePrimitivesProvider for AlloyRethStateProvider<P, N>
+impl<P, Node, N> NodePrimitivesProvider for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Send + Sync + std::fmt::Debug,
+    N: Send + Sync,
+    Node: NodeTypes,
 {
-    type Primitives = PrimitivesTy<N>;
+    type Primitives = PrimitivesTy<Node>;
 }
 
-impl<P, N> ChainStateBlockReader for AlloyRethStateProvider<P, N>
+impl<P, Node, N> ChainStateBlockReader for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn last_finalized_block_number(&self) -> Result<Option<BlockNumber>, ProviderError> {
         Ok(None)
@@ -1327,10 +1380,11 @@ where
     }
 }
 
-impl<P, N> ChainStateBlockWriter for AlloyRethStateProvider<P, N>
+impl<P, Node, N> ChainStateBlockWriter for AlloyRethStateProvider<P, Node, N>
 where
-    P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
-    N: NodeTypes,
+    P: Provider<N> + Clone + 'static + std::fmt::Debug,
+    N: Network,
+    Node: NodeTypes,
 {
     fn save_finalized_block_number(&self, _block_number: BlockNumber) -> Result<(), ProviderError> {
         Err(ProviderError::UnsupportedProvider)
@@ -1344,15 +1398,16 @@ where
 // Async database wrapper for revm compatibility
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct AsyncDbWrapper<P> {
+struct AsyncDbWrapper<P, N = alloy_network::AnyNetwork> {
     provider: P,
     block_id: BlockId,
+    network: std::marker::PhantomData<N>,
 }
 
 #[allow(dead_code)]
-impl<P> AsyncDbWrapper<P> {
+impl<P, N> AsyncDbWrapper<P, N> {
     const fn new(provider: P, block_id: BlockId) -> Self {
-        Self { provider, block_id }
+        Self { provider, block_id, network: std::marker::PhantomData }
     }
 
     /// Helper function to execute async operations in a blocking context
@@ -1364,7 +1419,7 @@ impl<P> AsyncDbWrapper<P> {
     }
 }
 
-impl<P> revm::Database for AsyncDbWrapper<P>
+impl<P> revm::Database for AsyncDbWrapper<P, alloy_network::AnyNetwork>
 where
     P: Provider<alloy_network::AnyNetwork> + Clone + 'static + std::fmt::Debug,
 {
