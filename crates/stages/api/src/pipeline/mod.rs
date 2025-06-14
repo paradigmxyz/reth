@@ -301,25 +301,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         // Get the actual pruning configuration
         let prune_modes = provider.prune_modes_ref();
 
-        let (is_within_history_limit, history_limit_info) =
-            prune_modes.is_target_block_within_history_limit(latest_block, to);
-        if !is_within_history_limit {
-            let (history_type, history_limit) = history_limit_info.unwrap();
-            warn!(
-                target: "sync::pipeline",
-                target_block = %to,
-                %latest_block,
-                %history_limit,
-                %history_type,
-                "Cannot unwind: target block is beyond history limit"
-            );
-            return Err(PipelineError::UnwindTargetBeyondHistoryLimit {
-                target_block: to,
-                latest_block,
-                history_limit,
-                history_type,
-            });
-        }
+        prune_modes.ensure_unwind_target_unpruned(latest_block, to)?;
 
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();

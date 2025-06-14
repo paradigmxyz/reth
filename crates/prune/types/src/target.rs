@@ -1,4 +1,6 @@
+use alloy_primitives::BlockNumber;
 use derive_more::Display;
+use thiserror::Error;
 
 use crate::{PruneMode, ReceiptsLogPruneConfig};
 
@@ -10,7 +12,23 @@ use crate::{PruneMode, ReceiptsLogPruneConfig};
 pub const MINIMUM_PRUNING_DISTANCE: u64 = 32 * 2 + 10_000;
 
 /// Type of history that can be pruned
-#[derive(Debug, Display, Clone)]
+#[derive(Debug, Error, PartialEq, Eq, Clone)]
+pub enum UnwindTargetPrunedError {
+    /// The target block is beyond the history limit
+    #[error("Cannot unwind to block {target_block} as it is beyond the {history_type} limit. Latest block: {latest_block}, History limit: {limit}")]
+    TargetBeyondHistoryLimit {
+        /// The latest block number
+        latest_block: BlockNumber,
+        /// The target block number
+        target_block: BlockNumber,
+        /// The type of history that is beyond the limit
+        history_type: HistoryType,
+        /// The limit of the history
+        limit: u64,
+    },
+}
+
+#[derive(Debug, Display, Clone, PartialEq, Eq)]
 pub enum HistoryType {
     /// Account history
     AccountHistory,
@@ -94,26 +112,32 @@ impl PruneModes {
     }
 
     /// Returns true if target block is within history limit
-    pub fn is_target_block_within_history_limit(
+    pub fn ensure_unwind_target_unpruned(
         &self,
         latest_block: u64,
         target_block: u64,
-    ) -> (bool, Option<(HistoryType, u64)>) {
+    ) -> Result<(), UnwindTargetPrunedError> {
         let distance = latest_block.saturating_sub(target_block);
-
         [
             (self.account_history, HistoryType::AccountHistory),
             (self.storage_history, HistoryType::StorageHistory),
         ]
-        .into_iter()
-        .find_map(|(mode, history_type)| {
-            if let Some(PruneMode::Distance(limit)) = mode {
-                (distance > limit).then_some((history_type, limit))
+        .iter()
+        .find_map(|(prune_mode, history_type)| {
+            if let Some(PruneMode::Distance(limit)) = prune_mode {
+                (distance > *limit).then_some(Err(
+                    UnwindTargetPrunedError::TargetBeyondHistoryLimit {
+                        latest_block,
+                        target_block,
+                        history_type: history_type.clone(),
+                        limit: *limit,
+                    },
+                ))
             } else {
                 None
             }
         })
-        .map_or((true, None), |(history_type, limit)| (false, Some((history_type, limit))))
+        .unwrap_or(Ok(()))
     }
 }
 

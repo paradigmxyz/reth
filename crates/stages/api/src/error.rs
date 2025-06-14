@@ -1,11 +1,10 @@
 use crate::PipelineEvent;
 use alloy_eips::eip1898::BlockWithParent;
-use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, DatabaseError, RethError};
 use reth_network_p2p::error::DownloadError;
 use reth_provider::ProviderError;
-use reth_prune::{HistoryType, PruneSegment, PruneSegmentError, PrunerError};
+use reth_prune::{PruneSegment, PruneSegmentError, PrunerError, UnwindTargetPrunedError};
 use reth_static_file_types::StaticFileSegment;
 use thiserror::Error;
 use tokio::sync::broadcast::error::SendError;
@@ -164,16 +163,7 @@ pub enum PipelineError {
     /// The pipeline encountered an unwind when `fail_on_unwind` was set to `true`.
     #[error("unexpected unwind")]
     UnexpectedUnwind,
-    /// Cannot unwind to block as it is beyond the history retention limit.
-    #[error("Cannot unwind to block {target_block} as it is beyond the {history_type} limit. Latest block: {latest_block}, History limit: {history_limit}")]
-    UnwindTargetBeyondHistoryLimit {
-        /// The target block number to unwind to
-        target_block: BlockNumber,
-        /// The latest block number in the chain
-        latest_block: BlockNumber,
-        /// Number of blocks from latest block that is retained in history
-        history_limit: BlockNumber,
-        /// The type of history (account or storage)
-        history_type: HistoryType,
-    },
+    /// Unwind target pruned error.
+    #[error(transparent)]
+    UnwindTargetPruned(#[from] UnwindTargetPrunedError),
 }
