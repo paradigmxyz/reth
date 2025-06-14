@@ -200,9 +200,7 @@ pub fn next_block_base_fee(
     if chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
         Ok(decode_holocene_base_fee(chain_spec, parent, timestamp)?)
     } else {
-        Ok(parent
-            .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
-            .unwrap_or_default())
+        Ok(chain_spec.next_block_base_fee(&parent))
     }
 }
 
@@ -253,12 +251,7 @@ mod tests {
             ..Default::default()
         };
         let base_fee = next_block_base_fee(&op_chain_spec, &parent, 0);
-        assert_eq!(
-            base_fee.unwrap(),
-            parent
-                .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
-                .unwrap_or_default()
-        );
+        assert_eq!(base_fee.unwrap(), op_chain_spec.next_block_base_fee(&parent));
     }
 
     #[test]
