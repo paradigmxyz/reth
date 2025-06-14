@@ -313,7 +313,7 @@ pub mod pool;
 pub mod validate;
 
 pub mod blobstore;
-mod config;
+pub mod config;
 pub mod identifier;
 mod ordering;
 mod traits;

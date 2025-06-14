@@ -14,6 +14,10 @@ use crate::{
     },
     NetworkConfigBuilder, NetworkManager,
 };
+use crate::transactions::{
+    config::{ShardedMempoolAnnouncementFilter, StrictEthAnnouncementFilter, TransactionPropagationKind},
+    policy::NetworkPolicies,
+ };
 use alloy_primitives::TxHash;
 use reth_eth_wire::EthVersion;
 use reth_eth_wire_types::EthNetworkPrimitives;
@@ -28,27 +32,46 @@ use tracing::trace;
 
 /// A new tx manager for testing.
 pub async fn new_tx_manager(
-) -> (TransactionsManager<TestPool, EthNetworkPrimitives>, NetworkManager<EthNetworkPrimitives>) {
+) -> (
+    TransactionsManager<
+        TestPool,
+        EthNetworkPrimitives,
+        NetworkPolicies<TransactionPropagationKind, ShardedMempoolAnnouncementFilter<StrictEthAnnouncementFilter>>
+    >,
+    NetworkManager<EthNetworkPrimitives>
+) {
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
-
     let config = NetworkConfigBuilder::new(secret_key)
         // let OS choose port
         .listener_port(0)
         .disable_discovery()
         .build(client);
-
     let pool = testing_pool();
-
     let transactions_manager_config = config.transactions_manager_config.clone();
-    let (_network_handle, network, transactions, _) = NetworkManager::new(config)
-        .await
-        .unwrap()
-        .into_builder()
-        .transactions(pool.clone(), transactions_manager_config)
-        .split_with_handle();
-
-    (transactions, network)
+    
+    let mut network_manager = NetworkManager::new(config).await.unwrap();
+    let (to_tx_manager_tx, from_network_rx) = mpsc::unbounded_channel();
+    network_manager.set_transactions(to_tx_manager_tx);
+    let network_handle = network_manager.handle().clone();
+    
+    let propagation_policy = TransactionPropagationKind::default();
+    let announcement_policy = ShardedMempoolAnnouncementFilter::new(
+        StrictEthAnnouncementFilter::default(),
+        4,
+        None
+    );
+    let policies = NetworkPolicies::new(propagation_policy, announcement_policy);
+    
+    let transactions = TransactionsManager::with_policy(
+        network_handle,
+        pool,
+        from_network_rx,
+        transactions_manager_config,
+        policies,
+    );
+    
+    (transactions, network_manager)
 }
 
 /// Directly buffer hahs into tx fetcher for testing.
