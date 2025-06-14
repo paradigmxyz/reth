@@ -155,8 +155,8 @@ jobs:
 
   draft-release:
     name: draft release
-    needs: [build, extract-version]
     runs-on: ubuntu-latest
+    needs: [build, extract-version]
     if: ${{ github.event.inputs.dry_run != 'true' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
@@ -171,6 +171,12 @@ jobs:
           fetch-depth: 0
       - name: Download artifacts
         uses: actions/download-artifact@v4
+      - name: Generate full changelog
+        id: changelog
+        run: |
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "$(git log --pretty=format:"- %s" $(git describe --tags --abbrev=0 ${{ env.VERSION }}^)..${{ env.VERSION }})" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       - name: Create release draft
         env:
           GITHUB_USER: ${{ github.repository_owner }}
@@ -219,6 +225,10 @@ jobs:
 
           *See [Update Priorities](https://paradigmxyz.github.io/reth/installation/priorities.html) for more information about this table.*
 
+          ## All Changes
+
+          ${{ steps.changelog.outputs.CHANGELOG }}
+
           ## Binaries
 
           [See pre-built binaries documentation.](https://paradigmxyz.github.io/reth/installation/binaries.html)
@@ -259,28 +269,6 @@ jobs:
     name: dry run summary
     runs-on: ubuntu-latest
     needs: [build, extract-version]
-    if: ${{ github.event.inputs.dry_run == 'true' }}
-    env:
-      VERSION: ${{ needs.extract-version.outputs.VERSION }}
-    steps:
-      - name: Summarize dry run
-        run: |
-          echo "## 🧪 Release Dry Run Summary"
-          echo ""
-          echo "✅ Successfully completed dry run for commit ${{ github.sha }}"
-          echo ""
-          echo "### What would happen in a real release:"
-          echo "- Binary artifacts would be uploaded to GitHub"
-          echo "- Docker images would be pushed to registry"
-          echo "- A draft release would be created"
-          echo ""
-          echo "### Next Steps"
-          echo "To perform a real release, push a git tag."
-
-  dry-run-summary:
-    name: dry run summary
-    needs: [build, extract-version]
-    runs-on: ubuntu-latest
     if: ${{ github.event.inputs.dry_run == 'true' }}
     env:
       VERSION: ${{ needs.extract-version.outputs.VERSION }}
