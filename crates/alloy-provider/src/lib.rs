@@ -417,8 +417,6 @@ where
         trace!(target: "alloy-provider", "Subscribing to canonical state notifications");
         self.canon_state_notification.subscribe()
     }
-
-    // canonical_state_stream has a default implementation in the trait
 }
 
 impl<P, Node, N> ChainSpecProvider for AlloyRethProvider<P, Node, N>
