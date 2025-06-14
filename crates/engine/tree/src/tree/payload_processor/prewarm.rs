@@ -8,7 +8,7 @@ use crate::tree::{
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     StateProviderBuilder,
 };
-use alloy_consensus::transaction::Recovered;
+use alloy_consensus::{transaction::Recovered, Transaction};
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use itertools::Itertools;
@@ -96,7 +96,11 @@ where
     fn spawn_all(&mut self) {
         let chunk_size = (self.pending.len() / self.max_concurrency).max(1);
 
-        for chunk in &self.pending.drain(..).chunks(chunk_size) {
+        // Spawn batches of transactions in descending gas limit order, so that the most expensive
+        // transactions are prewarmed first
+        for chunk in
+            &self.pending.drain(..).sorted_by_key(|tx| tx.gas_limit()).rev().chunks(chunk_size)
+        {
             let sender = self.actions_tx.clone();
             let ctx = self.ctx.clone();
             let pending_chunk = chunk.collect::<Vec<_>>();
