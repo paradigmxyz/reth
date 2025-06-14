@@ -8,6 +8,7 @@ use reth_revm::{State, database::StateProviderDatabase};
 use reth_primitives::transaction::SignedTransaction;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_errors::RethError;
+use alloy_consensus::transaction::Transaction;
 use std::sync::Arc;
 
 /// Payload builder for Rollkit Reth node
@@ -78,7 +79,11 @@ where
         })?;
 
         // Execute transactions
-        for tx in attributes.transactions {
+        eprintln!("Rollkit payload builder: executing {} transactions", attributes.transactions.len());
+        for (i, tx) in attributes.transactions.iter().enumerate() {
+            eprintln!("Transaction {}: hash={:?}, nonce={}, gas_price={:?}, gas_limit={}", 
+                i, tx.hash(), tx.nonce(), tx.gas_price(), tx.gas_limit());
+            
             // Convert to recovered transaction for execution
             let recovered_tx = tx.try_clone_into_recovered().map_err(|_| {
                 PayloadBuilderError::Internal(RethError::Other("Failed to recover transaction".into()))
@@ -86,12 +91,12 @@ where
 
             // Execute the transaction
             match builder.execute_transaction(recovered_tx) {
-                Ok(_gas_used) => {
-                    // Transaction executed successfully
+                Ok(gas_used) => {
+                    eprintln!("Transaction {} executed successfully, gas used: {}", i, gas_used);
                 }
                 Err(err) => {
                     // Log the error but continue with other transactions
-                    eprintln!("Transaction execution failed: {:?}", err);
+                    eprintln!("Transaction {} execution failed: {:?}", i, err);
                     continue;
                 }
             }
@@ -101,8 +106,12 @@ where
         let BlockBuilderOutcome { execution_result: _, hashed_state: _, trie_updates: _, block } =
             builder.finish(&state_provider).map_err(PayloadBuilderError::other)?;
 
+        let sealed_block = block.sealed_block().clone();
+        eprintln!("Rollkit payload builder: built block number={}, hash={:?}, tx_count={}, gas_used={}", 
+            sealed_block.number, sealed_block.hash(), sealed_block.transaction_count(), sealed_block.gas_used);
+
         // Return the sealed block
-        Ok(block.sealed_block().clone())
+        Ok(sealed_block)
     }
 }
 

@@ -1,25 +1,47 @@
-# exclude everything
-*
+# Build artifacts
+target/
+dist/
+build/
 
-# include source files
-!/bin
-!/crates
-!/testing
-!book.toml
-!Cargo.lock
-!Cargo.toml
-!Cross.toml
-!deny.toml
-!Makefile
+# Git files
+.git/
+.gitignore
+.gitmodules
 
-# include for vergen constants
-!/.git
+# Documentation
+*.md
+docs/
+book/
 
-# include dist directory, where the reth binary is located after compilation
-!/dist
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
 
-# include licenses
-!LICENSE-*
+# OS files
+.DS_Store
+Thumbs.db
 
-# include example files
-!/examples
+# CI/CD files
+.github/
+.gitlab-ci.yml
+.travis.yml
+
+# Docker files (except the one we're using)
+Dockerfile*
+!Dockerfile.rollkit
+docker-compose*.yml
+!rollkit-reth-docker-compose.yml
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Node modules (if any)
+node_modules/
+
+# Python files (if any)
+__pycache__/
+*.pyc
