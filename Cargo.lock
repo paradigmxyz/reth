@@ -10823,6 +10823,7 @@ dependencies = [
  "clap",
  "eyre",
  "futures",
+ "hex",
  "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-cli-util",

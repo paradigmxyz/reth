@@ -59,7 +59,7 @@ where
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
             gas_limit: attributes.gas_limit.unwrap_or(30_000_000),
-            parent_beacon_block_root: None,
+            parent_beacon_block_root: Some(alloy_primitives::B256::ZERO), // Set to zero for rollkit blocks
             withdrawals: None,
         };
 

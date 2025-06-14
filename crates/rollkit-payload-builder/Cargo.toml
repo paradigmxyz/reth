@@ -9,7 +9,7 @@ license = "MIT OR Apache-2.0"
 # Reth dependencies
 reth-primitives = { workspace = true }
 reth-primitives-traits = { workspace = true }
-reth-provider = { workspace = true }
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm = { workspace = true }
 reth-node-types = { workspace = true }
 reth-payload-builder-primitives = { workspace = true }
@@ -69,6 +69,7 @@ reth-node-builder = { workspace = true }
 reth-tracing = { workspace = true }
 alloy-genesis = { workspace = true }
 tempfile = "3.0"
+hex = "0.4"
 
 [[bin]]
 name = "rollkit-reth"

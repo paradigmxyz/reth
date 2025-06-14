@@ -62,9 +62,12 @@ impl RollkitPayloadBuilderConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("Invalid max transactions value")]
+    /// Invalid maximum transactions value.
     InvalidMaxTransactions,
     #[error("Invalid max gas limit value")]
+    /// Invalid maximum gas limit value.
     InvalidMaxGasLimit,
     #[error("Invalid min gas price value")]
+    /// Invalid minimum gas price value.
     InvalidMinGasPrice,
 } 

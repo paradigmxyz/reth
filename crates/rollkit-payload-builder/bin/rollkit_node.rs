@@ -426,7 +426,9 @@ where
     Client: Clone,
 {
     rollkit_builder: Arc<RollkitPayloadBuilder<Client>>,
+    #[allow(dead_code)]
     pool: Pool,
+    #[allow(dead_code)]
     config: RollkitPayloadBuilderConfig,
 }
 

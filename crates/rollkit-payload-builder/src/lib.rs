@@ -1,3 +1,5 @@
+//! Rollkit payload builder for Reth integration.
+
 mod builder;
 mod config;
 mod types;
@@ -9,6 +11,7 @@ pub use builder::{create_payload_builder_service, RollkitPayloadBuilder};
 pub use config::{ConfigError, RollkitPayloadBuilderConfig};
 pub use types::{RollkitPayloadAttributes, PayloadAttributesError};
 
+/// Adds two numbers together.
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }
