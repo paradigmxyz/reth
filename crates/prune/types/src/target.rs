@@ -1,3 +1,5 @@
+use derive_more::Display;
+
 use crate::{PruneMode, ReceiptsLogPruneConfig};
 
 /// Minimum distance from the tip necessary for the node to work correctly:
@@ -6,6 +8,15 @@ use crate::{PruneMode, ReceiptsLogPruneConfig};
 /// 2. Another 10k blocks to have a room for maneuver in case when things go wrong and a manual
 ///    unwind is required.
 pub const MINIMUM_PRUNING_DISTANCE: u64 = 32 * 2 + 10_000;
+
+/// Type of history that can be pruned
+#[derive(Debug, Display, Clone)]
+pub enum HistoryType {
+    /// Account history
+    AccountHistory,
+    /// Storage history
+    StorageHistory,
+}
 
 /// Pruning configuration for every segment of the data that can be pruned.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -80,6 +91,29 @@ impl PruneModes {
     /// Returns true if all prune modes are set to [`None`].
     pub fn is_empty(&self) -> bool {
         self == &Self::none()
+    }
+
+    /// Returns true if target block is within history limit
+    pub fn is_target_block_within_history_limit(
+        &self,
+        latest_block: u64,
+        target_block: u64,
+    ) -> (bool, Option<(HistoryType, u64)>) {
+        let distance = latest_block.saturating_sub(target_block);
+
+        [
+            (self.account_history, HistoryType::AccountHistory),
+            (self.storage_history, HistoryType::StorageHistory),
+        ]
+        .into_iter()
+        .find_map(|(mode, history_type)| {
+            if let Some(PruneMode::Distance(limit)) = mode {
+                (distance > limit).then_some((history_type, limit))
+            } else {
+                None
+            }
+        })
+        .map_or((true, None), |(history_type, limit)| (false, Some((history_type, limit))))
     }
 }
 

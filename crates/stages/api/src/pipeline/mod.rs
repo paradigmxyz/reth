@@ -7,7 +7,7 @@ pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, BlockNumReader,
     ChainStateBlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
     StageCheckpointReader, StageCheckpointWriter,
 };
@@ -294,6 +294,33 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
+        // Add validation before starting unwind
+        let provider = self.provider_factory.provider()?;
+        let latest_block = provider.last_block_number()?;
+
+        // Get the actual pruning configuration
+        let prune_modes = provider.prune_modes_ref();
+
+        let (is_within_history_limit, history_limit_info) =
+            prune_modes.is_target_block_within_history_limit(latest_block, to);
+        if !is_within_history_limit {
+            let (history_type, history_limit) = history_limit_info.unwrap();
+            warn!(
+                target: "sync::pipeline",
+                target_block = %to,
+                %latest_block,
+                %history_limit,
+                %history_type,
+                "Cannot unwind: target block is beyond history limit"
+            );
+            return Err(PipelineError::UnwindTargetBeyondHistoryLimit {
+                target_block: to,
+                latest_block,
+                history_limit,
+                history_type,
+            });
+        }
+
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
