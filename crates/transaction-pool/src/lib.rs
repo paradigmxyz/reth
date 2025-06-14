@@ -84,12 +84,17 @@
 //!
 //! ### Common Errors
 //!
-//! - `NonceNotConsistent`: Nonce too low
-//! - `InsufficientFunds`: Insufficient balance
-//! - `ExceedsGasLimit`: Gas limit too high
-//! - `SignerAccountHasBytecode`: EOA has code
-//! - `Underpriced`: Fee too low
-//! - Blob errors: Missing sidecar, invalid proofs
+//! - [`NonceNotConsistent`](reth_primitives_traits::transaction::error::InvalidTransactionError::NonceNotConsistent): Nonce too low
+//! - [`InsufficientFunds`](reth_primitives_traits::transaction::error::InvalidTransactionError::InsufficientFunds): Insufficient balance
+//! - [`ExceedsGasLimit`](crate::error::InvalidPoolTransactionError::ExceedsGasLimit): Gas limit too high
+//! - [`SignerAccountHasBytecode`](reth_primitives_traits::transaction::error::InvalidTransactionError::SignerAccountHasBytecode): EOA has code
+//! - [`Underpriced`](crate::error::InvalidPoolTransactionError::Underpriced): Fee too low
+//! - [`ReplacementUnderpriced`](crate::error::PoolErrorKind::ReplacementUnderpriced): Replacement transaction fee too low
+//! - Blob errors:
+//!   - [`MissingEip4844BlobSidecar`](crate::error::Eip4844PoolTransactionError::MissingEip4844BlobSidecar): Missing sidecar
+//!   - [`InvalidEip4844Blob`](crate::error::Eip4844PoolTransactionError::InvalidEip4844Blob): Invalid blob proofs
+//!   - [`NoEip4844Blobs`](crate::error::Eip4844PoolTransactionError::NoEip4844Blobs): EIP-4844 transaction without blobs
+//!   - [`TooManyEip4844Blobs`](crate::error::Eip4844PoolTransactionError::TooManyEip4844Blobs): Too many blobs
 //!
 //! ## Subpool Design
 //!
