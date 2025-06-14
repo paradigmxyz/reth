@@ -42,6 +42,7 @@ tracing = "0.1"
 eyre = "0.6"
 reqwest = { version = "0.11", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
 
 # Reth dependencies for testing
 reth-tracing = { path = "../tracing" }
