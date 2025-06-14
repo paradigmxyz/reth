@@ -249,7 +249,7 @@ where
             hashed_cursor_factory,
             input.hashed_address,
         )
-        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().cloned()))
+        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
         .storage_multiproof(input.target_slots)
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
@@ -525,12 +525,12 @@ impl<Tx: DbTx> BlindedProvider for ProofTaskBlindedNodeProvider<Tx> {
         match self {
             Self::AccountNode { sender } => {
                 let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedAccountNode(path.clone(), tx),
+                    ProofTaskKind::BlindedAccountNode(*path, tx),
                 ));
             }
             Self::StorageNode { sender, account } => {
                 let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedStorageNode(*account, path.clone(), tx),
+                    ProofTaskKind::BlindedStorageNode(*account, *path, tx),
                 ));
             }
         }
