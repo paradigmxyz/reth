@@ -83,6 +83,11 @@ alloy-genesis.workspace = true
 tempfile.workspace = true
 hex = "0.4"
 
+# Additional test dependencies for Engine API tests
+reqwest = { version = "0.11", features = ["json"] }
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+
 [lints]
 workspace = true
 
@@ -111,9 +116,4 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 [[bin]]
 name = "rollkit-reth"
-path = "bin/src/main.rs"
-
-[[bin]]
-name = "test-rollkit-engine-api"
-path = "bin/test_rollkit_engine_api.rs"
-required-features = ["test-binaries"] 
+path = "bin/src/main.rs" 

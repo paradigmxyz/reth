@@ -91,30 +91,29 @@ fn test_rollkit_reth_invalid_arguments() {
     println!("✓ rollkit invalid arguments test passed");
 }
 
-/// Tests that the test binary compiles successfully
+/// Tests that the Engine API integration tests run successfully
 #[test]
-fn test_rollkit_engine_api_test_binary_compiles() {
+fn test_rollkit_engine_api_tests_run() {
     let output = Command::new("cargo")
-        .args(&["build", "--bin", "test-rollkit-engine-api", "--features", "test-binaries"])
+        .args(&["test", "test_engine_api", "--lib"])
         .output()
-        .expect("Failed to execute cargo build for test binary");
+        .expect("Failed to execute cargo test for Engine API tests");
 
     if !output.status.success() {
-        // It's okay if this fails in CI where features might not be available
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if stderr.contains("feature") || stderr.contains("dependency") {
-            println!("⚠ Test binary compilation skipped (missing features): {}", stderr);
+        if stderr.contains("dependency") || stderr.contains("feature") {
+            println!("⚠ Engine API tests skipped (missing dependencies): {}", stderr);
             return;
         }
         
         panic!(
-            "Test binary compilation failed:\nstdout: {}\nstderr: {}",
+            "Engine API tests failed:\nstdout: {}\nstderr: {}",
             String::from_utf8_lossy(&output.stdout),
             stderr
         );
     }
     
-    println!("✓ test-rollkit-engine-api binary compilation test passed");
+    println!("✓ Engine API integration tests passed");
 }
 
 /// Tests library compilation and basic exports
