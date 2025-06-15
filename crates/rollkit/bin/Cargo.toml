@@ -1,0 +1,77 @@
+[package]
+name = "rollkit-reth"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+exclude.workspace = true
+
+[dependencies]
+reth-cli-util.workspace = true
+reth-ethereum-cli.workspace = true
+reth-ethereum = { workspace = true, features = ["node", "cli"] }
+reth-node-builder.workspace = true
+reth-chainspec.workspace = true
+reth-ethereum-payload-builder.workspace = true
+reth-payload-primitives.workspace = true
+reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
+reth-node-api.workspace = true
+reth-provider.workspace = true
+reth-payload-builder.workspace = true
+reth-basic-payload-builder.workspace = true
+reth-engine-local.workspace = true
+reth-revm.workspace = true
+reth-trie-db.workspace = true
+
+# Alloy dependencies
+alloy-rpc-types.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-primitives.workspace = true
+alloy-eips.workspace = true
+
+# Core dependencies
+eyre.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["full"] }
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+
+# Rollkit-specific payload builder
+rollkit-payload-builder = { path = "../../rollkit-payload-builder" }
+
+clap = { workspace = true, features = ["derive", "env"] }
+
+[dev-dependencies]
+# Test dependencies
+alloy-consensus.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["jemalloc"]
+
+jemalloc = ["reth-cli-util/jemalloc", "reth-ethereum-cli/jemalloc"]
+jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
+tracy-allocator = ["reth-cli-util/tracy-allocator"]
+
+asm-keccak = ["reth-ethereum-cli/asm-keccak"]
+
+dev = [
+    "reth-ethereum-cli/dev",
+    "reth-ethereum/arbitrary",
+]
+
+min-error-logs = ["tracing/release_max_level_error"]
+min-warn-logs = ["tracing/release_max_level_warn"]
+min-info-logs = ["tracing/release_max_level_info"]
+min-debug-logs = ["tracing/release_max_level_debug"]
+min-trace-logs = ["tracing/release_max_level_trace"]
+
+[[bin]]
+name = "rollkit-reth"
+path = "src/main.rs" 

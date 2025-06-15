@@ -135,6 +135,7 @@ members = [
     "crates/trie/sparse",
     "crates/trie/trie",
     "crates/rollkit-payload-builder",
+    "crates/rollkit/bin",
     "examples/beacon-api-sidecar-fetcher/",
     "examples/beacon-api-sse/",
     "examples/bsc-p2p",
@@ -319,6 +320,7 @@ codegen-units = 1
 [workspace.dependencies]
 # reth
 op-reth = { path = "crates/optimism/bin" }
+rollkit-reth = { path = "crates/rollkit/bin" }
 reth = { path = "bin/reth" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }

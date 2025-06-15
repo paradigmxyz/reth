@@ -10866,6 +10866,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "rollkit-reth"
+version = "1.4.8"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-primitives",
+ "alloy-rpc-types",
+ "alloy-rpc-types-engine",
+ "clap",
+ "eyre",
+ "reth-basic-payload-builder",
+ "reth-chainspec",
+ "reth-cli-util",
+ "reth-engine-local",
+ "reth-ethereum",
+ "reth-ethereum-cli",
+ "reth-ethereum-payload-builder",
+ "reth-node-api",
+ "reth-node-builder",
+ "reth-payload-builder",
+ "reth-payload-primitives",
+ "reth-primitives",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-revm",
+ "reth-trie-db",
+ "rollkit-payload-builder",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "route-recognizer"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

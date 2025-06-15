@@ -5,27 +5,14 @@ WORKDIR /app
 
 LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
 LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
-LABEL org.opencontainers.image.description="Rollkit-enabled Reth node"
+LABEL org.opencontainers.image.description="Rollkit-enabled Reth node with Engine API transaction support"
 
-# Install system dependencies in a separate layer for better caching
-RUN apt-get update && apt-get -y upgrade && apt-get install -y \
-    libclang-dev \
-    pkg-config \
-    && rm -rf /var/lib/apt/lists/*
+# Install system dependencies
+RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-config
 
 # Builds a cargo-chef plan
 FROM chef AS planner
-# Copy workspace configuration files
-COPY Cargo.toml Cargo.lock ./
-COPY .cargo .cargo
-
-# Copy all crate manifests and bin manifests for dependency resolution
-COPY crates crates
-COPY bin bin
-COPY testing testing
-COPY examples examples
-
-# Generate the recipe for the workspace
+COPY --exclude=.git --exclude=dist . .
 RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
@@ -35,58 +22,34 @@ COPY --from=planner /app/recipe.json recipe.json
 ARG BUILD_PROFILE=release
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
-# Extra Cargo flags for optimization
-ARG RUSTFLAGS="-C target-cpu=native"
+# Extra Cargo flags
+ARG RUSTFLAGS=""
 ENV RUSTFLAGS="$RUSTFLAGS"
 
 # Extra Cargo features
 ARG FEATURES=""
 ENV FEATURES=$FEATURES
 
-# Build dependencies - this is the heaviest layer and will be cached
-# as long as Cargo.toml files don't change
-RUN --mount=type=cache,target=/app/target \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json
+# Builds dependencies
+RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json
 
-# Copy workspace configuration again
-COPY Cargo.toml Cargo.lock ./
-COPY .cargo .cargo
+# Build application
+COPY --exclude=dist . .
+RUN cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --package rollkit-reth --bin rollkit-reth
 
-# Copy all source files
-COPY crates crates
-COPY bin bin
-COPY testing testing
-COPY examples examples
+# ARG is not resolved in COPY so we have to hack around it by copying the
+# binary to a temporary location
+RUN cp /app/target/$BUILD_PROFILE/rollkit-reth /app/rollkit-reth
 
-# Build the application with caching
-RUN --mount=type=cache,target=/app/target \
-    --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --package rollkit-payload-builder --bin rollkit-reth && \
-    cp /app/target/$BUILD_PROFILE/rollkit-reth /app/rollkit-reth
-
-# Use a minimal runtime image
-FROM ubuntu:22.04 AS runtime
+# Use Ubuntu as the release image
+FROM ubuntu AS runtime
 WORKDIR /app
 
-# Install only essential runtime dependencies
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r reth \
-    && useradd -r -g reth reth
-
-# Copy the binary
-COPY --from=builder /app/rollkit-reth /usr/local/bin/rollkit-reth
+# Copy rollkit-reth over from the build stage
+COPY --from=builder /app/rollkit-reth /usr/local/bin
 
 # Copy licenses
 COPY LICENSE-* ./
 
-# Set proper permissions
-RUN chmod +x /usr/local/bin/rollkit-reth
-
-# Switch to non-root user
-USER reth
-
-EXPOSE 30303 30303/udp 9001 8545 8546
+EXPOSE 30303 30303/udp 9001 8545 8546 8551
 ENTRYPOINT ["/usr/local/bin/rollkit-reth"] 

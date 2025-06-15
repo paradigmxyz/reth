@@ -24,47 +24,50 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.rollkit
+      args:
+        BUILD_PROFILE: release
+        FEATURES: "jemalloc"
     depends_on:
       jwt-init:
         condition: service_completed_successfully
     ports:
-      - "9001:9001" # metrics
+      - "9001:9001"   # metrics
       - "30303:30303" # eth/66 peering
-      - "8545:8545" # rpc
-      - "8551:8551" # engine
-      - "8546:8546" # ws
+      - "8545:8545"   # HTTP RPC
+      - "8551:8551"   # Engine API (authenticated)
+      - "8546:8546"   # WebSocket RPC
     volumes:
-      - ./chain:/root/chain:ro
-      - ./jwttoken:/root/jwt:ro
-      - logs:/root/logs
-    entrypoint: /bin/sh -c
-    command:
-      - |
-          rollkit-reth node \
-          --rollkit \
-          --rollkit-gas-limit 50000000 \
-          --engine-tx-passthrough \
-          -vvvv \
-          --chain /root/chain/genesis.json \
-          --metrics 0.0.0.0:9001 \
-          --log.file.directory /root/logs \
-          --authrpc.addr 0.0.0.0 \
-          --authrpc.port 8551 \
-          --authrpc.jwtsecret /root/jwt/jwt.hex \
-          --http --http.addr 0.0.0.0 --http.port 8545 \
-          --http.api "eth,net,web3,txpool" \
-          --ws --ws.addr 0.0.0.0 --ws.port 8546 --ws.api eth,net,web3 \
-          --engine.persistence-threshold 0 \
-          --engine.memory-block-buffer-target 0 \
-          --disable-discovery \
-          --txpool.pending-max-count 200000 \
-          --txpool.pending-max-size 200 \
-          --txpool.queued-max-count 200000 \
-          --txpool.queued-max-size 200 \
-          --txpool.max-account-slots 2048 \
-          --txpool.max-new-txns 2048 \
-          --txpool.additional-validation-tasks 16
+      - ./jwttoken:/jwt:ro
+      - rollkit_data:/data
+    environment:
+      - RUST_LOG=info,rollkit_reth=debug,rollkit_payload_builder=debug
+      - RUST_BACKTRACE=1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8545 -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"eth_blockNumber\",\"params\":[],\"id\":1}' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    command: >
+      node
+      --chain=dev
+      --rollkit
+      --rollkit-gas-limit=50000000
+      --engine-tx-passthrough
+      --datadir=/data
+      --http
+      --http.addr=0.0.0.0
+      --http.port=8545
+      --http.api=eth,net,web3,txpool
+      --ws
+      --ws.addr=0.0.0.0
+      --ws.port=8546
+      --authrpc.addr=0.0.0.0
+      --authrpc.port=8551
+      --authrpc.jwtsecret=/jwt/jwt.hex
+      --metrics=0.0.0.0:9001
+      --log.stdout.format=terminal
 
 volumes:
-  logs:
+  rollkit_data:
     driver: local 
