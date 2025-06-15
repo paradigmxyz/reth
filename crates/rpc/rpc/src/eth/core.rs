@@ -470,7 +470,7 @@ mod tests {
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
-    use reth_chainspec::{BaseFeeParams, ChainSpec, ChainSpecProvider};
+    use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
@@ -582,11 +582,9 @@ mod tests {
 
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
-        base_fees_per_gas.push(BaseFeeParams::ethereum().next_block_base_fee(
-            last_header.gas_used,
-            last_header.gas_limit,
-            last_header.base_fee_per_gas.unwrap_or_default(),
-        ) as u128);
+        let spec = mock_provider.chain_spec();
+        let fee = spec.next_block_base_fee(&last_header);
+        base_fees_per_gas.push(fee as u128);
 
         let eth_api = build_test_eth_api(mock_provider);
 
