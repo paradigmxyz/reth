@@ -64,26 +64,11 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 /// Rollkit-specific command line arguments
 #[derive(Debug, Clone, Parser, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RollkitArgs {
-    /// Enable rollkit mode
-    #[arg(long, default_value = "false")]
-    pub rollkit: bool,
-
-    /// Maximum gas limit for rollkit payloads
-    #[arg(long, default_value = "30000000")]
-    pub rollkit_gas_limit: u64,
-
-    /// Enable transaction passthrough via Engine API
-    #[arg(long, default_value = "true")]
-    pub engine_tx_passthrough: bool,
 }
 
 impl Default for RollkitArgs {
     fn default() -> Self {
-        Self {
-            rollkit: false,
-            rollkit_gas_limit: 30_000_000,
-            engine_tx_passthrough: true,
-        }
+        Self {}
     }
 }
 
@@ -420,12 +405,10 @@ pub struct RollkitPayloadBuilderBuilder {
 
 impl RollkitPayloadBuilderBuilder {
     /// Create a new builder with rollkit args
-    pub fn new(args: &RollkitArgs) -> Self {
+    pub fn new(_args: &RollkitArgs) -> Self {
         let config = RollkitPayloadBuilderConfig {
             max_transactions: 1000,
-            max_gas_limit: args.rollkit_gas_limit,
             min_gas_price: 1_000_000_000, // 1 Gwei
-            enable_tx_validation: args.engine_tx_passthrough,
         };
         info!("Created Rollkit payload builder with config: {:?}", config);
         Self { config }
@@ -591,15 +574,8 @@ fn main() {
     if let Err(err) =
         Cli::<EthereumChainSpecParser, RollkitArgs>::parse().run(async move |builder, rollkit_args| {
             info!("=== ROLLKIT-RETH: Starting with args: {:?} ===", rollkit_args);
-            
-            if rollkit_args.rollkit {
-                info!("=== ROLLKIT-RETH: Rollkit mode enabled ===");
-                info!("=== ROLLKIT-RETH: Gas limit: {} ===", rollkit_args.rollkit_gas_limit);
-                info!("=== ROLLKIT-RETH: Engine TX passthrough: {} ===", rollkit_args.engine_tx_passthrough);
-                info!("=== ROLLKIT-RETH: Using custom payload builder with transaction support ===");
-            } else {
-                info!("=== ROLLKIT-RETH: Using standard ethereum node ===");
-            }
+            info!("=== ROLLKIT-RETH: Rollkit mode enabled ===");
+            info!("=== ROLLKIT-RETH: Using custom payload builder with transaction support ===");
             
             let handle = builder
                 .node(RollkitNode::new(rollkit_args))

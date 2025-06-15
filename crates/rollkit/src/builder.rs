@@ -55,11 +55,15 @@ where
         let sealed_parent = SealedHeader::new(parent_header, attributes.parent_hash);
 
         // Create next block environment attributes
+        let gas_limit = attributes.gas_limit.ok_or_else(|| {
+            PayloadBuilderError::Internal(RethError::Other("Gas limit is required for rollkit payloads".into()))
+        })?;
+        
         let next_block_attrs = NextBlockEnvAttributes {
             timestamp: attributes.timestamp,
             suggested_fee_recipient: attributes.suggested_fee_recipient,
             prev_randao: attributes.prev_randao,
-            gas_limit: attributes.gas_limit.unwrap_or(30_000_000),
+            gas_limit,
             parent_beacon_block_root: Some(alloy_primitives::B256::ZERO), // Set to zero for rollkit blocks
             withdrawals: None,
         };
