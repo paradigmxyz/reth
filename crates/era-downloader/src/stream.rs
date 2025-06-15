@@ -264,7 +264,11 @@ impl<Http: HttpClient + Clone + Send + Sync + 'static + Unpin> Stream for Starti
             if let Poll::Ready(result) = self.fetch_file_list.poll_unpin(cx) {
                 match result {
                     Ok(_) => self.recover_index(),
-                    Err(e) => return Poll::Ready(Some(Box::pin(async move { Err(e) }))),
+                    Err(e) => {
+                        self.fetch_file_list();
+
+                        return Poll::Ready(Some(Box::pin(async move { Err(e) })))
+                    }
                 }
             }
         }

@@ -2,14 +2,15 @@
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_chains::{ChainKind, NamedChain};
 use clap::{Args, Parser};
-use eyre::{eyre, OptionExt};
+use eyre::eyre;
 use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
-use reth_node_core::{dirs::data_dir, version::SHORT_VERSION};
+use reth_fs_util as fs;
+use reth_node_core::version::SHORT_VERSION;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -81,8 +82,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
                 Some(url) => url,
                 None => self.env.chain.chain().kind().try_to_url()?,
             };
-            let folder = data_dir().ok_or_eyre("Missing data directory")?.join("era");
-            let folder = folder.into_boxed_path();
+            let folder =
+                self.env.datadir.resolve_datadir(self.env.chain.chain()).data_dir().join("era");
+
+            fs::create_dir_all(&folder)?;
+
             let client = EraClient::new(Client::new(), url, folder);
             let stream = EraStream::new(client, EraStreamConfig::default());
 

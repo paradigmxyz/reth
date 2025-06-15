@@ -242,6 +242,40 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 ///
 /// It can be configured with different policies for transaction propagation and announcement
 /// filtering. See [`NetworkPolicies`] and [`TransactionPolicies`] for more details.
+///
+/// ## Network Transaction Processing
+///
+/// ### Message Types
+///
+/// - **`Transactions`**: Full transaction broadcasts (rejects blob transactions)
+/// - **`NewPooledTransactionHashes`**: Hash announcements
+///
+/// ### Peer Tracking
+///
+/// - Maintains per-peer transaction cache (default: 10,240 entries)
+/// - Prevents duplicate imports and enables efficient propagation
+///
+/// ### Bad Transaction Handling
+///
+/// Caches and rejects transactions with consensus violations (gas, signature, chain ID).
+/// Penalizes peers sending invalid transactions.
+///
+/// ### Import Management
+///
+/// Limits concurrent pool imports and backs off when approaching capacity.
+///
+/// ### Transaction Fetching
+///
+/// For announced transactions: filters known → queues unknown → fetches → imports
+///
+/// ### Propagation Rules
+///
+/// Based on: origin (Local/External/Private), peer capabilities, and network state.
+/// Disabled during initial sync.
+///
+/// ### Security
+///
+/// Rate limiting via reputation, bad transaction isolation, peer scoring.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
 pub struct TransactionsManager<
