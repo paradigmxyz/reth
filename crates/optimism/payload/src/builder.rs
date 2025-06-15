@@ -29,6 +29,7 @@ use reth_optimism_txpool::{
     interop::{is_valid_interop, MaybeInteropTransaction},
     OpPooledTx,
 };
+use reth_payload_builder::KeepPayloadJobAlive;
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
 use reth_payload_util::{BestPayloadTransactions, NoopPayloadTransactions, PayloadTransactions};
@@ -183,7 +184,7 @@ where
         let attributes = OpPayloadBuilderAttributes::try_new(parent.hash(), attributes, 3)
             .map_err(PayloadBuilderError::other)?;
 
-        let config = PayloadConfig { parent_header: Arc::new(parent), attributes };
+        let config = PayloadConfig { parent_header: Arc::new(parent), attributes, keep_alive: KeepPayloadJobAlive::No };
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
             da_config: self.config.da_config.clone(),
