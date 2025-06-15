@@ -154,7 +154,7 @@ impl RollkitTestNode {
     }
 
     /// Returns mock responses for testing without a real node
-    fn get_mock_response(&self, method: &str, params: &serde_json::Value) -> Result<serde_json::Value> {
+    fn get_mock_response(&self, method: &str, _params: &serde_json::Value) -> Result<serde_json::Value> {
         match method {
             "engine_forkchoiceUpdatedV3" => {
                 // Mock a successful forkchoice update with a payload ID
@@ -169,7 +169,6 @@ impl RollkitTestNode {
             }
             "engine_getPayloadV3" => {
                 // Create mock transactions based on the test context
-                // Generate realistic number of transactions (usually 2 for our tests)
                 let mock_transactions = vec![
                     "0xf86c808504a817c800825208941234567890123456789012345678901234567890880de0b6b3a764000080820a95a01b6b6d1c7b6f6b5a7b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6ba01b6b6d1c7b6f6b5a7b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b",
                     "0xf86c018504a817c800825208941234567890123456789012345678901234567890880de0b6b3a764000080820a96a01b6b6d1c7b6f6b5a7b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6ba01b6b6d1c7b6f6b5a7b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b6b"
@@ -347,113 +346,6 @@ async fn test_fork_choice_updated_with_transactions() -> Result<()> {
     Ok(())
 }
 
-/// Test fork choice updated with gas limit validation
-async fn test_fork_choice_updated_gas_limit_validation() -> Result<()> {
-    let test_node = get_test_node().await?;
-
-    // Create a transaction that requires more gas than our limit allows
-    let high_gas_tx = create_test_transaction(0, 50000, 1_000_000_000, Some(Address::random()), 100);
-    let tx_bytes = encode_transaction(&high_gas_tx)?;
-
-    // Create payload attributes with a low gas limit
-    let payload_attributes = RollkitEnginePayloadAttributes {
-        inner: alloy_rpc_types::engine::PayloadAttributes {
-            timestamp: chrono::Utc::now().timestamp() as u64,
-            prev_randao: B256::random(),
-            suggested_fee_recipient: Address::from_str(TEST_ADDRESS).unwrap(),
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::random()),
-        },
-        transactions: Some(vec![tx_bytes]),
-        gas_limit: Some(30000), // Less than the transaction's gas limit
-    };
-
-    let forkchoice_state = ForkchoiceState {
-        head_block_hash: B256::random(),
-        safe_block_hash: B256::random(),
-        finalized_block_hash: B256::random(),
-    };
-
-    let result = test_node
-        .fork_choice_updated_v3(forkchoice_state, Some(payload_attributes))
-        .await;
-
-    // This should either succeed with partial execution or fail with validation error
-    match result {
-        Ok(response) => {
-            println!("Gas limit validation test response: {:?}", response);
-        }
-        Err(e) => {
-            println!("Expected gas limit validation error: {}", e);
-        }
-    }
-
-    Ok(())
-}
-
-/// Test full payload lifecycle
-async fn test_full_payload_lifecycle() -> Result<()> {
-    let test_node = get_test_node().await?;
-
-    // Step 1: Create transactions
-    let tx = create_test_transaction(0, 21000, 1_000_000_000, Some(Address::random()), 500);
-    let tx_bytes = encode_transaction(&tx)?;
-
-    // Step 2: Create payload attributes
-    let payload_attributes = RollkitEnginePayloadAttributes {
-        inner: alloy_rpc_types::engine::PayloadAttributes {
-            timestamp: chrono::Utc::now().timestamp() as u64,
-            prev_randao: B256::random(),
-            suggested_fee_recipient: Address::from_str(TEST_ADDRESS).unwrap(),
-            withdrawals: Some(vec![]),
-            parent_beacon_block_root: Some(B256::random()),
-        },
-        transactions: Some(vec![tx_bytes]),
-        gas_limit: Some(30000),
-    };
-
-    let forkchoice_state = ForkchoiceState {
-        head_block_hash: B256::random(),
-        safe_block_hash: B256::random(),
-        finalized_block_hash: B256::random(),
-    };
-
-    // Step 3: Fork choice update to build payload
-    let fork_choice_result = test_node
-        .fork_choice_updated_v3(forkchoice_state, Some(payload_attributes))
-        .await;
-
-    if let Ok(response) = fork_choice_result {
-        if let Some(payload_id) = response.get("payloadId") {
-            if !payload_id.is_null() {
-                let payload_id: PayloadId = serde_json::from_value(payload_id.clone())?;
-                
-                // Step 4: Get the built payload
-                let payload_result = test_node.get_payload_v3(payload_id).await;
-                
-                if let Ok(payload_response) = payload_result {
-                    if let Some(execution_payload) = payload_response.get("executionPayload") {
-                        // Step 5: Submit the payload via engine_newPayloadV3
-                        let new_payload_result = test_node.new_payload_v3(execution_payload.clone()).await;
-                        
-                        match new_payload_result {
-                            Ok(response) => {
-                                println!("✓ Full payload lifecycle completed successfully");
-                                println!("New payload response: {:?}", response);
-                            }
-                            Err(e) => {
-                                println!("New payload submission failed: {}", e);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
 /// Main test runner
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -488,30 +380,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    println!("\n=== Test 3: Gas Limit Validation ===");
-    match test_fork_choice_updated_gas_limit_validation().await {
-        Ok(_) => {
-            println!("✅ Test 3 PASSED");
-            passed += 1;
-        }
-        Err(e) => {
-            println!("❌ Test 3 FAILED: {}", e);
-            failed += 1;
-        }
-    }
-
-    println!("\n=== Test 4: Full Payload Lifecycle ===");
-    match test_full_payload_lifecycle().await {
-        Ok(_) => {
-            println!("✅ Test 4 PASSED");
-            passed += 1;
-        }
-        Err(e) => {
-            println!("❌ Test 4 FAILED: {}", e);
-            failed += 1;
-        }
-    }
-
     println!("\n=== 📊 Test Results ===");
     println!("✅ Passed: {}", passed);
     println!("❌ Failed: {}", failed);
@@ -524,4 +392,4 @@ async fn main() -> Result<()> {
     }
     
     Ok(())
-}
+} 

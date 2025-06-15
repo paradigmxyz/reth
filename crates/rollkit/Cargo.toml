@@ -7,11 +7,17 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 exclude.workspace = true
+description = "Rollkit node binary with standard reth CLI support and rollkit payload builder integration"
+
+[lib]
+name = "rollkit_reth"
+path = "src/lib.rs"
 
 [dependencies]
+# Reth CLI and core dependencies
 reth-cli-util.workspace = true
 reth-ethereum-cli.workspace = true
-reth-ethereum = { workspace = true, features = ["node", "cli"] }
+reth-ethereum = { workspace = true, features = ["node", "cli", "pool"] }
 reth-node-builder.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-payload-builder.workspace = true
@@ -19,35 +25,63 @@ reth-payload-primitives.workspace = true
 reth-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-node-api.workspace = true
-reth-provider.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-engine-local.workspace = true
 reth-revm.workspace = true
 reth-trie-db.workspace = true
 
+# Additional reth dependencies for payload builder
+reth-node-types.workspace = true
+reth-payload-builder-primitives.workspace = true
+reth-execution-types.workspace = true
+reth-evm-ethereum.workspace = true
+reth-evm.workspace = true
+reth-errors.workspace = true
+reth-node-core.workspace = true
+reth-rpc-builder.workspace = true
+reth-rpc-api.workspace = true
+reth-rpc-engine-api.workspace = true
+reth-engine-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
+
 # Alloy dependencies
 alloy-rpc-types.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 
 # Core dependencies
 eyre.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["full"] }
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 thiserror.workspace = true
-
-# Rollkit-specific payload builder
-rollkit-payload-builder = { path = "../../rollkit-payload-builder" }
-
+async-trait.workspace = true
+futures.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+
+# Additional dependencies for test binaries
+reqwest = { version = "0.11", features = ["json"], optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
 # Test dependencies
-alloy-consensus.workspace = true
-serde_json.workspace = true
+reth-testing-utils.workspace = true
+reth-db.workspace = true
+reth-evm-ethereum.workspace = true
+reth-transaction-pool.workspace = true
+reth-consensus.workspace = true
+reth-tasks.workspace = true
+reth-tracing.workspace = true
+alloy-genesis.workspace = true
+tempfile.workspace = true
+hex = "0.4"
 
 [lints]
 workspace = true
@@ -66,6 +100,9 @@ dev = [
     "reth-ethereum/arbitrary",
 ]
 
+# Feature for test binaries
+test-binaries = ["reqwest", "chrono", "rand"]
+
 min-error-logs = ["tracing/release_max_level_error"]
 min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
@@ -74,4 +111,9 @@ min-trace-logs = ["tracing/release_max_level_trace"]
 
 [[bin]]
 name = "rollkit-reth"
-path = "src/main.rs" 
+path = "bin/src/main.rs"
+
+[[bin]]
+name = "test-rollkit-engine-api"
+path = "bin/test_rollkit_engine_api.rs"
+required-features = ["test-binaries"] 

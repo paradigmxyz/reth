@@ -48,7 +48,7 @@ use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, Payload
 use reth_provider::HeaderProvider;
 use reth_revm::cached::CachedReads;
 use reth_trie_db::MerklePatriciaTrie;
-use rollkit_payload_builder::{
+use rollkit_reth::{
     PayloadAttributesError, RollkitPayloadAttributes, RollkitPayloadBuilder,
     RollkitPayloadBuilderConfig,
 };
@@ -343,7 +343,7 @@ where
     type Validator = RollkitEngineValidator;
 
     async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
-        info!("Building Rollkit engine validator");
+        info!(target: "rollkit::engine", "Building Rollkit engine validator");
         Ok(RollkitEngineValidator::new(ctx.config.chain.clone()))
     }
 }
@@ -398,7 +398,7 @@ where
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
-        info!("Building Rollkit node components with custom payload builder");
+        info!(target: "rollkit::node", "Building Rollkit node components with custom payload builder");
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(EthereumPoolBuilder::default())
@@ -409,7 +409,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        info!("Adding Rollkit RPC extensions with custom engine validator");
+        info!(target: "rollkit::node", "Adding Rollkit RPC extensions with custom engine validator");
         RollkitNodeAddOns::default()
     }
 }
@@ -571,7 +571,7 @@ where
         pool: Pool,
         evm_config: EthEvmConfig,
     ) -> eyre::Result<Self::PayloadBuilder> {
-        info!("Building Rollkit engine payload builder service");
+        info!(target: "rollkit::payload", "Building Rollkit engine payload builder service");
         let rollkit_builder = Arc::new(RollkitPayloadBuilder::new(Arc::new(ctx.provider().clone()), evm_config));
         
         Ok(RollkitEnginePayloadBuilder {
