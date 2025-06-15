@@ -57,7 +57,7 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 
 .PHONY: install-rollkit
 install-rollkit: ## Build and install the rollkit-reth binary under `~/.cargo/bin`.
-	cargo install --path crates/rollkit/bin --bin rollkit-reth --force --locked \
+	cargo install --path crates/rollkit --bin rollkit-reth --force --locked \
 		--features "$(FEATURES)" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
@@ -105,7 +105,7 @@ build-op: ## Build the op-reth binary into `target` directory.
 
 .PHONY: build-rollkit
 build-rollkit: ## Build the rollkit-reth binary into `target` directory.
-	cargo build --bin rollkit-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/rollkit/bin/Cargo.toml
+	cargo build --bin rollkit-reth --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/rollkit/Cargo.toml
 
 # Builds the reth binary natively.
 build-native-%:
@@ -115,7 +115,7 @@ op-build-native-%:
 	cargo build --bin op-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/optimism/bin/Cargo.toml
 
 rollkit-build-native-%:
-	cargo build --bin rollkit-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/rollkit/bin/Cargo.toml
+	cargo build --bin rollkit-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/rollkit/Cargo.toml
 
 # The following commands use `cross` to build a cross-compile.
 #
@@ -153,7 +153,7 @@ op-build-%:
 
 rollkit-build-%:
 	RUSTFLAGS="-C link-arg=-lgcc -Clink-arg=-static-libgcc" \
-		cross build --bin rollkit-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/rollkit/bin/Cargo.toml
+		cross build --bin rollkit-reth --target $* --features "$(FEATURES)" --profile "$(PROFILE)" --manifest-path crates/rollkit/Cargo.toml
 
 # Unfortunately we can't easily use cross to build for Darwin because of licensing issues.
 # If we wanted to, we would need to build a custom Docker image with the SDK available.
