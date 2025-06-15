@@ -889,6 +889,7 @@ impl<Eth, Evm> DebugApiServer for DebugApi<Eth, Evm>
 where
     Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
     Evm: ConfigureEvm<Primitives: NodePrimitives<Block = ProviderBlock<Eth::Provider>>> + 'static,
+    <Eth as reth_rpc_eth_api::RpcNodeCore>::Provider: reth_chain_state::CanonStateSubscriptions,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
