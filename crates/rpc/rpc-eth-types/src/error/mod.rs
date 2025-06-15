@@ -528,7 +528,11 @@ impl RpcInvalidTransactionError {
             Self::InvalidChainId |
             Self::GasTooLow |
             Self::GasTooHigh |
-            Self::GasRequiredExceedsAllowance { .. } => EthRpcErrorCode::InvalidInput.code(),
+            Self::GasRequiredExceedsAllowance { .. } |
+            Self::NonceTooLow { .. } |
+            Self::NonceTooHigh { .. } |
+            Self::FeeCapTooLow |
+            Self::FeeCapVeryHigh => EthRpcErrorCode::InvalidInput.code(),
             Self::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
@@ -782,7 +786,22 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
             RpcPoolError::TxPoolOverflow => {
                 rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), error.to_string())
             }
-            error => internal_rpc_err(error.to_string()),
+            RpcPoolError::AlreadyKnown |
+            RpcPoolError::InvalidSender |
+            RpcPoolError::Underpriced |
+            RpcPoolError::ReplaceUnderpriced |
+            RpcPoolError::ExceedsGasLimit |
+            RpcPoolError::ExceedsFeeCap { .. } |
+            RpcPoolError::NegativeValue |
+            RpcPoolError::OversizedData |
+            RpcPoolError::ExceedsMaxInitCodeSize |
+            RpcPoolError::PoolTransactionError(_) |
+            RpcPoolError::Eip4844(_) |
+            RpcPoolError::Eip7702(_) |
+            RpcPoolError::AddressAlreadyReserved => {
+                rpc_error_with_code(EthRpcErrorCode::InvalidInput.code(), error.to_string())
+            }
+            RpcPoolError::Other(other) => internal_rpc_err(other.to_string()),
         }
     }
 }
