@@ -103,16 +103,6 @@ impl Database for WitnessDatabase<'_> {
         Ok(bytecode.clone())
     }
 
-    // /// Get block hash by block number from the provided ancestor hashes map.
-    // ///
-    // /// Returns an error if the hash for the given block number is not found in the map.
-    // fn block_hash(&mut self, block_number: u64) -> Result<B256, Self::Error> {
-    //     self.block_hashes
-    //         .get(&block_number)
-    //         .copied()
-    //         .ok_or(ProviderError::StateForNumberNotFound(block_number))
-    // }
-
     /// Get block hash by block number from the provided ancestor hashes vector.
     ///
     /// Returns an error if the hash for the given block number is not in the contiguous range.
