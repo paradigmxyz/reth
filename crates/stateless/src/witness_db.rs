@@ -2,7 +2,7 @@
 //! specifically designed for stateless execution environments.
 
 use crate::trie::StatelessTrie;
-use alloc::{collections::btree_map::BTreeMap, format};
+use alloc::{format, vec::Vec};
 use alloy_primitives::{map::B256Map, Address, B256, U256};
 use reth_errors::ProviderError;
 use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
@@ -18,12 +18,17 @@ use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 /// database is not available or desired.
 #[derive(Debug)]
 pub(crate) struct WitnessDatabase<'a> {
-    /// Map of block numbers to block hashes.
-    /// This is used to service the `BLOCKHASH` opcode.
-    // TODO: use Vec instead -- ancestors should be contiguous
-    // TODO: so we can use the current_block_number and an offset to
-    // TODO: get the block number of a particular ancestor
-    block_hashes_by_block_number: BTreeMap<u64, B256>,
+    /// Block hashes ordered from oldest to newest (lowest to highest block number).
+    /// Used to service the `BLOCKHASH` opcode.
+    ///
+    /// The last element corresponds to the parent of the current block.
+    block_hashes: Vec<B256>,
+    /// The block number corresponding to `block_hashes[0]`.
+    ///
+    /// This is needed to compute the offset when querying a specific block number.
+    /// All valid `block_number` queries must fall within the contiguous range
+    /// `[block_hashes_start, block_hashes_start + block_hashes.len())`.
+    block_hashes_start: u64,
     /// Map of code hashes to bytecode.
     /// Used to fetch contract code needed during execution.
     bytecode: B256Map<Bytecode>,
@@ -52,9 +57,10 @@ impl<'a> WitnessDatabase<'a> {
     pub(crate) const fn new(
         trie: &'a StatelessTrie,
         bytecode: B256Map<Bytecode>,
-        ancestor_hashes: BTreeMap<u64, B256>,
+        block_hashes: Vec<B256>,
+        block_hashes_start: u64,
     ) -> Self {
-        Self { trie, block_hashes_by_block_number: ancestor_hashes, bytecode }
+        Self { trie, block_hashes, block_hashes_start, bytecode }
     }
 }
 
@@ -97,12 +103,28 @@ impl Database for WitnessDatabase<'_> {
         Ok(bytecode.clone())
     }
 
-    /// Get block hash by block number from the provided ancestor hashes map.
+    // /// Get block hash by block number from the provided ancestor hashes map.
+    // ///
+    // /// Returns an error if the hash for the given block number is not found in the map.
+    // fn block_hash(&mut self, block_number: u64) -> Result<B256, Self::Error> {
+    //     self.block_hashes
+    //         .get(&block_number)
+    //         .copied()
+    //         .ok_or(ProviderError::StateForNumberNotFound(block_number))
+    // }
+
+    /// Get block hash by block number from the provided ancestor hashes vector.
     ///
-    /// Returns an error if the hash for the given block number is not found in the map.
+    /// Returns an error if the hash for the given block number is not in the contiguous range.
     fn block_hash(&mut self, block_number: u64) -> Result<B256, Self::Error> {
-        self.block_hashes_by_block_number
-            .get(&block_number)
+        // Compute the index relative to the starting block number
+        let index = block_number
+            .checked_sub(self.block_hashes_start)
+            .ok_or(ProviderError::StateForNumberNotFound(block_number))?;
+
+        // Look up the hash at the computed index
+        self.block_hashes
+            .get(index as usize)
             .copied()
             .ok_or(ProviderError::StateForNumberNotFound(block_number))
     }
