@@ -216,7 +216,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             if idle_peer.is_some() {
                 hashes_to_request.insert(hash);
-                break idle_peer.copied()
+                break idle_peer.copied();
             }
 
             if let Some(ref mut bud) = budget {
@@ -275,7 +275,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
-                return hashes_from_announcement_iter.collect()
+                return hashes_from_announcement_iter.collect();
             }
             acc_size_response = size;
         }
@@ -655,7 +655,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     self.metrics.egress_peer_channel_full.increment(1);
                     Some(new_announced_hashes)
                 }
-            }
+            };
         }
 
         *inflight_count += 1;
@@ -895,6 +895,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
                 }
+                let mut has_bad_transactions = false;
                 if verification_outcome == VerificationOutcome::ReportPeer {
                     // todo: report peer for sending hashes that weren't requested
                     trace!(target: "net::tx",
@@ -903,6 +904,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         verified_payload_len=verified_payload.len(),
                         "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
                     );
+                    has_bad_transactions = true;
                 }
                 // peer has only sent hashes that we didn't request
                 if verified_payload.is_empty() {
@@ -928,6 +930,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     valid_payload_len=valid_payload.len(),
                     "received `PooledTransactions` response from peer with duplicate entries, filtered them out"
                     );
+                    has_bad_transactions = true;
                 }
                 // valid payload will have at least one transaction at this point. even if the tx
                 // size/type announced by the peer is different to the actual tx size/type, pass on
@@ -956,6 +959,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         fetched_len=fetched.len(),
                         "peer failed to serve hashes it announced"
                     );
+                    has_bad_transactions = true;
                 }
 
                 //
@@ -964,6 +968,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
                 let transactions = valid_payload.into_data().into_values().collect();
+
+                if has_bad_transactions {
+                    self.remove_peer(&peer_id);
+                }
 
                 FetchEvent::TransactionsFetched { peer_id, transactions }
             }
