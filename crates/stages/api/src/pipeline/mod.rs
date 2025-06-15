@@ -7,7 +7,7 @@ pub use event::*;
 use futures_util::Future;
 use reth_primitives_traits::constants::BEACON_CONSENSUS_REORG_UNWIND_DEPTH;
 use reth_provider::{
-    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader,
+    providers::ProviderNodeTypes, writer::UnifiedStorageWriter, BlockHashReader, BlockNumReader,
     ChainStateBlockReader, ChainStateBlockWriter, DatabaseProviderFactory, ProviderFactory,
     StageCheckpointReader, StageCheckpointWriter,
 };
@@ -294,6 +294,15 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
+        // Add validation before starting unwind
+        let provider = self.provider_factory.provider()?;
+        let latest_block = provider.last_block_number()?;
+
+        // Get the actual pruning configuration
+        let prune_modes = provider.prune_modes_ref();
+
+        prune_modes.ensure_unwind_target_unpruned(latest_block, to)?;
+
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
 
