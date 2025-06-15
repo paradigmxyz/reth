@@ -29,16 +29,14 @@ use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_errors::ProviderError;
-use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, Bytecode, RecoveredBlock, SealedBlock, SealedHeader, TransactionMeta,
 };
 use reth_provider::{
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
-    BlockchainTreePendingStateProvider, CanonChainTracker, CanonStateNotification,
-    CanonStateNotifications, CanonStateSubscriptions, ChainStateBlockReader, ChainStateBlockWriter,
-    ChangeSetReader, DatabaseProviderFactory, ExecutionDataProvider, FullExecutionDataProvider,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, CanonChainTracker,
+    CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
+    ChainStateBlockReader, ChainStateBlockWriter, ChangeSetReader, DatabaseProviderFactory,
     HeaderProvider, PruneCheckpointReader, ReceiptProvider, StageCheckpointReader, StateProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageReader,
     TransactionVariant, TransactionsProvider,
@@ -430,27 +428,6 @@ where
 
     fn chain_spec(&self) -> Arc<Self::ChainSpec> {
         self.chain_spec.clone()
-    }
-}
-
-impl<P, Node, N> BlockchainTreePendingStateProvider for AlloyRethProvider<P, Node, N>
-where
-    P: Provider<N> + Clone + 'static,
-    N: Network,
-    Node: NodeTypes,
-{
-    fn pending_state_provider(
-        &self,
-        _block_hash: BlockHash,
-    ) -> Result<Box<dyn FullExecutionDataProvider>, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
-    }
-
-    fn find_pending_state_provider(
-        &self,
-        _block_hash: BlockHash,
-    ) -> Option<Box<dyn FullExecutionDataProvider>> {
-        None
     }
 }
 
@@ -1307,21 +1284,6 @@ where
             // Fallback for when chain_spec is not provided
             Arc::new(Node::ChainSpec::default())
         }
-    }
-}
-
-impl<P, Node, N> ExecutionDataProvider for AlloyRethStateProvider<P, Node, N>
-where
-    P: Provider<N> + Clone + 'static,
-    N: Network,
-    Node: NodeTypes,
-{
-    fn execution_outcome(&self) -> &ExecutionOutcome {
-        unimplemented!("execution outcome not available for RPC provider")
-    }
-
-    fn block_hash(&self, _block_number: BlockNumber) -> Option<BlockHash> {
-        None
     }
 }
 
