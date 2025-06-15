@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
-use futures::future::TryFutureExt;
+use futures::{future::TryFutureExt, stream, StreamExt};
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::NodePrimitives;
@@ -566,62 +566,153 @@ where
         to_block: u64,
         limits: QueryLimits,
     ) -> Result<Vec<Log>, EthFilterError> {
+        // generate all the block ranges we need to process
+        let ranges: Vec<_> =
+            BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range).collect();
         let mut all_logs = Vec::new();
 
-        // loop over the range of new blocks and check logs if the filter matches the log's bloom
-        // filter
-        for (from, to) in
-            BlockRangeInclusiveIter::new(from_block..=to_block, self.max_headers_range)
+        // for small ranges (less than 2 chunks)
+        if ranges.len() <= 1 {
+            for (from, to) in ranges {
+                let chunk_logs = self
+                    .process_block_range(filter, from, to, from_block, to_block, limits)
+                    .await?;
+                all_logs.extend(chunk_logs);
+            }
+
+            return Ok(all_logs);
+        }
+
+        // adjust based on system capabilities
+        //TODO: configurable, 4 is a good default for both I/O and CPU balance
+        let concurrency = std::cmp::min(ranges.len(), 4);
+
+        // process block ranges in parallel while preserving order
+        let results = stream::iter(ranges.into_iter().enumerate())
+            .map(|(range_idx, (from, to))| {
+                let self_inner = self;
+                let filter = &filter;
+
+                async move {
+                    let chunk_logs = self_inner
+                        .process_block_range(filter, from, to, from_block, to_block, limits)
+                        .await?;
+
+                    // return chunk index with logs to preserve order
+                    Ok::<(usize, Vec<Log>), EthFilterError>((range_idx, chunk_logs))
+                }
+            })
+            .buffer_unordered(concurrency)
+            .collect::<Vec<_>>()
+            .await;
+
+        let mut ordered_results = vec![Vec::new(); results.len()];
+
+        for result in results {
+            match result {
+                Ok((idx, logs)) => {
+                    ordered_results[idx] = logs;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        // combine logs
+        for (range_idx, logs) in ordered_results.into_iter().enumerate() {
+            if let Some(max_logs) = limits.max_logs_per_response {
+                let is_multi_block_range = from_block != to_block;
+                if is_multi_block_range && all_logs.len() + logs.len() > max_logs {
+                    // If we're going to exceed the limit, return error with processed range
+                    // Calculate the block number we've processed up to this point
+                    let processed_to_block = if range_idx > 0 {
+                        // If we've processed at least one full range, use the end of the previous
+                        // range
+                        let (_prev_from, prev_to) = BlockRangeInclusiveIter::new(
+                            from_block..=to_block,
+                            self.max_headers_range,
+                        )
+                        .nth(range_idx - 1)
+                        .unwrap_or((from_block, from_block));
+                        prev_to
+                    } else {
+                        // Otherwise, we're still in the first range
+                        from_block
+                    };
+
+                    return Err(EthFilterError::QueryExceedsMaxResults {
+                        max_logs,
+                        from_block,
+                        to_block: processed_to_block,
+                    });
+                }
+            }
+
+            all_logs.extend(logs);
+        }
+
+        Ok(all_logs)
+    }
+
+    /// Processes a single block range
+    async fn process_block_range(
+        &self,
+        filter: &Filter,
+        from: u64,
+        to: u64,
+        overall_from_block: u64,
+        overall_to_block: u64,
+        limits: QueryLimits,
+    ) -> Result<Vec<Log>, EthFilterError> {
+        let mut chunk_logs = Vec::new();
+
+        let headers = self.provider().headers_range(from..=to)?;
+        // these are consecutive headers, so we can use the parent hash of the next
+        // block to get the current header's hash
+        for (idx, header) in headers
+            .iter()
+            .enumerate()
+            .filter(|(_, header)| filter.matches_bloom(header.logs_bloom()))
         {
-            let headers = self.provider().headers_range(from..=to)?;
-            for (idx, header) in headers
-                .iter()
-                .enumerate()
-                .filter(|(_, header)| filter.matches_bloom(header.logs_bloom()))
+            let block_hash = match headers.get(idx + 1) {
+                Some(child) => child.parent_hash(),
+                None => self
+                    .provider()
+                    .block_hash(header.number())?
+                    .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
+            };
+
+            let num_hash = BlockNumHash::new(header.number(), block_hash);
+            if let Some((receipts, maybe_block)) =
+                self.eth_cache().get_receipts_and_maybe_block(num_hash.hash).await?
             {
-                // these are consecutive headers, so we can use the parent hash of the next
-                // block to get the current header's hash
-                let block_hash = match headers.get(idx + 1) {
-                    Some(child) => child.parent_hash(),
-                    None => self
-                        .provider()
-                        .block_hash(header.number())?
-                        .ok_or_else(|| ProviderError::HeaderNotFound(header.number().into()))?,
-                };
+                append_matching_block_logs(
+                    &mut chunk_logs,
+                    maybe_block
+                        .map(ProviderOrBlock::Block)
+                        .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
+                    filter,
+                    num_hash,
+                    &receipts,
+                    false,
+                    header.timestamp(),
+                )?;
 
-                let num_hash = BlockNumHash::new(header.number(), block_hash);
-                if let Some((receipts, maybe_block)) =
-                    self.eth_cache().get_receipts_and_maybe_block(num_hash.hash).await?
-                {
-                    append_matching_block_logs(
-                        &mut all_logs,
-                        maybe_block
-                            .map(ProviderOrBlock::Block)
-                            .unwrap_or_else(|| ProviderOrBlock::Provider(self.provider())),
-                        filter,
-                        num_hash,
-                        &receipts,
-                        false,
-                        header.timestamp(),
-                    )?;
-
-                    // size check but only if range is multiple blocks, so we always return all
-                    // logs of a single block
-                    let is_multi_block_range = from_block != to_block;
-                    if let Some(max_logs_per_response) = limits.max_logs_per_response {
-                        if is_multi_block_range && all_logs.len() > max_logs_per_response {
-                            return Err(EthFilterError::QueryExceedsMaxResults {
-                                max_logs: max_logs_per_response,
-                                from_block,
-                                to_block: num_hash.number.saturating_sub(1),
-                            });
-                        }
+                // size check but only if range is multiple blocks, so we always return all
+                // logs of a single block
+                let is_multi_block_range = overall_from_block != overall_to_block;
+                if let Some(max_logs_per_response) = limits.max_logs_per_response {
+                    if is_multi_block_range && chunk_logs.len() > max_logs_per_response {
+                        return Err(EthFilterError::QueryExceedsMaxResults {
+                            max_logs: max_logs_per_response,
+                            from_block: from,
+                            to_block: num_hash.number.saturating_sub(1),
+                        });
                     }
                 }
             }
         }
 
-        Ok(all_logs)
+        Ok(chunk_logs)
     }
 }
 
