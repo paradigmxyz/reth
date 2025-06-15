@@ -1287,18 +1287,6 @@ where
     }
 }
 
-impl<P, Node, N> reth_provider::BlockExecutionForkProvider for AlloyRethStateProvider<P, Node, N>
-where
-    P: Provider<N> + Clone + 'static,
-    N: Network,
-    Node: NodeTypes,
-{
-    fn canonical_fork(&self) -> alloy_eips::BlockNumHash {
-        // For RPC provider, we don't have fork information
-        alloy_eips::BlockNumHash::default()
-    }
-}
-
 // Note: FullExecutionDataProvider is already implemented via the blanket implementation
 // for types that implement both ExecutionDataProvider and BlockExecutionForkProvider
 
