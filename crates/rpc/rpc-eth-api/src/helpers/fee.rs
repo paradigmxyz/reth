@@ -5,17 +5,16 @@ use crate::FromEthApiError;
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::U256;
-use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
+use alloy_rpc_types_eth::{BlockId, BlockNumberOrTag, FeeHistory};
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
-use reth_primitives_traits::BlockBody;
+use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, EthApiError, FeeHistoryCache,
     FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
-use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider};
+use reth_storage_api::{BlockIdReader, BlockReader, BlockReaderIdExt, HeaderProvider};
 use tracing::debug;
-
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthFees: LoadFee {
@@ -156,7 +155,16 @@ pub trait EthFees: LoadFee {
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
                 let spec = self.provider().chain_spec();
-                base_fee_per_gas.push(last_entry.next_block_base_fee(&spec) as u128);
+                let block = self
+                    .provider()
+                    .block_by_hash(last_entry.header_hash)
+                    .map_err(|e| EthApiError::Internal(e.into()))? // convert ProviderError → RethError here
+                    .ok_or_else(|| {
+                        EthApiError::HeaderNotFound(BlockId::Hash(last_entry.header_hash.into()))
+                    })?;
+
+                let fee = EthChainSpec::next_block_base_fee(&spec, block.header());
+                base_fee_per_gas.push(fee as u128);
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
@@ -211,7 +219,8 @@ pub trait EthFees: LoadFee {
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
                 let spec = self.provider().chain_spec();
-                base_fee_per_gas.push(spec.next_block_base_fee(last_header.header()) as u128);
+                let fee = EthChainSpec::next_block_base_fee(&spec, last_header.header());
+                   base_fee_per_gas.push(fee as u128);
 
                 // Same goes for the `base_fee_per_blob_gas`:
                 // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.

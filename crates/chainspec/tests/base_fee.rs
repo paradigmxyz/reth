@@ -1,7 +1,7 @@
+use alloy_consensus::Header;
+use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use reth_chainspec::{ChainSpec, EthChainSpec};
 
-use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip1559::{BaseFeeParams, INITIAL_BASE_FEE};
 fn parent_header() -> Header {
     Header {
         gas_used: 15_000_000,

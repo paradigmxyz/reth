@@ -316,12 +316,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `new_tip+1`
-                let pending_block_base_fee = new_tip
-                    .header()
-                    .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp()),
-                    )
-                    .unwrap_or_default();
+                let pending_block_base_fee = chain_spec.next_block_base_fee(new_tip.header());
                 let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(new_tip.timestamp()),
                 );
@@ -422,10 +417,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `tip+1`
-                let pending_block_base_fee = tip
-                    .header()
-                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(tip.timestamp()))
-                    .unwrap_or_default();
+                let pending_block_base_fee = chain_spec.next_block_base_fee(tip.header());
                 let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(tip.timestamp()),
                 );

@@ -266,12 +266,7 @@ mod tests {
             ..Default::default()
         };
         let base_fee = next_block_base_fee(&op_chain_spec, &parent, 1800000005);
-        assert_eq!(
-            base_fee.unwrap(),
-            parent
-                .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
-                .unwrap_or_default()
-        );
+        assert_eq!(base_fee.unwrap(), op_chain_spec.next_block_base_fee(&parent));
     }
 
     #[test]
