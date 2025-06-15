@@ -67,16 +67,14 @@ impl Database for WitnessDatabase<'_> {
     ///
     /// Returns `Ok(None)` if the account is not found in the trie.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        if let Some(account) = self.trie.account(address)? {
-            return Ok(Some(AccountInfo {
+        self.trie.account(address).map(|opt| {
+            opt.map(|account| AccountInfo {
                 balance: account.balance,
                 nonce: account.nonce,
                 code_hash: account.code_hash,
                 code: None,
-            }));
-        };
-
-        Ok(None)
+            })
+        })
     }
 
     /// Get storage value of an account at a specific slot.
@@ -90,11 +88,9 @@ impl Database for WitnessDatabase<'_> {
     ///
     /// Returns an error if the bytecode for the given hash is not found in the map.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        let bytecode = self.bytecode.get(&code_hash).ok_or_else(|| {
+        self.bytecode.get(&code_hash).cloned().ok_or_else(|| {
             ProviderError::TrieWitnessError(format!("bytecode for {code_hash} not found"))
-        })?;
-
-        Ok(bytecode.clone())
+        })
     }
 
     /// Get block hash by block number from the provided ancestor hashes map.
