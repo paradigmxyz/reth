@@ -162,6 +162,7 @@ where
     let mut stage = MerkleStage::Execution {
         // Forces updating the root instead of calculating from scratch
         clean_threshold: u64::MAX,
+        incremental_threshold: u64::MAX,
     };
 
     loop {
