@@ -33,6 +33,7 @@ reth-rpc-eth-types = { workspace = true, optional = true }
 reth-rpc-builder = { workspace = true, optional = true }
 reth-exex = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
+reth-trie-db = { workspace = true, optional = true }
 reth-node-builder = { workspace = true, optional = true }
 reth-tasks = { workspace = true, optional = true }
 reth-cli-util = { workspace = true, optional = true }
@@ -91,6 +92,7 @@ test-utils = [
     "reth-transaction-pool?/test-utils",
     "reth-evm-ethereum?/test-utils",
     "reth-node-builder?/test-utils",
+    "reth-trie-db?/test-utils",
 ]
 
 full = [
@@ -122,7 +124,7 @@ node = [
     "dep:reth-node-ethereum",
     "dep:reth-node-builder",
     "rpc",
-    "trie",
+    "trie-db",
 ]
 pool = ["dep:reth-transaction-pool"]
 rpc = [
@@ -140,3 +142,4 @@ network = ["dep:reth-network", "tasks", "dep:reth-network-api", "dep:reth-eth-wi
 provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]
+trie-db = ["trie", "dep:reth-trie-db"]

@@ -8122,6 +8122,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
+ "reth-trie-db",
 ]
 
 [[package]]
@@ -9018,6 +9019,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
+ "reth-trie-db",
 ]
 
 [[package]]
