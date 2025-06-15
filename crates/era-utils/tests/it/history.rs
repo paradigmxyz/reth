@@ -31,8 +31,7 @@ async fn test_history_imports_from_fresh_state_successfully() {
     let mut hash_collector = Collector::new(4096, folder);
 
     let expected_block_number = 8191;
-    let actual_block_number =
-        reth_era_utils::import(stream, &pf.provider_rw().unwrap().0, &mut hash_collector).unwrap();
+    let actual_block_number = reth_era_utils::import(stream, &pf, &mut hash_collector).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 }
