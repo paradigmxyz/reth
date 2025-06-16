@@ -7143,6 +7143,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-alloy-provider"
+version = "1.4.8"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-network",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-rpc-types",
+ "alloy-rpc-types-engine",
+ "reth-chainspec",
+ "reth-db-api",
+ "reth-errors",
+ "reth-execution-types",
+ "reth-node-types",
+ "reth-primitives",
+ "reth-provider",
+ "reth-prune-types",
+ "reth-stages-types",
+ "reth-storage-api",
+ "reth-trie",
+ "revm",
+ "revm-primitives",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "reth-basic-payload-builder"
 version = "1.4.8"
 dependencies = [
