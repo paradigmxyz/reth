@@ -13,9 +13,7 @@ use reth_era::{
     },
 };
 use reth_fs_util as fs;
-use reth_storage_api::{
-    BlockNumReader, BlockReader, DBProvider, HeaderProvider,
-};
+use reth_storage_api::{BlockNumReader, BlockReader, HeaderProvider};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -44,11 +42,10 @@ pub struct ExportConfig {
 
 /// Fetches block history data from the provider
 /// and prepares it for export to era1 files
-/// for a given number of blocks
-/// then writes them to disk.
+/// for a given number of blocks then writes them to disk.
 pub fn export<P, B>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
 where
-    P: DBProvider + BlockReader<Block = B>,
+    P: BlockReader<Block = B>,
     B: Into<BlockBody<P::Transaction, Header>>,
     P::Header: Into<Header>,
 {
