@@ -37,6 +37,9 @@ pub enum MessageError {
     /// Thrown when rlp decoding a message failed.
     #[error("RLP error: {0}")]
     RlpError(#[from] alloy_rlp::Error),
+    /// Other message error with custom message
+    #[error("{0}")]
+    Other(String),
 }
 
 /// An `eth` protocol message, containing a message ID and payload.
