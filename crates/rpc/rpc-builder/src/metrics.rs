@@ -388,11 +388,25 @@ where
                     BlockId::Number(BlockNumberOrTag::Number(n)) => *n < bedrock_block,
                     BlockId::Number(BlockNumberOrTag::Earliest) => true,
                     BlockId::Number(_) => false,
-                    BlockId::Hash(h) => provider
-                        .sealed_header_by_hash((*h).into())
-                        .ok()
-                        .flatten()
-                        .map_or(true, |hdr| hdr.header().number() < bedrock_block),
+                    BlockId::Hash(h) => match provider.sealed_header_by_hash((*h).into()) {
+                        Ok(Some(header)) => header.header().number() < bedrock_block,
+
+                        Ok(None) => {
+                            // Hash not found ⇒ treat as *post-Bedrock* (stay on main node)
+                            tracing::debug!(target: "rpc::historical",
+                                            ?block_id, "hash unknown; not forwarding");
+                            false
+                        }
+
+                        Err(e) => {
+                            // I/O or DB error ⇒ also stay local, but log it
+                            tracing::warn!(target: "rpc::historical",
+                                        error = %e,
+                                        ?block_id,
+                                        "header lookup failed; not forwarding");
+                            false
+                        }
+                    },
                 };
 
                 if is_pre_bedrock {
