@@ -31,6 +31,9 @@ use reth_storage_api::{
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::sync::Arc;
 
+type RpcReceiptFuture<T, E> =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<RpcReceipt<T>, E>> + Send>>;
+
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
 ///
@@ -74,9 +77,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn send_raw_transaction_sync(
         &self,
         tx: Bytes,
-    ) -> std::pin::Pin<
-        Box<dyn Future<Output = Result<RpcReceipt<Self::NetworkTypes>, Self::Error>> + Send>,
-    >
+    ) -> RpcReceiptFuture<Self::NetworkTypes, Self::Error>
     where
         Self: LoadReceipt + 'static,
     {
