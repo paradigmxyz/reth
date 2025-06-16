@@ -16,7 +16,6 @@ use alloy_primitives::Address;
 use alloy_rpc_types_eth::{state::EvmOverrides, TransactionRequest};
 use clap::Parser;
 use futures_util::StreamExt;
-use reth::builder::NodeHandle;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
     evm::{
@@ -28,7 +27,7 @@ use reth_ethereum::{
             interpreter::{interpreter::EthInterpreter, interpreter_types::Jumps, Interpreter},
         },
     },
-    node::EthereumNode,
+    node::{builder::NodeHandle, EthereumNode},
     pool::TransactionPool,
     rpc::api::eth::helpers::Call,
 };

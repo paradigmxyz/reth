@@ -25,7 +25,8 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
+    constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Block,
+    GotExpected, SealedBlock,
 };
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -113,7 +114,7 @@ where
     pub fn validate_all_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Tx>,
+        transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         self.inner.validate_batch_with_origin(origin, transactions)
     }
@@ -144,7 +145,7 @@ where
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         self.validate_all_with_origin(origin, transactions)
     }
@@ -459,6 +460,16 @@ where
             }
         }
 
+        // Osaka validation of max tx gas.
+        if self.fork_tracker.is_osaka_activated() &&
+            transaction.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA
+        {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidTransactionError::GasLimitTooHigh.into(),
+            ))
+        }
+
         Ok(transaction)
     }
 
@@ -648,7 +659,7 @@ where
     fn validate_batch_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Tx>,
+        transactions: impl IntoIterator<Item = Tx> + Send,
     ) -> Vec<TransactionValidationOutcome<Tx>> {
         let mut provider = None;
         transactions

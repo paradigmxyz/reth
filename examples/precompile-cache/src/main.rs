@@ -10,11 +10,6 @@ use alloy_evm::{
 use alloy_genesis::Genesis;
 use alloy_primitives::Bytes;
 use parking_lot::RwLock;
-use reth::{
-    builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
-    revm::precompile::PrecompileResult,
-    tasks::TaskManager,
-};
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec},
     evm::{
@@ -25,17 +20,20 @@ use reth_ethereum::{
             handler::EthPrecompiles,
             inspector::{Inspector, NoOpInspector},
             interpreter::interpreter::EthInterpreter,
+            precompile::PrecompileResult,
             primitives::hardfork::SpecId,
             MainBuilder, MainContext,
         },
     },
     node::{
         api::{FullNodeTypes, NodeTypes},
+        builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
         core::{args::RpcServerArgs, node_config::NodeConfig},
         evm::EthEvm,
         node::EthereumAddOns,
         EthEvmConfig, EthereumNode,
     },
+    tasks::TaskManager,
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
@@ -168,7 +166,7 @@ impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = EthEvmConfig<MyEvmFactory>;
+    type EVM = EthEvmConfig<ChainSpec, MyEvmFactory>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new_with_evm_factory(

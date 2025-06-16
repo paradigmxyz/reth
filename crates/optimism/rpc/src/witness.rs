@@ -7,8 +7,8 @@ use op_alloy_rpc_types_engine::OpPayloadAttributes;
 use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
+use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpPayloadBuilder, OpPayloadPrimitives};
 use reth_optimism_txpool::OpPooledTx;
 use reth_primitives_traits::SealedHeader;
@@ -44,10 +44,14 @@ impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig> {
 impl<Pool, Provider, EvmConfig> OpDebugWitnessApi<Pool, Provider, EvmConfig>
 where
     EvmConfig: ConfigureEvm,
-    Provider: NodePrimitivesProvider + BlockReaderIdExt<Header = alloy_consensus::Header>,
+    Provider: NodePrimitivesProvider<Primitives: NodePrimitives<BlockHeader = Provider::Header>>
+        + BlockReaderIdExt,
 {
     /// Fetches the parent header by hash.
-    fn parent_header(&self, parent_block_hash: B256) -> ProviderResult<SealedHeader> {
+    fn parent_header(
+        &self,
+        parent_block_hash: B256,
+    ) -> ProviderResult<SealedHeader<Provider::Header>> {
         self.inner
             .provider
             .sealed_header_by_hash(parent_block_hash)?
@@ -62,10 +66,10 @@ where
     Pool: TransactionPool<
             Transaction: OpPooledTx<Consensus = <Provider::Primitives as NodePrimitives>::SignedTx>,
         > + 'static,
-    Provider: BlockReaderIdExt<Header = alloy_consensus::Header>
+    Provider: BlockReaderIdExt<Header = <Provider::Primitives as NodePrimitives>::BlockHeader>
         + NodePrimitivesProvider<Primitives: OpPayloadPrimitives>
         + StateProviderFactory
-        + ChainSpecProvider<ChainSpec = OpChainSpec>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
         + Clone
         + 'static,
     EvmConfig: ConfigureEvm<Primitives = Provider::Primitives, NextBlockEnvCtx = OpNextBlockEnvAttributes>

@@ -3157,7 +3157,7 @@ mod tests {
 
         fn transform_updates(
             updates: Vec<BTreeMap<Nibbles, Account>>,
-            mut rng: impl rand_08::Rng,
+            mut rng: impl rand::Rng,
         ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
             let mut keys = BTreeSet::new();
             updates
@@ -3168,7 +3168,7 @@ mod tests {
                     let keys_to_delete_len = update.len() / 2;
                     let keys_to_delete = (0..keys_to_delete_len)
                         .map(|_| {
-                            let key = rand_08::seq::IteratorRandom::choose(keys.iter(), &mut rng)
+                            let key = rand::seq::IteratorRandom::choose(keys.iter(), &mut rng)
                                 .unwrap()
                                 .clone();
                             keys.take(&key).unwrap()

@@ -5,10 +5,6 @@
 use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap, EvmFactory};
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, Bytes};
-use reth::{
-    builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
-    tasks::TaskManager,
-};
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec},
     evm::{
@@ -27,10 +23,12 @@ use reth_ethereum::{
     },
     node::{
         api::{FullNodeTypes, NodeTypes},
+        builder::{components::ExecutorBuilder, BuilderContext, NodeBuilder},
         core::{args::RpcServerArgs, node_config::NodeConfig},
         node::EthereumAddOns,
         EthereumNode,
     },
+    tasks::TaskManager,
     EthPrimitives,
 };
 use reth_tracing::{RethTracer, Tracer};
@@ -86,7 +84,7 @@ impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = EthEvmConfig<MyEvmFactory>;
+    type EVM = EthEvmConfig<ChainSpec, MyEvmFactory>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config =

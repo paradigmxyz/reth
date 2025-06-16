@@ -1,35 +1,41 @@
-use crate::chainspec::CustomChainSpec;
-use alloy_consensus::Block;
+use crate::{
+    chainspec::CustomChainSpec,
+    primitives::{Block, CustomHeader, CustomTransaction},
+};
 use alloy_evm::block::{BlockExecutionError, BlockExecutorFactory};
 use alloy_op_evm::OpBlockExecutionCtx;
 use reth_ethereum::{
     evm::primitives::execute::{BlockAssembler, BlockAssemblerInput},
     primitives::Receipt,
 };
-use reth_op::{node::OpBlockAssembler, DepositReceipt, OpTransactionSigned};
+use reth_op::{node::OpBlockAssembler, DepositReceipt};
+use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct CustomBlockAssembler {
-    inner: OpBlockAssembler<CustomChainSpec>,
+    block_assembler: OpBlockAssembler<CustomChainSpec>,
+}
+
+impl CustomBlockAssembler {
+    pub const fn new(chain_spec: Arc<CustomChainSpec>) -> Self {
+        Self { block_assembler: OpBlockAssembler::new(chain_spec) }
+    }
 }
 
 impl<F> BlockAssembler<F> for CustomBlockAssembler
 where
     F: for<'a> BlockExecutorFactory<
         ExecutionCtx<'a> = OpBlockExecutionCtx,
-        Transaction = OpTransactionSigned,
+        Transaction = CustomTransaction,
         Receipt: Receipt + DepositReceipt,
     >,
 {
-    // TODO: use custom block here
-    type Block = Block<OpTransactionSigned>;
+    type Block = Block;
 
     fn assemble_block(
         &self,
-        input: BlockAssemblerInput<'_, '_, F>,
+        input: BlockAssemblerInput<'_, '_, F, CustomHeader>,
     ) -> Result<Self::Block, BlockExecutionError> {
-        let block = self.inner.assemble_block(input)?;
-
-        Ok(block)
+        Ok(self.block_assembler.assemble_block(input)?.map_header(From::from))
     }
 }

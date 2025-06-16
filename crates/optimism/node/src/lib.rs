@@ -20,7 +20,7 @@ pub mod engine;
 pub use engine::OpEngineTypes;
 
 pub mod node;
-pub use node::{OpNetworkPrimitives, OpNode};
+pub use node::*;
 
 pub mod rpc;
 pub use rpc::OpEngineApiBuilder;
@@ -35,7 +35,10 @@ pub use reth_optimism_txpool as txpool;
 pub mod utils;
 
 pub use reth_optimism_payload_builder::{
-    OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder, OpPayloadBuilderAttributes,
+    self as payload, config::OpDAConfig, OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilder,
+    OpPayloadBuilderAttributes, OpPayloadPrimitives, OpPayloadTypes,
 };
 
 pub use reth_optimism_evm::*;
+
+pub use reth_optimism_storage::OpStorage;

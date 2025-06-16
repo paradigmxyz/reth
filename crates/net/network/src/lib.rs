@@ -168,13 +168,15 @@ pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
 pub use network::{NetworkHandle, NetworkProtocols};
 pub use swarm::NetworkConnectionState;
-pub use transactions::{FilterAnnouncement, MessageFilter};
 
 /// re-export p2p interfaces
 pub use reth_network_p2p as p2p;
 
-/// re-export types crate
-pub use reth_eth_wire_types as types;
+/// re-export types crates
+pub mod types {
+    pub use reth_eth_wire_types::*;
+    pub use reth_network_types::*;
+}
 
 use aquamarine as _;
 

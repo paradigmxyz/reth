@@ -214,7 +214,7 @@ pub trait TransactionValidator: Debug + Send + Sync {
     fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
         let futures = transactions.into_iter().map(|tx| self.validate_transaction(origin, tx));
         futures_util::future::join_all(futures)
@@ -261,7 +261,7 @@ where
     async fn validate_transactions_with_origin(
         &self,
         origin: TransactionOrigin,
-        transactions: Vec<Self::Transaction>,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
         match self {
             Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,

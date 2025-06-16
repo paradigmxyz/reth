@@ -41,8 +41,8 @@ impl EthVersion {
                 // eth/67,68 are eth/66 minus GetNodeData and NodeData messages
                 13
             }
-            // eth69 is both eth67 and eth68 minus NewBlockHashes and NewBlock
-            Self::Eth69 => 11,
+            // eth69 is both eth67 and eth68 minus NewBlockHashes and NewBlock + BlockRangeUpdate
+            Self::Eth69 => 12,
         }
     }
 
@@ -163,7 +163,7 @@ impl From<EthVersion> for &'static str {
     }
 }
 
-/// RLPx `p2p` protocol version
+/// `RLPx` `p2p` protocol version
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
@@ -265,6 +265,6 @@ mod tests {
         assert_eq!(EthVersion::Eth66.total_messages(), 15);
         assert_eq!(EthVersion::Eth67.total_messages(), 13);
         assert_eq!(EthVersion::Eth68.total_messages(), 13);
-        assert_eq!(EthVersion::Eth69.total_messages(), 11);
+        assert_eq!(EthVersion::Eth69.total_messages(), 12);
     }
 }

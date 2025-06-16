@@ -38,13 +38,14 @@ where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
             Evm: ConfigureEvm<
-                Primitives: NodePrimitives<
-                    BlockHeader = ProviderHeader<Self::Provider>,
-                    SignedTx = ProviderTx<Self::Provider>,
-                    Receipt = ProviderReceipt<Self::Provider>,
-                    Block = ProviderBlock<Self::Provider>,
-                >,
+                Primitives = <Self as RpcNodeCore>::Primitives,
                 NextBlockEnvCtx = NextBlockEnvAttributes,
+            >,
+            Primitives: NodePrimitives<
+                BlockHeader = ProviderHeader<Self::Provider>,
+                SignedTx = ProviderTx<Self::Provider>,
+                Receipt = ProviderReceipt<Self::Provider>,
+                Block = ProviderBlock<Self::Provider>,
             >,
         >,
     Provider: BlockReader<
@@ -70,7 +71,7 @@ where
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent.parent_beacon_block_root(),
+            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
             withdrawals: None,
         })
     }

@@ -4,11 +4,11 @@
 //!
 //! Examples include creating, encoding, and decoding protocol messages.
 //!
-//! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol).
+//! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md).
 
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
+    GetNodeData, GetPooledTransactions, GetReceipts, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
     Transactions,
 };
@@ -78,7 +78,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 if version.is_eth69() {
                     return Err(MessageError::Invalid(version, EthMessageID::NewBlock));
                 }
-                EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?))
+                EthMessage::NewBlock(Box::new(N::NewBlockPayload::decode(buf)?))
             }
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
@@ -218,9 +218,9 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a `NewBlock` message broadcast to the network.
     #[cfg_attr(
         feature = "serde",
-        serde(bound = "N::Block: serde::Serialize + serde::de::DeserializeOwned")
+        serde(bound = "N::NewBlockPayload: serde::Serialize + serde::de::DeserializeOwned")
     )]
-    NewBlock(Box<NewBlock<N::Block>>),
+    NewBlock(Box<N::NewBlockPayload>),
     /// Represents a Transactions message broadcast to the network.
     #[cfg_attr(
         feature = "serde",
@@ -394,7 +394,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EthBroadcastMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a new block broadcast message.
-    NewBlock(Arc<NewBlock<N::Block>>),
+    NewBlock(Arc<N::NewBlockPayload>),
     /// Represents a transactions broadcast message.
     Transactions(SharedTransactions<N::BroadcastedTransaction>),
 }
@@ -494,9 +494,13 @@ impl EthMessageID {
         }
     }
 
-    /// Returns the max value.
-    pub const fn max() -> u8 {
-        Self::Receipts.to_u8()
+    /// Returns the max value for the given version.
+    pub const fn max(version: EthVersion) -> u8 {
+        if version.is_eth69() {
+            Self::BlockRangeUpdate.to_u8()
+        } else {
+            Self::Receipts.to_u8()
+        }
     }
 }
 
