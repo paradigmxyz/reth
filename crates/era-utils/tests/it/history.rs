@@ -1,12 +1,16 @@
-use alloy_primitives::bytes::Bytes;
-use futures_util::{Stream, TryStreamExt};
-use reqwest::{Client, IntoUrl, Url};
+use crate::ClientWithFakeIndex;
+use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
-use reth_era_downloader::{EraClient, EraStream, EraStreamConfig, HttpClient};
+use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
+use reth_era_utils::{export, import, ExportConfig};
 use reth_etl::Collector;
-use reth_provider::test_utils::create_test_provider_factory;
-use std::{future::Future, str::FromStr};
+use reth_provider::{test_utils::create_test_provider_factory, BlockNumReader, BlockReader};
+use std::str::FromStr;
 use tempfile::tempdir;
+
+const EXPORT_FIRST_BLOCK: u64 = 0;
+const EXPORT_BLOCK_PER_FILE: u64 = 250;
+const EXPORT_TOTAL_BLOCKS: u64 = 1000;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_history_imports_from_fresh_state_successfully() {
@@ -31,42 +35,95 @@ async fn test_history_imports_from_fresh_state_successfully() {
     let mut hash_collector = Collector::new(4096, folder);
 
     let expected_block_number = 8191;
-    let actual_block_number = reth_era_utils::import(stream, &pf, &mut hash_collector).unwrap();
+    let actual_block_number = import(stream, &pf, &mut hash_collector).unwrap();
 
     assert_eq!(actual_block_number, expected_block_number);
 }
 
-/// An HTTP client pre-programmed with canned answer to index.
-///
-/// Passes any other calls to a real HTTP client!
-#[derive(Debug, Clone)]
-struct ClientWithFakeIndex(Client);
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_roundtrip_export_after_import() {
+    let url = Url::from_str("https://era.ithaca.xyz/era1/index.html").unwrap();
+    let download_folder = tempdir().unwrap();
+    let download_folder = download_folder.path().to_owned().into_boxed_path();
 
-impl HttpClient for ClientWithFakeIndex {
-    fn get<U: IntoUrl + Send + Sync>(
-        &self,
-        url: U,
-    ) -> impl Future<
-        Output = eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>,
-    > + Send
-           + Sync {
-        let url = url.into_url().unwrap();
+    let client = EraClient::new(ClientWithFakeIndex(Client::new()), url, download_folder);
+    let config = EraStreamConfig::default().with_max_files(1).with_max_concurrent_downloads(1);
 
-        async move {
-            match url.to_string().as_str() {
-                "https://era.ithaca.xyz/era1/index.html" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from_static(b"<a href=\"https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1\">mainnet-00000-5ec1ffb8.era1</a>"))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                _ => {
-                    let response = Client::get(&self.0, url).send().await?;
+    let stream = EraStream::new(client, config);
+    let pf = create_test_provider_factory();
+    init_genesis(&pf).unwrap();
 
-                    Ok(Box::new(response.bytes_stream().map_err(|e| eyre::Error::new(e)))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-            }
-        }
+    let folder = tempdir().unwrap();
+    let folder = Some(folder.path().to_owned());
+    let mut hash_collector = Collector::new(4096, folder);
+
+    let imported_blocks = import(stream, &pf, &mut hash_collector).unwrap();
+
+    assert_eq!(imported_blocks, 8191);
+    let provider_ref = pf.provider_rw().unwrap().0;
+    let best_block = provider_ref.best_block_number().unwrap();
+
+    assert!(best_block <= 8191, "Best block {} should not exceed imported count", best_block);
+
+    for &block_num in &[0, 1, 2, 10, 50] {
+        let block_exists = provider_ref.block_by_number(block_num).unwrap().is_some();
+        assert!(block_exists, "Block {} should exist after importing 8191 blocks", block_num);
     }
+
+    let last_block = EXPORT_FIRST_BLOCK + EXPORT_TOTAL_BLOCKS - 1;
+    let expected_files = (EXPORT_TOTAL_BLOCKS + EXPORT_BLOCK_PER_FILE - 1) / EXPORT_BLOCK_PER_FILE;
+
+    let export_folder = tempdir().unwrap();
+    let export_config = ExportConfig {
+        dir: export_folder.path().to_path_buf(),
+        first_block_number: EXPORT_FIRST_BLOCK,
+        last_block_number: last_block,
+        step: EXPORT_BLOCK_PER_FILE,
+        network: "mainnet".to_string(),
+    };
+
+    let exported_files = export(&provider_ref, &export_config).expect("Export should succeed");
+
+    assert_eq!(
+        exported_files.len(),
+        expected_files as usize,
+        "Should create {} files for {} blocks with {} blocks per file",
+        expected_files,
+        EXPORT_TOTAL_BLOCKS,
+        EXPORT_BLOCK_PER_FILE
+    );
+
+    for (i, file_path) in exported_files.iter().enumerate() {
+        assert!(file_path.exists(), "File {} should exist", i + 1);
+
+        let file_size = std::fs::metadata(file_path).unwrap().len();
+        assert!(file_size > 0, "File {} should not be empty", i + 1);
+        assert!(
+            file_size > 500,
+            "File {} should be substantial size, got {} bytes",
+            i + 1,
+            file_size
+        );
+
+        let file_name = file_path.file_name().unwrap().to_str().unwrap();
+        assert!(file_name.starts_with("mainnet-"), "File {} should start with 'mainnet-'", i + 1);
+        assert!(file_name.ends_with(".era1"), "File {} should end with '.era1'", i + 1);
+
+        // Calculate expected filename: each file contains EXPORT_BLOCK_PER_FILE blocks, except possibly the last one
+        let file_start_block = EXPORT_FIRST_BLOCK + (i as u64 * EXPORT_BLOCK_PER_FILE);
+        let remaining_blocks = EXPORT_TOTAL_BLOCKS - (i as u64 * EXPORT_BLOCK_PER_FILE);
+        let blocks_in_this_file = std::cmp::min(EXPORT_BLOCK_PER_FILE, remaining_blocks);
+
+        let expected_filename =
+            format!("mainnet-{}-{}.era1", file_start_block, blocks_in_this_file);
+        assert_eq!(file_name, expected_filename, "File {} should have correct name", i + 1);
+    }
+
+    // Verify total coverage matches expected range
+    let total_blocks_exported = (last_block - EXPORT_FIRST_BLOCK) + 1;
+    assert_eq!(
+        total_blocks_exported, EXPORT_TOTAL_BLOCKS,
+        "Should export exactly {} blocks (from {} to {})",
+        EXPORT_TOTAL_BLOCKS, EXPORT_FIRST_BLOCK, last_block
+    );
 }
