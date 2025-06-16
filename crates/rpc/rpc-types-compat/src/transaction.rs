@@ -14,7 +14,7 @@ use alloy_rpc_types_eth::{
 use core::error;
 use op_alloy_consensus::{
     transaction::{OpDepositInfo, OpTransactionInfo},
-    OpTxEnvelope,
+    OpTransaction as OpConsensusTransaction, OpTxEnvelope,
 };
 use op_alloy_rpc_types::OpTransactionRequest;
 use op_revm::OpTransaction;
@@ -226,11 +226,37 @@ pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
     Ok(OpTransactionInfo::new(tx_info, deposit_meta))
 }
 
-impl FromConsensusTx<OpTxEnvelope> for op_alloy_rpc_types::Transaction {
+impl<T: OpConsensusTransaction + ConsensusTransaction> FromConsensusTx<T>
+    for op_alloy_rpc_types::Transaction<T>
+{
     type TxInfo = OpTransactionInfo;
 
-    fn from_consensus_tx(tx: OpTxEnvelope, signer: Address, tx_info: Self::TxInfo) -> Self {
-        Self::from_transaction(tx.with_signer(signer), tx_info)
+    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
+        let base_fee = tx_info.inner.base_fee;
+        let effective_gas_price = if tx.is_deposit() {
+            // For deposits, we must always set the `gasPrice` field to 0 in rpc
+            // deposit tx don't have a gas price field, but serde of `Transaction` will take care of
+            // it
+            0
+        } else {
+            base_fee
+                .map(|base_fee| {
+                    tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
+                })
+                .unwrap_or_else(|| tx.max_fee_per_gas())
+        };
+
+        Self {
+            inner: Transaction {
+                inner: Recovered::new_unchecked(tx, signer),
+                block_hash: tx_info.inner.block_hash,
+                block_number: tx_info.inner.block_number,
+                transaction_index: tx_info.inner.index,
+                effective_gas_price: Some(effective_gas_price),
+            },
+            deposit_nonce: tx_info.deposit_meta.deposit_nonce,
+            deposit_receipt_version: tx_info.deposit_meta.deposit_receipt_version,
+        }
     }
 }
 
