@@ -40,13 +40,7 @@ pub struct EthPubSub<Eth> {
 
 // === impl EthPubSub ===
 
-impl<N: NodePrimitives, Eth> EthPubSub<Eth>
-where
-    Eth: RpcNodeCore<
-        Provider: BlockNumReader + CanonStateSubscriptions<Primitives = N>,
-        Pool: TransactionPool,
-    >,
-{
+impl<Eth> EthPubSub<Eth> {
     /// Creates a new, shareable instance.
     ///
     /// Subscription tasks are spawned via [`tokio::task::spawn`]
@@ -64,7 +58,15 @@ where
     const fn inner(&self) -> &Arc<EthPubSubInner<Eth>> {
         &self.inner
     }
+}
 
+impl<N: NodePrimitives, Eth> EthPubSub<Eth>
+where
+    Eth: RpcNodeCore<
+        Provider: BlockNumReader + CanonStateSubscriptions<Primitives = N>,
+        Pool: TransactionPool,
+    >,
+{
     /// Returns the current sync status for the `syncing` subscription
     pub fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
         self.inner().sync_status(is_syncing)
