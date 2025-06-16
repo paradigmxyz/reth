@@ -227,7 +227,7 @@ fn bench_state_root(c: &mut Criterion) {
 
                         (genesis_hash, payload_processor, provider, state_updates)
                     },
-                    |(genesis_hash, mut payload_processor, provider, state_updates)| {
+                    |(genesis_hash, payload_processor, provider, state_updates)| {
                         black_box({
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
