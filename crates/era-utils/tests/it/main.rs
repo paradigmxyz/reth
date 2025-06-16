@@ -10,7 +10,6 @@ mod history;
 
 const fn main() {}
 
-
 /// An HTTP client pre-programmed with canned answer to index.
 ///
 /// Passes any other calls to a real HTTP client!

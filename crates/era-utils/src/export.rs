@@ -28,8 +28,7 @@ const VERSION_ENTRY_SIZE: usize = ENTRY_HEADER_SIZE;
 
 /// Configuration to export block history
 /// to era1 files
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
+#[derive(Clone, Debug, Default)]
 pub struct ExportConfig {
     /// Directory to export era1 files to
     pub dir: PathBuf,
@@ -64,14 +63,31 @@ where
         config.first_block_number, config.last_block_number, config.step
     );
 
-    let head_block_number = provider.best_block_number()?;
+    let best_block_number = provider.best_block_number()?;
 
-    let last_block_number = if head_block_number < config.last_block_number {
+    // Determine the actual last block to export
+    // best_block_number() might be outdated, so check actual block availability
+
+    let last_block_number = if best_block_number < config.last_block_number {
         warn!(
             "Last block {} is beyond current head {}, setting last = head",
-            config.last_block_number, head_block_number
+            config.last_block_number, best_block_number
         );
-        head_block_number
+
+        // Check if more blocks are actually available beyond what `best_block_number()` reports
+        if let Ok(headers) = provider.headers_range(best_block_number..=config.last_block_number) {
+            if let Some(last_header) = headers.last() {
+                let highest_block = last_header.number();
+                info!("Found highest available block {} via headers_range", highest_block);
+                highest_block
+            } else {
+                warn!("No headers found in range, using best_block_number {}", best_block_number);
+                best_block_number
+            }
+        } else {
+            warn!("headers_range failed, using best_block_number {}", best_block_number);
+            best_block_number
+        }
     } else {
         config.last_block_number
     };

@@ -109,7 +109,8 @@ async fn test_roundtrip_export_after_import() {
         assert!(file_name.starts_with("mainnet-"), "File {} should start with 'mainnet-'", i + 1);
         assert!(file_name.ends_with(".era1"), "File {} should end with '.era1'", i + 1);
 
-        // Calculate expected filename: each file contains EXPORT_BLOCK_PER_FILE blocks, except possibly the last one
+        // Calculate expected filename: each file contains EXPORT_BLOCK_PER_FILE blocks, except
+        // possibly the last one
         let file_start_block = EXPORT_FIRST_BLOCK + (i as u64 * EXPORT_BLOCK_PER_FILE);
         let remaining_blocks = EXPORT_TOTAL_BLOCKS - (i as u64 * EXPORT_BLOCK_PER_FILE);
         let blocks_in_this_file = std::cmp::min(EXPORT_BLOCK_PER_FILE, remaining_blocks);
