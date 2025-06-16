@@ -185,7 +185,7 @@ where
         _end: BlockNumber,
     ) -> Result<Vec<B256>, ProviderError> {
         // Would need to make multiple RPC calls
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -247,17 +247,17 @@ where
 
     fn pending_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
         // RPC doesn't provide pending block number and hash together
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn safe_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
         // RPC doesn't provide safe block number and hash
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn finalized_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
         // RPC doesn't provide finalized block number and hash
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -335,7 +335,7 @@ where
         _block_hash: B256,
     ) -> Result<Option<StateProviderBox>, ProviderError> {
         // RPC provider doesn't support pending state by hash
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -577,7 +577,7 @@ where
 
     fn bytecode_by_hash(&self, _code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
         // Cannot fetch bytecode by hash via RPC
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn account_code(&self, addr: &Address) -> Result<Option<Bytecode>, ProviderError> {
@@ -786,7 +786,7 @@ where
         _block: BlockNumber,
     ) -> Result<Option<reth_execution_types::ExecutionOutcome<Self::Receipt>>, ProviderError> {
         // RPC doesn't provide execution outcomes
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -884,7 +884,7 @@ where
         _start: BlockNumber,
         _end: BlockNumber,
     ) -> Result<Vec<B256>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -898,19 +898,19 @@ where
         &self,
         _block_id: BlockId,
     ) -> Result<Option<BlockNumber>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn safe_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn finalized_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -927,24 +927,24 @@ where
         _hash: B256,
         _source: reth_provider::BlockSource,
     ) -> Result<Option<Self::Block>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn block(
         &self,
         _id: alloy_rpc_types::BlockHashOrNumber,
     ) -> Result<Option<Self::Block>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block(&self) -> Result<Option<RecoveredBlock<Self::Block>>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn pending_block_and_receipts(
         &self,
     ) -> Result<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn recovered_block(
@@ -952,7 +952,7 @@ where
         _id: alloy_rpc_types::BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> Result<Option<RecoveredBlock<Self::Block>>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn sealed_block_with_senders(
@@ -960,28 +960,28 @@ where
         _id: alloy_rpc_types::BlockHashOrNumber,
         _transaction_kind: TransactionVariant,
     ) -> Result<Option<RecoveredBlock<BlockTy<Node>>>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<Self::Block>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_with_senders_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<RecoveredBlock<BlockTy<Node>>>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn recovered_block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<RecoveredBlock<Self::Block>>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -994,65 +994,65 @@ where
     type Transaction = TxTy<Node>;
 
     fn transaction_id(&self, _tx_hash: B256) -> Result<Option<TxNumber>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_by_id(&self, _id: TxNumber) -> Result<Option<Self::Transaction>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_by_id_unhashed(
         &self,
         _id: TxNumber,
     ) -> Result<Option<Self::Transaction>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_by_hash(&self, _hash: B256) -> Result<Option<Self::Transaction>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_by_hash_with_meta(
         &self,
         _hash: B256,
     ) -> Result<Option<(Self::Transaction, TransactionMeta)>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_block(&self, _id: TxNumber) -> Result<Option<BlockNumber>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_block(
         &self,
         _block: alloy_rpc_types::BlockHashOrNumber,
     ) -> Result<Option<Vec<Self::Transaction>>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_block_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Vec<Self::Transaction>>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transactions_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
     ) -> Result<Vec<Self::Transaction>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn senders_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
     ) -> Result<Vec<Address>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn transaction_sender(&self, _id: TxNumber) -> Result<Option<Address>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -1065,32 +1065,32 @@ where
     type Receipt = ReceiptTy<Node>;
 
     fn receipt(&self, _id: TxNumber) -> Result<Option<Self::Receipt>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn receipt_by_hash(&self, _hash: B256) -> Result<Option<Self::Receipt>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn receipts_by_block(
         &self,
         _block: alloy_rpc_types::BlockHashOrNumber,
     ) -> Result<Option<Vec<Self::Receipt>>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn receipts_by_tx_range(
         &self,
         _range: impl RangeBounds<TxNumber>,
     ) -> Result<Vec<Self::Receipt>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn receipts_by_block_range(
         &self,
         _range: RangeInclusive<BlockNumber>,
     ) -> Result<Vec<Vec<Self::Receipt>>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -1103,40 +1103,40 @@ where
     type Header = HeaderTy<Node>;
 
     fn header(&self, _block_hash: &BlockHash) -> Result<Option<Self::Header>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn header_by_number(&self, _num: BlockNumber) -> Result<Option<Self::Header>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn header_td(&self, _hash: &BlockHash) -> Result<Option<U256>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn header_td_by_number(&self, _number: BlockNumber) -> Result<Option<U256>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn headers_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<Self::Header>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn sealed_header(
         &self,
         _number: BlockNumber,
     ) -> Result<Option<SealedHeader<HeaderTy<Node>>>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn sealed_headers_range(
         &self,
         _range: impl RangeBounds<BlockNumber>,
     ) -> Result<Vec<SealedHeader<HeaderTy<Node>>>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn sealed_headers_while(
@@ -1144,7 +1144,7 @@ where
         _range: impl RangeBounds<BlockNumber>,
         _predicate: impl FnMut(&SealedHeader<HeaderTy<Node>>) -> bool,
     ) -> Result<Vec<SealedHeader<HeaderTy<Node>>>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -1158,11 +1158,11 @@ where
         &self,
         _segment: PruneSegment,
     ) -> Result<Option<PruneCheckpoint>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn get_prune_checkpoints(&self) -> Result<Vec<(PruneSegment, PruneCheckpoint)>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -1173,18 +1173,18 @@ where
     Node: NodeTypes,
 {
     fn get_stage_checkpoint(&self, _id: StageId) -> Result<Option<StageCheckpoint>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn get_stage_checkpoint_progress(
         &self,
         _id: StageId,
     ) -> Result<Option<Vec<u8>>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn get_all_checkpoints(&self) -> Result<Vec<(String, StageCheckpoint)>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -1198,7 +1198,7 @@ where
         &self,
         _block_number: BlockNumber,
     ) -> Result<Vec<reth_db_api::models::AccountBeforeTx>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -1264,7 +1264,7 @@ where
         _block_hash: B256,
     ) -> Result<Option<StateProviderBox>, ProviderError> {
         // RPC provider doesn't support pending state by hash
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -1311,14 +1311,14 @@ where
         &self,
         _num: u64,
     ) -> Result<Option<reth_db_api::models::StoredBlockBodyIndices>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn block_body_indices_range(
         &self,
         _range: RangeInclusive<u64>,
     ) -> Result<Vec<reth_db_api::models::StoredBlockBodyIndices>, ProviderError> {
-        Ok(Vec::new())
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
@@ -1338,11 +1338,11 @@ where
     Node: NodeTypes,
 {
     fn last_finalized_block_number(&self) -> Result<Option<BlockNumber>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 
     fn last_safe_block_number(&self) -> Result<Option<BlockNumber>, ProviderError> {
-        Ok(None)
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
