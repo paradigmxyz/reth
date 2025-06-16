@@ -11,6 +11,8 @@ use reth_era_utils as era;
 use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_node_core::version::SHORT_VERSION;
+use reth_provider::StaticFileProviderFactory;
+use reth_static_file_types::StaticFileSegment;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -72,8 +74,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
         let mut hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
 
+        let next_block = provider_factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .unwrap_or_default() +
+            1;
+
         if let Some(path) = self.import.path {
-            let stream = read_dir(path, 0)?;
+            let stream = read_dir(path, next_block)?;
 
             era::import(stream, &provider_factory, &mut hash_collector)?;
         } else {
@@ -86,8 +94,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
             fs::create_dir_all(&folder)?;
 
+            let config = EraStreamConfig::default().start_from(next_block);
             let client = EraClient::new(Client::new(), url, folder);
-            let stream = EraStream::new(client, EraStreamConfig::default());
+            let stream = EraStream::new(client, config);
 
             era::import(stream, &provider_factory, &mut hash_collector)?;
         }
