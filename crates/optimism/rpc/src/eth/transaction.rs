@@ -7,7 +7,6 @@ use crate::{
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTxEnvelope};
-use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::DepositReceipt;
 use reth_rpc_eth_api::{
@@ -32,7 +31,6 @@ where
         + reth_rpc_eth_api::helpers::LoadReceipt
         + EthApiTypes<Error = OpEthApiError>,
     N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
-    Self::Provider: CanonStateSubscriptions + reth_chainspec::ChainSpecProvider,
 {
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
         self.inner.eth_api.signers()

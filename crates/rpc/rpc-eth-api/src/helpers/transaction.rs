@@ -53,10 +53,7 @@ use std::sync::Arc;
 /// See also <https://github.com/paradigmxyz/reth/issues/6240>
 ///
 /// This implementation follows the behaviour of Geth and disables the basefee check for tracing.
-pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt>
-where
-    <Self as RpcNodeCore>::Provider: CanonStateSubscriptions,
-{
+pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Signer access in default (L1) trait method implementations.

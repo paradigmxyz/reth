@@ -59,13 +59,10 @@ pub trait FullEthApi:
     + EthFees
     + Trace
     + LoadReceipt
-where
-    <Self as crate::RpcNodeCore>::Provider: reth_chain_state::CanonStateSubscriptions,
 {
 }
 
-impl<T> FullEthApi for T
-where
+impl<T> FullEthApi for T where
     T: FullEthApiTypes
         + EthApiSpec
         + EthTransactions
@@ -74,7 +71,6 @@ where
         + EthCall
         + EthFees
         + Trace
-        + LoadReceipt,
-    <T as crate::RpcNodeCore>::Provider: reth_chain_state::CanonStateSubscriptions,
+        + LoadReceipt
 {
 }
