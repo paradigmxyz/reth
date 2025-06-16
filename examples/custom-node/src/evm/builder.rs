@@ -3,6 +3,8 @@ use reth_ethereum::node::api::FullNodeTypes;
 use reth_node_builder::{components::ExecutorBuilder, BuilderContext, NodeTypes};
 use std::{future, future::Future};
 
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct CustomExecutorBuilder;
 
 impl<Node: FullNodeTypes> ExecutorBuilder<Node> for CustomExecutorBuilder

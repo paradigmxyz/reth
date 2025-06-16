@@ -311,7 +311,8 @@ impl InvalidPoolTransactionError {
                     InvalidTransactionError::ChainIdMismatch |
                     InvalidTransactionError::GasUintOverflow |
                     InvalidTransactionError::TxTypeNotSupported |
-                    InvalidTransactionError::SignerAccountHasBytecode => true,
+                    InvalidTransactionError::SignerAccountHasBytecode |
+                    InvalidTransactionError::GasLimitTooHigh => true,
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,

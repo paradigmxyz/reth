@@ -4,7 +4,6 @@ ethereum_package:
       el_extra_params:
         - "--rpc.eth-proof-window=100"
       cl_type: teku
-      cl_image: "consensys/teku:25.4.0"
   network_params:
     preset: minimal
     genesis_delay: 5

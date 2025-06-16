@@ -1,9 +1,10 @@
 use crate::{ScrollTxEnvelope, ScrollTxType, TxL1Message};
 use alloy_consensus::{
-    SignableTransaction, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy, Typed2718,
+    transaction::RlpEcdsaEncodableTx, SignableTransaction, Signed, Transaction, TxEip1559,
+    TxEip2930, TxEip7702, TxLegacy, Typed2718,
 };
-use alloy_eips::eip2930::AccessList;
-use alloy_primitives::{Address, Bytes, TxKind, B256};
+use alloy_eips::{eip2930::AccessList, Encodable2718};
+use alloy_primitives::{bytes::BufMut, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256};
 #[cfg(feature = "reth-codec")]
 use {
     reth_codecs::{Compact, __private::bytes},
@@ -339,6 +340,128 @@ impl Transaction for ScrollTypedTransaction {
             Self::Eip7702(tx) => tx.is_create(),
             Self::L1Message(tx) => tx.is_create(),
         }
+    }
+}
+
+impl RlpEcdsaEncodableTx for ScrollTypedTransaction {
+    fn rlp_encoded_fields_length(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.rlp_encoded_fields_length(),
+            Self::Eip2930(tx) => tx.rlp_encoded_fields_length(),
+            Self::Eip1559(tx) => tx.rlp_encoded_fields_length(),
+            Self::Eip7702(tx) => tx.rlp_encoded_fields_length(),
+            Self::L1Message(tx) => tx.rlp_encoded_fields_length(),
+        }
+    }
+
+    fn rlp_encode_fields(&self, out: &mut dyn alloy_rlp::BufMut) {
+        match self {
+            Self::Legacy(tx) => tx.rlp_encode_fields(out),
+            Self::Eip2930(tx) => tx.rlp_encode_fields(out),
+            Self::Eip1559(tx) => tx.rlp_encode_fields(out),
+            Self::Eip7702(tx) => tx.rlp_encode_fields(out),
+            Self::L1Message(tx) => tx.rlp_encode_fields(out),
+        }
+    }
+
+    fn eip2718_encode_with_type(&self, signature: &Signature, _ty: u8, out: &mut dyn BufMut) {
+        match self {
+            Self::Legacy(tx) => tx.eip2718_encode_with_type(signature, tx.ty(), out),
+            Self::Eip2930(tx) => tx.eip2718_encode_with_type(signature, tx.ty(), out),
+            Self::Eip1559(tx) => tx.eip2718_encode_with_type(signature, tx.ty(), out),
+            Self::Eip7702(tx) => tx.eip2718_encode_with_type(signature, tx.ty(), out),
+            Self::L1Message(tx) => tx.encode_2718(out),
+        }
+    }
+
+    fn eip2718_encode(&self, signature: &Signature, out: &mut dyn BufMut) {
+        match self {
+            Self::Legacy(tx) => tx.eip2718_encode(signature, out),
+            Self::Eip2930(tx) => tx.eip2718_encode(signature, out),
+            Self::Eip1559(tx) => tx.eip2718_encode(signature, out),
+            Self::Eip7702(tx) => tx.eip2718_encode(signature, out),
+            Self::L1Message(tx) => tx.encode_2718(out),
+        }
+    }
+
+    fn network_encode_with_type(&self, signature: &Signature, _ty: u8, out: &mut dyn BufMut) {
+        match self {
+            Self::Legacy(tx) => tx.network_encode_with_type(signature, tx.ty(), out),
+            Self::Eip2930(tx) => tx.network_encode_with_type(signature, tx.ty(), out),
+            Self::Eip1559(tx) => tx.network_encode_with_type(signature, tx.ty(), out),
+            Self::Eip7702(tx) => tx.network_encode_with_type(signature, tx.ty(), out),
+            Self::L1Message(tx) => tx.network_encode(out),
+        }
+    }
+
+    fn network_encode(&self, signature: &Signature, out: &mut dyn BufMut) {
+        match self {
+            Self::Legacy(tx) => tx.network_encode(signature, out),
+            Self::Eip2930(tx) => tx.network_encode(signature, out),
+            Self::Eip1559(tx) => tx.network_encode(signature, out),
+            Self::Eip7702(tx) => tx.network_encode(signature, out),
+            Self::L1Message(tx) => tx.network_encode(out),
+        }
+    }
+
+    fn tx_hash_with_type(&self, signature: &Signature, _ty: u8) -> TxHash {
+        match self {
+            Self::Legacy(tx) => tx.tx_hash_with_type(signature, tx.ty()),
+            Self::Eip2930(tx) => tx.tx_hash_with_type(signature, tx.ty()),
+            Self::Eip1559(tx) => tx.tx_hash_with_type(signature, tx.ty()),
+            Self::Eip7702(tx) => tx.tx_hash_with_type(signature, tx.ty()),
+            Self::L1Message(tx) => tx.tx_hash(),
+        }
+    }
+
+    fn tx_hash(&self, signature: &Signature) -> TxHash {
+        match self {
+            Self::Legacy(tx) => tx.tx_hash(signature),
+            Self::Eip2930(tx) => tx.tx_hash(signature),
+            Self::Eip1559(tx) => tx.tx_hash(signature),
+            Self::Eip7702(tx) => tx.tx_hash(signature),
+            Self::L1Message(tx) => tx.tx_hash(),
+        }
+    }
+}
+
+impl SignableTransaction<Signature> for ScrollTypedTransaction {
+    fn set_chain_id(&mut self, chain_id: ChainId) {
+        match self {
+            Self::Legacy(tx) => tx.set_chain_id(chain_id),
+            Self::Eip2930(tx) => tx.set_chain_id(chain_id),
+            Self::Eip1559(tx) => tx.set_chain_id(chain_id),
+            Self::Eip7702(tx) => tx.set_chain_id(chain_id),
+            Self::L1Message(_) => {}
+        }
+    }
+
+    fn encode_for_signing(&self, out: &mut dyn BufMut) {
+        match self {
+            Self::Legacy(tx) => tx.encode_for_signing(out),
+            Self::Eip2930(tx) => tx.encode_for_signing(out),
+            Self::Eip1559(tx) => tx.encode_for_signing(out),
+            Self::Eip7702(tx) => tx.encode_for_signing(out),
+            Self::L1Message(_) => {}
+        }
+    }
+
+    fn payload_len_for_signature(&self) -> usize {
+        match self {
+            Self::Legacy(tx) => tx.payload_len_for_signature(),
+            Self::Eip2930(tx) => tx.payload_len_for_signature(),
+            Self::Eip1559(tx) => tx.payload_len_for_signature(),
+            Self::Eip7702(tx) => tx.payload_len_for_signature(),
+            Self::L1Message(_) => 0,
+        }
+    }
+
+    fn into_signed(self, signature: Signature) -> Signed<Self, Signature>
+    where
+        Self: Sized,
+    {
+        let hash = self.tx_hash(&signature);
+        Signed::new_unchecked(self, signature, hash)
     }
 }
 

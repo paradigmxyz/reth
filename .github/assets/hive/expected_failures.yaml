@@ -36,7 +36,6 @@ engine-api: []
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-cancun:
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
-  - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
 
 sync: []
 

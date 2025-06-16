@@ -178,6 +178,7 @@ mod op {
 #[cfg(feature = "scroll-alloy-traits")]
 mod scroll {
     use super::*;
+    use scroll_alloy_consensus::ScrollTxEnvelope;
 
     impl InMemorySize for scroll_alloy_consensus::ScrollTypedTransaction {
         fn size(&self) -> usize {
@@ -198,6 +199,18 @@ mod scroll {
                 Self::Eip2930(tx) => tx.size(),
                 Self::Eip1559(tx) => tx.size(),
                 Self::Eip7702(tx) => tx.size(),
+            }
+        }
+    }
+
+    impl InMemorySize for ScrollTxEnvelope {
+        fn size(&self) -> usize {
+            match self {
+                Self::Legacy(tx) => tx.size(),
+                Self::Eip2930(tx) => tx.size(),
+                Self::Eip1559(tx) => tx.size(),
+                Self::Eip7702(tx) => tx.size(),
+                Self::L1Message(tx) => tx.size(),
             }
         }
     }

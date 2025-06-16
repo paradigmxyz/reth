@@ -1,6 +1,7 @@
 use alloy_eips::BlockId;
 use alloy_primitives::{Address, U256};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_chain_state::CanonStateNotification;
 use std::collections::HashMap;
 
 /// Reth API namespace for reth-specific methods
@@ -13,4 +14,12 @@ pub trait RethApi {
         &self,
         block_id: BlockId,
     ) -> RpcResult<HashMap<Address, U256>>;
+
+    /// Subscribe to json `ChainNotifications`
+    #[subscription(
+        name = "subscribeChainNotifications",
+        unsubscribe = "unsubscribeChainNotifications",
+        item = CanonStateNotification
+    )]
+    async fn reth_subscribe_chain_notifications(&self) -> jsonrpsee::core::SubscriptionResult;
 }

@@ -12,7 +12,7 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-# Alloy
+# alloy
 alloy-rlp.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
@@ -20,6 +20,7 @@ alloy-primitives = { workspace = true, features = ["rlp"] }
 
 # misc
 derive_more = { workspace = true, features = ["display"] }
+serde_with = { workspace = true, optional = true }
 
 # arbitrary
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -62,6 +63,7 @@ std = [
     "rand/std",
     "derive_more/std",
     "serde_json/std",
+    "serde_with?/std",
 ]
 k256 = [
     "alloy-primitives/k256",
@@ -98,6 +100,7 @@ serde = [
     "reth-codecs?/serde",
 ]
 serde-bincode-compat = [
+    "dep:serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
 ]

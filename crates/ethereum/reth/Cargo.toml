@@ -35,6 +35,7 @@ reth-exex = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-node-builder = { workspace = true, optional = true }
 reth-tasks = { workspace = true, optional = true }
+reth-cli-util = { workspace = true, optional = true }
 
 # reth-ethereum
 reth-ethereum-primitives.workspace = true
@@ -104,7 +105,7 @@ full = [
     "network",
 ]
 
-cli = ["dep:reth-ethereum-cli"]
+cli = ["dep:reth-ethereum-cli", "dep:reth-cli-util"]
 consensus = [
     "dep:reth-consensus",
     "dep:reth-consensus-common",
