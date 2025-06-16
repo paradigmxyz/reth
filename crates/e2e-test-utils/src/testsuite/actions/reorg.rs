@@ -58,11 +58,13 @@ where
                         "Direct hash reorgs are not supported. Use CaptureBlock to tag the target block first, then use ReorgTo::new_from_tag()"
                     ));
                 }
-                ReorgTarget::Tag(tag) => env
-                    .block_registry
-                    .get(tag)
-                    .copied()
-                    .ok_or_else(|| eyre::eyre!("Block tag '{}' not found in registry", tag))?,
+                ReorgTarget::Tag(tag) => {
+                    let (block_info, _node_idx) =
+                        env.block_registry.get(tag).copied().ok_or_else(|| {
+                            eyre::eyre!("Block tag '{}' not found in registry", tag)
+                        })?;
+                    block_info
+                }
             };
 
             let mut sequence = Sequence::new(vec![
@@ -102,12 +104,13 @@ where
                 block_info.number, block_info.hash
             );
 
-            // update environment to point to the target block
-            env.current_block_info = Some(block_info);
-            env.latest_header_time = block_info.timestamp;
+            // update active node state to point to the target block
+            let active_node_state = env.active_node_state_mut()?;
+            active_node_state.current_block_info = Some(block_info);
+            active_node_state.latest_header_time = block_info.timestamp;
 
             // update fork choice state to make the target block canonical
-            env.latest_fork_choice_state = ForkchoiceState {
+            active_node_state.latest_fork_choice_state = ForkchoiceState {
                 head_block_hash: block_info.hash,
                 safe_block_hash: block_info.hash,
                 finalized_block_hash: block_info.hash,

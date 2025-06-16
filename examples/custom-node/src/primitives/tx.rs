@@ -8,9 +8,9 @@ use alloy_consensus::{
     SignableTransaction, Signed, Transaction,
 };
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
-use alloy_primitives::{keccak256, Signature, TxHash};
+use alloy_primitives::{keccak256, Sealed, Signature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth_codecs::{
     alloy::transaction::{FromTxCompact, ToTxCompact},
     Compact,
@@ -242,5 +242,9 @@ impl Compact for CustomTransactionEnvelope {
 impl OpTransaction for CustomTransactionEnvelope {
     fn is_deposit(&self) -> bool {
         false
+    }
+
+    fn as_deposit(&self) -> Option<&Sealed<TxDeposit>> {
+        None
     }
 }
