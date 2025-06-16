@@ -67,7 +67,6 @@ where
 
     // Determine the actual last block to export
     // best_block_number() might be outdated, so check actual block availability
-
     let last_block_number = if best_block_number < config.last_block_number {
         warn!(
             "Last block {} is beyond current head {}, setting last = head",
