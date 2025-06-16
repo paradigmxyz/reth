@@ -169,7 +169,7 @@ pub enum AnnouncementAcceptance {
 }
 
 /// A policy that defines how to handle incoming transaction announcements,
-/// particularly concerning transaction types and other announcements metadata.
+/// particularly concerning transaction types and other announcement metadata.
 pub trait AnnouncementFilteringPolicy: Send + Sync + Unpin + 'static {
     /// Decides how to handle a transaction announcement based on its type, hash, and size.
     fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance;
