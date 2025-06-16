@@ -63,15 +63,15 @@ async fn test_roundtrip_export_after_import() {
     let provider_ref = pf.provider_rw().unwrap().0;
     let best_block = provider_ref.best_block_number().unwrap();
 
-    assert!(best_block <= 8191, "Best block {} should not exceed imported count", best_block);
+    assert!(best_block <= 8191, "Best block {best_block} should not exceed imported count");
 
     for &block_num in &[0, 1, 2, 10, 50] {
         let block_exists = provider_ref.block_by_number(block_num).unwrap().is_some();
-        assert!(block_exists, "Block {} should exist after importing 8191 blocks", block_num);
+        assert!(block_exists, "Block {block_num} should exist after importing 8191 blocks");
     }
 
     let last_block = EXPORT_FIRST_BLOCK + EXPORT_TOTAL_BLOCKS - 1;
-    let expected_files = (EXPORT_TOTAL_BLOCKS + EXPORT_BLOCK_PER_FILE - 1) / EXPORT_BLOCK_PER_FILE;
+    let expected_files = EXPORT_TOTAL_BLOCKS.div_ceil(EXPORT_BLOCK_PER_FILE);
 
     let export_folder = tempdir().unwrap();
     let export_config = ExportConfig {
@@ -87,10 +87,7 @@ async fn test_roundtrip_export_after_import() {
     assert_eq!(
         exported_files.len(),
         expected_files as usize,
-        "Should create {} files for {} blocks with {} blocks per file",
-        expected_files,
-        EXPORT_TOTAL_BLOCKS,
-        EXPORT_BLOCK_PER_FILE
+        "Should create {expected_files} files for {EXPORT_TOTAL_BLOCKS} blocks with {EXPORT_BLOCK_PER_FILE} blocks per file"
     );
 
     for (i, file_path) in exported_files.iter().enumerate() {
@@ -115,8 +112,7 @@ async fn test_roundtrip_export_after_import() {
         let remaining_blocks = EXPORT_TOTAL_BLOCKS - (i as u64 * EXPORT_BLOCK_PER_FILE);
         let blocks_in_this_file = std::cmp::min(EXPORT_BLOCK_PER_FILE, remaining_blocks);
 
-        let expected_filename =
-            format!("mainnet-{}-{}.era1", file_start_block, blocks_in_this_file);
+        let expected_filename = format!("mainnet-{file_start_block}-{blocks_in_this_file}.era1");
         assert_eq!(file_name, expected_filename, "File {} should have correct name", i + 1);
     }
 
@@ -124,7 +120,6 @@ async fn test_roundtrip_export_after_import() {
     let total_blocks_exported = (last_block - EXPORT_FIRST_BLOCK) + 1;
     assert_eq!(
         total_blocks_exported, EXPORT_TOTAL_BLOCKS,
-        "Should export exactly {} blocks (from {} to {})",
-        EXPORT_TOTAL_BLOCKS, EXPORT_FIRST_BLOCK, last_block
+        "Should export exactly {EXPORT_TOTAL_BLOCKS} blocks (from {EXPORT_FIRST_BLOCK} to {last_block})"
     );
 }
