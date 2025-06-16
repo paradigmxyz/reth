@@ -13,7 +13,7 @@ use test_case::test_case;
 async fn test_getting_file_name_after_fetching_file_list(url: &str) {
     let url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
-    let folder = folder.path().to_owned().into_boxed_path();
+    let folder = folder.path();
     let client = EraClient::new(StubClient, url, folder);
 
     client.fetch_file_list().await.unwrap();
