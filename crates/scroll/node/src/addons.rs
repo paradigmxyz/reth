@@ -72,12 +72,9 @@ where
 {
     type Handle = RpcHandle<N, ScrollEthApi<N>>;
 
-    async fn launch_add_ons(
-        self,
-        ctx: reth_node_api::AddOnsContext<'_, N>,
-    ) -> eyre::Result<Self::Handle> {
+    async fn launch_add_ons(self, ctx: AddOnsContext<'_, N>) -> eyre::Result<Self::Handle> {
         let Self { rpc_add_ons } = self;
-        rpc_add_ons.launch_add_ons_with(ctx, |_, _, _| Ok(())).await
+        rpc_add_ons.launch_add_ons_with(ctx, |_| Ok(())).await
     }
 }
 

@@ -16,7 +16,10 @@ use reth_codecs::{
     Compact,
 };
 use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
-use reth_op::primitives::{Extended, SignedTransaction};
+use reth_op::{
+    primitives::{Extended, SignedTransaction},
+    OpTransaction,
+};
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
@@ -233,5 +236,11 @@ impl Compact for CustomTransactionEnvelope {
         let (inner, buf) = <TxPayment as Compact>::from_compact(rest, len);
         let signed = Signed::new_unhashed(inner, signature);
         (CustomTransactionEnvelope { inner: signed }, buf)
+    }
+}
+
+impl OpTransaction for CustomTransactionEnvelope {
+    fn is_deposit(&self) -> bool {
+        false
     }
 }

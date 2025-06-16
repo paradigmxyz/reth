@@ -1,6 +1,9 @@
+use crate::{ScrollPooledTransaction, ScrollTxType, ScrollTypedTransaction, TxL1Message};
+use core::hash::Hash;
+
 use alloy_consensus::{
-    transaction::RlpEcdsaDecodableTx, Sealable, Sealed, Signed, Transaction, TxEip1559, TxEip2930,
-    TxEip7702, TxLegacy, Typed2718,
+    error::ValueError, transaction::RlpEcdsaDecodableTx, Sealable, Sealed, Signed, Transaction,
+    TxEip1559, TxEip2930, TxEip7702, TxLegacy, Typed2718,
 };
 use alloy_eips::{
     eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
@@ -9,8 +12,12 @@ use alloy_eips::{
 };
 use alloy_primitives::{Address, Bytes, Signature, TxKind, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
-
-use crate::{ScrollTxType, TxL1Message};
+#[cfg(feature = "reth-codec")]
+use reth_codecs::{
+    Compact,
+    __private::bytes::BufMut,
+    alloy::transaction::{CompactEnvelope, Envelope, FromTxCompact, ToTxCompact},
+};
 
 /// The Ethereum [EIP-2718] Transaction Envelope, modified for Scroll chains.
 ///
@@ -23,14 +30,13 @@ use crate::{ScrollTxType, TxL1Message};
 /// flag.
 ///
 /// [EIP-2718]: https://eips.ethereum.org/EIPS/eip-2718
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
     feature = "serde",
     serde(into = "serde_from::TaggedTxEnvelope", from = "serde_from::MaybeTaggedTxEnvelope")
 )]
 #[cfg_attr(all(any(test, feature = "arbitrary"), feature = "k256"), derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ScrollTxEnvelope {
     /// An untagged [`TxLegacy`].
     Legacy(Signed<TxLegacy>),
@@ -77,6 +83,33 @@ impl From<TxL1Message> for ScrollTxEnvelope {
 impl From<Sealed<TxL1Message>> for ScrollTxEnvelope {
     fn from(v: Sealed<TxL1Message>) -> Self {
         Self::L1Message(v)
+    }
+}
+
+impl From<Signed<ScrollTypedTransaction>> for ScrollTxEnvelope {
+    fn from(value: Signed<ScrollTypedTransaction>) -> Self {
+        let (tx, sig, hash) = value.into_parts();
+        match tx {
+            ScrollTypedTransaction::Legacy(tx_legacy) => {
+                let tx = Signed::new_unchecked(tx_legacy, sig, hash);
+                Self::Legacy(tx)
+            }
+            ScrollTypedTransaction::Eip2930(tx_eip2930) => {
+                let tx = Signed::new_unchecked(tx_eip2930, sig, hash);
+                Self::Eip2930(tx)
+            }
+            ScrollTypedTransaction::Eip1559(tx_eip1559) => {
+                let tx = Signed::new_unchecked(tx_eip1559, sig, hash);
+                Self::Eip1559(tx)
+            }
+            ScrollTypedTransaction::Eip7702(tx_eip7702) => {
+                let tx = Signed::new_unchecked(tx_eip7702, sig, hash);
+                Self::Eip7702(tx)
+            }
+            ScrollTypedTransaction::L1Message(tx) => {
+                Self::L1Message(Sealed::new_unchecked(tx, hash))
+            }
+        }
     }
 }
 
@@ -377,6 +410,100 @@ impl ScrollTxEnvelope {
             Self::L1Message(_) => None,
         }
     }
+
+    /// Converts the [`ScrollTxEnvelope`] into a [`ScrollPooledTransaction`], returns an error if
+    /// the transaction is a L1 message.
+    pub fn try_into_pooled(self) -> Result<ScrollPooledTransaction, ValueError<Self>> {
+        match self {
+            Self::Legacy(tx) => Ok(tx.into()),
+            Self::Eip2930(tx) => Ok(tx.into()),
+            Self::Eip1559(tx) => Ok(tx.into()),
+            Self::Eip7702(tx) => Ok(tx.into()),
+            Self::L1Message(tx) => Err(ValueError::new(tx.into(), "L1 messages cannot be pooled")),
+        }
+    }
+}
+
+#[cfg(feature = "reth-codec")]
+impl ToTxCompact for ScrollTxEnvelope {
+    fn to_tx_compact(&self, buf: &mut (impl BufMut + AsMut<[u8]>)) {
+        match self {
+            Self::Legacy(tx) => tx.tx().to_compact(buf),
+            Self::Eip2930(tx) => tx.tx().to_compact(buf),
+            Self::Eip1559(tx) => tx.tx().to_compact(buf),
+            Self::Eip7702(tx) => tx.tx().to_compact(buf),
+            Self::L1Message(tx) => tx.to_compact(buf),
+        };
+    }
+}
+
+#[cfg(feature = "reth-codec")]
+impl FromTxCompact for ScrollTxEnvelope {
+    type TxType = ScrollTxType;
+
+    fn from_tx_compact(buf: &[u8], tx_type: ScrollTxType, signature: Signature) -> (Self, &[u8]) {
+        match tx_type {
+            ScrollTxType::Legacy => {
+                let (tx, buf) = TxLegacy::from_compact(buf, buf.len());
+                let tx = Signed::new_unhashed(tx, signature);
+                (Self::Legacy(tx), buf)
+            }
+            ScrollTxType::Eip2930 => {
+                let (tx, buf) = TxEip2930::from_compact(buf, buf.len());
+                let tx = Signed::new_unhashed(tx, signature);
+                (Self::Eip2930(tx), buf)
+            }
+            ScrollTxType::Eip1559 => {
+                let (tx, buf) = TxEip1559::from_compact(buf, buf.len());
+                let tx = Signed::new_unhashed(tx, signature);
+                (Self::Eip1559(tx), buf)
+            }
+            ScrollTxType::Eip7702 => {
+                let (tx, buf) = TxEip7702::from_compact(buf, buf.len());
+                let tx = Signed::new_unhashed(tx, signature);
+                (Self::Eip7702(tx), buf)
+            }
+            ScrollTxType::L1Message => {
+                let (tx, buf) = TxL1Message::from_compact(buf, buf.len());
+                let tx = Sealed::new(tx);
+                (Self::L1Message(tx), buf)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "reth-codec")]
+const L1_MESSAGE_SIGNATURE: Signature = Signature::new(U256::ZERO, U256::ZERO, false);
+
+#[cfg(feature = "reth-codec")]
+impl Envelope for ScrollTxEnvelope {
+    fn signature(&self) -> &Signature {
+        match self {
+            Self::Legacy(tx) => tx.signature(),
+            Self::Eip2930(tx) => tx.signature(),
+            Self::Eip1559(tx) => tx.signature(),
+            Self::Eip7702(tx) => tx.signature(),
+            Self::L1Message(_) => &L1_MESSAGE_SIGNATURE,
+        }
+    }
+
+    fn tx_type(&self) -> Self::TxType {
+        Self::tx_type(self)
+    }
+}
+
+#[cfg(feature = "reth-codec")]
+impl Compact for ScrollTxEnvelope {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: BufMut + AsMut<[u8]>,
+    {
+        CompactEnvelope::to_compact(self, buf)
+    }
+
+    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
+        CompactEnvelope::from_compact(buf, len)
+    }
 }
 
 impl Encodable for ScrollTxEnvelope {
@@ -459,6 +586,33 @@ impl Encodable2718 for ScrollTxEnvelope {
     }
 }
 
+#[cfg(feature = "k256")]
+impl alloy_consensus::transaction::SignerRecoverable for ScrollTxEnvelope {
+    fn recover_signer(&self) -> Result<Address, alloy_consensus::crypto::RecoveryError> {
+        let signature_hash = match self {
+            Self::Legacy(tx) => tx.signature_hash(),
+            Self::Eip2930(tx) => tx.signature_hash(),
+            Self::Eip1559(tx) => tx.signature_hash(),
+            Self::Eip7702(tx) => tx.signature_hash(),
+            Self::L1Message(tx) => return Ok(tx.sender),
+        };
+        let signature = self.signature().expect("handled L1 message in previous match");
+        alloy_consensus::crypto::secp256k1::recover_signer(&signature, signature_hash)
+    }
+
+    fn recover_signer_unchecked(&self) -> Result<Address, alloy_consensus::crypto::RecoveryError> {
+        let signature_hash = match self {
+            Self::Legacy(tx) => tx.signature_hash(),
+            Self::Eip2930(tx) => tx.signature_hash(),
+            Self::Eip1559(tx) => tx.signature_hash(),
+            Self::Eip7702(tx) => tx.signature_hash(),
+            Self::L1Message(tx) => return Ok(tx.sender),
+        };
+        let signature = self.signature().expect("handled L1 message in previous match");
+        alloy_consensus::crypto::secp256k1::recover_signer_unchecked(&signature, signature_hash)
+    }
+}
+
 #[cfg(feature = "serde")]
 mod serde_from {
     //! NB: Why do we need this?
@@ -533,6 +687,166 @@ mod serde_from {
                 ScrollTxEnvelope::Eip7702(signed) => Self::Eip7702(signed),
                 ScrollTxEnvelope::L1Message(tx) => Self::L1Message(tx),
             }
+        }
+    }
+}
+
+/// Bincode-compatible serde implementation for `ScrollTxEnvelope`.
+#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
+pub(super) mod serde_bincode_compat {
+    use crate::TxL1Message;
+
+    use alloy_consensus::{
+        transaction::serde_bincode_compat::{TxEip1559, TxEip2930, TxEip7702, TxLegacy},
+        Sealed, Signed,
+    };
+    use alloy_primitives::{Signature, B256};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible representation of an `ScrollTxEnvelope`.
+    #[derive(Debug, Serialize, Deserialize)]
+    pub enum ScrollTxEnvelope<'a> {
+        /// Legacy variant.
+        Legacy {
+            /// Transaction signature.
+            signature: Signature,
+            /// Borrowed legacy transaction data.
+            transaction: TxLegacy<'a>,
+        },
+        /// EIP-2930 variant.
+        Eip2930 {
+            /// Transaction signature.
+            signature: Signature,
+            /// Borrowed EIP-2930 transaction data.
+            transaction: TxEip2930<'a>,
+        },
+        /// EIP-1559 variant.
+        Eip1559 {
+            /// Transaction signature.
+            signature: Signature,
+            /// Borrowed EIP-1559 transaction data.
+            transaction: TxEip1559<'a>,
+        },
+        /// EIP-7702 variant.
+        Eip7702 {
+            /// Transaction signature.
+            signature: Signature,
+            /// Borrowed EIP-7702 transaction data.
+            transaction: TxEip7702<'a>,
+        },
+        /// L1 message variant.
+        TxL1Message {
+            /// Precomputed hash.
+            hash: B256,
+            /// Borrowed deposit transaction data.
+            transaction: TxL1Message,
+        },
+    }
+
+    impl<'a> From<&'a super::ScrollTxEnvelope> for ScrollTxEnvelope<'a> {
+        fn from(value: &'a super::ScrollTxEnvelope) -> Self {
+            match value {
+                super::ScrollTxEnvelope::Legacy(signed_legacy) => Self::Legacy {
+                    signature: *signed_legacy.signature(),
+                    transaction: signed_legacy.tx().into(),
+                },
+                super::ScrollTxEnvelope::Eip2930(signed_2930) => Self::Eip2930 {
+                    signature: *signed_2930.signature(),
+                    transaction: signed_2930.tx().into(),
+                },
+                super::ScrollTxEnvelope::Eip1559(signed_1559) => Self::Eip1559 {
+                    signature: *signed_1559.signature(),
+                    transaction: signed_1559.tx().into(),
+                },
+                super::ScrollTxEnvelope::Eip7702(signed_7702) => Self::Eip7702 {
+                    signature: *signed_7702.signature(),
+                    transaction: signed_7702.tx().into(),
+                },
+                super::ScrollTxEnvelope::L1Message(sealed_l1_message) => Self::TxL1Message {
+                    hash: sealed_l1_message.seal(),
+                    transaction: sealed_l1_message.inner().clone(),
+                },
+            }
+        }
+    }
+
+    impl<'a> From<ScrollTxEnvelope<'a>> for super::ScrollTxEnvelope {
+        fn from(value: ScrollTxEnvelope<'a>) -> Self {
+            match value {
+                ScrollTxEnvelope::Legacy { signature, transaction } => {
+                    Self::Legacy(Signed::new_unhashed(transaction.into(), signature))
+                }
+                ScrollTxEnvelope::Eip2930 { signature, transaction } => {
+                    Self::Eip2930(Signed::new_unhashed(transaction.into(), signature))
+                }
+                ScrollTxEnvelope::Eip1559 { signature, transaction } => {
+                    Self::Eip1559(Signed::new_unhashed(transaction.into(), signature))
+                }
+                ScrollTxEnvelope::Eip7702 { signature, transaction } => {
+                    Self::Eip7702(Signed::new_unhashed(transaction.into(), signature))
+                }
+                ScrollTxEnvelope::TxL1Message { hash, transaction } => {
+                    Self::L1Message(Sealed::new_unchecked(transaction, hash))
+                }
+            }
+        }
+    }
+
+    impl SerializeAs<super::ScrollTxEnvelope> for ScrollTxEnvelope<'_> {
+        fn serialize_as<S>(
+            source: &super::ScrollTxEnvelope,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let borrowed = ScrollTxEnvelope::from(source);
+            borrowed.serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::ScrollTxEnvelope> for ScrollTxEnvelope<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::ScrollTxEnvelope, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let borrowed = ScrollTxEnvelope::deserialize(deserializer)?;
+            Ok(borrowed.into())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use arbitrary::Arbitrary;
+        use rand::Rng;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        /// Tests a bincode round-trip for `ScrollTxEnvelope` using an arbitrary instance.
+        #[test]
+        fn test_scroll_tx_envelope_bincode_roundtrip_arbitrary() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                // Use the bincode-compatible representation defined in this module.
+                #[serde_as(as = "ScrollTxEnvelope<'_>")]
+                envelope: super::super::ScrollTxEnvelope,
+            }
+
+            let mut bytes = [0u8; 1024];
+            rand::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                envelope: super::super::ScrollTxEnvelope::arbitrary(
+                    &mut arbitrary::Unstructured::new(&bytes),
+                )
+                .unwrap(),
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
         }
     }
 }

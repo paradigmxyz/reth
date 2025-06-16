@@ -19,17 +19,11 @@ reth-zstd-compressors = { workspace = true, optional = true }
 # alloy
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
-alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
-# revm
-revm-context.workspace = true
-
 # scroll
 scroll-alloy-consensus.workspace = true
-scroll-alloy-evm.workspace = true
-revm-scroll.workspace = true
 
 # codec
 bytes = { workspace = true, optional = true }
@@ -37,23 +31,15 @@ modular-bitfield = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 
 # misc
-derive_more.workspace = true
 once_cell.workspace = true
-rand_08 = { workspace = true, optional = true }
 
 # test
 arbitrary = { workspace = true, features = ["derive"], optional = true }
-proptest = { workspace = true, optional = true }
-secp256k1 = { workspace = true, optional = true }
 
 [dev-dependencies]
-proptest-arbitrary-interop.workspace = true
 reth-codecs = { workspace = true, features = ["test-utils"] }
 rstest.workspace = true
-proptest.workspace = true
-secp256k1 = { workspace = true, features = ["rand"] }
 rand.workspace = true
-rand_08.workspace = true
 
 [features]
 default = ["std"]
@@ -68,21 +54,12 @@ std = [
     "reth-primitives-traits/std",
     "reth-zstd-compressors?/std",
     "reth-codecs?/std",
-    "derive_more/std",
     "once_cell/std",
-    "proptest?/std",
     "serde?/std",
-    "rand_08?/std",
-    "secp256k1?/std",
-    "revm-scroll/std",
-    "revm-context/std",
-    "alloy-evm/std",
-    "scroll-alloy-evm/std",
 ]
 reth-codec = [
     "dep:reth-codecs",
     "std",
-    "dep:proptest",
     "dep:arbitrary",
     "reth-primitives-traits/reth-codec",
     "scroll-alloy-consensus/reth-codec",
@@ -93,17 +70,12 @@ reth-codec = [
 serde = [
     "dep:serde",
     "scroll-alloy-consensus/serde",
-    "secp256k1?/serde",
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "bytes?/serde",
-    "rand_08?/serde",
     "reth-codecs?/serde",
     "reth-primitives-traits/serde",
-    "revm-scroll/serde",
-    "revm-context/serde",
-    "scroll-alloy-evm/serde",
     "rand/serde",
 ]
 serde-bincode-compat = [
@@ -114,9 +86,6 @@ serde-bincode-compat = [
 ]
 arbitrary = [
     "dep:arbitrary",
-    "dep:secp256k1",
-    "secp256k1?/rand",
-    "rand_08",
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",

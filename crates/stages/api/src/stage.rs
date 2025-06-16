@@ -165,6 +165,11 @@ pub struct ExecOutput {
 }
 
 impl ExecOutput {
+    /// Mark the stage as not done, checkpointing at the given place.
+    pub const fn in_progress(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: false }
+    }
+
     /// Mark the stage as done, checkpointing at the given place.
     pub const fn done(checkpoint: StageCheckpoint) -> Self {
         Self { checkpoint, done: true }
@@ -271,4 +276,4 @@ pub trait StageExt<Provider>: Stage<Provider> {
     }
 }
 
-impl<Provider, S: Stage<Provider>> StageExt<Provider> for S {}
+impl<Provider, S: Stage<Provider> + ?Sized> StageExt<Provider> for S {}

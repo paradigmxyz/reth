@@ -1,4 +1,4 @@
-use crate::{DBProvider, OmmersProvider, StorageLocation};
+use crate::{DBProvider, StorageLocation};
 use alloc::vec::Vec;
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
@@ -146,9 +146,7 @@ where
 
 impl<Provider, T, H> BlockBodyReader<Provider> for EthStorage<T, H>
 where
-    Provider: DBProvider
-        + ChainSpecProvider<ChainSpec: EthereumCapabilities>
-        + OmmersProvider<Header = H>,
+    Provider: DBProvider + ChainSpecProvider<ChainSpec: EthereumCapabilities>,
     T: SignedTransaction,
     H: FullBlockHeader,
 {
@@ -181,9 +179,14 @@ where
             let ommers = if chain_spec.is_paris_active_at_block(header.number()) {
                 Vec::new()
             } else {
-                provider.ommers(header.number().into())?.unwrap_or_default()
+                // Pre-merge: fetch ommers from database using direct database access
+                provider
+                    .tx_ref()
+                    .cursor_read::<tables::BlockOmmers<H>>()?
+                    .seek_exact(header.number())?
+                    .map(|(_, stored_ommers)| stored_ommers.ommers)
+                    .unwrap_or_default()
             };
-
             bodies.push(alloy_consensus::BlockBody { transactions, ommers, withdrawals });
         }
 

@@ -101,7 +101,7 @@ impl TxL1Message {
     }
 
     /// Outputs the length of the transaction's fields, without a RLP header.
-    fn rlp_encoded_fields_length(&self) -> usize {
+    pub fn rlp_encoded_fields_length(&self) -> usize {
         self.queue_index.length() +
             self.gas_limit.length() +
             self.to.length() +
@@ -112,7 +112,7 @@ impl TxL1Message {
 
     /// Encode the fields of the transaction without a RLP header.
     /// <https://github.com/scroll-tech/go-ethereum/blob/9fff27e4f34fb5097100ed76ee725ce056267f4b/core/types/l1_message_tx.go#L12-L19>
-    fn rlp_encode_fields(&self, out: &mut dyn alloy_rlp::BufMut) {
+    pub fn rlp_encode_fields(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.queue_index.encode(out);
         self.gas_limit.encode(out);
         self.to.encode(out);

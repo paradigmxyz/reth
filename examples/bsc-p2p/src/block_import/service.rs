@@ -3,6 +3,7 @@ use crate::block_import::parlia::{ParliaConsensus, ParliaConsensusErr};
 use alloy_rpc_types::engine::{ForkchoiceState, PayloadStatusEnum};
 use futures::{future::Either, stream::FuturesUnordered, StreamExt};
 use reth_engine_primitives::{BeaconConsensusEngineHandle, EngineTypes};
+use reth_eth_wire::NewBlock;
 use reth_network::{
     import::{BlockImportError, BlockImportEvent, BlockImportOutcome, BlockValidation},
     message::NewBlockMessage,
@@ -25,13 +26,13 @@ pub type BscBlock<T> =
     <<<T as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block;
 
 /// Network message containing a new block
-pub(crate) type BlockMsg<T> = NewBlockMessage<BscBlock<T>>;
+pub(crate) type BlockMsg<T> = NewBlockMessage<NewBlock<BscBlock<T>>>;
 
 /// Import outcome for a block
-pub(crate) type Outcome<T> = BlockImportOutcome<BscBlock<T>>;
+pub(crate) type Outcome<T> = BlockImportOutcome<NewBlock<BscBlock<T>>>;
 
 /// Import event for a block
-pub(crate) type ImportEvent<T> = BlockImportEvent<BscBlock<T>>;
+pub(crate) type ImportEvent<T> = BlockImportEvent<NewBlock<BscBlock<T>>>;
 
 /// Future that processes a block import and returns its outcome
 type PayloadFut<T> = Pin<Box<dyn Future<Output = Outcome<T>> + Send + Sync>>;
@@ -371,7 +372,7 @@ mod tests {
         /// Run a block import test with the given event assertion
         async fn assert_block_import<F>(&mut self, assert_fn: F)
         where
-            F: Fn(&BlockImportEvent<BscBlock<EthEngineTypes>>) -> bool,
+            F: Fn(&BlockImportEvent<NewBlock<BscBlock<EthEngineTypes>>>) -> bool,
         {
             let block_msg = create_test_block();
             self.handle.send_block(block_msg, PeerId::random()).unwrap();
@@ -400,7 +401,7 @@ mod tests {
     }
 
     /// Creates a test block message
-    fn create_test_block() -> NewBlockMessage<Block> {
+    fn create_test_block() -> NewBlockMessage<NewBlock<Block>> {
         let block: reth_primitives::Block = Block::default();
         let new_block = NewBlock { block: block.clone(), td: U128::ZERO };
         NewBlockMessage { hash: block.header.hash_slow(), block: Arc::new(new_block) }
