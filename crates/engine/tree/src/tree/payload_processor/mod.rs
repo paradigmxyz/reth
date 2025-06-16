@@ -28,6 +28,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
 };
+use reth_trie_sparse::SparseTrieState;
 use std::{
     collections::VecDeque,
     sync::{
@@ -67,6 +68,9 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// A sparse trie, kept around to be used for the state root computation so that allocations
+    /// can be minimized.
+    sparse_trie: Option<SparseTrieState>,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -91,6 +95,7 @@ where
             evm_config,
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
+            sparse_trie: None,
             _marker: Default::default(),
         }
     }
@@ -134,7 +139,7 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     pub fn spawn<P>(
-        &self,
+        &mut self,
         header: SealedHeaderFor<N>,
         transactions: VecDeque<Recovered<N::SignedTx>>,
         provider_builder: StateProviderBuilder<N, P>,
@@ -191,11 +196,15 @@ where
             multi_proof_task.run();
         });
 
-        let mut sparse_trie_task = SparseTrieTask::new(
+        // take the sparse trie if it was set
+        let sparse_trie = self.sparse_trie.take();
+
+        let mut sparse_trie_task = SparseTrieTask::new_with_stored_trie(
             self.executor.clone(),
             sparse_trie_rx,
             proof_task.handle(),
             self.trie_metrics.clone(),
+            sparse_trie,
         );
 
         // wire the sparse trie to the state root response receiver
@@ -239,6 +248,11 @@ where
     {
         let prewarm_handle = self.spawn_caching_with(header, transactions, provider_builder, None);
         PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
+    }
+
+    /// Sets the sparse trie to be kept around for the state root computation.
+    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrieState) {
+        self.sparse_trie = Some(sparse_trie);
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -566,7 +580,7 @@ mod tests {
             }
         }
 
-        let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+        let mut payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
             WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
