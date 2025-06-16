@@ -48,6 +48,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, instrument, trace};
 
+use crate::session::active::RANGE_UPDATE_INTERVAL;
 pub use conn::EthRlpxConnection;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
@@ -532,6 +533,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 // negotiated version
                 let version = conn.version();
 
+                // Configure the interval at which the range information is updated, starting with
+                // ETH69
+                let range_update_interval = (conn.version() >= EthVersion::Eth69).then(|| {
+                    let mut interval = tokio::time::interval(RANGE_UPDATE_INTERVAL);
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    interval
+                });
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -556,6 +565,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     terminate_message: None,
                     range_info: None,
                     local_range_info: self.local_range_info.clone(),
+                    range_update_interval,
                 };
 
                 self.spawn(session);
