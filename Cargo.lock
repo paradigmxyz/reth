@@ -896,8 +896,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "983d99aa81f586cef9dae38443245e585840fcf0fc58b09aee0b1f27aed1d500"
+source = "git+https://github.com/mediocregopher/alloy-rs-trie?rev=da11f37#da11f3764d1846ef4c3d1e68454544848da88e45"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -7152,6 +7151,7 @@ dependencies = [
  "reth-rpc-types-compat",
  "reth-tasks",
  "reth-tokio-util",
+ "reth-tracing",
  "reth-transaction-pool",
  "similar-asserts",
  "tempfile",
@@ -12503,6 +12503,52 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.103",
+]
+
+[[package]]
+name = "trie-bug"
+version = "1.4.8"
+dependencies = [
+ "alloy-eips",
+ "alloy-json-rpc",
+ "alloy-primitives",
+ "alloy-provider",
+ "alloy-pubsub",
+ "alloy-rpc-client",
+ "alloy-rpc-types-engine",
+ "alloy-transport",
+ "alloy-transport-http",
+ "alloy-transport-ipc",
+ "alloy-transport-ws",
+ "async-trait",
+ "clap",
+ "csv",
+ "eyre",
+ "futures",
+ "humantime",
+ "nybbles",
+ "op-alloy-consensus",
+ "reqwest",
+ "reth-chainspec",
+ "reth-cli-runner",
+ "reth-cli-util",
+ "reth-db",
+ "reth-fs-util",
+ "reth-node-api",
+ "reth-node-core",
+ "reth-node-ethereum",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-tracing",
+ "reth-trie",
+ "reth-trie-common",
+ "reth-trie-db",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]

@@ -2412,8 +2412,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
+                trace!(target: "unwind_account_hashing", "upserting {}", hashed_address);
                 hashed_accounts_cursor.upsert(*hashed_address, account)?;
             } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                trace!(target: "unwind_account_hashing", "deleting {}", hashed_address);
                 hashed_accounts_cursor.delete_current()?;
             }
         }
@@ -2442,8 +2444,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
             changesets.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
+                trace!("Inserting hashed account: {}", hashed_address);
                 hashed_accounts_cursor.upsert(*hashed_address, account)?;
             } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
+                trace!("Deleting hashed account: {}", hashed_address);
                 hashed_accounts_cursor.delete_current()?;
             }
         }

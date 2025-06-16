@@ -224,10 +224,14 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
             let stage = &self.stages[stage_index];
             let stage_id = stage.id();
 
-            trace!(target: "sync::pipeline", stage = %stage_id, "Executing stage");
-            let next = self.execute_stage_to_completion(previous_stage, stage_index).await?;
-
-            trace!(target: "sync::pipeline", stage = %stage_id, ?next, "Completed stage");
+            let next = {
+                let span = tracing::trace_span!(target: "sync::pipeline", "stage", ?stage_id);
+                let _span_guard = span.enter();
+                trace!("Executing stage");
+                let next = self.execute_stage_to_completion(previous_stage, stage_index).await?;
+                trace!("Completed stage");
+                next
+            };
 
             match next {
                 ControlFlow::NoProgress { block_number } => {

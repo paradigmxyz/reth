@@ -10,6 +10,7 @@ exclude = [".github/"]
 [workspace]
 members = [
     "bin/reth-bench/",
+    "bin/trie-bug/",
     "bin/reth/",
     "crates/alloy-provider/",
     "crates/chain-state/",
@@ -323,6 +324,7 @@ reth = { path = "bin/reth" }
 reth-alloy-provider = { path = "crates/alloy-provider" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }
+trie-bug = { path = "bin/trie-bug" }
 reth-chain-state = { path = "crates/chain-state" }
 reth-chainspec = { path = "crates/chainspec", default-features = false }
 reth-cli = { path = "crates/cli/cli" }
@@ -731,6 +733,7 @@ vergen-git2 = "1.0.5"
 # alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "200d54ce6" }
 # alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "200d54ce6" }
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "200d54ce6" }
+alloy-trie = { git = "https://github.com/mediocregopher/alloy-rs-trie", rev = "da11f37" }
 
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }

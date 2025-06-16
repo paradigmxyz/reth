@@ -1,0 +1,71 @@
+Nibbles(0x080e0f) -> BranchNodeCompact {
+ state_mask: TrieMask(1111111111111110),
+ tree_mask: TrieMask(0010100000000000),
+ hash_mask: TrieMask(1011111111111110),
+ hashes: [
+     0x37ac52c0af606b38c7bb343cacb2d6451f4ad9032424a0a14845ab52627b5258,
+     0x63700fc1edfe127984e05112b5c2049a0d32955499c613bceaf1dc2c055ea884,
+     0x6073aa26e803f05b558bb935f93bcd6c369575d2e42dc5c7ca4c0da51db7e68f,
+     0xb86feec62b049df63e7e7872bca41ef6a47aec76e2057217273db6d7b0e5d4c6,
+     0xe51675be1ae9a1808813baf6a311e724886974bc7732c5dd9c72c6a159190b29,
+     0x4583f5f08850a5371dd78ad8cd64f25e1cd52e88f19f8dd7db145f81f95c97ba,
+     0xf27f05f77a31bfde98a3abe606a2566126a1e0c6c83bcb58d1a048b5e4750aab,
+     0x3f0c8e0be5beaf97a7189c7ffaca45373537bc2d7499de9683ac5bae8de42820,
+     0x7ca2890e6aab38404a4e2149c4cb87d17a53f549ac08a0ab2fc4ff999e75a307,
+     0x54eca13e2d99a10b95743d93ab4b55063f9d1a557d33345a59f0822b5e4ec08e,
+     0xe42d8d9efc93b7775e5aeda810a03edaa4b66ebff6971e39e99ddbac675bfd0b,
+     0x5abc7c0c8be6d6ff3130524336ed38c3256499543bc298f644fa7aa00b0fc647,
+     0x6e0f304478af06f11eb1bb0a02fdb3eaf1fcb3ee5ffb40ca47d96e0320b70c80,
+     0xcbfa68d7dcdfa371bb9388dbd1a60430dc34bd5a6c1f09c502a35060da970791
+ ], root_hash: None }
+
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e), position: Child(15), state_flag: true, tree_flag: true, hash_flag: true, hash: Some(0xe1fbc1e2e8fcdb6de774dc8ec583b9b8d48b81a9681eec96d
+78d30c722a04471) }) changes_contains:true
+update_skip_node old:false old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(1), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x37ac52c0af606b38c7bb343cacb2d6451f4ad9032424a0
+a14845ab52627b5258) }) changes_contains:false
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(1), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x37ac52c0af606b38c7bb343cacb2d6451f4ad9032424a0a
+14845ab52627b5258) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f01), value: 0x37ac52c0af606b38c7bb343cacb2d6451f4ad9032424a0a14845ab52627b5258, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(2), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x63700fc1edfe127984e05112b5c2049a0d32955499c613b
+ceaf1dc2c055ea884) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f02), value: 0x63700fc1edfe127984e05112b5c2049a0d32955499c613bceaf1dc2c055ea884, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(3), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x6073aa26e803f05b558bb935f93bcd6c369575d2e42dc5c
+7ca4c0da51db7e68f) }) changes_contains:true
+update_skip_node old:false old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(4), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0xb86feec62b049df63e7e7872bca41ef6a47aec76e20572
+17273db6d7b0e5d4c6) }) changes_contains:false
+account_node_iter.try_next() -> Leaf(0x8ef32bb927b4af1372536db79ba7ab71b11b0a92d8cc1ff575ad2c2fbf0c4bbd, Account { nonce: 0, balance: 1000000000000000000000, bytecode_hash: None })
+account_node_iter.try_next() -> Leaf(0x8ef32bc3ed6120e935988c6a090347af36d16dc5d8731679101d4a2eb1e2e9b7, Account { nonce: 0, balance: 1000000000000000000000, bytecode_hash: None })
+account_node_iter.try_next() -> Leaf(0x8ef3bb7bf0fd1cc0e9cb148623ed1d87b12434a1a78370a1067b86baf1c5d84d, Account { nonce: 0, balance: 1000000000000000000000, bytecode_hash: None })
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f04), value: 0xb86feec62b049df63e7e7872bca41ef6a47aec76e2057217273db6d7b0e5d4c6, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(5), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0xe51675be1ae9a1808813baf6a311e724886974bc7732c5d
+d9c72c6a159190b29) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f05), value: 0xe51675be1ae9a1808813baf6a311e724886974bc7732c5dd9c72c6a159190b29, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(6), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x4583f5f08850a5371dd78ad8cd64f25e1cd52e88f19f8dd
+7db145f81f95c97ba) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f06), value: 0x4583f5f08850a5371dd78ad8cd64f25e1cd52e88f19f8dd7db145f81f95c97ba, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(7), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0xf27f05f77a31bfde98a3abe606a2566126a1e0c6c83bcb5
+8d1a048b5e4750aab) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f07), value: 0xf27f05f77a31bfde98a3abe606a2566126a1e0c6c83bcb58d1a048b5e4750aab, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(8), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x3f0c8e0be5beaf97a7189c7ffaca45373537bc2d7499de9
+683ac5bae8de42820) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f08), value: 0x3f0c8e0be5beaf97a7189c7ffaca45373537bc2d7499de9683ac5bae8de42820, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(9), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x7ca2890e6aab38404a4e2149c4cb87d17a53f549ac08a0a
+b2fc4ff999e75a307) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f09), value: 0x7ca2890e6aab38404a4e2149c4cb87d17a53f549ac08a0ab2fc4ff999e75a307, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(10), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x54eca13e2d99a10b95743d93ab4b55063f9d1a557d3334
+5a59f0822b5e4ec08e) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f0a), value: 0x54eca13e2d99a10b95743d93ab4b55063f9d1a557d33345a59f0822b5e4ec08e, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(11), state_flag: true, tree_flag: true, hash_flag: true, hash: Some(0xe42d8d9efc93b7775e5aeda810a03edaa4b66ebff6971e3
+9e99ddbac675bfd0b) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f0b), value: 0xe42d8d9efc93b7775e5aeda810a03edaa4b66ebff6971e39e99ddbac675bfd0b, children_are_in_trie: true })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(12), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x5abc7c0c8be6d6ff3130524336ed38c3256499543bc298
+f644fa7aa00b0fc647) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f0c), value: 0x5abc7c0c8be6d6ff3130524336ed38c3256499543bc298f644fa7aa00b0fc647, children_are_in_trie: false })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(13), state_flag: true, tree_flag: true, hash_flag: true, hash: Some(0x6e0f304478af06f11eb1bb0a02fdb3eaf1fcb3ee5ffb40c
+a47d96e0320b70c80) }) changes_contains:false
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f0d), value: 0x6e0f304478af06f11eb1bb0a02fdb3eaf1fcb3ee5ffb40ca47d96e0320b70c80, children_are_in_trie: true })
+update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(14), state_flag: true, tree_flag: false, hash_flag: false, hash: None }) changes_contains:false
+update_skip_node old:false old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(15), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0xcbfa68d7dcdfa371bb9388dbd1a60430dc34bd5a6c1f0
+9c502a35060da970791) }) changes_contains:false
+account_node_iter.try_next() -> Leaf(0x8efe0c2bcc45787d7124977c8491f8acfef962a07d855f21a1563a2e67bd2a60, Account { nonce: 0, balance: 1000000000000000000000, bytecode_hash: None })
+account_node_iter.try_next() -> Branch(TrieBranchNode { key: Nibbles(0x080e0f0f), value: 0xcbfa68d7dcdfa371bb9388dbd1a60430dc34bd5a6c1f09c502a35060da970791, children_are_in_trie: false })

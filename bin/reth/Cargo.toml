@@ -47,6 +47,7 @@ reth-consensus.workspace = true
 reth-tokio-util.workspace = true
 reth-ress-protocol.workspace = true
 reth-ress-provider.workspace = true
+reth-tracing.workspace = true
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }

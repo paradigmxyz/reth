@@ -143,6 +143,9 @@ where
 
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
+        let _span =
+            tracing::trace_span!(target: "sync::stages::hashing_account", "executing").entered();
+
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
         }
@@ -154,6 +157,7 @@ where
         // AccountHashing table. Also, if we start from genesis, we need to hash from scratch, as
         // genesis accounts are not in changeset.
         if to_block - from_block > self.clean_threshold || from_block == 1 {
+            trace!("Clearing hashed accounts");
             let tx = provider.tx_ref();
 
             // clear table, load all accounts and hash it
@@ -202,10 +206,12 @@ where
                 }
 
                 let (key, value) = item?;
+                trace!("Appending account {key:?}");
                 hashed_account_cursor
                     .append(RawKey::<B256>::from_vec(key), &RawValue::<Account>::from_vec(value))?;
             }
         } else {
+            trace!("Aggregating accounts from transition changeset");
             // Aggregate all transition changesets and make a list of accounts that have been
             // changed.
             let lists = provider.changed_accounts_with_range(from_block..=to_block)?;

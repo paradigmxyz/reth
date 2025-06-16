@@ -1,0 +1,28 @@
+- 510 -> 509
+  - Leaf is not returned from TrieNodeIter
+    Leaf(0x1570e09a372d2c56d223af5fbad5b19b64fd8f7cf64172011935b24e2f2e3c1d, 1742219868)
+  - That leaf is not present in HashedStorages in the unwound db
+
+
+cargo run -- node --datadir /mnt/vol2/reth-data/trie-bug-12129/hoodi.main-sync-508 --chain=hoodi --debug.tip=0xc44389f1101bc63843768892c5fb98fc1ef43f79901e4efe8aec4366a5e07e42 --debug.max-block=508 --debug.terminate
+
+- 508 -> 507
+  - Account state branch 8ef is has differing hash at child 3
+  - 0x8ef3bb7bf0fd1cc0e9cb148623ed1d87b12434a1a78370a1067b86baf1c5d84d appears
+    in the prefix set both on main and on branch
+  - Account's address is 0xf41d7d4d745bb9ff75c3fe642af1de93e451903e
+
+  - Seems that tree_flag is getting set to true on 8ef(3) subnode when it didn't use to be
+
+    - MAIN:   update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(3), state_flag: true, tree_flag: false, hash_flag: true, hash: Some(0x6073aa26e803f05b558bb935f93bcd6c369575d2e42dc5c7ca4c0da51db7e68f) }) changes_contains:true new:false
+
+    - BRANCH: update_skip_node old:true old_node:Some(CursorSubNode { key: Nibbles(0x080e0f), position: Child(3), state_flag: true, tree_flag: true, hash_flag: true, hash: Some(0x6073aa26e803f05b558bb935f93bcd6c369575d2e42dc5c7ca4c0da51db7e68f) }) changes_contains:true new:false
+
+   - Skipping hashed seek
+     - MAIN:   TRACE try_next{trie_type=State}: trie::node_iter: performing hashed cursor seek key=0x8ef3000000000000000000000000000000000000000000000000000000000000
+     - BRANCH: TRACE try_next{trie_type=State}: trie::node_iter: skipping hashed seek seek_key=0x8ef3000000000000000000000000000000000000000000000000000000000000 walker_hash=Some(0x6073aa26e803f05b558bb935f93bcd6c369575d2e42dc5c7ca4c0da51db7e68f)
+
+  - Immediately after syncing the HashedAccounts key for the account is present.
+    Somewhere during unwind it is getting removed.
+
+- After rebasing on main the new repro case is block 492 -> 491
