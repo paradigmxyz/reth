@@ -234,10 +234,18 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         }
     }
 
+    /// Returns `true` if `actual_checksum` matches expected checksum of the ERA1 file indexed by
+    /// `number` based on the [file list].
+    ///
+    /// [file list]: Self::fetch_file_list
     async fn verify_checksum(&self, number: usize, actual_checksum: Vec<u8>) -> eyre::Result<bool> {
         Ok(actual_checksum == self.expected_checksum(number).await?)
     }
 
+    /// Returns `Ok` if `actual_checksum` matches expected checksum of the ERA1 file indexed by
+    /// `number` based on the [file list].
+    ///
+    /// [file list]: Self::fetch_file_list
     async fn assert_checksum(&self, number: usize, actual_checksum: Vec<u8>) -> eyre::Result<()> {
         let expected_checksum = self.expected_checksum(number).await?;
 
@@ -252,6 +260,9 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         }
     }
 
+    /// Returns SHA-256 checksum for ERA1 file indexed by `number` based on the [file list].
+    ///
+    /// [file list]: Self::fetch_file_list
     async fn expected_checksum(&self, number: usize) -> eyre::Result<Vec<u8>> {
         let file = File::open(self.folder.join(Self::CHECKSUMS)).await?;
         let reader = io::BufReader::new(file);
