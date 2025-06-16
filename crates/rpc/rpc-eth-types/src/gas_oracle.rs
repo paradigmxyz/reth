@@ -2,12 +2,15 @@
 //! previous blocks.
 
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
-use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction};
+use alloy_consensus::{
+    constants::GWEI_TO_WEI, transaction::SignerRecoverable, BlockHeader, Transaction,
+};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
 use itertools::Itertools;
+use reth_primitives_traits::BlockBody;
 use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
@@ -231,7 +234,7 @@ where
         let parent_hash = block.parent_hash();
 
         // sort the functions by ascending effective tip first
-        let sorted_transactions = block.transactions_recovered().sorted_by_cached_key(|tx| {
+        let sorted_transactions = block.body().transactions_iter().sorted_by_cached_key(|tx| {
             if let Some(base_fee) = base_fee_per_gas {
                 (*tx).effective_tip_per_gas(base_fee)
             } else {
@@ -256,8 +259,10 @@ where
             }
 
             // check if the sender was the coinbase, if so, ignore
-            if tx.signer() == block.beneficiary() {
-                continue
+            if let Ok(sender) = tx.recover_signer() {
+                if sender == block.beneficiary() {
+                    continue
+                }
             }
 
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
@@ -272,44 +277,8 @@ where
 
         Ok(Some((parent_hash, prices)))
     }
-
-    /// Get the median tip value for the given block. This is useful for determining
-    /// tips when a block is at capacity.
-    ///
-    /// If the block cannot be found or has no transactions, this will return `None`.
-    pub async fn get_block_median_tip(&self, block_hash: B256) -> EthResult<Option<U256>> {
-        // check the cache (this will hit the disk if the block is not cached)
-        let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
-            return Ok(None)
-        };
-
-        let base_fee_per_gas = block.base_fee_per_gas();
-
-        // Filter, sort and collect the prices
-        let prices = block
-            .transactions_recovered()
-            .filter_map(|tx| {
-                if let Some(base_fee) = base_fee_per_gas {
-                    (*tx).effective_tip_per_gas(base_fee)
-                } else {
-                    Some((*tx).priority_fee_or_price())
-                }
-            })
-            .sorted()
-            .collect::<Vec<_>>();
-
-        let median = if prices.is_empty() {
-            // if there are no prices, return `None`
-            None
-        } else if prices.len() % 2 == 1 {
-            Some(U256::from(prices[prices.len() / 2]))
-        } else {
-            Some(U256::from((prices[prices.len() / 2 - 1] + prices[prices.len() / 2]) / 2))
-        };
-
-        Ok(median)
-    }
 }
+
 /// Container type for mutable inner state of the [`GasPriceOracle`]
 #[derive(Debug)]
 struct GasPriceOracleInner {

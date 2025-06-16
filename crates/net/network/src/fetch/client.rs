@@ -15,12 +15,9 @@ use reth_network_p2p::{
 };
 use reth_network_peers::PeerId;
 use reth_network_types::ReputationChangeKind;
-use std::{
-    ops::RangeInclusive,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
@@ -83,16 +80,15 @@ impl<N: NetworkPrimitives> BodiesClient for FetchClient<N> {
     type Output = BodiesFut<N::BlockBody>;
 
     /// Sends a `GetBlockBodies` request to an available peer.
-    fn get_block_bodies_with_priority_and_range_hint(
+    fn get_block_bodies_with_priority(
         &self,
         request: Vec<B256>,
         priority: Priority,
-        range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         let (response, rx) = oneshot::channel();
         if self
             .request_tx
-            .send(DownloadRequest::GetBlockBodies { request, response, priority, range_hint })
+            .send(DownloadRequest::GetBlockBodies { request, response, priority })
             .is_ok()
         {
             Box::pin(FlattenedResponse::from(rx))

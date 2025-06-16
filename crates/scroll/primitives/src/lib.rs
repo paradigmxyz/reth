@@ -11,11 +11,10 @@
 
 use once_cell as _;
 
-#[cfg(not(feature = "std"))]
-extern crate alloc as std;
+extern crate alloc;
 
 pub mod transaction;
-pub use transaction::{tx_type::ScrollTxType, ScrollTransactionSigned};
+pub use transaction::{signed::ScrollTransactionSigned, tx_type::ScrollTxType};
 
 use reth_primitives_traits::Block;
 

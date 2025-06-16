@@ -45,12 +45,13 @@ pub trait LoadPendingBlock:
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
-        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
-        Primitives: NodePrimitives<
-            BlockHeader = ProviderHeader<Self::Provider>,
-            SignedTx = ProviderTx<Self::Provider>,
-            Receipt = ProviderReceipt<Self::Provider>,
-            Block = ProviderBlock<Self::Provider>,
+        Evm: ConfigureEvm<
+            Primitives: NodePrimitives<
+                BlockHeader = ProviderHeader<Self::Provider>,
+                SignedTx = ProviderTx<Self::Provider>,
+                Receipt = ProviderReceipt<Self::Provider>,
+                Block = ProviderBlock<Self::Provider>,
+            >,
         >,
     >
 {
@@ -76,7 +77,9 @@ pub trait LoadPendingBlock:
         >,
         Self::Error,
     > {
-        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? {
+        if let Some(block) =
+            self.provider().pending_block_with_senders().map_err(Self::Error::from_eth_err)?
+        {
             if let Some(receipts) = self
                 .provider()
                 .receipts_by_block(block.hash().into())

@@ -38,13 +38,13 @@ impl HttpClient for StubClient {
 
         async move {
             match url.to_string().as_str() {
-                "https://mainnet.era1.nimbus.team/" => {
+                "https://mainnet.era1.nimbus.team/index.html" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(NIMBUS))
                     })))
                         as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
                 }
-                "https://era1.ethportal.net/" => {
+                "https://era1.ethportal.net/index.html" => {
                     Ok(Box::new(futures::stream::once(Box::pin(async move {
                         Ok(bytes::Bytes::from(ETH_PORTAL))
                     })))

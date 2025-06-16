@@ -7,8 +7,7 @@ use alloy_rpc_types_eth::{
     Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
 };
 use reth_primitives_traits::{
-    Block as BlockTrait, BlockBody as BlockBodyTrait, NodePrimitives, RecoveredBlock,
-    SignedTransaction,
+    Block as BlockTrait, BlockBody as BlockBodyTrait, RecoveredBlock, SignedTransaction,
 };
 
 /// Converts the given primitive block into a [`Block`] response with the given
@@ -22,8 +21,8 @@ pub fn from_block<T, B>(
     tx_resp_builder: &T,
 ) -> Result<Block<T::Transaction, Header<B::Header>>, T::Error>
 where
-    T: TransactionCompat,
-    B: BlockTrait<Body: BlockBodyTrait<Transaction = <T::Primitives as NodePrimitives>::SignedTx>>,
+    T: TransactionCompat<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
+    B: BlockTrait,
 {
     match kind {
         BlockTransactionsKind::Hashes => Ok(from_block_with_tx_hashes::<T::Transaction, B>(block)),
@@ -63,8 +62,8 @@ pub fn from_block_full<T, B>(
     tx_resp_builder: &T,
 ) -> Result<Block<T::Transaction, Header<B::Header>>, T::Error>
 where
-    T: TransactionCompat,
-    B: BlockTrait<Body: BlockBodyTrait<Transaction = <T::Primitives as NodePrimitives>::SignedTx>>,
+    T: TransactionCompat<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
+    B: BlockTrait,
 {
     let block_number = block.header().number();
     let base_fee = block.header().base_fee_per_gas();

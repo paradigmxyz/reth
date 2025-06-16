@@ -12,9 +12,8 @@ extern crate alloc as std;
 
 mod transaction;
 pub use transaction::{
-    ScrollAdditionalInfo, ScrollL1MessageTransactionFields, ScrollPooledTransaction,
-    ScrollTransactionInfo, ScrollTxEnvelope, ScrollTxType, ScrollTypedTransaction, TxL1Message,
-    L1_MESSAGE_TRANSACTION_TYPE, L1_MESSAGE_TX_TYPE_ID,
+    ScrollL1MessageTransactionFields, ScrollPooledTransaction, ScrollTxEnvelope, ScrollTxType,
+    ScrollTypedTransaction, TxL1Message, L1_MESSAGE_TRANSACTION_TYPE, L1_MESSAGE_TX_TYPE_ID,
 };
 
 mod receipt;
@@ -22,9 +21,3 @@ pub use receipt::{ScrollReceiptEnvelope, ScrollReceiptWithBloom, ScrollTransacti
 
 #[cfg(feature = "serde")]
 pub use transaction::serde_l1_message_tx_rpc;
-
-/// Bincode-compatible serde implementations.
-#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
-pub mod serde_bincode_compat {
-    pub use super::transaction::serde_bincode_compat::*;
-}

@@ -735,6 +735,9 @@ Engine:
       --engine.legacy-state-root
           Enable legacy state root
 
+      --engine.caching-and-prewarming
+          CAUTION: This CLI flag has no effect anymore, use --engine.disable-caching-and-prewarming if you want to disable caching and prewarming
+
       --engine.disable-caching-and-prewarming
           Disable cross-block caching and parallel prewarming
 
@@ -762,31 +765,8 @@ Engine:
 
           [default: 1]
 
-      --engine.disable-precompile-cache
-          Disable precompile cache
-
-      --engine.state-root-fallback
-          Enable state root fallback, useful for testing
-
-      --engine.always-process-payload-attributes-on-canonical-head
-          Always process payload attributes and begin a payload build process even if `forkchoiceState.headBlockHash` is already the canonical head or an ancestor. See `TreeConfig::always_process_payload_attributes_on_canonical_head` for more details.
-
-          Note: This is a no-op on OP Stack.
-
-ERA:
-      --era.enable
-          Enable import from ERA1 files
-
-      --era.path <ERA_PATH>
-          The path to a directory for import.
-
-          The ERA1 files are read from the local directory parsing headers and bodies.
-
-      --era.url <ERA_URL>
-          The URL to a remote host where the ERA1 files are hosted.
-
-          The ERA1 files are read from the remote host using HTTP GET requests parsing headers
-          and bodies.
+      --engine.precompile-cache
+          Enable precompile cache
 
 Ress:
       --ress.enable

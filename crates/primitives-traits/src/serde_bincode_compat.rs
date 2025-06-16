@@ -242,17 +242,4 @@ mod block_bincode {
             repr.into()
         }
     }
-
-    #[cfg(feature = "scroll-alloy-traits")]
-    impl SerdeBincodeCompat for scroll_alloy_consensus::ScrollTxEnvelope {
-        type BincodeRepr<'a> = scroll_alloy_consensus::serde_bincode_compat::ScrollTxEnvelope<'a>;
-
-        fn as_repr(&self) -> Self::BincodeRepr<'_> {
-            self.into()
-        }
-
-        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-            repr.into()
-        }
-    }
 }

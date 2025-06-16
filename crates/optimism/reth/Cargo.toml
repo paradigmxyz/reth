@@ -35,7 +35,6 @@ reth-transaction-pool = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
 reth-node-builder = { workspace = true, optional = true }
 reth-tasks = { workspace = true, optional = true }
-reth-cli-util = { workspace = true, optional = true }
 
 # reth-op
 reth-optimism-primitives.workspace = true
@@ -89,7 +88,7 @@ test-utils = [
 full = ["consensus", "evm", "node", "provider", "rpc", "trie", "pool", "network"]
 
 alloy-compat = ["reth-optimism-primitives/alloy-compat"]
-cli = ["dep:reth-optimism-cli", "dep:reth-cli-util"]
+cli = ["dep:reth-optimism-cli"]
 consensus = [
     "dep:reth-consensus",
     "dep:reth-consensus-common",

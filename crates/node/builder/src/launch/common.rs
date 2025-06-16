@@ -427,7 +427,6 @@ where
                     NoopEvmConfig::<Evm>::default(),
                     self.toml_config().stages.clone(),
                     self.prune_modes(),
-                    None,
                 ))
                 .build(
                     factory.clone(),

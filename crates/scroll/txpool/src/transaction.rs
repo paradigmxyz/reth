@@ -212,7 +212,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::{ScrollPooledTransaction, ScrollTransactionValidator};
-    use alloy_consensus::{transaction::Recovered, Signed};
+    use alloy_consensus::transaction::Recovered;
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::Signature;
     use reth_provider::test_utils::MockEthProvider;
@@ -236,7 +236,7 @@ mod tests {
         let signer = Default::default();
         let deposit_tx = ScrollTypedTransaction::L1Message(TxL1Message::default());
         let signature = Signature::test_signature();
-        let signed_tx: ScrollTransactionSigned = Signed::new_unhashed(deposit_tx, signature).into();
+        let signed_tx = ScrollTransactionSigned::new_unhashed(deposit_tx, signature);
         let signed_recovered = Recovered::new_unchecked(signed_tx, signer);
         let len = signed_recovered.encode_2718_len();
         let pooled_tx: ScrollPooledTransaction =

@@ -420,12 +420,8 @@ where
             self.pool.write().update_accounts(changed_senders);
         let mut listener = self.event_listener.write();
 
-        for tx in &promoted {
-            listener.pending(tx.hash(), None);
-        }
-        for tx in &discarded {
-            listener.discarded(tx.hash());
-        }
+        promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
+        discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
 
         // This deletes outdated blob txs from the blob store, based on the account's nonce. This is
         // called during txpool maintenance when the pool drifted.
@@ -574,9 +570,7 @@ where
 
             {
                 let mut listener = self.event_listener.write();
-                for hash in &discarded_hashes {
-                    listener.discarded(hash);
-                }
+                discarded_hashes.iter().for_each(|hash| listener.discarded(hash));
             }
 
             // A newly added transaction may be immediately discarded, so we need to
@@ -671,15 +665,9 @@ where
         // broadcast specific transaction events
         let mut listener = self.event_listener.write();
 
-        for tx in &mined {
-            listener.mined(tx, block_hash);
-        }
-        for tx in &promoted {
-            listener.pending(tx.hash(), None);
-        }
-        for tx in &discarded {
-            listener.discarded(tx.hash());
-        }
+        mined.iter().for_each(|tx| listener.mined(tx, block_hash));
+        promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
+        discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
     }
 
     /// Fire events for the newly added transaction if there are any.
@@ -691,12 +679,8 @@ where
                 let AddedPendingTransaction { transaction, promoted, discarded, replaced } = tx;
 
                 listener.pending(transaction.hash(), replaced.clone());
-                for tx in promoted {
-                    listener.pending(tx.hash(), None);
-                }
-                for tx in discarded {
-                    listener.discarded(tx.hash());
-                }
+                promoted.iter().for_each(|tx| listener.pending(tx.hash(), None));
+                discarded.iter().for_each(|tx| listener.discarded(tx.hash()));
             }
             AddedTransaction::Parked { transaction, replaced, .. } => {
                 listener.queued(transaction.hash());
@@ -764,9 +748,7 @@ where
 
         let mut listener = self.event_listener.write();
 
-        for tx in &removed {
-            listener.discarded(tx.hash());
-        }
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
 
         removed
     }
@@ -784,9 +766,7 @@ where
 
         let mut listener = self.event_listener.write();
 
-        for tx in &removed {
-            listener.discarded(tx.hash());
-        }
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
 
         removed
     }
@@ -801,9 +781,7 @@ where
 
         let mut listener = self.event_listener.write();
 
-        for tx in &removed {
-            listener.discarded(tx.hash());
-        }
+        removed.iter().for_each(|tx| listener.discarded(tx.hash()));
 
         removed
     }
@@ -1216,13 +1194,11 @@ impl<T: PoolTransaction> OnNewCanonicalStateOutcome<T> {
 mod tests {
     use crate::{
         blobstore::{BlobStore, InMemoryBlobStore},
-        identifier::SenderId,
         test_utils::{MockTransaction, TestPoolBuilder},
         validate::ValidTransaction,
         BlockInfo, PoolConfig, SubPoolLimit, TransactionOrigin, TransactionValidationOutcome, U256,
     };
     use alloy_eips::{eip4844::BlobTransactionSidecar, eip7594::BlobTransactionSidecarVariant};
-    use alloy_primitives::Address;
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -1308,29 +1284,5 @@ mod tests {
 
         // Assert that the pool's blob store matches the expected blob store.
         assert_eq!(*test_pool.blob_store(), blob_store);
-    }
-
-    #[test]
-    fn test_auths_stored_in_identifiers() {
-        // Create a test pool with default configuration.
-        let test_pool = &TestPoolBuilder::default().with_config(Default::default()).pool;
-
-        let auth = Address::new([1; 20]);
-        let tx = MockTransaction::eip7702();
-
-        test_pool.add_transactions(
-            TransactionOrigin::Local,
-            [TransactionValidationOutcome::Valid {
-                balance: U256::from(1_000),
-                state_nonce: 0,
-                bytecode_hash: None,
-                transaction: ValidTransaction::Valid(tx),
-                propagate: true,
-                authorities: Some(vec![auth]),
-            }],
-        );
-
-        let identifiers = test_pool.identifiers.read();
-        assert_eq!(identifiers.sender_id(&auth), Some(SenderId::from(1)));
     }
 }

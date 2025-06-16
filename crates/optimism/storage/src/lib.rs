@@ -12,7 +12,7 @@
 extern crate alloc;
 
 mod chain;
-pub use chain::OpStorage;
+pub use chain::OptStorage;
 
 #[cfg(test)]
 mod tests {

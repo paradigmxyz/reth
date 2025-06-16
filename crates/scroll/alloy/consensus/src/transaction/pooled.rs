@@ -3,7 +3,6 @@
 
 use crate::{ScrollTxEnvelope, ScrollTxType};
 use alloy_consensus::{
-    error::ValueError,
     transaction::{RlpEcdsaDecodableTx, TxEip1559, TxEip2930, TxLegacy},
     SignableTransaction, Signed, Transaction, TxEip7702, TxEnvelope, Typed2718,
 };
@@ -439,14 +438,6 @@ impl From<ScrollPooledTransaction> for TxEnvelope {
 impl From<ScrollPooledTransaction> for ScrollTxEnvelope {
     fn from(tx: ScrollPooledTransaction) -> Self {
         tx.into_scroll_envelope()
-    }
-}
-
-impl TryFrom<ScrollTxEnvelope> for ScrollPooledTransaction {
-    type Error = ValueError<ScrollTxEnvelope>;
-
-    fn try_from(value: ScrollTxEnvelope) -> Result<Self, Self::Error> {
-        value.try_into_pooled()
     }
 }
 

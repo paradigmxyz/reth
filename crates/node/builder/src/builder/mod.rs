@@ -37,7 +37,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
 use secp256k1::SecretKey;
-use std::{fmt::Debug, sync::Arc};
+use std::sync::Arc;
 use tracing::{info, trace, warn};
 
 pub mod add_ons;
@@ -563,8 +563,13 @@ where
     where
         EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
-        let launcher = self.engine_api_launcher();
-        self.builder.launch_with(launcher).await
+        let Self { builder, task_executor } = self;
+
+        let engine_tree_config = builder.config.engine.tree_config();
+
+        let launcher =
+            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
+        builder.launch_with(launcher).await
     }
 
     /// Launches the node with the [`DebugNodeLauncher`].
@@ -588,17 +593,6 @@ where
             engine_tree_config,
         ));
         builder.launch_with(launcher).await
-    }
-
-    /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API
-    /// support.
-    pub fn engine_api_launcher(&self) -> EngineNodeLauncher {
-        let engine_tree_config = self.builder.config.engine.tree_config();
-        EngineNodeLauncher::new(
-            self.task_executor.clone(),
-            self.builder.config.datadir(),
-            engine_tree_config,
-        )
     }
 }
 
@@ -728,7 +722,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             > + Unpin
             + 'static,
         Node::Provider: BlockReaderFor<N>,
-        Policy: TransactionPropagationPolicy + Debug,
+        Policy: TransactionPropagationPolicy,
     {
         let (handle, network, txpool, eth) = builder
             .transactions_with_policy(pool, tx_config, propagation_policy)

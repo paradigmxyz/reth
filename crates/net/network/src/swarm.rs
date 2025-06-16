@@ -122,7 +122,6 @@ impl<N: NetworkPrimitives> Swarm<N> {
                 messages,
                 direction,
                 timeout,
-                range_info,
             } => {
                 self.state.on_session_activated(
                     peer_id,
@@ -130,7 +129,6 @@ impl<N: NetworkPrimitives> Swarm<N> {
                     status.clone(),
                     messages.clone(),
                     timeout,
-                    range_info,
                 );
                 Some(SwarmEvent::SessionEstablished {
                     peer_id,

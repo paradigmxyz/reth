@@ -242,25 +242,16 @@ impl<N: NodePrimitives> Chain<N> {
         N::SignedTx: Encodable2718,
     {
         let mut receipt_attach = Vec::with_capacity(self.blocks().len());
-
-        self.blocks_and_receipts().for_each(|(block, receipts)| {
-            let block_num_hash = BlockNumHash::new(block.number(), block.hash());
-
-            let tx_receipts = block
-                .body()
-                .transactions()
-                .iter()
-                .zip(receipts)
-                .map(|(tx, receipt)| (tx.trie_hash(), receipt.clone()))
-                .collect();
-
-            receipt_attach.push(BlockReceipts {
-                block: block_num_hash,
-                tx_receipts,
-                timestamp: block.timestamp(),
-            });
-        });
-
+        for ((block_num, block), receipts) in
+            self.blocks().iter().zip(self.execution_outcome.receipts().iter())
+        {
+            let mut tx_receipts = Vec::with_capacity(receipts.len());
+            for (tx, receipt) in block.body().transactions().iter().zip(receipts.iter()) {
+                tx_receipts.push((tx.trie_hash(), receipt.clone()));
+            }
+            let block_num_hash = BlockNumHash::new(*block_num, block.hash());
+            receipt_attach.push(BlockReceipts { block: block_num_hash, tx_receipts });
+        }
         receipt_attach
     }
 
@@ -409,8 +400,6 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
     pub block: BlockNumHash,
     /// Transaction identifier and receipt.
     pub tx_receipts: Vec<(TxHash, T)>,
-    /// Block timestamp
-    pub timestamp: u64,
 }
 
 /// Bincode-compatible [`Chain`] serde implementation.

@@ -280,9 +280,6 @@ impl NodeState {
             BeaconConsensusEngineEvent::InvalidBlock(block) => {
                 warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
             }
-            BeaconConsensusEngineEvent::BlockReceived(num_hash) => {
-                info!(number=num_hash.number, hash=?num_hash.hash, "Received block from consensus engine");
-            }
         }
     }
 

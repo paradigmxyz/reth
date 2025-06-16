@@ -4,8 +4,24 @@ mod active;
 mod conn;
 mod counter;
 mod handle;
-mod types;
-pub use types::BlockRangeInfo;
+
+use active::QueuedOutgoingMessages;
+pub use conn::EthRlpxConnection;
+pub use handle::{
+    ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
+    SessionCommand,
+};
+
+pub use reth_network_api::{Direction, PeerInfo};
+
+use std::{
+    collections::HashMap,
+    future::Future,
+    net::SocketAddr,
+    sync::{atomic::AtomicU64, Arc},
+    task::{Context, Poll},
+    time::{Duration, Instant},
+};
 
 use crate::{
     message::PeerMessage,
@@ -13,7 +29,6 @@ use crate::{
     protocol::{IntoRlpxSubProtocol, OnNotSupported, RlpxSubProtocolHandlers, RlpxSubProtocols},
     session::active::ActiveSession,
 };
-use active::QueuedOutgoingMessages;
 use counter::SessionCounter;
 use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
@@ -31,14 +46,6 @@ use reth_network_types::SessionsConfig;
 use reth_tasks::TaskSpawner;
 use rustc_hash::FxHashMap;
 use secp256k1::SecretKey;
-use std::{
-    collections::HashMap,
-    future::Future,
-    net::SocketAddr,
-    sync::{atomic::AtomicU64, Arc},
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::TcpStream,
@@ -47,13 +54,6 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, instrument, trace};
-
-pub use conn::EthRlpxConnection;
-pub use handle::{
-    ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
-    SessionCommand,
-};
-pub use reth_network_api::{Direction, PeerInfo};
 
 /// Internal identifier for active sessions.
 #[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Eq, Hash)]
@@ -543,7 +543,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                     terminate_message: None,
-                    range_info: None,
                 };
 
                 self.spawn(session);
@@ -580,7 +579,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     messages,
                     direction,
                     timeout,
-                    range_info: None,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
@@ -703,8 +701,6 @@ pub enum SessionEvent<N: NetworkPrimitives> {
         /// The maximum time that the session waits for a response from the peer before timing out
         /// the connection
         timeout: Arc<AtomicU64>,
-        /// The range info for the peer.
-        range_info: Option<BlockRangeInfo>,
     },
     /// The peer was already connected with another session.
     AlreadyConnected {

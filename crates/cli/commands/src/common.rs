@@ -85,9 +85,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         if config.stages.etl.dir.is_none() {
             config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
         }
-        if config.stages.era.folder.is_none() {
-            config.stages.era = config.stages.era.with_datadir(data_dir.data_dir());
-        }
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
         let (db, sfp) = match access {
@@ -167,7 +164,6 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     NoopEvmConfig::<N::Evm>::default(),
                     config.stages.clone(),
                     prune_modes.clone(),
-                    None,
                 ))
                 .build(factory.clone(), StaticFileProducer::new(factory.clone(), prune_modes));
 

@@ -42,14 +42,13 @@ where
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
         Evm: ConfigureEvm<
-            Primitives = <Self as RpcNodeCore>::Primitives,
+            Primitives: NodePrimitives<
+                SignedTx = ProviderTx<Self::Provider>,
+                BlockHeader = ProviderHeader<Self::Provider>,
+                Receipt = ProviderReceipt<Self::Provider>,
+                Block = ProviderBlock<Self::Provider>,
+            >,
             NextBlockEnvCtx = OpNextBlockEnvAttributes,
-        >,
-        Primitives: NodePrimitives<
-            BlockHeader = ProviderHeader<Self::Provider>,
-            SignedTx = ProviderTx<Self::Provider>,
-            Receipt = ProviderReceipt<Self::Provider>,
-            Block = ProviderBlock<Self::Provider>,
         >,
     >,
 {
@@ -65,7 +64,7 @@ where
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
+    ) -> Result<<Self::Evm as reth_evm::ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
         Ok(OpNextBlockEnvAttributes {
             timestamp: parent.timestamp().saturating_add(12),
             suggested_fee_recipient: parent.beneficiary(),

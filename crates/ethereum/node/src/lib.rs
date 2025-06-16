@@ -17,14 +17,11 @@ use revm as _;
 pub use reth_ethereum_engine_primitives::EthEngineTypes;
 
 pub mod evm;
-pub use evm::EthEvmConfig;
-
-#[allow(deprecated)]
-pub use evm::EthExecutorProvider;
+pub use evm::{EthEvmConfig, EthExecutorProvider};
 
 pub use reth_ethereum_consensus as consensus;
 pub mod node;
-pub use node::*;
+pub use node::{EthereumEthApiBuilder, EthereumNode};
 
 pub mod payload;
 

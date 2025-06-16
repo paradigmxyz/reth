@@ -1,14 +1,15 @@
-use reth_eth_wire_types::BasicNetworkPrimitives;
 use reth_network::{
     config::NetworkMode, transform::header::HeaderTransform, NetworkConfig, NetworkHandle,
-    NetworkManager, PeersInfo,
+    NetworkManager, NetworkPrimitives, PeersInfo,
 };
 use reth_node_api::TxTy;
 use reth_node_builder::{components::NetworkBuilder, BuilderContext, FullNodeTypes};
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::BlockHeader;
 use reth_scroll_chainspec::ScrollChainSpec;
-use reth_scroll_primitives::ScrollPrimitives;
+use reth_scroll_primitives::{
+    ScrollBlock, ScrollBlockBody, ScrollPrimitives, ScrollReceipt, ScrollTransactionSigned,
+};
 use reth_tracing::tracing::info;
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use scroll_alloy_hardforks::ScrollHardforks;
@@ -57,8 +58,18 @@ where
 }
 
 /// Network primitive types used by Scroll networks.
-pub type ScrollNetworkPrimitives =
-    BasicNetworkPrimitives<ScrollPrimitives, scroll_alloy_consensus::ScrollPooledTransaction>;
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct ScrollNetworkPrimitives;
+
+impl NetworkPrimitives for ScrollNetworkPrimitives {
+    type BlockHeader = alloy_consensus::Header;
+    type BlockBody = ScrollBlockBody;
+    type Block = ScrollBlock;
+    type BroadcastedTransaction = ScrollTransactionSigned;
+    type PooledTransaction = scroll_alloy_consensus::ScrollPooledTransaction;
+    type Receipt = ScrollReceipt;
+}
 
 /// An implementation of a [`HeaderTransform`] for Scroll.
 #[derive(Debug, Clone)]

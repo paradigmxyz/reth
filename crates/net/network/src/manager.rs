@@ -37,9 +37,7 @@ use crate::{
 };
 use futures::{Future, StreamExt};
 use parking_lot::Mutex;
-use reth_chainspec::EnrForkIdEntry;
 use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, NetworkPrimitives};
-use reth_eth_wire_types::NewBlockPayload;
 use reth_fs_util::{self as fs, FsPathError};
 use reth_metrics::common::mpsc::UnboundedMeteredSender;
 use reth_network_api::{
@@ -272,9 +270,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         if let Some(disc_config) = discovery_v4_config.as_mut() {
             // merge configured boot nodes
             disc_config.bootstrap_nodes.extend(resolved_boot_nodes.clone());
-            // add the forkid entry for EIP-868, but wrap it in an `EnrForkIdEntry` for proper
-            // encoding
-            disc_config.add_eip868_pair("eth", EnrForkIdEntry::from(status.forkid));
+            disc_config.add_eip868_pair("eth", status.forkid);
         }
 
         if let Some(discv5) = discovery_v5_config.as_mut() {
@@ -528,7 +524,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
 
     #[allow(dead_code)]
     /// Invoked after a `NewBlock` message from the peer was validated
-    fn on_block_import_result(&mut self, event: BlockImportEvent<N::NewBlockPayload>) {
+    fn on_block_import_result(&mut self, event: BlockImportEvent<N::Block>) {
         match event {
             BlockImportEvent::Announcement(validation) => match validation {
                 BlockValidation::ValidHeader { block } => {
@@ -601,8 +597,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                     this.swarm.state_mut().on_new_block(peer_id, block.hash);
                     let block = Arc::unwrap_or_clone(block.block);
                     // start block import process
-                    this.block_import
-                        .notify(NewBlockWithPeer { peer_id, block: block.block().clone() });
+                    this.block_import.notify(NewBlockWithPeer { peer_id, block: block.block });
                 });
             }
             PeerMessage::PooledTransactions(msg) => {

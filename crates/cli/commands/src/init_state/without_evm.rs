@@ -25,26 +25,21 @@ pub(crate) fn read_header_from_file(path: PathBuf) -> Result<Header, eyre::Error
 
 /// Creates a dummy chain (with no transactions) up to the last EVM block and appends the
 /// first valid block.
-pub fn setup_without_evm<Provider, F>(
+pub fn setup_without_evm<Provider>(
     provider_rw: &Provider,
     header: SealedHeader<<Provider::Primitives as NodePrimitives>::BlockHeader>,
     total_difficulty: U256,
-    header_factory: F,
 ) -> ProviderResult<()>
 where
-    Provider: StaticFileProviderFactory
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader = Header>>
         + StageCheckpointWriter
         + BlockWriter<Block = <Provider::Primitives as NodePrimitives>::Block>,
-    F: Fn(BlockNumber) -> <Provider::Primitives as NodePrimitives>::BlockHeader
-        + Send
-        + Sync
-        + 'static,
 {
     info!(target: "reth::cli", new_tip = ?header.num_hash(), "Setting up dummy EVM chain before importing state.");
 
     let static_file_provider = provider_rw.static_file_provider();
     // Write EVM dummy data up to `header - 1` block
-    append_dummy_chain(&static_file_provider, header.number() - 1, header_factory)?;
+    append_dummy_chain(&static_file_provider, header.number() - 1)?;
 
     info!(target: "reth::cli", "Appending first valid block.");
 
@@ -102,15 +97,10 @@ where
 /// * Headers: It will push an empty block.
 /// * Transactions: It will not push any tx, only increments the end block range.
 /// * Receipts: It will not push any receipt, only increments the end block range.
-fn append_dummy_chain<N, F>(
+fn append_dummy_chain<N: NodePrimitives<BlockHeader = Header>>(
     sf_provider: &StaticFileProvider<N>,
     target_height: BlockNumber,
-    header_factory: F,
-) -> ProviderResult<()>
-where
-    N: NodePrimitives,
-    F: Fn(BlockNumber) -> N::BlockHeader + Send + Sync + 'static,
-{
+) -> ProviderResult<()> {
     let (tx, rx) = std::sync::mpsc::channel();
 
     // Spawn jobs for incrementing the block end range of transactions and receipts
@@ -132,11 +122,12 @@ where
     // Spawn job for appending empty headers
     let provider = sf_provider.clone();
     std::thread::spawn(move || {
+        let mut empty_header = Header::default();
         let result = provider.latest_writer(StaticFileSegment::Headers).and_then(|mut writer| {
             for block_num in 1..=target_height {
                 // TODO: should we fill with real parent_hash?
-                let header = header_factory(block_num);
-                writer.append_header(&header, U256::ZERO, &B256::ZERO)?;
+                empty_header.number = block_num;
+                writer.append_header(&empty_header, U256::ZERO, &B256::ZERO)?;
             }
             Ok(())
         });

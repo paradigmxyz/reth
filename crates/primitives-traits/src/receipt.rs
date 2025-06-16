@@ -5,7 +5,6 @@ use alloc::vec::Vec;
 use alloy_consensus::{
     Eip2718EncodableReceipt, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, Typed2718,
 };
-use alloy_rlp::{Decodable, Encodable};
 use core::fmt;
 
 /// Helper trait that unifies all behaviour required by receipt to support full node operations.
@@ -24,8 +23,6 @@ pub trait Receipt:
     + TxReceipt<Log = alloy_primitives::Log>
     + RlpEncodableReceipt
     + RlpDecodableReceipt
-    + Encodable
-    + Decodable
     + Eip2718EncodableReceipt
     + Typed2718
     + MaybeSerde

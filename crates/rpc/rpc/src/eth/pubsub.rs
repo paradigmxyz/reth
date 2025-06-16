@@ -62,11 +62,8 @@ where
             Provider: BlockNumReader + CanonStateSubscriptions,
             Pool: TransactionPool,
             Network: NetworkInfo,
-        > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
-                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
-            >,
-        > + 'static,
+        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>
+        + 'static,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -97,11 +94,7 @@ where
             Provider: BlockNumReader + CanonStateSubscriptions,
             Pool: TransactionPool,
             Network: NetworkInfo,
-        > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
-                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
-            >,
-        >,
+        > + EthApiTypes<TransactionCompat: TransactionCompat<PoolConsensusTx<Eth::Pool>>>,
 {
     match kind {
         SubscriptionKind::NewHeads => {
@@ -340,7 +333,6 @@ where
                 let all_logs = logs_utils::matching_block_logs_with_tx_hashes(
                     &filter,
                     block_receipts.block,
-                    block_receipts.timestamp,
                     block_receipts.tx_receipts.iter().map(|(tx, receipt)| (*tx, receipt)),
                     removed,
                 );

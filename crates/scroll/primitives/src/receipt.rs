@@ -371,9 +371,9 @@ impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for Scroll
 #[cfg(feature = "reth-codec")]
 mod compact {
     use super::*;
+    use alloc::borrow::Cow;
     use alloy_primitives::U256;
     use reth_codecs::Compact;
-    use std::borrow::Cow;
 
     #[derive(reth_codecs::CompactZstd)]
     #[reth_zstd(

@@ -1,6 +1,9 @@
 //! `EthApiBuilder` implementation
 
-use crate::{eth::core::EthApiInner, EthApi};
+use crate::{
+    eth::{core::EthApiInner, EthTxBuilder},
+    EthApi,
+};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
@@ -238,6 +241,6 @@ where
             + Unpin
             + 'static,
     {
-        EthApi { inner: Arc::new(self.build_inner()), tx_resp_builder: Default::default() }
+        EthApi { inner: Arc::new(self.build_inner()), tx_resp_builder: EthTxBuilder }
     }
 }

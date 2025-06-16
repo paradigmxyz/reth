@@ -1,5 +1,7 @@
 //! Scroll-Reth `eth_` endpoint implementation.
 
+use std::{fmt, sync::Arc};
+
 use alloy_primitives::U256;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
@@ -16,7 +18,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
+    EthApiTypes, FullEthApiServer, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_tasks::{
@@ -24,15 +26,15 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use std::{fmt, marker::PhantomData, sync::Arc};
 
-use crate::{eth::transaction::ScrollTxInfoMapper, ScrollEthApiError};
 pub use receipt::ScrollReceiptBuilder;
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_types::error::FromEvmError;
 use reth_scroll_primitives::ScrollPrimitives;
-use scroll_alloy_network::{Network, Scroll};
+use scroll_alloy_network::Scroll;
+
+use crate::ScrollEthApiError;
 
 mod block;
 mod call;
@@ -63,25 +65,9 @@ impl<T> ScrollNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
 #[derive(Clone)]
-pub struct ScrollEthApi<N: ScrollNodeCore, NetworkT = Scroll> {
+pub struct ScrollEthApi<N: ScrollNodeCore> {
     /// Gateway to node's core components.
     inner: Arc<ScrollEthApiInner<N>>,
-    /// Marker for the network types.
-    _nt: PhantomData<NetworkT>,
-    tx_resp_builder:
-        RpcConverter<N::Primitives, NetworkT, ScrollEthApiError, ScrollTxInfoMapper<N>>,
-}
-
-impl<N: ScrollNodeCore, NetworkT> ScrollEthApi<N, NetworkT> {
-    /// Creates a new [`ScrollEthApi`].
-    pub fn new(eth_api: EthApiNodeBackend<N>) -> Self {
-        let inner = Arc::new(ScrollEthApiInner { eth_api });
-        Self {
-            inner: inner.clone(),
-            _nt: PhantomData,
-            tx_resp_builder: RpcConverter::with_mapper(ScrollTxInfoMapper::new(inner)),
-        }
-    }
 }
 
 impl<N> ScrollEthApi<N>
@@ -105,27 +91,23 @@ where
     }
 }
 
-impl<N, NetworkT> EthApiTypes for ScrollEthApi<N, NetworkT>
+impl<N> EthApiTypes for ScrollEthApi<N>
 where
-    Self: Send + Sync + fmt::Debug,
+    Self: Send + Sync,
     N: ScrollNodeCore,
-    NetworkT: Network + Clone + fmt::Debug,
-    <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
     type Error = ScrollEthApiError;
     type NetworkTypes = Scroll;
-    type TransactionCompat =
-        RpcConverter<N::Primitives, NetworkT, ScrollEthApiError, ScrollTxInfoMapper<N>>;
+    type TransactionCompat = Self;
 
     fn tx_resp_builder(&self) -> &Self::TransactionCompat {
-        &self.tx_resp_builder
+        self
     }
 }
 
-impl<N, NetworkT> RpcNodeCore for ScrollEthApi<N, NetworkT>
+impl<N> RpcNodeCore for ScrollEthApi<N>
 where
     N: ScrollNodeCore,
-    NetworkT: Network,
 {
     type Primitives = N::Primitives;
     type Provider = N::Provider;
@@ -160,10 +142,9 @@ where
     }
 }
 
-impl<N, NetworkT> RpcNodeCoreExt for ScrollEthApi<N, NetworkT>
+impl<N> RpcNodeCoreExt for ScrollEthApi<N>
 where
     N: ScrollNodeCore,
-    NetworkT: Network,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>> {
@@ -171,7 +152,7 @@ where
     }
 }
 
-impl<N, NetworkT> EthApiSpec for ScrollEthApi<N, NetworkT>
+impl<N> EthApiSpec for ScrollEthApi<N>
 where
     N: ScrollNodeCore<
         Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
@@ -179,7 +160,6 @@ where
                       + StageCheckpointReader,
         Network: NetworkInfo,
     >,
-    NetworkT: Network,
 {
     type Transaction = ProviderTx<Self::Provider>;
 
@@ -194,12 +174,10 @@ where
     }
 }
 
-impl<N, NetworkT> SpawnBlocking for ScrollEthApi<N, NetworkT>
+impl<N> SpawnBlocking for ScrollEthApi<N>
 where
     Self: Send + Sync + Clone + 'static,
     N: ScrollNodeCore,
-    NetworkT: Network,
-    <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -217,7 +195,7 @@ where
     }
 }
 
-impl<N, NetworkT> LoadFee for ScrollEthApi<N, NetworkT>
+impl<N> LoadFee for ScrollEthApi<N>
 where
     Self: LoadBlock<Provider = N::Provider>,
     N: ScrollNodeCore<
@@ -237,18 +215,15 @@ where
     }
 }
 
-impl<N, NetworkT> LoadState for ScrollEthApi<N, NetworkT>
-where
+impl<N> LoadState for ScrollEthApi<N> where
     N: ScrollNodeCore<
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
-    >,
-    NetworkT: Network,
-    <N as RpcNodeCore>::Primitives: fmt::Debug,
+    >
 {
 }
 
-impl<N, NetworkT> EthState for ScrollEthApi<N, NetworkT>
+impl<N> EthState for ScrollEthApi<N>
 where
     Self: LoadState + SpawnBlocking,
     N: ScrollNodeCore,
@@ -259,14 +234,14 @@ where
     }
 }
 
-impl<N, NetworkT> EthFees for ScrollEthApi<N, NetworkT>
+impl<N> EthFees for ScrollEthApi<N>
 where
     Self: LoadFee,
     N: ScrollNodeCore,
 {
 }
 
-impl<N, NetworkT> Trace for ScrollEthApi<N, NetworkT>
+impl<N> Trace for ScrollEthApi<N>
 where
     Self: RpcNodeCore<Provider: BlockReader>
         + LoadState<
@@ -282,7 +257,7 @@ where
 {
 }
 
-impl<N, NetworkT> AddDevSigners for ScrollEthApi<N, NetworkT>
+impl<N> AddDevSigners for ScrollEthApi<N>
 where
     N: ScrollNodeCore,
 {
@@ -291,7 +266,7 @@ where
     }
 }
 
-impl<N: ScrollNodeCore, NetworkT> fmt::Debug for ScrollEthApi<N, NetworkT> {
+impl<N: ScrollNodeCore> fmt::Debug for ScrollEthApi<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ScrollEthApi").finish_non_exhaustive()
     }
@@ -299,9 +274,9 @@ impl<N: ScrollNodeCore, NetworkT> fmt::Debug for ScrollEthApi<N, NetworkT> {
 
 /// Container type `ScrollEthApi`
 #[allow(missing_debug_implementations)]
-pub struct ScrollEthApiInner<N: ScrollNodeCore> {
+struct ScrollEthApiInner<N: ScrollNodeCore> {
     /// Gateway to node's core components.
-    pub eth_api: EthApiNodeBackend<N>,
+    eth_api: EthApiNodeBackend<N>,
 }
 
 impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
@@ -345,6 +320,6 @@ where
         .proof_permits(ctx.config.proof_permits)
         .build_inner();
 
-        Ok(ScrollEthApi::new(eth_api))
+        Ok(ScrollEthApi { inner: Arc::new(ScrollEthApiInner { eth_api }) })
     }
 }

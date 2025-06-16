@@ -25,8 +25,7 @@ use alloy_eips::{
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_primitives_traits::{
-    constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Block,
-    GotExpected, SealedBlock,
+    transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
 };
 use reth_storage_api::{StateProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -460,16 +459,6 @@ where
                     ),
                 ))
             }
-        }
-
-        // Osaka validation of max tx gas.
-        if self.fork_tracker.is_osaka_activated() &&
-            transaction.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA
-        {
-            return Err(TransactionValidationOutcome::Invalid(
-                transaction,
-                InvalidTransactionError::GasLimitTooHigh.into(),
-            ))
         }
 
         Ok(transaction)

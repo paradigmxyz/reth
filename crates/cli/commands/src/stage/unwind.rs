@@ -146,7 +146,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     evm_config.clone(),
                     stage_conf.clone(),
                     prune_modes.clone(),
-                    None,
                 )
                 .set(ExecutionStage::new(
                     evm_config,
@@ -209,9 +208,7 @@ impl Subcommands {
             Self::NumBlocks { amount } => last.saturating_sub(*amount),
         };
         if target > last {
-            eyre::bail!(
-                "Target block number {target} is higher than the latest block number {last}"
-            )
+            eyre::bail!("Target block number is higher than the latest block number")
         }
         Ok(target)
     }

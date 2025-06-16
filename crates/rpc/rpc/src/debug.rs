@@ -34,10 +34,9 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProvider, StateProviderFactory, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::{context_interface::Transaction, state::EvmState, DatabaseCommit};
 use revm_inspectors::tracing::{
     FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
@@ -529,7 +528,7 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx_env = this.eth_api().evm_config().tx_env(tx);
-                        let res = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
+                        let (res, _) = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
@@ -863,25 +862,6 @@ where
         let frame = inspector.geth_builder().geth_traces(gas_used, return_value, *config);
 
         Ok((frame.into(), res.state))
-    }
-
-    /// Returns the state root of the `HashedPostState` on top of the state for the given block with
-    /// trie updates.
-    async fn debug_state_root_with_updates(
-        &self,
-        hashed_state: HashedPostState,
-        block_id: Option<BlockId>,
-    ) -> Result<(B256, TrieUpdates), Eth::Error> {
-        self.inner
-            .eth_api
-            .spawn_blocking_io(move |this| {
-                let state = this
-                    .provider()
-                    .state_by_block_id(block_id.unwrap_or_default())
-                    .map_err(Eth::Error::from_eth_err)?;
-                state.state_root_with_updates(hashed_state).map_err(Eth::Error::from_eth_err)
-            })
-            .await
     }
 }
 
@@ -1236,14 +1216,6 @@ where
 
     async fn debug_start_go_trace(&self, _file: String) -> RpcResult<()> {
         Ok(())
-    }
-
-    async fn debug_state_root_with_updates(
-        &self,
-        hashed_state: HashedPostState,
-        block_id: Option<BlockId>,
-    ) -> RpcResult<(B256, TrieUpdates)> {
-        Self::debug_state_root_with_updates(self, hashed_state, block_id).await.map_err(Into::into)
     }
 
     async fn debug_stop_cpu_profile(&self) -> RpcResult<()> {

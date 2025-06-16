@@ -3,14 +3,14 @@
 use crate::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
     BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, HashedPostStateProvider,
-    HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader, ReceiptProvider,
+    HeaderProvider, NodePrimitivesProvider, OmmersProvider, PruneCheckpointReader, ReceiptProvider,
     ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
     StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider,
+    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
+use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
     Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
@@ -146,6 +146,10 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReaderIdExt for NoopProvider<C, N> 
     fn header_by_id(&self, _id: BlockId) -> ProviderResult<Option<N::BlockHeader>> {
         Ok(None)
     }
+
+    fn ommers_by_id(&self, _id: BlockId) -> ProviderResult<Option<Vec<N::BlockHeader>>> {
+        Ok(None)
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
@@ -163,7 +167,11 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+        Ok(None)
+    }
+
+    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
@@ -524,6 +532,22 @@ impl<C: Send + Sync, N: NodePrimitives> StageCheckpointReader for NoopProvider<C
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
         Ok(Vec::new())
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> WithdrawalsProvider for NoopProvider<C, N> {
+    fn withdrawals_by_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _timestamp: u64,
+    ) -> ProviderResult<Option<Withdrawals>> {
+        Ok(None)
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {
+    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
+        Ok(None)
     }
 }
 

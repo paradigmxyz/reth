@@ -38,7 +38,6 @@ reth-rpc-server-types.workspace = true
 reth-network-types.workspace = true
 reth-consensus.workspace = true
 reth-node-api.workspace = true
-reth-trie-common.workspace = true
 
 # ethereum
 alloy-evm.workspace = true
@@ -86,7 +85,6 @@ tracing.workspace = true
 tracing-futures.workspace = true
 futures.workspace = true
 serde.workspace = true
-sha2.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 

@@ -9,9 +9,6 @@ pub use envelope::ScrollTxEnvelope;
 mod l1_message;
 pub use l1_message::{ScrollL1MessageTransactionFields, TxL1Message, L1_MESSAGE_TRANSACTION_TYPE};
 
-mod meta;
-pub use meta::{ScrollAdditionalInfo, ScrollTransactionInfo};
-
 mod typed;
 pub use typed::ScrollTypedTransaction;
 
@@ -20,9 +17,3 @@ pub use pooled::ScrollPooledTransaction;
 
 #[cfg(feature = "serde")]
 pub use l1_message::serde_l1_message_tx_rpc;
-
-/// Bincode-compatible serde implementations for transaction types.
-#[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
-pub(super) mod serde_bincode_compat {
-    pub use super::envelope::serde_bincode_compat::*;
-}

@@ -38,14 +38,13 @@ where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
             Evm: ConfigureEvm<
-                Primitives = <Self as RpcNodeCore>::Primitives,
+                Primitives: NodePrimitives<
+                    BlockHeader = ProviderHeader<Self::Provider>,
+                    SignedTx = ProviderTx<Self::Provider>,
+                    Receipt = ProviderReceipt<Self::Provider>,
+                    Block = ProviderBlock<Self::Provider>,
+                >,
                 NextBlockEnvCtx = NextBlockEnvAttributes,
-            >,
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-                Block = ProviderBlock<Self::Provider>,
             >,
         >,
     Provider: BlockReader<

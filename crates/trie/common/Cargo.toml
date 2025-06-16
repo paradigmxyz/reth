@@ -84,7 +84,10 @@ std = [
     "revm-database/std",
     "revm-state/std",
 ]
-eip1186 = ["alloy-rpc-types-eth/serde", "dep:alloy-serde"]
+eip1186 = [
+    "alloy-rpc-types-eth/serde",
+    "dep:alloy-serde",
+]
 serde = [
     "dep:serde",
     "bytes?/serde",
@@ -98,7 +101,10 @@ serde = [
     "revm-database/serde",
     "revm-state/serde",
 ]
-reth-codec = ["dep:reth-codecs", "dep:bytes"]
+reth-codec = [
+    "dep:reth-codecs",
+    "dep:bytes",
+]
 serde-bincode-compat = [
     "serde",
     "reth-primitives-traits/serde-bincode-compat",

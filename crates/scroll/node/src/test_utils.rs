@@ -36,7 +36,6 @@ pub async fn setup(
                 .build(Default::default()),
         ),
         is_dev,
-        Default::default(),
         scroll_payload_attributes,
     )
     .await
