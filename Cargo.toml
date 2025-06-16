@@ -463,7 +463,7 @@ revm-inspectors = "0.24.0"
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.1.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.10", default-features = false }
+alloy-evm = { version = "0.11", default-features = false }
 alloy-primitives = { version = "1.1.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.1.0"
@@ -501,13 +501,13 @@ alloy-transport-ipc = { version = "1.0.9", default-features = false }
 alloy-transport-ws = { version = "1.0.9", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.10.0", default-features = false }
+alloy-op-evm = { version = "0.11", default-features = false }
 alloy-op-hardforks = "0.2.2"
-op-alloy-rpc-types = { version = "0.17.2", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.17.2", default-features = false }
-op-alloy-network = { version = "0.17.2", default-features = false }
-op-alloy-consensus = { version = "0.17.2", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.17.2", default-features = false }
+op-alloy-rpc-types = { version = "0.18", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.18", default-features = false }
+op-alloy-network = { version = "0.18", default-features = false }
+op-alloy-consensus = { version = "0.18", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.18", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
@@ -729,9 +729,6 @@ vergen-git2 = "1.0.5"
 # alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
-
-# alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "main" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "main" }
 #
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }

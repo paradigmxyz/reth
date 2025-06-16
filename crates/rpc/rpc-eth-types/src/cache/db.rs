@@ -9,8 +9,9 @@ use reth_storage_api::{HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
     database::{BundleState, CacheDB},
+    primitives::HashMap,
     state::{AccountInfo, Bytecode},
-    Database,
+    Database, DatabaseCommit,
 };
 
 /// Helper alias type for the state's [`CacheDB`]
@@ -218,5 +219,11 @@ impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         self.0.block_hash_ref(number)
+    }
+}
+
+impl DatabaseCommit for StateCacheDbRefMutWrapper<'_, '_> {
+    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
+        self.0.commit(changes)
     }
 }
