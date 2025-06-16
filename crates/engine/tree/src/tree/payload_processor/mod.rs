@@ -11,7 +11,7 @@ use crate::tree::{
 };
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_evm::block::StateChangeSource;
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
@@ -23,7 +23,7 @@ use reth_provider::{
     StateProviderFactory, StateReader,
 };
 use reth_revm::{db::BundleState, state::EvmState};
-use reth_trie::TrieInput;
+use reth_trie::{MultiProofTargets, TrieInput};
 use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
@@ -70,7 +70,9 @@ where
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// A sparse trie, kept around to be used for the state root computation so that allocations
     /// can be minimized.
-    sparse_trie: Option<SparseTrieState>,
+    sparse_trie: Option<(SparseTrieState, B256Map<SparseTrieState>)>,
+    /// Sets the fetched proof targets to be kept around for the state root computation.
+    fetched_proof_targets: Option<MultiProofTargets>,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -96,6 +98,7 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_trie: None,
+            fetched_proof_targets: None,
             _marker: Default::default(),
         }
     }
@@ -177,13 +180,16 @@ where
         // We set it to half of the proof task concurrency, because often for each multiproof we
         // spawn one Tokio task for the account proof, and one Tokio task for the storage proof.
         let max_multi_proof_task_concurrency = max_proof_task_concurrency / 2;
-        let multi_proof_task = MultiProofTask::new(
+        let mut multi_proof_task = MultiProofTask::new(
             state_root_config,
             self.executor.clone(),
             proof_task.handle(),
             to_sparse_trie,
             max_multi_proof_task_concurrency,
         );
+        if let Some(fetched_proof_targets) = self.fetched_proof_targets.take() {
+            multi_proof_task = multi_proof_task.with_fetched_proof_targets(fetched_proof_targets);
+        }
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
@@ -192,8 +198,10 @@ where
             self.spawn_caching_with(header, transactions, provider_builder, to_multi_proof.clone());
 
         // spawn multi-proof task
+        let (fetched_proof_targets_tx, fetched_proof_targets_rx) = channel();
         self.executor.spawn_blocking(move || {
-            multi_proof_task.run();
+            let fetched_proof_targets = multi_proof_task.run();
+            fetched_proof_targets_tx.send(fetched_proof_targets).unwrap();
         });
 
         // take the sparse trie if it was set
@@ -211,7 +219,8 @@ where
         let (state_root_tx, state_root_rx) = channel();
         self.executor.spawn_blocking(move || {
             let res = sparse_trie_task.run();
-            let _ = state_root_tx.send(res);
+            let fetched_proof_targets = fetched_proof_targets_rx.recv().unwrap();
+            let _ = state_root_tx.send(res.map(|outcome| (outcome, fetched_proof_targets)));
         });
 
         // spawn the proof task
@@ -251,8 +260,13 @@ where
     }
 
     /// Sets the sparse trie to be kept around for the state root computation.
-    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrieState) {
-        self.sparse_trie = Some(sparse_trie);
+    pub(super) fn set_sparse_trie(&mut self, trie: (SparseTrieState, B256Map<SparseTrieState>)) {
+        self.sparse_trie = Some(trie);
+    }
+
+    /// Sets the fetched proof targets to be kept around for the state root computation.
+    pub(super) fn set_fetched_proof_targets(&mut self, fetched_proof_targets: MultiProofTargets) {
+        self.fetched_proof_targets = Some(fetched_proof_targets);
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -327,7 +341,11 @@ pub struct PayloadHandle {
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
     /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    state_root: Option<
+        mpsc::Receiver<
+            Result<(StateRootComputeOutcome, MultiProofTargets), ParallelStateRootError>,
+        >,
+    >,
 }
 
 impl PayloadHandle {
@@ -336,7 +354,9 @@ impl PayloadHandle {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub fn state_root(
+        &mut self,
+    ) -> Result<(StateRootComputeOutcome, MultiProofTargets), ParallelStateRootError> {
         self.state_root
             .take()
             .expect("state_root is None")
@@ -603,7 +623,7 @@ mod tests {
         }
         drop(state_hook);
 
-        let root_from_task = handle.state_root().expect("task failed").state_root;
+        let root_from_task = handle.state_root().expect("task failed").0.state_root;
         let root_from_regular = state_root(accumulated_state);
 
         assert_eq!(

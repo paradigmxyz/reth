@@ -669,6 +669,14 @@ where
         }
     }
 
+    pub(super) fn with_fetched_proof_targets(
+        mut self,
+        fetched_proof_targets: MultiProofTargets,
+    ) -> Self {
+        self.fetched_proof_targets = fetched_proof_targets;
+        self
+    }
+
     /// Returns a [`Sender`] that can be used to send arbitrary [`MultiProofMessage`]s to this task.
     pub(super) fn state_root_message_sender(&self) -> Sender<MultiProofMessage> {
         self.tx.clone()
@@ -888,7 +896,7 @@ where
     ///      currently being calculated, or if there are any pending proofs in the proof sequencer
     ///      left to be revealed by checking the pending tasks.
     /// 6. This task exits after all pending proofs are processed.
-    pub(crate) fn run(mut self) {
+    pub(crate) fn run(mut self) -> MultiProofTargets {
         // TODO convert those into fields
         let mut prefetch_proofs_requested = 0;
         let mut state_update_proofs_requested = 0;
@@ -1039,7 +1047,7 @@ where
                             ?err,
                             "proof calculation error"
                         );
-                        return
+                        return self.fetched_proof_targets
                     }
                 },
                 Err(_) => {
@@ -1074,6 +1082,8 @@ where
                 .last_proof_wait_time_histogram
                 .record(updates_finished_time.elapsed().as_secs_f64());
         }
+
+        self.fetched_proof_targets
     }
 }
 

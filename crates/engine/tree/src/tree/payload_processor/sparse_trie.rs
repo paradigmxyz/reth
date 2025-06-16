@@ -4,7 +4,7 @@ use crate::tree::payload_processor::{
     executor::WorkloadExecutor,
     multiproof::{MultiProofTaskMetrics, SparseTrieUpdate},
 };
-use alloy_primitives::B256;
+use alloy_primitives::{map::B256Map, B256};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
@@ -70,15 +70,16 @@ where
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         trie_metrics: MultiProofTaskMetrics,
-        sparse_trie_state: Option<SparseTrieState>,
+        sparse_trie_state: Option<(SparseTrieState, B256Map<SparseTrieState>)>,
     ) -> Self {
-        if let Some(sparse_trie_state) = sparse_trie_state {
-            Self::with_accounts_trie(
+        if let Some((account_trie, storage_tries)) = sparse_trie_state {
+            Self::with_tries(
                 executor,
                 updates,
                 blinded_provider_factory,
                 trie_metrics,
-                sparse_trie_state,
+                account_trie,
+                storage_tries,
             )
         } else {
             Self::new(executor, updates, blinded_provider_factory, trie_metrics)
@@ -87,15 +88,16 @@ where
 
     /// Creates a new sparse trie task, using the given cleared `SparseTrieState` for the accounts
     /// trie.
-    pub(super) fn with_accounts_trie(
+    pub(super) fn with_tries(
         executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
-        sparse_trie_state: SparseTrieState,
+        account_trie: SparseTrieState,
+        storage_tries: B256Map<SparseTrieState>,
     ) -> Self {
         let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
-        trie.populate_from(sparse_trie_state);
+        trie.populate_from(account_trie, storage_tries);
 
         Self { executor, updates, metrics, trie }
     }
@@ -146,10 +148,10 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        // take the account trie
-        let trie = self.trie.take_cleared_account_trie_state();
+        // take the tries
+        let tries = self.trie.take_cleared_tries();
 
-        Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
+        Ok(StateRootComputeOutcome { state_root, trie_updates, tries })
     }
 }
 
@@ -161,8 +163,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: TrieUpdates,
-    /// The account state trie.
-    pub trie: SparseTrieState,
+    /// The account and storage tries.
+    pub tries: (SparseTrieState, B256Map<SparseTrieState>),
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.

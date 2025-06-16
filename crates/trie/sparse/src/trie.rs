@@ -956,7 +956,7 @@ impl<P> RevealedSparseTrie<P> {
 
     /// Returns the cleared `SparseTrieState` for this `RevealedSparseTrie`.
     pub fn cleared_state(mut self) -> SparseTrieState {
-        self.clear();
+        // self.clear();
         SparseTrieState {
             nodes: self.nodes,
             branch_node_tree_masks: self.branch_node_tree_masks,
@@ -1357,6 +1357,8 @@ impl<P> RevealedSparseTrie<P> {
                                 hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path.clone(), branch_node);
+                            self.branch_node_tree_masks.insert(path.clone(), tree_mask);
+                            self.branch_node_hash_masks.insert(path.clone(), hash_mask);
                         } else if self
                             .branch_node_tree_masks
                             .get(&path)
@@ -1370,6 +1372,8 @@ impl<P> RevealedSparseTrie<P> {
                             // removed nodes.
                             updates.updated_nodes.remove(&path);
                             updates.removed_nodes.insert(path.clone());
+                            self.branch_node_tree_masks.remove(&path);
+                            self.branch_node_hash_masks.remove(&path);
                         } else if self
                             .branch_node_hash_masks
                             .get(&path)

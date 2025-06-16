@@ -109,14 +109,34 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
 
     /// Uses the input `SparseTrieState` to populate the backing data structures in the `state`
     /// trie.
-    pub fn populate_from(&mut self, trie: SparseTrieState) {
+    pub fn populate_from(
+        &mut self,
+        account_trie: SparseTrieState,
+        storage_tries: B256Map<SparseTrieState>,
+    ) {
         if let Some(new_trie) = self.state.as_revealed_mut() {
-            new_trie.use_allocated_state(trie);
+            new_trie.use_allocated_state(account_trie);
         } else {
             self.state = SparseTrie::revealed_with_provider(
                 self.provider_factory.account_node_provider(),
-                trie,
+                account_trie,
             )
+        }
+
+        for (address, storage_trie) in storage_tries {
+            if let Some(trie) =
+                self.storages.get_mut(&address).and_then(SparseTrie::as_revealed_mut)
+            {
+                trie.use_allocated_state(storage_trie);
+            } else {
+                self.storages.insert(
+                    address,
+                    SparseTrie::revealed_with_provider(
+                        self.provider_factory.storage_node_provider(address),
+                        storage_trie,
+                    ),
+                );
+            }
         }
     }
 
@@ -879,10 +899,15 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         Ok(())
     }
 
-    /// Clears and takes the account trie.
-    pub fn take_cleared_account_trie_state(&mut self) -> SparseTrieState {
-        let trie = core::mem::take(&mut self.state);
-        trie.cleared()
+    /// Clears and takes the account and storage tries.
+    pub fn take_cleared_tries(&mut self) -> (SparseTrieState, B256Map<SparseTrieState>) {
+        (
+            core::mem::take(&mut self.state).cleared(),
+            core::mem::take(&mut self.storages)
+                .into_iter()
+                .map(|(k, v)| (k, v.cleared()))
+                .collect(),
+        )
     }
 }
 
