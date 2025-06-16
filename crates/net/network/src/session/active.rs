@@ -25,8 +25,7 @@ use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, EthVersion, NetworkPrimitives,
-    NewBlockPayload,
+    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -44,10 +43,16 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
 
+/// The recommended interval at which a new range update should be sent to the remote peer.
+///
+/// This is set to 120 seconds (2 minutes) as per the Ethereum specification for eth69.
+pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(120);
+
 // Constants for timeout updating.
 
 /// Minimum timeout value
 const MINIMUM_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Maximum timeout value
 const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
 /// How much the new measurements affect the current timeout (X percent)
@@ -517,18 +522,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         // terminate the task
         Some(Poll::Ready(()))
     }
-
-    /// Creates an interval for sending range updates to the remote peer.
-    fn create_range_update_interval(
-        conn: &EthRlpxConnection<N>,
-        range_update_interval: Duration,
-    ) -> Option<Interval> {
-        (conn.version() > EthVersion::Eth69).then(|| {
-            let mut interval = tokio::time::interval(range_update_interval);
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            interval
-        })
-    }
 }
 
 impl<N: NetworkPrimitives> Future for ActiveSession<N> {
@@ -540,22 +533,6 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         // if the session is terminate we have to send the termination message before we can close
         if let Some(terminate) = this.poll_terminate_message(cx) {
             return terminate
-        }
-
-        let is_disconnecting = this.is_disconnecting();
-        if let Some(mut interval) =
-            Self::create_range_update_interval(&this.conn, Duration::from_secs(120))
-        {
-            while interval.poll_tick(cx).is_ready() {
-                if !is_disconnecting {
-                    let update = EthMessage::BlockRangeUpdate(reth_eth_wire::BlockRangeUpdate {
-                        earliest: this.local_range_info.earliest(),
-                        latest: this.local_range_info.latest(),
-                        latest_hash: this.local_range_info.latest_hash(),
-                    });
-                    this.queued_outgoing.push_back(update.into());
-                }
-            }
         }
 
         if this.is_disconnecting() {
@@ -736,6 +713,15 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
 
             if !progress {
                 break 'main
+            }
+        }
+
+        if let Some(interval) = &mut this.range_update_interval {
+            // queue in new range updates if the interval is ready
+            while interval.poll_tick(cx).is_ready() {
+                this.queued_outgoing.push_back(
+                    EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
+                );
             }
         }
 
@@ -1011,11 +997,6 @@ mod tests {
 
                     self.to_sessions.push(commands_to_session);
 
-                    let range_update_interval = ActiveSession::create_range_update_interval(
-                        &conn,
-                        Duration::from_secs(120),
-                    );
-
                     ActiveSession {
                         next_id: 0,
                         remote_peer_id: peer_id,
@@ -1047,7 +1028,7 @@ mod tests {
                             1000,
                             alloy_primitives::B256::ZERO,
                         ),
-                        range_update_interval,
+                        range_update_interval: None,
                     }
                 }
                 ev => {
