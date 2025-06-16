@@ -115,7 +115,7 @@ impl MakeCanonical {
     pub const fn new() -> Self {
         Self { active_node_only: false }
     }
-    
+
     /// Create a new `MakeCanonical` action that only applies to the active node
     pub const fn with_active_node() -> Self {
         Self { active_node_only: true }
@@ -159,7 +159,7 @@ where
                 );
 
                 validate_fcu_response(&fcu_response, &format!("Active node {active_idx}"))?;
-                
+
                 Ok(())
             } else {
                 // Original broadcast behavior
@@ -171,7 +171,10 @@ where
                 // if we're on a fork, validate it now that it's canonical
                 if let Ok(active_state) = env.active_node_state() {
                     if let Some(fork_base) = active_state.current_fork_base {
-                        debug!("MakeCanonical: Adding fork validation from base block {}", fork_base);
+                        debug!(
+                            "MakeCanonical: Adding fork validation from base block {}",
+                            fork_base
+                        );
                         actions.push(Box::new(ValidateFork::new(fork_base)));
                         // clear the fork base since we're now canonical
                         env.active_node_state_mut()?.current_fork_base = None;

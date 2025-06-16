@@ -644,7 +644,7 @@ where
                 // Send only to the active node
                 let active_idx = env.active_node_idx;
                 let engine = env.node_clients[active_idx].engine.http_client();
-                
+
                 let result = EngineApiClient::<Engine>::new_payload_v3(
                     &engine,
                     execution_payload.clone(),
@@ -658,14 +658,15 @@ where
                 // Validate the response
                 match result.status {
                     PayloadStatusEnum::Valid => {
-                        env.active_node_state_mut()?.latest_payload_executed = Some(next_new_payload);
+                        env.active_node_state_mut()?.latest_payload_executed =
+                            Some(next_new_payload);
                         Ok(())
                     }
                     other => Err(eyre::eyre!(
                         "Active node {}: Unexpected payload status: {:?}",
                         active_idx,
                         other
-                    ))
+                    )),
                 }
             } else {
                 // Loop through all clients and broadcast the next new payload
@@ -707,11 +708,13 @@ where
                 let any_valid =
                     broadcast_results.iter().any(|(_, status)| *status == PayloadStatusEnum::Valid);
                 if !any_valid {
-                    return Err(eyre::eyre!("Failed to successfully broadcast payload to any client"));
+                    return Err(eyre::eyre!(
+                        "Failed to successfully broadcast payload to any client"
+                    ));
                 }
 
                 debug!("Broadcast complete. Results: {:?}", broadcast_results);
-                
+
                 Ok(())
             }
         })
@@ -965,8 +968,6 @@ where
         })
     }
 }
-
-
 
 /// Action that produces a sequence of blocks where some blocks are intentionally invalid
 #[derive(Debug)]

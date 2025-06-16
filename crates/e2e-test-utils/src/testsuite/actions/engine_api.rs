@@ -272,20 +272,20 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             // Validate required fields
-            let target_node = self.target_node
-                .ok_or_else(|| eyre::eyre!("Target node not specified"))?;
-            let source_node = self.source_node
-                .ok_or_else(|| eyre::eyre!("Source node not specified"))?;
+            let target_node =
+                self.target_node.ok_or_else(|| eyre::eyre!("Target node not specified"))?;
+            let source_node =
+                self.source_node.ok_or_else(|| eyre::eyre!("Source node not specified"))?;
 
             // Determine block numbers to send
             let block_numbers = if let Some(custom_numbers) = &self.custom_block_numbers {
                 custom_numbers.clone()
             } else {
-                let start = self.start_block
-                    .ok_or_else(|| eyre::eyre!("Start block not specified"))?;
-                let count = self.total_blocks
-                    .ok_or_else(|| eyre::eyre!("Total blocks not specified"))?;
-                
+                let start =
+                    self.start_block.ok_or_else(|| eyre::eyre!("Start block not specified"))?;
+                let count =
+                    self.total_blocks.ok_or_else(|| eyre::eyre!("Total blocks not specified"))?;
+
                 if self.reverse_order {
                     // Send blocks in reverse order (e.g., for count=2, start=1: [2, 1])
                     (0..count).map(|i| start + count - 1 - i).collect()
@@ -298,11 +298,12 @@ where
             for &block_number in &block_numbers {
                 // For the first block in reverse order, expect buffering
                 // For subsequent blocks, they might connect immediately
-                let expected_status = if self.reverse_order && block_number == *block_numbers.first().unwrap() {
-                    ExpectedPayloadStatus::SyncingOrAccepted
-                } else {
-                    ExpectedPayloadStatus::Valid
-                };
+                let expected_status =
+                    if self.reverse_order && block_number == *block_numbers.first().unwrap() {
+                        ExpectedPayloadStatus::SyncingOrAccepted
+                    } else {
+                        ExpectedPayloadStatus::Valid
+                    };
 
                 let mut action = SendNewPayload::<Engine>::new(
                     target_node,
