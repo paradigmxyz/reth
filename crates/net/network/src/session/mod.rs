@@ -48,6 +48,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, instrument, trace};
 
+use crate::session::active::RANGE_UPDATE_INTERVAL;
 pub use conn::EthRlpxConnection;
 pub use handle::{
     ActiveSessionHandle, ActiveSessionMessage, PendingSessionEvent, PendingSessionHandle,
@@ -116,6 +117,9 @@ pub struct SessionManager<N: NetworkPrimitives> {
     metrics: SessionManagerMetrics,
     /// The [`EthRlpxHandshake`] is used to perform the initial handshake with the peer.
     handshake: Arc<dyn EthRlpxHandshake>,
+    /// Shared local range information that gets propagated to active sessions.
+    /// This represents the range of blocks that this node can serve to other peers.
+    local_range_info: BlockRangeInfo,
 }
 
 // === impl SessionManager ===
@@ -136,6 +140,13 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
         let active_session_tx = PollSender::new(active_session_tx);
+
+        // Initialize local range info from the status
+        let local_range_info = BlockRangeInfo::new(
+            status.earliest_block.unwrap_or_default(),
+            status.latest_block.unwrap_or_default(),
+            status.blockhash,
+        );
 
         Self {
             next_id: 0,
@@ -159,6 +170,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
             disconnections_counter: Default::default(),
             metrics: Default::default(),
             handshake,
+            local_range_info,
         }
     }
 
@@ -521,6 +533,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 // negotiated version
                 let version = conn.version();
 
+                // Configure the interval at which the range information is updated, starting with
+                // ETH69
+                let range_update_interval = (conn.version() >= EthVersion::Eth69).then(|| {
+                    let mut interval = tokio::time::interval(RANGE_UPDATE_INTERVAL);
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    interval
+                });
+
                 let session = ActiveSession {
                     next_id: 0,
                     remote_peer_id: peer_id,
@@ -544,6 +564,8 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                     terminate_message: None,
                     range_info: None,
+                    local_range_info: self.local_range_info.clone(),
+                    range_update_interval,
                 };
 
                 self.spawn(session);
@@ -653,13 +675,24 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
     }
 
-    pub(crate) const fn update_advertised_block_range(
-        &mut self,
-        block_range_update: BlockRangeUpdate,
-    ) {
+    /// Updates the advertised block range that this node can serve to other peers starting with
+    /// Eth69.
+    ///
+    /// This method updates both the local status message that gets sent to peers during handshake
+    /// and the shared local range information that gets propagated to active sessions (Eth69).
+    /// The range information is used in ETH69 protocol where peers announce the range of blocks
+    /// they can serve to optimize data synchronization.
+    pub(crate) fn update_advertised_block_range(&mut self, block_range_update: BlockRangeUpdate) {
         self.status.earliest_block = Some(block_range_update.earliest);
         self.status.latest_block = Some(block_range_update.latest);
         self.status.blockhash = block_range_update.latest_hash;
+
+        // Update the shared local range info that gets propagated to active sessions
+        self.local_range_info.update(
+            block_range_update.earliest,
+            block_range_update.latest,
+            block_range_update.latest_hash,
+        );
     }
 }
 

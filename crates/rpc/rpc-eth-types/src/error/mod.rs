@@ -13,6 +13,7 @@ use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
+use reth_rpc_types_compat::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
@@ -60,6 +61,14 @@ pub enum EthApiError {
     /// Header range not found for start block hash/number/tag to end block hash/number/tag
     #[error("header range not found, start block {0:?}, end block {1:?}")]
     HeaderRangeNotFound(BlockId, BlockId),
+    /// Thrown when historical data is not available because it has been pruned
+    ///
+    /// This error is intended for use as a standard response when historical data is
+    /// requested that has been pruned according to the node's data retention policy.
+    ///
+    /// See also <https://eips.ethereum.org/EIPS/eip-4444>
+    #[error("pruned history unavailable")]
+    PrunedHistoryUnavailable,
     /// Receipts not found for block hash/number/tag
     #[error("receipts not found")]
     ReceiptsNotFound(BlockId),
@@ -224,8 +233,40 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 internal_rpc_err(err.to_string())
             }
             err @ EthApiError::TransactionInputError(_) => invalid_params_rpc_err(err.to_string()),
+            EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
+        }
+    }
+}
+
+impl From<TransactionConversionError> for EthApiError {
+    fn from(_: TransactionConversionError) -> Self {
+        Self::TransactionConversionError
+    }
+}
+
+impl From<EthTxEnvError> for EthApiError {
+    fn from(value: EthTxEnvError) -> Self {
+        match value {
+            EthTxEnvError::CallFees(CallFeesError::BlobTransactionMissingBlobHashes) => {
+                Self::InvalidTransaction(
+                    RpcInvalidTransactionError::BlobTransactionMissingBlobHashes,
+                )
+            }
+            EthTxEnvError::CallFees(CallFeesError::FeeCapTooLow) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::FeeCapTooLow)
+            }
+            EthTxEnvError::CallFees(CallFeesError::ConflictingFeeFieldsInRequest) => {
+                Self::ConflictingFeeFieldsInRequest
+            }
+            EthTxEnvError::CallFees(CallFeesError::TipAboveFeeCap) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::TipAboveFeeCap)
+            }
+            EthTxEnvError::CallFees(CallFeesError::TipVeryHigh) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::TipVeryHigh)
+            }
+            EthTxEnvError::Input(err) => Self::TransactionInputError(err),
         }
     }
 }
@@ -487,7 +528,11 @@ impl RpcInvalidTransactionError {
             Self::InvalidChainId |
             Self::GasTooLow |
             Self::GasTooHigh |
-            Self::GasRequiredExceedsAllowance { .. } => EthRpcErrorCode::InvalidInput.code(),
+            Self::GasRequiredExceedsAllowance { .. } |
+            Self::NonceTooLow { .. } |
+            Self::NonceTooHigh { .. } |
+            Self::FeeCapTooLow |
+            Self::FeeCapVeryHigh => EthRpcErrorCode::InvalidInput.code(),
             Self::Revert(_) => EthRpcErrorCode::ExecutionError.code(),
             _ => EthRpcErrorCode::TransactionRejected.code(),
         }
@@ -741,7 +786,22 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
             RpcPoolError::TxPoolOverflow => {
                 rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), error.to_string())
             }
-            error => internal_rpc_err(error.to_string()),
+            RpcPoolError::AlreadyKnown |
+            RpcPoolError::InvalidSender |
+            RpcPoolError::Underpriced |
+            RpcPoolError::ReplaceUnderpriced |
+            RpcPoolError::ExceedsGasLimit |
+            RpcPoolError::ExceedsFeeCap { .. } |
+            RpcPoolError::NegativeValue |
+            RpcPoolError::OversizedData |
+            RpcPoolError::ExceedsMaxInitCodeSize |
+            RpcPoolError::PoolTransactionError(_) |
+            RpcPoolError::Eip4844(_) |
+            RpcPoolError::Eip7702(_) |
+            RpcPoolError::AddressAlreadyReserved => {
+                rpc_error_with_code(EthRpcErrorCode::InvalidInput.code(), error.to_string())
+            }
+            RpcPoolError::Other(other) => internal_rpc_err(other.to_string()),
         }
     }
 }

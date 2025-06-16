@@ -480,7 +480,7 @@ impl PeersManager {
                         reputation_change = MAX_TRUSTED_PEER_REPUTATION_CHANGE;
                     }
                 }
-                peer.apply_reputation(reputation_change)
+                peer.apply_reputation(reputation_change, rep)
             }
         } else {
             return

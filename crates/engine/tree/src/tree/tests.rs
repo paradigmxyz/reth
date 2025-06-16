@@ -349,6 +349,18 @@ impl TestHarness {
         }
     }
 
+    async fn check_block_received(&mut self, hash: B256) {
+        let event = self.from_tree_rx.recv().await.unwrap();
+        match event {
+            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::BlockReceived(
+                num_hash,
+            )) => {
+                assert_eq!(num_hash.hash, hash);
+            }
+            _ => panic!("Unexpected event: {event:#?}"),
+        }
+    }
+
     fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>) {
         let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
         let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
@@ -367,14 +379,6 @@ impl TestHarness {
         chain: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
     ) {
         self.setup_range_insertion_for_chain(chain, None)
-    }
-
-    fn setup_range_insertion_for_invalid_chain(
-        &mut self,
-        chain: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>,
-        index: usize,
-    ) {
-        self.setup_range_insertion_for_chain(chain, Some(index))
     }
 
     fn setup_range_insertion_for_chain(
@@ -1137,35 +1141,9 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected() {
     assert!(test_harness.tree.state.buffer.block(&buffered_block_hash).is_none());
 
     // both blocks are added to the canon chain in order
+    // note that the buffered block is received first, but added last
+    test_harness.check_block_received(buffered_block_hash).await;
+    test_harness.check_block_received(non_buffered_block_hash).await;
     test_harness.check_canon_block_added(non_buffered_block_hash).await;
     test_harness.check_canon_block_added(buffered_block_hash).await;
-}
-
-#[tokio::test]
-async fn test_engine_tree_reorg_with_missing_ancestor_expecting_valid() {
-    reth_tracing::init_test_tracing();
-    let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-
-    let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..6).collect();
-    test_harness = test_harness.with_blocks(base_chain.clone());
-
-    // create a side chain with an invalid block
-    let side_chain =
-        test_harness.block_builder.create_fork(base_chain.last().unwrap().recovered_block(), 15);
-    let invalid_index = 9;
-
-    test_harness.setup_range_insertion_for_invalid_chain(side_chain.clone(), invalid_index);
-
-    for (index, block) in side_chain.iter().enumerate() {
-        test_harness.send_new_payload(block.clone()).await;
-
-        if index < side_chain.len() - invalid_index - 1 {
-            test_harness.send_fcu(block.hash(), ForkchoiceStatus::Valid).await;
-        }
-    }
-
-    // Try to do a forkchoice update to a block after the invalid one
-    let fork_tip_hash = side_chain.last().unwrap().hash();
-    test_harness.send_fcu(fork_tip_hash, ForkchoiceStatus::Invalid).await;
 }

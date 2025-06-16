@@ -571,6 +571,10 @@ where
             }
         };
 
+        let num_hash = block.num_hash();
+        let engine_event = BeaconConsensusEngineEvent::BlockReceived(num_hash);
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+
         let block_hash = block.hash();
         let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
         if lowest_buffered_ancestor == block_hash {
