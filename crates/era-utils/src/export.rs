@@ -12,10 +12,10 @@ use reth_era::{
         TotalDifficulty,
     },
 };
-use reth_ethereum_primitives::TransactionSigned;
 use reth_fs_util as fs;
-use reth_primitives_traits::{Block, FullBlockHeader, SignedTransaction};
-use reth_storage_api::{BlockReader, BlockWriter, DBProvider, HeaderProvider, ReceiptProvider};
+use reth_storage_api::{
+    BlockNumReader, BlockReader, DBProvider, HeaderProvider,
+};
 use std::{
     path::PathBuf,
     time::{Duration, Instant},
@@ -48,53 +48,23 @@ pub struct ExportConfig {
 /// then writes them to disk.
 pub fn export<P, B>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
 where
-    P: DBProvider
-        + BlockReader<Block = B>
-        + ReceiptProvider
-        + HeaderProvider
-        + BlockWriter<Block = B>,
-    B: Block + Into<BlockBody<P::Transaction, Header>>,
-    P::Header: Into<Header> + FullBlockHeader,
-    <P as ReceiptProvider>::Receipt: alloy_rlp::Encodable,
-    P::Transaction: SignedTransaction + From<TransactionSigned>,
+    P: DBProvider + BlockReader<Block = B>,
+    B: Into<BlockBody<P::Transaction, Header>>,
+    P::Header: Into<Header>,
 {
     info!(
         "Exporting blockchain history from block {} to {} in steps of {}",
         config.first_block_number, config.last_block_number, config.step
     );
 
-    let best_block_number = provider.best_block_number()?;
-
     // Determine the actual last block to export
     // best_block_number() might be outdated, so check actual block availability
-    let last_block_number = if best_block_number < config.last_block_number {
-        warn!(
-            "Last block {} is beyond current head {}, setting last = head",
-            config.last_block_number, best_block_number
-        );
-
-        // Check if more blocks are actually available beyond what `best_block_number()` reports
-        if let Ok(headers) = provider.headers_range(best_block_number..=config.last_block_number) {
-            if let Some(last_header) = headers.last() {
-                let highest_block = last_header.number();
-                info!("Found highest available block {} via headers_range", highest_block);
-                highest_block
-            } else {
-                warn!("No headers found in range, using best_block_number {}", best_block_number);
-                best_block_number
-            }
-        } else {
-            warn!("headers_range failed, using best_block_number {}", best_block_number);
-            best_block_number
-        }
-    } else {
-        config.last_block_number
-    };
+    let last_block_number = determine_export_range(provider, config)?;
 
     info!(
         target: "era::history::export",
         first = config.first_block_number,
-        last = config.last_block_number,
+        last = last_block_number,
         step = config.step,
         "Preparing era1 export data"
     );
@@ -234,4 +204,39 @@ where
     );
 
     Ok(created_files)
+}
+
+/// Determines the actual last block number that can be exported,
+/// Uses `headers_range` fallback when `best_block_number` is stale due to static file storage.
+fn determine_export_range<P>(provider: &P, config: &ExportConfig) -> Result<BlockNumber>
+where
+    P: HeaderProvider + BlockNumReader,
+{
+    let best_block_number = provider.best_block_number()?;
+
+    let last_block_number = if best_block_number < config.last_block_number {
+        warn!(
+            "Last block {} is beyond current head {}, setting last = head",
+            config.last_block_number, best_block_number
+        );
+
+        // Check if more blocks are actually available beyond what `best_block_number()` reports
+        if let Ok(headers) = provider.headers_range(best_block_number..=config.last_block_number) {
+            if let Some(last_header) = headers.last() {
+                let highest_block = last_header.number();
+                info!("Found highest available block {} via headers_range", highest_block);
+                highest_block
+            } else {
+                warn!("No headers found in range, using best_block_number {}", best_block_number);
+                best_block_number
+            }
+        } else {
+            warn!("headers_range failed, using best_block_number {}", best_block_number);
+            best_block_number
+        }
+    } else {
+        config.last_block_number
+    };
+
+    Ok(last_block_number)
 }
