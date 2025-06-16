@@ -113,49 +113,34 @@ where
 
         for (i, header) in headers.into_iter().enumerate() {
             let expected_block_number = start_block + i as u64;
-            let actual_block_number = header.number();
 
-            // Validate block number
-            if expected_block_number != actual_block_number {
-                return Err(eyre!(
-                    "Expected header for block {expected_block_number}, got {actual_block_number}"
-                ));
-            }
-
-            let body = provider
-                .block_by_number(actual_block_number)?
-                .ok_or_else(|| eyre!("Block body not found for block {}", actual_block_number))?;
-
-            let receipts = provider
-                .receipts_by_block(actual_block_number.into())?
-                .ok_or_else(|| eyre!("Receipts not found for block {}", actual_block_number))?;
-
-            total_difficulty += header.difficulty();
-
-            let compressed_header = CompressedHeader::from_header(&header.into())?;
-            let compressed_body = CompressedBody::from_body(&body.into())?;
-            let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
-                .map_err(|e| eyre!("Failed to compress receipts: {}", e))?;
+            let (compressed_header, compressed_body, compressed_receipts) = compress_block_data(
+                provider,
+                header,
+                expected_block_number,
+                &mut total_difficulty,
+            )?;
 
             // Save last block's header data for accumulator
-            if actual_block_number == end_block {
+            if expected_block_number == end_block {
                 final_header_data = compressed_header.data.clone();
             }
 
             let difficulty = TotalDifficulty::new(total_difficulty);
-
-            let block_tuple = BlockTuple::new(
-                compressed_header.clone(),
-                compressed_body.clone(),
-                compressed_receipts.clone(),
-                difficulty,
-            );
 
             let header_size = compressed_header.data.len() + ENTRY_HEADER_SIZE;
             let body_size = compressed_body.data.len() + ENTRY_HEADER_SIZE;
             let receipts_size = compressed_receipts.data.len() + ENTRY_HEADER_SIZE;
             let difficulty_size = 32 + ENTRY_HEADER_SIZE; // U256 is 32 + 8 bytes header overhead
             let total_size = header_size + body_size + receipts_size + difficulty_size;
+
+            let block_tuple = BlockTuple::new(
+                compressed_header,
+                compressed_body,
+                compressed_receipts,
+                difficulty,
+            );
+
             offsets.push(position);
             position += total_size as i64;
 
@@ -166,7 +151,7 @@ where
             if last_report_time.elapsed() >= report_interval {
                 info!(
                     target: "era::history::export",
-                    "Export progress: block {actual_block_number}/{last_block_number} ({:.2}%) - elapsed: {:?}",
+                    "Export progress: block {expected_block_number}/{last_block_number} ({:.2}%) - elapsed: {:?}",
                     (total_blocks_processed as f64) /
                         ((last_block_number - config.first_block_number + 1) as f64) *
                         100.0,
@@ -203,8 +188,8 @@ where
     Ok(created_files)
 }
 
-/// Determines the actual last block number that can be exported,
-/// Uses `headers_range` fallback when `best_block_number` is stale due to static file storage.
+// Determines the actual last block number that can be exported,
+// Uses `headers_range` fallback when `best_block_number` is stale due to static file storage.
 fn determine_export_range<P>(provider: &P, config: &ExportConfig) -> Result<BlockNumber>
 where
     P: HeaderProvider + BlockNumReader,
@@ -236,4 +221,40 @@ where
     };
 
     Ok(last_block_number)
+}
+
+// Compresses block data and returns compressed components with metadata
+fn compress_block_data<P, B>(
+    provider: &P,
+    header: P::Header,
+    expected_block_number: BlockNumber,
+    total_difficulty: &mut U256,
+) -> Result<(CompressedHeader, CompressedBody, CompressedReceipts)>
+where
+    P: BlockReader<Block = B>,
+    B: Into<BlockBody<P::Transaction, Header>>,
+    P::Header: Into<Header>,
+{
+    let actual_block_number = header.number();
+
+    if expected_block_number != actual_block_number {
+        return Err(eyre!("Expected block {expected_block_number}, got {actual_block_number}"));
+    }
+
+    let body = provider
+        .block_by_number(actual_block_number)?
+        .ok_or_else(|| eyre!("Block body not found for block {}", actual_block_number))?;
+
+    let receipts = provider
+        .receipts_by_block(actual_block_number.into())?
+        .ok_or_else(|| eyre!("Receipts not found for block {}", actual_block_number))?;
+
+    *total_difficulty += header.difficulty();
+
+    let compressed_header = CompressedHeader::from_header(&header.into())?;
+    let compressed_body = CompressedBody::from_body(&body.into())?;
+    let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
+        .map_err(|e| eyre!("Failed to compress receipts: {}", e))?;
+
+    Ok((compressed_header, compressed_body, compressed_receipts))
 }
