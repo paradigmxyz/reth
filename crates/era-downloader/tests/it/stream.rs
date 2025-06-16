@@ -14,8 +14,8 @@ use test_case::test_case;
 async fn test_streaming_files_after_fetching_file_list(url: &str) {
     let base_url = Url::from_str(url).unwrap();
     let folder = tempdir().unwrap();
-    let folder = folder.path().to_owned().into_boxed_path();
-    let client = EraClient::new(StubClient, base_url, folder.clone());
+    let folder = folder.path();
+    let client = EraClient::new(StubClient, base_url, folder);
 
     let mut stream = EraStream::new(
         client,
@@ -36,8 +36,8 @@ async fn test_streaming_files_after_fetching_file_list(url: &str) {
 #[tokio::test]
 async fn test_streaming_files_after_fetching_file_list_into_missing_folder_fails() {
     let base_url = Url::from_str("https://era.ithaca.xyz/era1/index.html").unwrap();
-    let folder = tempdir().unwrap().path().to_owned().into_boxed_path();
-    let client = EraClient::new(StubClient, base_url, folder.clone());
+    let folder = tempdir().unwrap().path().to_owned();
+    let client = EraClient::new(StubClient, base_url, folder);
 
     let mut stream = EraStream::new(
         client,

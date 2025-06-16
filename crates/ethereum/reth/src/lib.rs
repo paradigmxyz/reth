@@ -116,6 +116,10 @@ pub mod node {
 pub mod trie {
     #[doc(inline)]
     pub use reth_trie::*;
+
+    #[cfg(feature = "trie-db")]
+    #[doc(inline)]
+    pub use reth_trie_db::*;
 }
 
 /// Re-exported rpc types

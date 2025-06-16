@@ -2,6 +2,7 @@
 
 use alloy_primitives::B256;
 use parking_lot::RwLock;
+use reth_eth_wire::BlockRangeUpdate;
 use std::{
     ops::RangeInclusive,
     sync::{
@@ -13,7 +14,7 @@ use std::{
 /// Information about the range of blocks available from a peer.
 ///
 /// This represents the announced `eth69`
-/// [`BlockRangeUpdate`](reth_eth_wire_types::BlockRangeUpdate) of a peer.
+/// [`BlockRangeUpdate`] of a peer.
 #[derive(Debug, Clone)]
 pub struct BlockRangeInfo {
     /// The inner range information.
@@ -64,6 +65,15 @@ impl BlockRangeInfo {
         self.inner.earliest.store(earliest, Ordering::Relaxed);
         self.inner.latest.store(latest, Ordering::Relaxed);
         *self.inner.latest_hash.write() = latest_hash;
+    }
+
+    /// Converts the current range information to an Eth69 [`BlockRangeUpdate`] message.
+    pub fn to_message(&self) -> BlockRangeUpdate {
+        BlockRangeUpdate {
+            earliest: self.earliest(),
+            latest: self.latest(),
+            latest_hash: self.latest_hash(),
+        }
     }
 }
 

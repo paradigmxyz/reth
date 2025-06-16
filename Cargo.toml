@@ -11,6 +11,7 @@ exclude = [".github/"]
 members = [
     "bin/reth-bench/",
     "bin/reth/",
+    "crates/alloy-provider/",
     "crates/chain-state/",
     "crates/chainspec/",
     "crates/cli/cli/",
@@ -319,6 +320,7 @@ codegen-units = 1
 # reth
 op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
+reth-alloy-provider = { path = "crates/alloy-provider" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }
 reth-chain-state = { path = "crates/chain-state" }
@@ -457,13 +459,13 @@ revm-context = { version = "5.0.0", default-features = false }
 revm-context-interface = { version = "5.0.0", default-features = false }
 revm-database-interface = { version = "4.0.0", default-features = false }
 op-revm = { version = "5.0.0", default-features = false }
-revm-inspectors = "0.23.0"
+revm-inspectors = "0.24.0"
 
 # eth
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.1.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.10", default-features = false }
+alloy-evm = { version = "0.11", default-features = false }
 alloy-primitives = { version = "1.1.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.1.0"
@@ -501,13 +503,13 @@ alloy-transport-ipc = { version = "1.0.9", default-features = false }
 alloy-transport-ws = { version = "1.0.9", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.10.0", default-features = false }
+alloy-op-evm = { version = "0.11", default-features = false }
 alloy-op-hardforks = "0.2.2"
-op-alloy-rpc-types = { version = "0.17.2", default-features = false }
-op-alloy-rpc-types-engine = { version = "0.17.2", default-features = false }
-op-alloy-network = { version = "0.17.2", default-features = false }
-op-alloy-consensus = { version = "0.17.2", default-features = false }
-op-alloy-rpc-jsonrpsee = { version = "0.17.2", default-features = false }
+op-alloy-rpc-types = { version = "0.18.2", default-features = false }
+op-alloy-rpc-types-engine = { version = "0.18.2", default-features = false }
+op-alloy-network = { version = "0.18.2", default-features = false }
+op-alloy-consensus = { version = "0.18.2", default-features = false }
+op-alloy-rpc-jsonrpsee = { version = "0.18.2", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
@@ -733,9 +735,6 @@ alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "alexey/nybble
 # alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
 # alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "main" }
-
-# alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "main" }
-# alloy-op-evm = { git = "https://github.com/alloy-rs/evm", branch = "main" }
 #
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "ad607c1" }
