@@ -50,6 +50,9 @@ tokio-util = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 alloy-provider = { workspace = true, features = ["ws", "ipc"] }
 alloy-network.workspace = true
+alloy-eips.workspace = true
+alloy-primitives.workspace = true
+jsonrpsee-types.workspace = true
 
 [dev-dependencies]
 reth-primitives-traits.workspace = true

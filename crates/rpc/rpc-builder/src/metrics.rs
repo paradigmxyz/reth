@@ -4,10 +4,32 @@ use jsonrpsee::{
     types::Request,
     MethodResponse, RpcModule,
 };
+
+// use jsonrpsee::core::{
+//     types::{Id,
+// use crate::{params::{Id}};
+// at the top of metrics.rs (or a dedicated utils.rs)
+use jsonrpsee::core::__reexports::serde_json::{self, Value as JsonValue};
+
+use alloy_primitives::B256;
+use jsonrpsee::core::client::ClientT;
+use jsonrpsee::core::RpcResult;
+use jsonrpsee::http_client::HttpClient;
+use jsonrpsee::types::{
+    error::{ErrorCode, ErrorObjectOwned},
+    Params,
+};
 use reth_metrics::{
     metrics::{Counter, Histogram},
     Metrics,
 };
+use reth_primitives_traits::AlloyBlockHeader;
+use serde_json::value::RawValue;
+use std::str::FromStr;
+
+use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_primitives::BlockNumber;
+use reth_storage_api::BlockReaderIdExt;
 use std::{
     collections::HashMap,
     future::Future,
@@ -261,10 +283,67 @@ pub struct HistoricalRpcService<S, P> {
     /// Bedrock transition block number
     bedrock_block: BlockNumber,
 }
+fn parse_block_id_from_params(
+    params: &jsonrpsee::types::Params<'_>,
+    position: usize,
+) -> RpcResult<BlockId> {
+    let values: Vec<serde_json::Value> = params.parse()?;
+    let val = match values.get(position) {
+        Some(v) => v,                                                 // normal path
+        None => return Ok(BlockId::Number(BlockNumberOrTag::Latest)), // default
+    };
+
+    if let Some(s) = val.as_str() {
+        match s {
+            "latest" => return Ok(BlockId::Number(BlockNumberOrTag::Latest)),
+            "earliest" => return Ok(BlockId::Number(BlockNumberOrTag::Earliest)),
+            "pending" => return Ok(BlockId::Number(BlockNumberOrTag::Pending)),
+            "finalized" => return Ok(BlockId::Number(BlockNumberOrTag::Finalized)),
+            "safe" => return Ok(BlockId::Number(BlockNumberOrTag::Safe)),
+            _ => {}
+        }
+
+        if s.starts_with("0x") {
+            if s.len() == 66 {
+                if let Ok(hash) = B256::from_str(s) {
+                    return Ok(BlockId::Hash(hash.into()));
+                }
+            }
+
+            if let Ok(n) = u64::from_str_radix(&s[2..], 16) {
+                return Ok(BlockId::Number(BlockNumberOrTag::Number(n.into())));
+            }
+        }
+    }
+
+    if let Some(n) = val.as_u64() {
+        return Ok(BlockId::Number(BlockNumberOrTag::Number(n.into())));
+    }
+
+    Err(ErrorObjectOwned::from(ErrorCode::InvalidParams))
+}
+
+fn get_block_id_from_tx_hash<P>(
+    provider: &Arc<P>,
+    params: &jsonrpsee::types::Params<'_>,
+) -> Option<BlockId>
+where
+    P: BlockReaderIdExt + Send + Sync,
+{
+    let tx_hash = params.sequence().next().ok().flatten()?;
+
+    let maybe_tx_with_meta = provider.transaction_by_hash_with_meta(tx_hash).ok()?;
+
+    maybe_tx_with_meta.map(|(_transaction, meta)| BlockId::from(meta.block_hash))
+}
+fn params_as_vec(params: &Params<'_>) -> Vec<JsonValue> {
+    params.parse::<Vec<JsonValue>>().unwrap_or_default()
+}
 
 impl<S, P> RpcServiceT for HistoricalRpcService<S, P>
 where
     S: RpcServiceT<MethodResponse = MethodResponse> + Send + Sync + Clone + 'static,
+
     P: BlockReaderIdExt + Send + Sync + Clone + 'static,
 {
     type MethodResponse = S::MethodResponse;
@@ -272,86 +351,84 @@ where
     type BatchResponse = S::BatchResponse;
 
     fn call<'a>(&self, req: Request<'a>) -> impl Future<Output = Self::MethodResponse> + Send + 'a {
-        let method = req.method.as_ref();
+        let method_owned: String = req.method.clone().into_owned();
+        let params_owned = req.params().into_owned();
+        let id_owned: jsonrpsee::types::Id<'static> = match req.id() {
+            jsonrpsee::types::Id::Number(n) => jsonrpsee::types::Id::Number(n),
+            jsonrpsee::types::Id::Str(s) => jsonrpsee::types::Id::Str(s.into_owned().into()),
+            jsonrpsee::types::Id::Null => jsonrpsee::types::Id::Null,
+        };
+
         let inner_service = self.inner.clone();
         let historical_client = self.historical_client.clone();
-        let provider = self.provider.clone(); // Fixed variable name
+        let provider = self.provider.clone();
         let bedrock_block = self.bedrock_block;
 
-        async move {
-            // Check if this method should be considered for historical forwarding
-            let is_historical_method = matches!(
-                method,
-                "eth_getBalance"
-                    | "eth_getStorageAt"
-                    | "eth_getCode"
-                    | "eth_call"
-                    | "eth_getTransactionCount"
-                    | "eth_getBlockByHash"
-                    | "eth_getBlockByNumber"
-                    | "eth_getTransactionByHash"
-                    | "eth_getTransactionReceipt"
-            );
+        Box::pin(async move {
+            let maybe_block_id = match method_owned.as_str() {
+                "eth_getBlockByNumber" | "eth_getBlockByHash" => {
+                    parse_block_id_from_params(&params_owned, 0).ok()
+                }
 
-            if is_historical_method {
-                // Extract block ID from parameters based on method
-                let maybe_block_id = match method {
-                    "eth_getBlockByNumber" => {
-                        // First param is block ID
-                        req.params.parse::<(BlockId,)>().ok().map(|(id,)| id)
-                    }
-                    "eth_getBlockByHash" => {
-                        // First param is hash
-                        req.params.parse::<(BlockHash,)>().ok().map(|hash| BlockId::Hash(hash.0))
-                    }
-                    _ => None,
+                "eth_getBalance"
+                | "eth_getStorageAt"
+                | "eth_getCode"
+                | "eth_getTransactionCount"
+                | "eth_call" => parse_block_id_from_params(&params_owned, 1).ok(),
+
+                "eth_getTransactionByHash" | "eth_getTransactionReceipt" => {
+                    get_block_id_from_tx_hash(&provider, &params_owned)
+                }
+
+                _ => None,
+            };
+
+            if let Some(block_id) = maybe_block_id {
+                let is_pre_bedrock = match &block_id {
+                    BlockId::Number(BlockNumberOrTag::Number(n)) => *n < bedrock_block,
+                    BlockId::Number(BlockNumberOrTag::Earliest) => true,
+                    BlockId::Number(_) => false,
+                    BlockId::Hash(h) => provider
+                        .sealed_header_by_hash((*h).into())
+                        .ok()
+                        .flatten()
+                        .map_or(true, |hdr| hdr.header().number() < bedrock_block),
                 };
 
-                if let Some(block_id) = maybe_block_id {
-                    // Determine if block is pre-bedrock
-                    let is_pre_bedrock = match block_id {
-                        BlockId::Number(BlockNumberOrTag::Number(num)) => num < bedrock_block,
-                        BlockId::Number(BlockNumberOrTag::Earliest) => true,
-                        BlockId::Number(_) => false,
-                        BlockId::Hash(hash) => {
-                            if let Ok(Some(header)) = provider.header_by_hash(hash).await {
-                                header.number < bedrock_block
-                            } else {
-                                true
-                            }
-                        }
-                    };
+                if is_pre_bedrock {
+                    tracing::debug!(target: "rpc::historical",
+                                method = %method_owned, ?block_id,
+                                "forwarding pre-Bedrock request");
 
-                    if is_pre_bedrock {
-                        // Forward pre-bedrock request to historical endpoint
-                        tracing::debug!(
-                            target: "rpc::historical",
-                            method = %method,
-                            ?block_id,
-                            "Forwarding pre-bedrock request to historical endpoint"
-                        );
+                    let client_params = params_as_vec(&params_owned);
 
-                        match historical_client.request(method, req.params.clone()).await {
-                            Ok(response) => {
-                                return response;
-                            }
-                            Err(err) => {
-                                tracing::warn!(
-                                    target: "rpc::historical", // Fixed typo
-                                    %err,
-                                    method = %method,
-                                    ?block_id,
-                                    "Historical request failed, falling back to regular service"
-                                );
-                            }
-                        }
+                    if let Ok(resp_json) = historical_client
+                        .request::<JsonValue, _>(method_owned.as_str(), client_params)
+                        .await
+                    {
+                        let raw: Box<RawValue> = RawValue::from_string(
+                            serde_json::to_string(&resp_json).expect("hist node sent invalid JSON"),
+                        )
+                        .expect("string is valid JSON");
+
+                        let payload = jsonrpsee_types::ResponsePayload::success(raw).into();
+
+                        return MethodResponse::response(id_owned, payload, usize::MAX);
                     }
+
+                    tracing::warn!(target: "rpc::historical",
+                               method = %method_owned, ?block_id,
+                               "historical request failed, falling back");
                 }
             }
 
-            // Default to inner service
-            inner_service.call(req).await
-        }
+            let params_box =
+                RawValue::from_string(params_owned.as_str().unwrap_or("[]").to_owned()).ok();
+
+            let fallback_req = Request::owned(method_owned, params_box, id_owned);
+
+            inner_service.call(fallback_req).await
+        })
     }
 
     fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
@@ -363,5 +440,54 @@ where
         n: Notification<'a>,
     ) -> impl Future<Output = Self::NotificationResponse> + Send + 'a {
         self.inner.notification(n)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::{BlockId, BlockNumberOrTag};
+    use jsonrpsee::types::Params;
+    /// Tests that various valid BlockId types can be parsed from the first parameter.
+    #[test]
+    fn parses_block_id_from_first_param() {
+        // Test with a block number
+        let params_num = Params::new(Some(r#"["0x64"]"#)); // 100
+        assert_eq!(
+            parse_block_id_from_params(&params_num, 0).unwrap(),
+            BlockId::Number(BlockNumberOrTag::Number(100))
+        );
+
+        // Test with the "earliest" tag
+        let params_tag = Params::new(Some(r#"["earliest"]"#));
+        assert_eq!(
+            parse_block_id_from_params(&params_tag, 0).unwrap(),
+            BlockId::Number(BlockNumberOrTag::Earliest)
+        );
+    }
+
+    /// Tests that the function correctly parses from a position other than 0.
+    #[test]
+    fn parses_block_id_from_second_param() {
+        let params =
+            Params::new(Some(r#"["0x0000000000000000000000000000000000000000", "latest"]"#));
+        let result = parse_block_id_from_params(&params, 1).unwrap();
+        assert_eq!(result, BlockId::Number(BlockNumberOrTag::Latest));
+    }
+
+    /// Tests that the function defaults to "latest" if the parameter is missing.
+    #[test]
+    fn defaults_to_latest_when_param_is_missing() {
+        let params = Params::new(Some(r#"["0x0000000000000000000000000000000000000000"]"#));
+        let result = parse_block_id_from_params(&params, 1).unwrap();
+        assert_eq!(result, BlockId::Number(BlockNumberOrTag::Latest));
+    }
+
+    /// Tests that the function returns an error for invalid input.
+    #[test]
+    fn returns_error_for_invalid_input() {
+        let params = Params::new(Some(r#"[true]"#));
+        let result = parse_block_id_from_params(&params, 0);
+        assert!(result.is_err());
     }
 }

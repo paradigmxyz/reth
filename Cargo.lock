@@ -9863,6 +9863,7 @@ dependencies = [
  "clap",
  "http",
  "jsonrpsee",
+ "jsonrpsee-types",
  "metrics",
  "pin-project",
  "reth-chain-state",
