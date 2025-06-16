@@ -24,7 +24,7 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    message::{EthBroadcastMessage, RequestPair},
+    message::{EthBroadcastMessage, MessageError, RequestPair},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
@@ -282,6 +282,17 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::BlockRangeUpdate(msg) => {
+                // Validate that earliest <= latest according to the spec
+                if msg.earliest > msg.latest {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(format!(
+                            "invalid block range: earliest ({}) > latest ({})",
+                            msg.earliest, msg.latest
+                        ))),
+                        message: EthMessage::BlockRangeUpdate(msg),
+                    };
+                }
+
                 if let Some(range_info) = self.range_info.as_ref() {
                     range_info.update(msg.earliest, msg.latest, msg.latest_hash);
                 }
