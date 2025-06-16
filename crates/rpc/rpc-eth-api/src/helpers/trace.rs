@@ -403,7 +403,7 @@ pub trait Trace:
     /// 2. configures the EVM evn
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
-    ///    _after_ the transaction [`EvmState`] and the database that points to the state right
+    ///    _after_ the transaction `EvmState` and the database that points to the state right
     ///    _before_ the transaction, in other words the state the transaction was executed on:
     ///    `changed_state = tx(cached_state)`
     ///
