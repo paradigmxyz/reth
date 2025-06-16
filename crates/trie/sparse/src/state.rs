@@ -113,9 +113,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         if let Some(new_trie) = self.state.as_revealed_mut() {
             new_trie.use_allocated_state(trie);
         } else {
-            self.state = SparseTrie::AllocatedEmpty {
-                allocated: trie,
-            };
+            self.state = SparseTrie::AllocatedEmpty { allocated: trie };
         }
     }
 
