@@ -423,6 +423,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.map.remove(&(fixed_block_range_end, segment));
     }
 
+    /// Given a segment and target block, it deletes all jars and files that are below that target block.
+    ///
+    /// For example if block is 1M and the blocks per file are 500K this will delete all individual files below 1M, so 0-499K and 500K-999K.
+    pub fn delete_jars_below(&self, segment: StaticFileSegment, block: BlockNumber) -> ProviderResult<()> {
+        // No jars to delete if block is 0
+        if block == 0 {
+            return Ok(())
+        }
+
+        // TODO
+
+        Ok(())
+    }
+
     /// Given a segment and block, it deletes the jar and all files from the respective block range.
     ///
     /// CAUTION: destructive. Deletes files on disk.
