@@ -19,7 +19,7 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
     /// Returns the last block number associated with the last canonical header in the database.
     fn last_block_number(&self) -> ProviderResult<BlockNumber>;
 
-    /// Returns earliesr block number associated with the first canonical header in the database.
+    /// Returns earliest block number to keep track of the expired block range.
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
         Ok(0)
     }
