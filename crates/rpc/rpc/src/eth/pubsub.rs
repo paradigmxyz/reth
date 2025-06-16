@@ -53,11 +53,6 @@ impl<Eth> EthPubSub<Eth> {
         let inner = EthPubSubInner { eth_api, subscription_task_spawner };
         Self { inner: Arc::new(inner) }
     }
-
-    /// Returns a reference to the inner `Arc<EthPubSubInner<Eth>>`.
-    const fn inner(&self) -> &Arc<EthPubSubInner<Eth>> {
-        &self.inner
-    }
 }
 
 impl<N: NodePrimitives, Eth> EthPubSub<Eth>
@@ -69,29 +64,29 @@ where
 {
     /// Returns the current sync status for the `syncing` subscription
     pub fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
-        self.inner().sync_status(is_syncing)
+        self.inner.sync_status(is_syncing)
     }
 
     /// Returns a stream that yields all transaction hashes emitted by the txpool.
     pub fn pending_transaction_hashes_stream(&self) -> impl Stream<Item = TxHash> {
-        self.inner().pending_transaction_hashes_stream()
+        self.inner.pending_transaction_hashes_stream()
     }
 
     /// Returns a stream that yields all transactions emitted by the txpool.
     pub fn full_pending_transaction_stream(
         &self,
     ) -> impl Stream<Item = NewTransactionEvent<<Eth::Pool as TransactionPool>::Transaction>> {
-        self.inner().full_pending_transaction_stream()
+        self.inner.full_pending_transaction_stream()
     }
 
     /// Returns a stream that yields all new RPC blocks.
     pub fn new_headers_stream(&self) -> impl Stream<Item = Header<N::BlockHeader>> {
-        self.inner().new_headers_stream()
+        self.inner.new_headers_stream()
     }
 
     /// Returns a stream that yields all logs that match the given filter.
     pub fn log_stream(&self, filter: Filter) -> impl Stream<Item = Log> {
-        self.inner().log_stream(filter)
+        self.inner.log_stream(filter)
     }
 }
 
@@ -165,7 +160,7 @@ where
                         // full transaction objects requested
                         let stream = pubsub.full_pending_transaction_stream().filter_map(|tx| {
                             let tx_value = match pubsub
-                                .inner()
+                                .inner
                                 .eth_api
                                 .tx_resp_builder()
                                 .fill_pending(tx.transaction.to_consensus())
@@ -199,10 +194,10 @@ where
         SubscriptionKind::Syncing => {
             // get new block subscription
             let mut canon_state = BroadcastStream::new(
-                pubsub.inner().eth_api.provider().subscribe_to_canonical_state(),
+                pubsub.inner.eth_api.provider().subscribe_to_canonical_state(),
             );
             // get current sync status
-            let mut initial_sync_status = pubsub.inner().eth_api.network().is_syncing();
+            let mut initial_sync_status = pubsub.inner.eth_api.network().is_syncing();
             let current_sub_res = pubsub.sync_status(initial_sync_status);
 
             // send the current status immediately
@@ -218,7 +213,7 @@ where
             }
 
             while canon_state.next().await.is_some() {
-                let current_syncing = pubsub.inner().eth_api.network().is_syncing();
+                let current_syncing = pubsub.inner.eth_api.network().is_syncing();
                 // Only send a new response if the sync status has changed
                 if current_syncing != initial_sync_status {
                     // Update the sync status on each new block
