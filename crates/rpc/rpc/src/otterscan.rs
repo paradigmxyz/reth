@@ -338,8 +338,11 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                |tx_info, inspector, _, _, _| {
-                    Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
+                |tx_info, ctx| {
+                    Ok(ctx
+                        .inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info))
                 },
             )
             .await
