@@ -788,7 +788,7 @@ impl<P> RevealedSparseTrie<P> {
                     nodes.push(RemovedSparseNode { path, node, unset_branch_nibble: None });
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    let nibble = path[current.len()];
+                    let nibble = path.get_unchecked(current.len());
                     debug_assert!(
                         state_mask.is_bit_set(nibble),
                         "current: {current:?}, path: {path:?}, nibble: {nibble:?}, state_mask: {state_mask:?}",
@@ -1443,7 +1443,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                 }
                 Some(SparseNode::Branch { state_mask, .. }) => {
                     // Check if branch has a child at the next nibble in our path
-                    let nibble = path[current.len()];
+                    let nibble = path.get_unchecked(current.len());
                     if !state_mask.is_bit_set(nibble) {
                         // No child at this nibble - exclusion proof
                         return Ok(LeafLookup::NonExistent { diverged_at: current });
@@ -1534,7 +1534,10 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     self.nodes.reserve(3);
                     self.nodes.insert(
                         current.slice(..common),
-                        SparseNode::new_split_branch(current[common], path[common]),
+                        SparseNode::new_split_branch(
+                            current.get_unchecked(common),
+                            path.get_unchecked(common),
+                        ),
                     );
                     self.nodes.insert(
                         path.slice(..=common),
@@ -1585,7 +1588,10 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         // create state mask for new branch node
                         // NOTE: this might overwrite the current extension node
                         self.nodes.reserve(3);
-                        let branch = SparseNode::new_split_branch(current[common], path[common]);
+                        let branch = SparseNode::new_split_branch(
+                            current.get_unchecked(common),
+                            path.get_unchecked(common),
+                        );
                         self.nodes.insert(current.slice(..common), branch);
 
                         // create new leaf
@@ -1602,7 +1608,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    let nibble = path[current.len()];
+                    let nibble = path.get_unchecked(current.len());
                     current.push_unchecked(nibble);
                     if !state_mask.is_bit_set(nibble) {
                         state_mask.set_bit(nibble);

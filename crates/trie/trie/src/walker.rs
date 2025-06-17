@@ -272,7 +272,7 @@ impl<C: TrieCursor> TrieWalker<C> {
         // We need to sync the stack with the trie structure when consuming a new node. This is
         // necessary for proper traversal and accurately representing the trie in the stack.
         if !key.is_empty() && !self.stack.is_empty() {
-            self.stack[0].set_nibble(key[0]);
+            self.stack[0].set_nibble(key.get_unchecked(0));
         }
 
         // The current tree mask might have been set incorrectly.

@@ -892,7 +892,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.8.1"
-source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Fnybbles-uint#3d6443236652c3f7698b3568668657bc1e7ca25f"
+source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Fnybbles-uint#158b47e702a03c4c5c1741c64648c7ad760828b2"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -5880,7 +5880,7 @@ dependencies = [
 [[package]]
 name = "nybbles"
 version = "0.3.4"
-source = "git+https://github.com/alloy-rs/nybbles?branch=alexey%2Fuint-repr#d4be3daa605b9a7e693558252d85e71d1bbf55ca"
+source = "git+https://github.com/alloy-rs/nybbles?branch=alexey%2Fuint-repr#e2ffc93428979473c63fae20527940d5bd28b9f1"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
