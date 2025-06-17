@@ -1450,12 +1450,8 @@ mod tests {
         let mut cached_mode = CachedMode { filter_inner, headers_iter: headers.into_iter() };
 
         // should find the receipt from provider fallback (cache will be empty)
-        let result = cached_mode.next().await;
-        assert!(result.is_ok());
-        let receipt_result = result.unwrap();
-        assert!(receipt_result.is_some());
-
-        let receipt_block_result = receipt_result.unwrap();
+        let result = cached_mode.next().await.expect("next should succeed");
+        let receipt_block_result = result.expect("should have receipt result");
         assert_eq!(receipt_block_result.header.hash(), test_hash);
         assert_eq!(receipt_block_result.header.number, test_block_number);
         assert_eq!(receipt_block_result.receipts.len(), 1);
@@ -1489,8 +1485,7 @@ mod tests {
         let mut cached_mode = CachedMode { filter_inner, headers_iter: headers.into_iter() };
 
         // should immediately return None for empty headers
-        let result = cached_mode.next().await;
-        assert!(result.is_ok());
-        assert!(result.unwrap().is_none());
+        let result = cached_mode.next().await.expect("next should succeed");
+        assert!(result.is_none());
     }
 }
