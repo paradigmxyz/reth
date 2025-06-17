@@ -2595,9 +2595,6 @@ mod tests {
 
         let sparse_nodes = sparse_trie.nodes.iter().sorted_by_key(|(path, _)| *path);
 
-        println!("proof_nodes: {:?}", proof_nodes.clone().collect::<Vec<_>>());
-        println!("sparse_nodes: {:?}", sparse_nodes.clone().collect::<Vec<_>>());
-
         for ((proof_node_path, proof_node), (sparse_node_path, sparse_node)) in
             proof_nodes.zip(sparse_nodes)
         {
