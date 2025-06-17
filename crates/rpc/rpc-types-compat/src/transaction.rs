@@ -2,8 +2,7 @@
 
 use crate::fees::{CallFees, CallFeesError};
 use alloy_consensus::{
-    error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction,
-    Transaction as ConsensusTransaction, TxEip4844,
+    error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction, TxEip4844,
 };
 use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, Signature, TxKind, U256};
@@ -124,7 +123,7 @@ pub trait FromConsensusTx<T> {
     fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self;
 }
 
-impl<T: ConsensusTransaction> FromConsensusTx<T> for Transaction<T> {
+impl<T: alloy_consensus::Transaction> FromConsensusTx<T> for Transaction<T> {
     type TxInfo = TransactionInfo;
 
     fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
@@ -149,7 +148,7 @@ impl<T: ConsensusTransaction> FromConsensusTx<T> for Transaction<T> {
 
 impl<ConsensusTx, RpcTx> IntoRpcTx<RpcTx> for ConsensusTx
 where
-    ConsensusTx: ConsensusTransaction,
+    ConsensusTx: alloy_consensus::Transaction,
     RpcTx: FromConsensusTx<Self>,
 {
     type TxInfo = RpcTx::TxInfo;
@@ -226,11 +225,13 @@ pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
     Ok(OpTransactionInfo::new(tx_info, deposit_meta))
 }
 
-impl FromConsensusTx<OpTxEnvelope> for op_alloy_rpc_types::Transaction {
+impl<T: op_alloy_consensus::OpTransaction + alloy_consensus::Transaction> FromConsensusTx<T>
+    for op_alloy_rpc_types::Transaction<T>
+{
     type TxInfo = OpTransactionInfo;
 
-    fn from_consensus_tx(tx: OpTxEnvelope, signer: Address, tx_info: Self::TxInfo) -> Self {
-        Self::from_transaction(tx.with_signer(signer), tx_info)
+    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
+        Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
     }
 }
 
