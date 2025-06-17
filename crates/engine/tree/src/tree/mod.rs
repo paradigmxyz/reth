@@ -1505,8 +1505,8 @@ where
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
-        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash).cloned() {
-            return Ok(Some(block.block))
+        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
+            return Ok(Some(block.block.clone()))
         }
 
         let (block, senders) = self
@@ -1914,12 +1914,13 @@ where
             let old = old
                 .iter()
                 .filter_map(|block| {
-                    let (_, trie) = self
+                    let trie = self
                         .state
                         .tree_state
                         .persisted_trie_updates
-                        .get(&block.recovered_block.hash())
-                        .cloned()?;
+                        .get(&block.recovered_block.hash())?
+                        .1
+                        .clone();
                     Some(ExecutedBlockWithTrieUpdates {
                         block: block.clone(),
                         trie: ExecutedTrieUpdates::Present(trie),
