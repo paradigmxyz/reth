@@ -180,7 +180,7 @@ impl IntoRpcTx<Transaction> for EthereumTxEnvelope<TxEip4844> {
     type TxInfo = TransactionInfo;
 
     fn into_rpc_tx(self, signer: Address, tx_info: TransactionInfo) -> Transaction {
-        Transaction::<Self>::from_transaction(self.with_signer(signer).convert(), tx_info)
+        Transaction::from_transaction(self.with_signer(signer).convert(), tx_info)
     }
 }
 
