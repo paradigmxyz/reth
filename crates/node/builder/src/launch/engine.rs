@@ -10,7 +10,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
-use reth_chainspec::EthChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_local::{LocalMiner, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
@@ -30,6 +30,7 @@ use reth_node_core::{
     args::DefaultEraHost,
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
+    primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
@@ -300,6 +301,8 @@ where
             .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
             .into_built_payload_stream()
             .fuse();
+
+        let chainspec = ctx.chain_spec();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
@@ -343,6 +346,14 @@ where
                                 if let Some(head) = ev.canonical_header() {
                                     // Once we're progressing via live sync, we can consider the node is not syncing anymore
                                     network_handle.update_sync_state(SyncState::Idle);
+                                                                        let head_block = Head {
+                                        number: head.number(),
+                                        hash: head.hash(),
+                                        difficulty: head.difficulty(),
+                                        timestamp: head.timestamp(),
+                                        total_difficulty: chainspec.final_paris_total_difficulty().filter(|_| chainspec.is_paris_active_at_block(head.number())).unwrap_or_default(),
+                                    };
+
                                     let updated=BlockRangeUpdate{
                                         earliest:0,
                                         latest:head.number(),
