@@ -10,17 +10,30 @@ use reth_scroll_evm::ScrollNextBlockEnvAttributes;
 use reth_scroll_payload::{ScrollBuilderConfig, ScrollPayloadTransactions};
 use reth_scroll_primitives::{ScrollPrimitives, ScrollTransactionSigned};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use std::time::Duration;
 
 /// Payload builder for Scroll.
-#[derive(Debug, Clone, Default, Copy)]
-pub struct ScrollPayloadBuilder<Txs = ()> {
+#[derive(Debug, Clone, Copy)]
+pub struct ScrollPayloadBuilderBuilder<Txs = ()> {
     /// Returns the current best transactions from the mempool.
     pub best_transactions: Txs,
+    /// The payload building time limit.
+    pub payload_building_time_limit: Duration,
+}
+
+impl Default for ScrollPayloadBuilderBuilder {
+    fn default() -> Self {
+        Self {
+            best_transactions: (),
+            payload_building_time_limit: SCROLL_PAYLOAD_BUILDING_DURATION,
+        }
+    }
 }
 
 const SCROLL_GAS_LIMIT: u64 = 20_000_000;
+const SCROLL_PAYLOAD_BUILDING_DURATION: Duration = Duration::from_secs(1);
 
-impl<Txs> ScrollPayloadBuilder<Txs> {
+impl<Txs> ScrollPayloadBuilderBuilder<Txs> {
     /// A helper method to initialize [`reth_scroll_payload::ScrollPayloadBuilder`] with the
     /// given EVM config.
     pub fn build<Node, Evm, Pool>(
@@ -43,18 +56,16 @@ impl<Txs> ScrollPayloadBuilder<Txs> {
         Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>>,
         Txs: ScrollPayloadTransactions<Pool::Transaction>,
     {
-        let gas_limit = if let Some(gas) = ctx.payload_builder_config().gas_limit() {
-            gas
-        } else {
+        let gas_limit = ctx.payload_builder_config().gas_limit().unwrap_or_else (|| {
             tracing::warn!(target: "reth::cli", "Using {SCROLL_GAS_LIMIT} gas limit for ScrollPayloadBuilder. Configure with --builder.gaslimit");
             SCROLL_GAS_LIMIT
-        };
+        });
 
         let payload_builder = reth_scroll_payload::ScrollPayloadBuilder::new(
             pool,
             evm_config,
             ctx.provider().clone(),
-            ScrollBuilderConfig::new(gas_limit),
+            ScrollBuilderConfig::new(gas_limit, self.payload_building_time_limit),
         )
         .with_transactions(self.best_transactions);
 
@@ -62,7 +73,8 @@ impl<Txs> ScrollPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, Pool, Txs, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for ScrollPayloadBuilder<Txs>
+impl<Node, Pool, Txs, Evm> PayloadBuilderBuilder<Node, Pool, Evm>
+    for ScrollPayloadBuilderBuilder<Txs>
 where
     Node: FullNodeTypes<
         Types: NodeTypes<

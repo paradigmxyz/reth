@@ -10356,15 +10356,12 @@ dependencies = [
  "reth-payload-util",
  "reth-primitives-traits",
  "reth-revm",
- "reth-scroll-chainspec",
  "reth-scroll-engine-primitives",
  "reth-scroll-evm",
- "reth-scroll-forks",
  "reth-scroll-primitives",
  "reth-storage-api",
  "reth-transaction-pool",
  "revm",
- "scroll-alloy-consensus",
  "scroll-alloy-evm",
  "scroll-alloy-hardforks",
  "thiserror 2.0.12",
@@ -11605,7 +11602,6 @@ dependencies = [
 name = "scroll-alloy-provider"
 version = "1.4.8"
 dependencies = [
- "alloy-json-rpc",
  "alloy-primitives",
  "alloy-provider",
  "alloy-rpc-client",
@@ -11618,7 +11614,6 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "jsonrpsee",
- "jsonrpsee-types",
  "reqwest",
  "reth-engine-primitives",
  "reth-payload-builder",

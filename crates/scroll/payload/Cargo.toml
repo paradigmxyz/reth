@@ -21,7 +21,6 @@ alloy-primitives.workspace = true
 reth-scroll-evm.workspace = true
 scroll-alloy-hardforks.workspace = true
 scroll-alloy-evm.workspace = true
-scroll-alloy-consensus.workspace = true
 
 # revm
 revm.workspace = true
@@ -36,8 +35,6 @@ reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-revm.workspace = true
-reth-scroll-chainspec.workspace = true
-reth-scroll-forks.workspace = true
 reth-storage-api.workspace = true
 reth-transaction-pool.workspace = true
 reth-payload-util.workspace = true
@@ -52,28 +49,6 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [features]
-std = [
-    "futures-util/std",
-    "reth-payload-primitives/std",
-    "reth-primitives-traits/std",
-    "reth-scroll-engine-primitives/std",
-    "alloy-consensus/std",
-    "alloy-primitives/std",
-    "alloy-rlp/std",
-    "reth-chainspec/std",
-    "reth-evm/std",
-    "reth-execution-types/std",
-    "reth-revm/std",
-    "reth-storage-api/std",
-    "revm/std",
-    "thiserror/std",
-    "tracing/std",
-    "reth-scroll-chainspec/std",
-    "reth-scroll-forks/std",
-    "scroll-alloy-consensus/std",
-    "scroll-alloy-hardforks/std",
-    "scroll-alloy-evm/std",
-]
 test-utils = [
     "dep:futures-util",
     "reth-payload-builder/test-utils",

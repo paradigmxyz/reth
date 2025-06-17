@@ -2,7 +2,7 @@
 
 use crate::{
     ScrollAddOns, ScrollConsensusBuilder, ScrollExecutorBuilder, ScrollNetworkBuilder,
-    ScrollPayloadBuilder, ScrollPoolBuilder, ScrollStorage,
+    ScrollPayloadBuilderBuilder, ScrollPoolBuilder, ScrollStorage,
 };
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
@@ -23,7 +23,7 @@ impl ScrollNode {
     pub fn components<Node>() -> ComponentsBuilder<
         Node,
         ScrollPoolBuilder,
-        BasicPayloadServiceBuilder<ScrollPayloadBuilder>,
+        BasicPayloadServiceBuilder<ScrollPayloadBuilderBuilder>,
         ScrollNetworkBuilder,
         ScrollExecutorBuilder,
         ScrollConsensusBuilder,
@@ -41,7 +41,7 @@ impl ScrollNode {
             .node_types::<Node>()
             .pool(ScrollPoolBuilder::default())
             .executor(ScrollExecutorBuilder::default())
-            .payload(BasicPayloadServiceBuilder::new(ScrollPayloadBuilder::default()))
+            .payload(BasicPayloadServiceBuilder::new(ScrollPayloadBuilderBuilder::default()))
             .network(ScrollNetworkBuilder)
             .executor(ScrollExecutorBuilder)
             .consensus(ScrollConsensusBuilder)
@@ -55,7 +55,7 @@ where
     type ComponentsBuilder = ComponentsBuilder<
         N,
         ScrollPoolBuilder,
-        BasicPayloadServiceBuilder<ScrollPayloadBuilder>,
+        BasicPayloadServiceBuilder<ScrollPayloadBuilderBuilder>,
         ScrollNetworkBuilder,
         ScrollExecutorBuilder,
         ScrollConsensusBuilder,

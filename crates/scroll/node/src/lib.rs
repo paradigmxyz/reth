@@ -5,7 +5,7 @@ pub use builder::{
     engine::{ScrollEngineValidator, ScrollEngineValidatorBuilder},
     execution::ScrollExecutorBuilder,
     network::{ScrollHeaderTransform, ScrollNetworkBuilder, ScrollNetworkPrimitives},
-    payload::ScrollPayloadBuilder,
+    payload::ScrollPayloadBuilderBuilder,
     pool::ScrollPoolBuilder,
 };
 

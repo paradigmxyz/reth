@@ -1,7 +1,7 @@
 //! Scroll's payload builder implementation.
 
 use super::{PayloadBuildingBaseFeeProvider, ScrollPayloadBuilderError};
-use crate::config::ScrollBuilderConfig;
+use crate::config::{PayloadBuildingBreaker, ScrollBuilderConfig};
 
 use alloy_consensus::{Transaction, Typed2718};
 use alloy_primitives::{B256, U256};
@@ -57,7 +57,7 @@ impl<T: PoolTransaction> ScrollPayloadTransactions<T> for () {
 }
 
 /// Scroll's payload builder.
-#[derive(Debug, Clone)]
+#[derive(Clone, Debug)]
 pub struct ScrollPayloadBuilder<Pool, Client, Evm, Txs = ()> {
     /// The type responsible for creating the evm.
     pub evm_config: Evm,
@@ -134,15 +134,10 @@ where
         let state = StateProviderDatabase::new(&state_provider);
 
         if ctx.attributes().no_tx_pool {
-            builder.build(state, &state_provider, ctx, self.builder_config.clone())
+            builder.build(state, &state_provider, ctx, &self.builder_config)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(
-                cached_reads.as_db_mut(state),
-                &state_provider,
-                ctx,
-                self.builder_config.clone(),
-            )
+            builder.build(cached_reads.as_db_mut(state), &state_provider, ctx, &self.builder_config)
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -222,7 +217,7 @@ impl<Txs> ScrollBuilder<'_, Txs> {
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: ScrollPayloadBuilderCtx<EvmConfig, ChainSpec>,
-        builder_config: ScrollBuilderConfig,
+        builder_config: &ScrollBuilderConfig,
     ) -> Result<BuildOutcomeKind<ScrollBuiltPayload>, PayloadBuilderError>
     where
         EvmConfig: ConfigureEvm<
@@ -234,6 +229,7 @@ impl<Txs> ScrollBuilder<'_, Txs> {
     {
         let Self { best } = self;
         tracing::debug!(target: "payload_builder", id=%ctx.payload_id(), parent_header = ?ctx.parent().hash(), parent_number = ctx.parent().number, "building new payload");
+        let breaker = builder_config.breaker();
 
         let mut db = State::builder().with_database(db).with_bundle_update().build();
 
@@ -251,8 +247,9 @@ impl<Txs> ScrollBuilder<'_, Txs> {
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            if ctx.execute_best_transactions(&mut info, &mut builder, best_txs)?.is_some() {
-                return Ok(BuildOutcomeKind::Cancelled)
+            if ctx.execute_best_transactions(&mut info, &mut builder, best_txs, breaker)?.is_some()
+            {
+                return Ok(BuildOutcomeKind::Cancelled);
             }
 
             // check if the new payload is even more valuable
@@ -371,7 +368,7 @@ where
     pub fn block_builder<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
-        builder_config: ScrollBuilderConfig,
+        builder_config: &ScrollBuilderConfig,
     ) -> Result<impl BlockBuilder<Primitives = Evm::Primitives> + 'a, PayloadBuilderError> {
         // get the base fee for the attributes.
         let base_fee: u64 = if self.chain_spec.is_curie_active_at_block(self.parent().number + 1) {
@@ -390,7 +387,7 @@ where
                 ScrollNextBlockEnvAttributes {
                     timestamp: self.attributes().timestamp(),
                     suggested_fee_recipient: self.attributes().suggested_fee_recipient(),
-                    gas_limit: builder_config.desired_gas_limit,
+                    gas_limit: builder_config.gas_limit,
                     base_fee,
                 },
             )
@@ -459,6 +456,7 @@ where
         mut best_txs: impl PayloadTransactions<
             Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>,
         >,
+        breaker: PayloadBuildingBreaker,
     ) -> Result<Option<()>, PayloadBuilderError> {
         let block_gas_limit = builder.evm_mut().block().gas_limit;
         let base_fee = builder.evm_mut().block().basefee;
@@ -482,6 +480,12 @@ where
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
                 return Ok(Some(()))
+            }
+
+            // check if the execution needs to be halted.
+            if breaker.should_break(info.cumulative_gas_used) {
+                tracing::trace!(target: "scroll::payload_builder", ?info, "breaking execution loop");
+                return Ok(None);
             }
 
             let gas_used = match builder.execute_transaction(tx.clone()) {
