@@ -33,7 +33,10 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_provider::{
+    providers::{BlockchainProvider, NodeTypesForProvider},
+    BlockNumReader,
+};
 use reth_stages::stages::EraImportSource;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -303,6 +306,7 @@ where
             .fuse();
 
         let chainspec = ctx.chain_spec();
+        let provider = ctx.blockchain_db().clone();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
@@ -355,8 +359,8 @@ where
                                     };
                                     network_handle.update_status(head_block);
 
-                                    let updated=BlockRangeUpdate{
-                                        earliest:0,
+                                    let updated = BlockRangeUpdate {
+                                        earliest: provider.earliest_block_number().unwrap_or_default(),
                                         latest:head.number(),
                                         latest_hash:head.hash()
                                     };
