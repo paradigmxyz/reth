@@ -1166,7 +1166,8 @@ where
             }
             TransactionsCommand::PropagateTransactions(txs) => self.propagate_all(txs),
             TransactionsCommand::BroadcastTransactions(txs) => {
-                self.propagate_transactions(txs, PropagationMode::Forced);
+                let propagated = self.propagate_transactions(txs, PropagationMode::Forced);
+                self.pool.on_propagated(propagated);
             }
             TransactionsCommand::GetTransactionHashes { peers, tx } => {
                 let mut res = HashMap::with_capacity(peers.len());
