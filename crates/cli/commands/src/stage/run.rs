@@ -271,7 +271,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             max_cumulative_gas: None,
                             max_duration: None,
                         },
-                        config.stages.merkle.clean_threshold,
+                        config.stages.merkle.incremental_threshold,
                         ExExManagerHandle::empty(),
                     )),
                     None,
@@ -299,7 +299,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     None,
                 ),
                 StageEnum::Merkle => (
-                    Box::new(MerkleStage::new_execution(config.stages.merkle.clean_threshold)),
+                    Box::new(MerkleStage::new_execution(
+                        config.stages.merkle.rebuild_threshold,
+                        config.stages.merkle.incremental_threshold,
+                    )),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
                 StageEnum::AccountHistory => (
