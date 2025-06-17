@@ -984,9 +984,8 @@ impl<
             return Ok(Some(result));
         }
 
-        let next_header = match self.iter.next() {
-            Some(header) => header,
-            None => return Ok(None),
+        let Some(next_header) = self.iter.next() else {
+            return Ok(None);
         };
 
         let mut range_headers = vec![next_header];
