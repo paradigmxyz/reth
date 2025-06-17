@@ -59,7 +59,7 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = (*block).clone_into_rpc_block(full.into(), |tx, tx_info| {
+            let block = block.clone_into_rpc_block(full.into(), |tx, tx_info| {
                 self.tx_resp_builder().fill(tx, tx_info)
             })?;
             Ok(Some(block))

@@ -551,8 +551,8 @@ mod rpc_compat {
     where
         B: BlockTrait,
     {
-        /// Converts the given primitive block into a [`Block`] response with the given
-        /// [`BlockTransactionsKind`]
+        /// Converts the block block into an RPC [`Block`] instance with the given
+        /// [`BlockTransactionsKind`].
         ///
         /// The `tx_resp_builder` closure is used to build the transaction response for each
         /// transaction.
@@ -599,8 +599,7 @@ mod rpc_compat {
             }
         }
 
-        /// Create a new [`Block`] response from a [`RecoveredBlock`] by reference, using the
-        /// total difficulty to populate its field in the rpc response.
+        /// Create a new [`Block`] instance from a [`RecoveredBlock`] reference.
         ///
         /// This will populate the `transactions` field with only the hashes of the transactions in
         /// the block: [`BlockTransactions::Hashes`]
@@ -638,8 +637,8 @@ mod rpc_compat {
             Block { header, uncles, transactions, withdrawals }
         }
 
-        /// Create a new [`Block`] response from a [`RecoveredBlock`], using the
-        /// total difficulty to populate its field in the rpc response.
+        /// Create a new [`Block`] response from a [`RecoveredBlock`], using the given closure to
+        /// create the rpc transactions.
         ///
         /// This will populate the `transactions` field with the _full_
         /// transaction objects: [`BlockTransactions::Full`]

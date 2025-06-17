@@ -13,6 +13,8 @@
 //!   types.
 //! - `reth-codec`: Enables db codec support for reth types including zstd compression for certain
 //!   types.
+//! - `rpc-compat`: Adds RPC compatibility functions for the types in this crate, e.g. rpc type
+//!   conversions.
 //! - `serde`: Adds serde support for all types.
 //! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
 //!   friendly `k256` is used)
