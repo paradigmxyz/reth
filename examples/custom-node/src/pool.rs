@@ -1,5 +1,3 @@
-use crate::primitives::CustomTransactionEnvelope;
-use op_alloy_consensus::OpPooledTransaction;
-use reth_ethereum::primitives::Extended;
+use crate::primitives::CustomTransaction;
 
-pub type CustomPooledTransaction = Extended<OpPooledTransaction, CustomTransactionEnvelope>;
+pub type CustomPooledTransaction = CustomTransaction;

@@ -1,4 +1,4 @@
-use crate::primitives::{CustomTransaction, CustomTransactionEnvelope, TxPayment};
+use crate::primitives::{CustomTransaction, TxPayment};
 use alloy_eips::{eip2930::AccessList, Typed2718};
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded, IntoTxEnv};
 use alloy_primitives::{Address, Bytes, TxKind, B256, U256};
@@ -260,10 +260,10 @@ impl TransactionEnv for CustomTxEnv {
 impl FromRecoveredTx<CustomTransaction> for PaymentTxEnv {
     fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
         PaymentTxEnv(match tx {
-            CustomTransaction::BuiltIn(tx) => {
+            CustomTransaction::Ethereum(tx) => {
                 OpTransaction::<TxEnv>::from_recovered_tx(tx, sender).base
             }
-            CustomTransaction::Other(tx) => TxEnv::from_recovered_tx(tx, sender),
+            CustomTransaction::Custom(tx) => TxEnv::from_recovered_tx(tx.tx(), sender),
         })
     }
 }
@@ -271,10 +271,10 @@ impl FromRecoveredTx<CustomTransaction> for PaymentTxEnv {
 impl FromTxWithEncoded<CustomTransaction> for PaymentTxEnv {
     fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
         PaymentTxEnv(match tx {
-            CustomTransaction::BuiltIn(tx) => {
+            CustomTransaction::Ethereum(tx) => {
                 OpTransaction::<TxEnv>::from_encoded_tx(tx, sender, encoded).base
             }
-            CustomTransaction::Other(tx) => TxEnv::from_encoded_tx(tx, sender, encoded),
+            CustomTransaction::Custom(tx) => TxEnv::from_encoded_tx(tx.tx(), sender, encoded),
         })
     }
 }
@@ -305,17 +305,12 @@ impl FromRecoveredTx<TxPayment> for TxEnv {
     }
 }
 
-impl FromRecoveredTx<CustomTransactionEnvelope> for TxEnv {
-    fn from_recovered_tx(tx: &CustomTransactionEnvelope, sender: Address) -> Self {
-        Self::from_recovered_tx(tx.inner.tx(), sender)
+impl FromTxWithEncoded<TxPayment> for TxEnv {
+    fn from_encoded_tx(tx: &TxPayment, sender: Address, _encoded: Bytes) -> Self {
+        Self::from_recovered_tx(tx, sender)
     }
 }
 
-impl FromTxWithEncoded<CustomTransactionEnvelope> for TxEnv {
-    fn from_encoded_tx(tx: &CustomTransactionEnvelope, sender: Address, _encoded: Bytes) -> Self {
-        Self::from_recovered_tx(tx.inner.tx(), sender)
-    }
-}
 
 impl FromRecoveredTx<OpTxEnvelope> for CustomTxEnv {
     fn from_recovered_tx(tx: &OpTxEnvelope, sender: Address) -> Self {
@@ -332,9 +327,9 @@ impl FromTxWithEncoded<OpTxEnvelope> for CustomTxEnv {
 impl FromRecoveredTx<CustomTransaction> for CustomTxEnv {
     fn from_recovered_tx(tx: &CustomTransaction, sender: Address) -> Self {
         match tx {
-            CustomTransaction::BuiltIn(tx) => Self::from_recovered_tx(tx, sender),
-            CustomTransaction::Other(tx) => {
-                Self::Payment(PaymentTxEnv(TxEnv::from_recovered_tx(tx, sender)))
+            CustomTransaction::Ethereum(tx) => Self::from_recovered_tx(tx, sender),
+            CustomTransaction::Custom(tx) => {
+                Self::Payment(PaymentTxEnv(TxEnv::from_recovered_tx(tx.tx(), sender)))
             }
         }
     }
@@ -343,9 +338,9 @@ impl FromRecoveredTx<CustomTransaction> for CustomTxEnv {
 impl FromTxWithEncoded<CustomTransaction> for CustomTxEnv {
     fn from_encoded_tx(tx: &CustomTransaction, sender: Address, encoded: Bytes) -> Self {
         match tx {
-            CustomTransaction::BuiltIn(tx) => Self::from_encoded_tx(tx, sender, encoded),
-            CustomTransaction::Other(tx) => {
-                Self::Payment(PaymentTxEnv(TxEnv::from_encoded_tx(tx, sender, encoded)))
+            CustomTransaction::Ethereum(tx) => Self::from_encoded_tx(tx, sender, encoded),
+            CustomTransaction::Custom(tx) => {
+                Self::Payment(PaymentTxEnv(TxEnv::from_encoded_tx(tx.tx(), sender, encoded)))
             }
         }
     }
