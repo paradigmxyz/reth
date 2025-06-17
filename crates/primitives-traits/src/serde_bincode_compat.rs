@@ -22,11 +22,12 @@
 //! # use reth_primitives_traits::serde_bincode_compat::{self, SerdeBincodeCompat};
 //! # use serde::{Deserialize, Serialize};
 //! # use serde_with::serde_as;
+//! # use alloy_consensus::Header;
 //! #[serde_as]
 //! #[derive(Serialize, Deserialize)]
-//! struct MyStruct<T: SerdeBincodeCompat> {
-//!     #[serde_as(as = "serde_bincode_compat::BincodeReprFor<'_, T>")]
-//!     data: T,
+//! struct MyStruct {
+//!     #[serde_as(as = "serde_bincode_compat::BincodeReprFor<'_, Header>")]
+//!     data: Header,
 //! }
 //! ```
 
@@ -52,8 +53,8 @@ pub use block_bincode::{Block, BlockBody};
 ///
 /// ```rust
 /// # use reth_primitives_traits::serde_bincode_compat::RlpBincode;
-/// # use alloy_rlp::{Encodable, Decodable};
-/// # #[derive(Encodable, Decodable)]
+/// # use alloy_rlp::{RlpEncodable, RlpDecodable};
+/// # #[derive(RlpEncodable, RlpDecodable)]
 /// # struct MyType;
 /// impl RlpBincode for MyType {}
 /// // SerdeBincodeCompat is automatically implemented
@@ -113,8 +114,8 @@ pub type BincodeReprFor<'a, T> = <T as SerdeBincodeCompat>::BincodeRepr<'a>;
 ///
 /// ```rust
 /// # use reth_primitives_traits::serde_bincode_compat::RlpBincode;
-/// # use alloy_rlp::{Encodable, Decodable};
-/// #[derive(Encodable, Decodable)]
+/// # use alloy_rlp::{RlpEncodable, RlpDecodable};
+/// #[derive(RlpEncodable, RlpDecodable)]
 /// struct MyCustomType {
 ///     value: u64,
 ///     data: Vec<u8>,
