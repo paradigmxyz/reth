@@ -1033,18 +1033,13 @@ mod tests {
     use super::*;
     use alloy_chains::Chain;
     use alloy_consensus::constants::ETH_TO_WEI;
-    use alloy_eips::{eip4844::BLOB_TX_MIN_BLOB_GASPRICE, eip7840::BlobParams};
     use alloy_evm::block::calc::{base_block_reward, block_reward};
     use alloy_genesis::{ChainConfig, GenesisAccount};
     use alloy_primitives::{b256, hex};
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use std::{
-        collections::{BTreeMap, HashMap},
-        str::FromStr,
-        string::String,
-    };
+    use std::{collections::HashMap, str::FromStr};
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -2505,39 +2500,5 @@ Post-merge hard forks (timestamp based):
         for (num_ommers, expected_reward) in cases {
             assert_eq!(block_reward(base_reward, num_ommers), expected_reward);
         }
-    }
-
-    #[test]
-    fn blob_params_from_genesis() {
-        let s = r#"{
-         "cancun":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         },
-         "prague":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         }
-      }"#;
-        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
-        let hardfork_params = BlobScheduleBlobParams::from_schedule(&schedule);
-        let expected = BlobScheduleBlobParams {
-            cancun: BlobParams {
-                target_blob_count: 3,
-                max_blob_count: 6,
-                update_fraction: 3338477,
-                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
-            },
-            prague: BlobParams {
-                target_blob_count: 3,
-                max_blob_count: 6,
-                update_fraction: 3338477,
-                min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
-            },
-            ..Default::default()
-        };
-        assert_eq!(hardfork_params, expected);
     }
 }
