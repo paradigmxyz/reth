@@ -169,8 +169,19 @@ Before submitting changes, ensure:
 1. **Format Check**: `cargo +nightly fmt --all --check`
 2. **Clippy**: No warnings with `RUSTFLAGS="-D warnings"`
 3. **Tests Pass**: All unit and integration tests
-4. **Documentation**: Update relevant docs and add doc comments
+4. **Documentation**: Update relevant docs and add doc comments with `cargo docs --document-private-items`
 5. **Commit Messages**: Follow conventional format (feat:, fix:, chore:, etc.)
+
+
+### Opening PRs against <https://github.com/paradigmxyz/reth>
+
+Label PRs appropriately, first check the available labels and then apply the relevant ones:
+* when changes are RPC related, add A-rpc label
+* when changes are docs related, add C-docs label
+* when changes are optimism related (e.g. new feature or exlusive changes to crates/optimism), add A-op-reth label
+* ... and so on, check the available labels for more options.
+
+If changes in reth include changes to dependencies, run commands `zepter` and `make lint-toml` before finalizing the pr. Assume `zepter` binary is installed.
 
 ### Debugging Tips
 
@@ -294,4 +305,7 @@ cargo build --release --features "jemalloc asm-keccak"
 
 # Check compilation for all features
 cargo check --workspace --all-features
+
+# Check documentation
+cargo docs --document-private-items 
 ```
