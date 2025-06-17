@@ -571,6 +571,10 @@ where
             }
         };
 
+        let num_hash = block.num_hash();
+        let engine_event = BeaconConsensusEngineEvent::BlockReceived(num_hash);
+        self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
+
         let block_hash = block.hash();
         let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
         if lowest_buffered_ancestor == block_hash {
@@ -886,7 +890,10 @@ where
 
             // For OpStack the proposers are allowed to reorg their own chain at will, so we need to
             // always trigger a new payload job if requested.
-            if self.engine_kind.is_opstack() {
+            // Also allow forcing this behavior via a config flag.
+            if self.engine_kind.is_opstack() ||
+                self.config.always_process_payload_attributes_on_canonical_head()
+            {
                 if let Some(attr) = attrs {
                     debug!(target: "engine::tree", head = canonical_header.number(), "handling payload attributes for canonical head");
                     let updated =

@@ -79,6 +79,20 @@ pub struct TreeConfig {
     precompile_cache_disabled: bool,
     /// Whether to use state root fallback for testing
     state_root_fallback: bool,
+    /// Whether to always process payload attributes and begin a payload build process
+    /// even if `forkchoiceState.headBlockHash` is already the canonical head or an ancestor.
+    ///
+    /// The Engine API specification generally states that client software "MUST NOT begin a
+    /// payload build process if `forkchoiceState.headBlockHash` references a `VALID`
+    /// ancestor of the head of canonical chain".
+    /// See: <https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_forkchoiceupdatedv1> (Rule 2)
+    ///
+    /// This flag allows overriding that behavior.
+    /// This is useful for specific chain configurations (e.g., OP Stack where proposers
+    /// can reorg their own chain), various custom chains, or for development/testing purposes
+    /// where immediate payload regeneration is desired despite the head not changing or moving to
+    /// an ancestor.
+    always_process_payload_attributes_on_canonical_head: bool,
 }
 
 impl Default for TreeConfig {
@@ -99,6 +113,7 @@ impl Default for TreeConfig {
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
+            always_process_payload_attributes_on_canonical_head: false,
         }
     }
 }
@@ -122,6 +137,7 @@ impl TreeConfig {
         reserved_cpu_cores: usize,
         precompile_cache_disabled: bool,
         state_root_fallback: bool,
+        always_process_payload_attributes_on_canonical_head: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -139,6 +155,7 @@ impl TreeConfig {
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
+            always_process_payload_attributes_on_canonical_head,
         }
     }
 
@@ -212,6 +229,22 @@ impl TreeConfig {
     /// Returns whether to use state root fallback.
     pub const fn state_root_fallback(&self) -> bool {
         self.state_root_fallback
+    }
+
+    /// Sets whether to always process payload attributes when the FCU head is already canonical.
+    pub const fn with_always_process_payload_attributes_on_canonical_head(
+        mut self,
+        always_process_payload_attributes_on_canonical_head: bool,
+    ) -> Self {
+        self.always_process_payload_attributes_on_canonical_head =
+            always_process_payload_attributes_on_canonical_head;
+        self
+    }
+
+    /// Returns true if payload attributes should always be processed even when the FCU head is
+    /// canonical.
+    pub const fn always_process_payload_attributes_on_canonical_head(&self) -> bool {
+        self.always_process_payload_attributes_on_canonical_head
     }
 
     /// Setter for persistence threshold.

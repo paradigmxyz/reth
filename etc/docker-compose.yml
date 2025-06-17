@@ -10,7 +10,10 @@ services:
       - "8545:8545" # rpc
       - "8551:8551" # engine
     volumes:
-      - reth_data:/root/.local/share/reth
+      - mainnet_data:/root/.local/share/reth/mainnet
+      - sepolia_data:/root/.local/share/reth/sepolia
+      - holesky_data:/root/.local/share/reth/holesky
+      - hoodi_data:/root/.local/share/reth/hoodi
       - logs:/root/logs
       - ./jwttoken:/root/jwt/:ro
     # https://paradigmxyz.github.io/reth/run/troubleshooting.html#concurrent-database-access-error-using-containersdocker
@@ -66,7 +69,13 @@ services:
              /run.sh"
 
 volumes:
-  reth_data:
+  mainnet_data:
+    driver: local
+  sepolia_data:
+    driver: local
+  holesky_data:
+    driver: local
+  hoodi_data:
     driver: local
   logs:
     driver: local

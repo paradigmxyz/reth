@@ -1,5 +1,13 @@
 //! Engine node related functionality.
 
+use crate::{
+    common::{Attached, LaunchContextWith, WithConfigs},
+    hooks::NodeHooks,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
+    setup::build_networked_pipeline,
+    AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
+};
 use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -19,27 +27,20 @@ use reth_node_api::{
     PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
+    args::DefaultEraHost,
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_stages::stages::EraImportSource;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
 use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::{
-    common::{Attached, LaunchContextWith, WithConfigs},
-    hooks::NodeHooks,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
-    setup::build_networked_pipeline,
-    AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
-    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
-};
 
 /// The engine node launcher.
 #[derive(Debug)]
@@ -137,10 +138,14 @@ where
         .await?;
 
         // create pipeline
-        let network_client = ctx.components().network().fetch_client().await?;
+        let network_handle = ctx.components().network().clone();
+        let network_client = network_handle.fetch_client().await?;
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         let node_config = ctx.node_config();
+
+        // We always assume that node is syncing after a restart
+        network_handle.update_sync_state(SyncState::Syncing);
 
         let max_block = ctx.max_block(network_client.clone()).await?;
 
@@ -153,6 +158,18 @@ where
         // Configure the pipeline
         let pipeline_exex_handle =
             exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
+
+        let era_import_source = if node_config.era.enabled {
+            EraImportSource::maybe_new(
+                node_config.era.source.path.clone(),
+                node_config.era.source.url.clone(),
+                || node_config.chain.chain().kind().default_era_host(),
+                || node_config.datadir().data_dir().join("era").into(),
+            )
+        } else {
+            None
+        };
+
         let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
@@ -165,6 +182,7 @@ where
             static_file_producer,
             ctx.components().evm_config().clone(),
             pipeline_exex_handle,
+            era_import_source,
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
@@ -275,7 +293,6 @@ where
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
-        let network_handle = ctx.components().network().clone();
         let mut built_payloads = ctx
             .components()
             .payload_builder_handle()
@@ -315,8 +332,6 @@ where
                                     debug!(target: "reth::cli", "Terminating after initial backfill");
                                     break
                                 }
-
-                                network_handle.update_sync_state(SyncState::Idle);
                             }
                             ChainEvent::BackfillSyncStarted => {
                                 network_handle.update_sync_state(SyncState::Syncing);
@@ -328,6 +343,8 @@ where
                             }
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
+                                    // Once we're progressing via live sync, we can consider the node is not syncing anymore
+                                    network_handle.update_sync_state(SyncState::Idle);
                                     let head_block = Head {
                                         number: head.number(),
                                         hash: head.hash(),
