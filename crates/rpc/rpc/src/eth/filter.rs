@@ -988,7 +988,8 @@ impl<
             return Ok(None);
         };
 
-        let mut range_headers = vec![next_header];
+        let mut range_headers = Vec::with_capacity(self.max_range);
+        range_headers.push(next_header);
 
         // Collect consecutive blocks up to max_range size
         while range_headers.len() < self.max_range {
