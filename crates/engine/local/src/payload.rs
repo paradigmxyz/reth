@@ -4,7 +4,7 @@
 use alloy_primitives::{Address, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
-use reth_payload_primitives::PayloadAttributesBuilder;
+use reth_payload_primitives::{PayloadAttributes, PayloadAttributesBuilder};
 use std::sync::Arc;
 
 /// The attributes builder for local Ethereum payload.
@@ -69,6 +69,16 @@ where
 // TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented
 // for any
 pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
+
+/// Provides local payload attributes builder functionality
+pub trait LocalPayloadAttributesAddOns<T>: Send + Sync + 'static {
+    /// The payload attributes type this builder produces
+    type PayloadAttributes: PayloadAttributes;
+    /// The builder type returned by the addons
+    type Builder: PayloadAttributesBuilder<Self::PayloadAttributes> + Send;
+    /// Creates a local payload attributes builder
+    fn local_payload_attributes_builder(&self) -> eyre::Result<Self::Builder>;
+}
 
 impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
 where
