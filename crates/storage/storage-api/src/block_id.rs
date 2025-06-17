@@ -19,6 +19,11 @@ pub trait BlockNumReader: BlockHashReader + Send + Sync {
     /// Returns the last block number associated with the last canonical header in the database.
     fn last_block_number(&self) -> ProviderResult<BlockNumber>;
 
+    /// Returns earliest block number to keep track of the expired block range.
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        Ok(0)
+    }
+
     /// Gets the `BlockNumber` for the given hash. Returns `None` if no block with this hash exists.
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>>;
 

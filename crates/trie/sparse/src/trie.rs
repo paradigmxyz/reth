@@ -238,21 +238,6 @@ impl<P> SparseTrie<P> {
         }
     }
 
-    /// Creates a new trie with the given provider and sparse trie state.
-    pub fn revealed_with_provider(provider: P, revealed_state: SparseTrieState) -> Self {
-        let revealed = RevealedSparseTrie {
-            provider,
-            nodes: revealed_state.nodes,
-            branch_node_tree_masks: revealed_state.branch_node_tree_masks,
-            branch_node_hash_masks: revealed_state.branch_node_hash_masks,
-            values: revealed_state.values,
-            prefix_set: PrefixSetMut::default(),
-            updates: None,
-            rlp_buf: Vec::new(),
-        };
-        Self::Revealed(Box::new(revealed))
-    }
-
     /// Wipes the trie by removing all nodes and values,
     /// and resetting the trie to only contain an empty root node.
     ///

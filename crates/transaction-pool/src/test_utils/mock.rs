@@ -653,7 +653,7 @@ impl MockTransaction {
         matches!(self, Self::Eip2930 { .. })
     }
 
-    /// Checks if the transaction is of the EIP-2930 type.
+    /// Checks if the transaction is of the EIP-7702 type.
     pub const fn is_eip7702(&self) -> bool {
         matches!(self, Self::Eip7702 { .. })
     }

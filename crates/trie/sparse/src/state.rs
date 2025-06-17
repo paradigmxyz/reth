@@ -113,10 +113,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         if let Some(new_trie) = self.state.as_revealed_mut() {
             new_trie.use_allocated_state(trie);
         } else {
-            self.state = SparseTrie::revealed_with_provider(
-                self.provider_factory.account_node_provider(),
-                trie,
-            )
+            self.state = SparseTrie::AllocatedEmpty { allocated: trie };
         }
     }
 
