@@ -992,25 +992,16 @@ impl<
 
         // Collect consecutive blocks up to max_range size
         while range_headers.len() < self.max_range {
-            match self.iter.peek() {
-                Some(peeked) => {
-                    if let Some(last_header) = range_headers.last() {
-                        let expected_next = last_header.header().number() + 1;
-                        if peeked.header().number() == expected_next {
-                            if let Some(next_header) = self.iter.next() {
-                                range_headers.push(next_header);
-                            } else {
-                                break;
-                            }
-                        } else {
-                            break; // Non-consecutive block, stop here
-                        }
-                    } else {
-                        break;
-                    }
-                }
-                None => break, // No more headers
+            let Some(peeked) = self.iter.peek() else { break };
+            let Some(last_header) = range_headers.last() else { break };
+
+            let expected_next = last_header.header().number() + 1;
+            if peeked.header().number() != expected_next {
+                break; // Non-consecutive block, stop here
             }
+
+            let Some(next_header) = self.iter.next() else { break };
+            range_headers.push(next_header);
         }
 
         // Use efficient batch method for receipts and blocks
