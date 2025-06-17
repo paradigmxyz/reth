@@ -508,7 +508,7 @@ where
         }
         // Case 3: Entire shard is below the unwinding point
         // Return all block numbers for reinsertion (preserve entire shard)
-        return Ok(list.iter().collect::<Vec<_>>());
+        return Ok(list.iter().collect::<Vec<_>>())
     }
 
     // No shards found or all processed
