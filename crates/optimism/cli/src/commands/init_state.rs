@@ -1,21 +1,18 @@
 //! Command that initializes the node from a genesis file.
 
+use alloy_primitives::{B256, U256};
 use clap::Parser;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment};
+use reth_cli_commands::init_state::without_evm;
 use reth_db_common::init::init_from_state_dump;
 use reth_optimism_chainspec::OpChainSpec;
-use reth_optimism_primitives::{
-    bedrock::{BEDROCK_HEADER, BEDROCK_HEADER_HASH, BEDROCK_HEADER_TTD},
-    mantle::{MANTLE_SEPOLIA_HEADER, MANTLE_SEPOLIA_HEADER_HASH, MANTLE_SEPOLIA_HEADER_TTD},
-    OpPrimitives,
-};
+use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::SealedHeader;
 use reth_provider::{
-    BlockNumReader, ChainSpecProvider, DatabaseProviderFactory, StaticFileProviderFactory,
-    StaticFileWriter,
+    BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
-use std::{io::BufReader, sync::Arc};
+use std::{io::BufReader, str::FromStr, sync::Arc};
 use tracing::info;
 
 /// Initializes the database with the genesis block.
@@ -50,50 +47,47 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
         let static_file_provider = provider_factory.static_file_provider();
         let provider_rw = provider_factory.database_provider_rw()?;
 
-        // OP-Mainnet may want to bootstrap a chain without OVM historical data
-        if provider_factory.chain_spec().is_optimism_mainnet() && self.without_ovm {
+        if self.init_state.without_evm {
+            info!(target: "reth::cli", "Initializing state without EVM historical data");
+            // ensure header, total difficulty and header hash are provided
+            let header = self
+                .init_state
+                .header
+                .ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
+            let header = without_evm::read_header_from_file(header)?;
+
+            let header_hash = self
+                .init_state
+                .header_hash
+                .ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
+            let header_hash = B256::from_str(&header_hash)?;
+
+            let total_difficulty = self
+                .init_state
+                .total_difficulty
+                .ok_or_else(|| eyre::eyre!("Total difficulty must be provided"))?;
+            let total_difficulty = U256::from_str(&total_difficulty)?;
+
             let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                reth_cli_commands::init_state::without_evm::setup_without_evm(
+                info!(target: "reth::cli", "header: {:?}, header_hash: {:?}, total_difficulty: {:?}", header, header_hash, total_difficulty);
+                without_evm::setup_without_evm(
                     &provider_rw,
-                    SealedHeader::new(BEDROCK_HEADER, BEDROCK_HEADER_HASH),
-                    BEDROCK_HEADER_TTD,
+                    SealedHeader::new(header, header_hash),
+                    total_difficulty,
                 )?;
 
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they
                 // will be unwound according to database checkpoints.
                 //
-                // Necessary to commit, so the BEDROCK_HEADER is accessible to provider_rw and
+                // Necessary to commit, so the header is accessible to provider_rw and
                 // init_state_dump
                 static_file_provider.commit()?;
-            } else if last_block_number > 0 && last_block_number < BEDROCK_HEADER.number {
+            } else if last_block_number > 0 && last_block_number < header.number {
                 return Err(eyre::eyre!(
-                    "Data directory should be empty when calling init-state with --without-ovm."
-                ))
-            }
-        }
-
-        if provider_factory.chain_spec().is_mantle_sepolia() {
-            let last_block_number = provider_rw.last_block_number()?;
-
-            if last_block_number == 0 {
-                reth_cli_commands::init_state::without_evm::setup_without_evm(
-                    &provider_rw,
-                    SealedHeader::new(MANTLE_SEPOLIA_HEADER, MANTLE_SEPOLIA_HEADER_HASH),
-                    MANTLE_SEPOLIA_HEADER_TTD,
-                )?;
-
-                // SAFETY: it's safe to commit static files, since in the event of a crash, they
-                // will be unwound according to database checkpoints.
-                //
-                // Necessary to commit, so the MANTLE_SEPOLIA_HEADER is accessible to provider_rw and
-                // init_state_dump
-                static_file_provider.commit()?;
-            } else if last_block_number > 0 && last_block_number < MANTLE_SEPOLIA_HEADER.number {
-                return Err(eyre::eyre!(
-                    "Data directory should be empty when calling init-state with --without-ovm."
-                ))
+                    "Data directory should be empty when calling init-state with --without-evm-history."
+                ));
             }
         }
 
