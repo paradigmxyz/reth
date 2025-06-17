@@ -68,5 +68,9 @@ pub use ress_args::RessArgs;
 mod era;
 pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
+/// HardforkArgs for configuring hardfork activation block overrides
+mod hardfork;
+pub use hardfork::HardforkOverrideArgs;
+
 mod error;
 pub mod types;

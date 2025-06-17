@@ -435,6 +435,18 @@ impl ChainSpec {
         }
     }
 
+    /// Override the hardforks for the chain.
+    pub fn with_hardforks_overrides(
+        &self,
+        overrides: Vec<(EthereumHardfork, ForkCondition)>,
+    ) -> Self {
+        let mut spec = self.clone();
+        for (fork, condition) in overrides {
+            spec.hardforks.insert(fork, condition);
+        }
+        spec
+    }
+
     /// Returns the hardfork display helper.
     pub fn display_hardforks(&self) -> DisplayHardforks {
         DisplayHardforks::new(self.hardforks.forks_iter())
