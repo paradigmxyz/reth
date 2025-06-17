@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
-use futures::future::TryFutureExt;
+use futures::{future::TryFutureExt, StreamExt};
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{Block, NodePrimitives, SealedHeader};
@@ -900,10 +900,7 @@ impl<
             distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
             !sealed_headers.is_empty()
         {
-            Self::Cached(CachedMode {
-                filter_inner,
-                headers_iter: sealed_headers.into_iter(),
-            })
+            Self::Cached(CachedMode { filter_inner, headers_iter: sealed_headers.into_iter() })
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
@@ -938,11 +935,8 @@ impl<
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         for header in self.headers_iter.by_ref() {
             // Try cache first for recent blocks
-            let cache_result = self
-                .filter_inner
-                .eth_cache()
-                .get_receipts_and_maybe_block(header.hash())
-                .await?;
+            let cache_result =
+                self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?;
 
             let (receipts, recovered_block) = match cache_result {
                 Some((receipts, maybe_block)) => (receipts, maybe_block),
@@ -995,47 +989,42 @@ impl<
             None => return Ok(None),
         };
 
-        let start_number = next_header.header().number();
         let mut range_headers = vec![next_header];
 
-        // peek ahead to extend range up to max_range size
+        // Collect consecutive blocks up to max_range size
         while range_headers.len() < self.max_range {
-            if let Some(peeked) = self.iter.peek() {
-                // Check if next block is consecutive
-                if peeked.header().number() == start_number + range_headers.len() as u64 {
-                    let next = self.iter.next().unwrap();
-                    range_headers.push(next);
-                } else {
-                    break;
+            match self.iter.peek() {
+                Some(peeked) => {
+                    if let Some(last_header) = range_headers.last() {
+                        let expected_next = last_header.header().number() + 1;
+                        if peeked.header().number() == expected_next {
+                            if let Some(next_header) = self.iter.next() {
+                                range_headers.push(next_header);
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break; // Non-consecutive block, stop here
+                        }
+                    } else {
+                        break;
+                    }
                 }
-            } else {
-                break;
+                None => break, // No more headers
             }
         }
 
-        let start_block = range_headers[0].header().number();
-        let end_block = range_headers.last().unwrap().header().number();
+        // Use efficient batch method for receipts and blocks
+        let block_hashes: Vec<alloy_primitives::B256> =
+            range_headers.iter().map(|header| header.hash()).collect();
 
-        let receipts_range =
-            self.filter_inner.provider().receipts_by_block_range(start_block..=end_block)?;
+        let mut receipt_stream =
+            self.filter_inner.eth_cache().get_receipts_and_maybe_block_stream(block_hashes);
 
-        for (i, header) in range_headers.into_iter().enumerate() {
-            // get receipts for this specific block from the range result
-            if let Some(receipts) = receipts_range.get(i) {
+        for header in range_headers {
+            if let Some(Ok(Some((receipts, recovered_block)))) = receipt_stream.next().await {
                 if !receipts.is_empty() {
-                    // TODO: refactor when https://github.com/paradigmxyz/reth/issues/16470 is done
-                    let recovered_block = self
-                        .filter_inner
-                        .provider()
-                        .block(header.hash().into())?
-                        .and_then(|block| block.try_into_recovered().ok())
-                        .map(Arc::new);
-
-                    self.next.push_back(ReceiptBlockResult {
-                        receipts: Arc::new(receipts.clone()),
-                        recovered_block,
-                        header,
-                    });
+                    self.next.push_back(ReceiptBlockResult { receipts, recovered_block, header });
                 }
             }
         }
@@ -1458,10 +1447,7 @@ mod tests {
 
         let headers = vec![test_header.clone()];
 
-        let mut cached_mode = CachedMode {
-            filter_inner,
-            headers_iter: headers.into_iter(),
-        };
+        let mut cached_mode = CachedMode { filter_inner, headers_iter: headers.into_iter() };
 
         // should find the receipt from provider fallback (cache will be empty)
         let result = cached_mode.next().await;
@@ -1500,10 +1486,7 @@ mod tests {
 
         let headers: Vec<SealedHeader<alloy_consensus::Header>> = vec![];
 
-        let mut cached_mode = CachedMode {
-            filter_inner,
-            headers_iter: headers.into_iter(),
-        };
+        let mut cached_mode = CachedMode { filter_inner, headers_iter: headers.into_iter() };
 
         // should immediately return None for empty headers
         let result = cached_mode.next().await;
