@@ -124,7 +124,9 @@ pub trait FromConsensusTx<T> {
     fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self;
 }
 
-impl<T: ConsensusTransaction> FromConsensusTx<T> for Transaction<T> {
+impl<T: ConsensusTransaction, T2: ConsensusTransaction + From<T>> FromConsensusTx<T>
+    for Transaction<T2>
+{
     type TxInfo = TransactionInfo;
 
     fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
@@ -138,7 +140,7 @@ impl<T: ConsensusTransaction> FromConsensusTx<T> for Transaction<T> {
             .unwrap_or_else(|| tx.max_fee_per_gas());
 
         Self {
-            inner: Recovered::new_unchecked(tx, signer),
+            inner: Recovered::new_unchecked(tx, signer).convert(),
             block_hash,
             block_number,
             transaction_index,
@@ -174,14 +176,6 @@ where
     /// [`eth_simulateV1`]: <https://github.com/ethereum/execution-apis/pull/484>
     /// [required fields]: TransactionRequest::buildable_type
     fn try_into_sim_tx(self) -> Result<T, ValueError<Self>>;
-}
-
-impl IntoRpcTx<Transaction> for EthereumTxEnvelope<TxEip4844> {
-    type TxInfo = TransactionInfo;
-
-    fn into_rpc_tx(self, signer: Address, tx_info: TransactionInfo) -> Transaction {
-        Transaction::from_transaction(self.with_signer(signer).convert(), tx_info)
-    }
 }
 
 /// Adds extra context to [`TransactionInfo`].
