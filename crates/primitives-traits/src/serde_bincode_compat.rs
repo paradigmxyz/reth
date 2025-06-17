@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use alloy_primitives::Bytes;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
@@ -41,6 +42,10 @@ impl SerdeBincodeCompat for alloy_consensus::Header {
 pub type BincodeReprFor<'a, T> = <T as SerdeBincodeCompat>::BincodeRepr<'a>;
 
 /// A helper trait for using RLP-encoding for providing bincode-compatible serialization.
+///
+/// By implementing this trait, [`SerdeBincodeCompat`] will be automatically implemented for the
+/// type and RLP encoding will be used for serialization and deserialization for bincode
+/// compatibility.
 pub trait RlpBincode: alloy_rlp::Encodable + alloy_rlp::Decodable {}
 
 impl<T: RlpBincode + 'static> SerdeBincodeCompat for T {
