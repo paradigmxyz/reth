@@ -51,7 +51,6 @@ For the sake of this tutorial, we'll use the reference implementation of the Rol
 op-reth supports additional OP Stack specific CLI arguments:
 1. `--rollup.sequencer-http <uri>` - The sequencer endpoint to connect to. Transactions sent to the `op-reth` EL are also forwarded to this sequencer endpoint for inclusion, as the sequencer is the entity that builds blocks on OP Stack chains.
 1. `--rollup.disable-tx-pool-gossip` - Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
-1. `--rollup.enable-genesis-walkback` - Disables setting the forkchoice status to tip on startup, making the `op-node` walk back to genesis and verify the integrity of the chain before starting to sync. This can be omitted unless a corruption of local chainstate is suspected.
 1. `--rollup.discovery.v4` - Enables the discovery v4 protocol for peer discovery. By default, op-reth, similar to op-geth, has discovery v5 enabled and discovery v4 disabled, whereas regular reth has discovery v4 enabled and discovery v5 disabled.
 
 First, ensure that your L1 archival node is running and synced to tip. Also make sure that the beacon node / consensus layer client is running and has http APIs enabled. Then, start `op-reth` with the `--rollup.sequencer-http` flag set to the `Base Mainnet` sequencer endpoint:

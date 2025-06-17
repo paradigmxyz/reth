@@ -494,6 +494,7 @@ fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 }
                 IncomingEthRequest::GetNodeData { .. } => {}
                 IncomingEthRequest::GetReceipts { .. } => {}
+                IncomingEthRequest::GetReceipts69 { .. } => {}
             },
         }
     }

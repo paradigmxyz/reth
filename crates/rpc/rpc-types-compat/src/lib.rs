@@ -10,8 +10,10 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
+mod fees;
 pub mod transaction;
+pub use fees::{CallFees, CallFeesError};
 pub use transaction::{
-    try_into_op_tx_info, IntoRpcTx, RpcConverter, TransactionCompat, TransactionConversionError,
-    TryIntoSimTx, TxInfoMapper,
+    try_into_op_tx_info, EthTxEnvError, IntoRpcTx, RpcConverter, TransactionCompat,
+    TransactionConversionError, TryIntoSimTx, TxInfoMapper,
 };

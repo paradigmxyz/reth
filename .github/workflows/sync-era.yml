@@ -1,6 +1,6 @@
-# Runs sync tests.
+# Runs sync tests with ERA stage enabled.
 
-name: sync test
+name: sync-era test
 
 on:
   workflow_dispatch:
@@ -47,13 +47,14 @@ jobs:
           cache-on-failure: true
       - name: Build ${{ matrix.chain.bin }}
         run: make ${{ matrix.chain.build }}
-      - name: Run sync
+      - name: Run sync with ERA enabled
         run: |
           ${{ matrix.chain.bin }} node \
             --chain ${{ matrix.chain.chain }} \
             --debug.tip ${{ matrix.chain.tip }} \
             --debug.max-block ${{ matrix.chain.block }} \
             --debug.terminate
+            --era.enable
       - name: Verify the target block hash
         run: |
           ${{ matrix.chain.bin }} db --chain ${{ matrix.chain.chain }} get static-file headers ${{ matrix.chain.block }} \
