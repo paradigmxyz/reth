@@ -133,6 +133,27 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         max
     }
 
+    /// Deletes files that are outside-of the working range.
+    pub async fn delete_outside_range(&self, index: usize, max_files: usize) -> eyre::Result<()> {
+        let last = index + max_files;
+
+        if let Ok(mut dir) = fs::read_dir(&self.folder).await {
+            while let Ok(Some(entry)) = dir.next_entry().await {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(number) = self.file_name_to_number(name) {
+                        if number < index || number >= last {
+                            eprintln!("Deleting kokot {}", entry.path().display());
+                            eprintln!("{number} < {index} || {number} > {last}");
+                            reth_fs_util::remove_file(entry.path())?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns a download URL for the file corresponding to `number`.
     pub async fn url(&self, number: usize) -> eyre::Result<Option<Url>> {
         Ok(self.number_to_file_name(number).await?.map(|name| self.url.join(&name)).transpose()?)
