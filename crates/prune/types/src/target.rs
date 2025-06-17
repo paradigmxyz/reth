@@ -77,7 +77,7 @@ impl PruneModes {
             receipts: Some(PruneMode::Full),
             account_history: Some(PruneMode::Full),
             storage_history: Some(PruneMode::Full),
-            bodies_history:Some(PruneMode::Full),
+            bodies_history: Some(PruneMode::Full),
             receipts_log_filter: Default::default(),
         }
     }

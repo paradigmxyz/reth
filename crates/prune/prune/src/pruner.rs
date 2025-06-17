@@ -134,11 +134,6 @@ where
         debug!(target: "pruner", %tip_block_number, "Pruner started");
         let start = Instant::now();
 
-        // TODO: check if we need to remove old static files
-        // we need to 1. update the static files indices and remove tracking for files that we're going to remove
-        // move the files to a tmp folder
-        // remove the files in the background because these can be large files ~50GB
-
         let mut limiter = PruneLimiter::default().set_deleted_entries_limit(self.delete_limit);
         if let Some(timeout) = self.timeout {
             limiter = limiter.set_time_limit(timeout);

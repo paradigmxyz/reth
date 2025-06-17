@@ -1,13 +1,12 @@
 //! Pruning and full node arguments
 
-use crate::args::error::ReceiptsLogError;
+use crate::{args::error::ReceiptsLogError, primitives::EthereumHardfork};
 use alloy_primitives::{Address, BlockNumber};
 use clap::{builder::RangedU64ValueParser, Args};
+use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 use std::collections::BTreeMap;
-use reth_chainspec::EthereumHardforks;
-use crate::primitives::EthereumHardfork;
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
@@ -107,7 +106,8 @@ impl PruningArgs {
     /// Returns pruning configuration.
     // TODO: accept chainspec again so that we can access merge block if any
     pub fn prune_config<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneConfig>
-        where ChainSpec: EthereumHardforks
+    where
+        ChainSpec: EthereumHardforks,
     {
         // Initialise with a default prune configuration.
         let mut config = PruneConfig::default();
@@ -161,11 +161,14 @@ impl PruningArgs {
     }
 
     fn bodies_prune_mode<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneMode>
-    where ChainSpec: EthereumHardforks
+    where
+        ChainSpec: EthereumHardforks,
     {
         if self.bodies_pre_merge.is_some() {
-            chain_spec.ethereum_fork_activation(EthereumHardfork::Paris)
-            Some(PruneMode::Full)
+            chain_spec
+                .ethereum_fork_activation(EthereumHardfork::Paris)
+                .block_number()
+                .map(|merge_block| PruneMode::Before(merge_block))
         } else if let Some(distance) = self.sender_recovery_distance {
             Some(PruneMode::Distance(distance))
         } else if let Some(block_number) = self.sender_recovery_before {
@@ -173,7 +176,6 @@ impl PruningArgs {
         } else {
             None
         }
-
     }
 
     const fn sender_recovery_prune_mode(&self) -> Option<PruneMode> {
