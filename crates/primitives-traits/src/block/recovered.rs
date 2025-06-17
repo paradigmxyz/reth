@@ -13,7 +13,21 @@ use derive_more::Deref;
 
 /// A block with senders recovered from the block's transactions.
 ///
-/// This type is a [`SealedBlock`] with a list of senders that match the transactions in the block.
+/// This type represents a [`SealedBlock`] where all transaction senders have been
+/// recovered and verified. Recovery is an expensive operation that extracts the
+/// sender address from each transaction's signature.
+///
+/// # Construction
+///
+/// - [`new`] / [`new_unhashed`] - Create with pre-recovered senders (unchecked)
+/// - [`try_new`] / [`try_new_unhashed`] - Create with validation
+/// - [`try_recover`] - Recover from a block
+/// - [`try_recover_sealed`] - Recover from a sealed block
+///
+/// # Performance
+///
+/// Sender recovery is computationally expensive. Cache recovered blocks when possible
+/// to avoid repeated recovery operations.
 ///
 /// ## Sealing
 ///
