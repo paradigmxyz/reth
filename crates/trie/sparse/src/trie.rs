@@ -2505,8 +2505,10 @@ mod tests {
 
     /// Pad nibbles to the length of a B256 hash with zeros on the right.
     fn pad_nibbles_right(mut nibbles: Nibbles) -> Nibbles {
-        nibbles
-            .extend(&Nibbles::from_vec_unchecked(vec![0; B256::len_bytes() * 2 - nibbles.len()]));
+        nibbles.extend(&Nibbles::from_nibbles_unchecked(vec![
+            0;
+            B256::len_bytes() * 2 - nibbles.len()
+        ]));
         nibbles
     }
 
