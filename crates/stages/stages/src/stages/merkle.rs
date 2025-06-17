@@ -40,7 +40,13 @@ Once you have this information, please submit a github issue at https://github.c
 
 /// The default threshold (in number of blocks) for switching from incremental trie building
 /// of changes to whole rebuild.
-pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 5_000;
+pub const MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD: u64 = 100_000;
+
+/// The default threshold (in number of blocks) to run the stage in incremental mode. The
+/// incremental mode will calculate the state root for a large range of blocks by calculating the
+/// new state root for this many blocks, in batches, repeating until we reach the desired block
+/// number.
+pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
@@ -67,10 +73,11 @@ pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 5_000;
 pub enum MerkleStage {
     /// The execution portion of the merkle stage.
     Execution {
-        // TODO: make struct for holding incremental settings, for code reuse
+        // TODO: make struct for holding incremental settings, for code reuse between `Execution`
+        // variant and `Both`
         /// The threshold (in number of blocks) for switching from incremental trie building
         /// of changes to whole rebuild.
-        clean_threshold: u64,
+        rebuild_threshold: u64,
         /// The threshold (in number of blocks) to run the stage in incremental mode. The
         /// incremental mode will calculate the state root by calculating the new state root for
         /// some number of blocks, repeating until we reach the desired block number.
@@ -83,7 +90,7 @@ pub enum MerkleStage {
     Both {
         /// The threshold (in number of blocks) for switching from incremental trie building
         /// of changes to whole rebuild.
-        clean_threshold: u64,
+        rebuild_threshold: u64,
         /// The threshold (in number of blocks) to run the stage in incremental mode. The
         /// incremental mode will calculate the state root by calculating the new state root for
         /// some number of blocks, repeating until we reach the desired block number.
@@ -95,8 +102,8 @@ impl MerkleStage {
     /// Stage default for the [`MerkleStage::Execution`].
     pub const fn default_execution() -> Self {
         Self::Execution {
-            clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-            incremental_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
+            incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
         }
     }
 
@@ -106,12 +113,8 @@ impl MerkleStage {
     }
 
     /// Create new instance of [`MerkleStage::Execution`].
-    pub const fn new_execution(clean_threshold: u64) -> Self {
-        // TODO: make this configurable
-        Self::Execution {
-            clean_threshold,
-            incremental_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-        }
+    pub const fn new_execution(rebuild_threshold: u64, incremental_threshold: u64) -> Self {
+        Self::Execution { rebuild_threshold, incremental_threshold }
     }
 
     /// Gets the hashing progress
@@ -175,12 +178,12 @@ where
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-            Self::Execution { clean_threshold, incremental_threshold } => {
-                (*clean_threshold, *incremental_threshold)
+            Self::Execution { rebuild_threshold, incremental_threshold } => {
+                (*rebuild_threshold, *incremental_threshold)
             }
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { clean_threshold, incremental_threshold } => {
-                (*clean_threshold, *incremental_threshold)
+            Self::Both { rebuild_threshold, incremental_threshold } => {
+                (*rebuild_threshold, *incremental_threshold)
             }
         };
 
@@ -583,7 +586,7 @@ mod tests {
 
         fn stage(&self) -> Self::S {
             Self::S::Both {
-                clean_threshold: self.clean_threshold,
+                rebuild_threshold: self.clean_threshold,
                 incremental_threshold: self.incremental_threshold,
             }
         }

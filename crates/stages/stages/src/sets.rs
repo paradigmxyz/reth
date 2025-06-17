@@ -402,7 +402,10 @@ where
                 self.stages_config.storage_hashing,
                 self.stages_config.etl.clone(),
             ))
-            .add_stage(MerkleStage::new_execution(self.stages_config.merkle.clean_threshold))
+            .add_stage(MerkleStage::new_execution(
+                self.stages_config.merkle.rebuild_threshold,
+                self.stages_config.merkle.incremental_threshold,
+            ))
     }
 }
 
