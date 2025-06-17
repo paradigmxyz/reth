@@ -1,7 +1,9 @@
 use crate::{build::ScrollBlockAssembler, ScrollEvmConfig, ScrollNextBlockEnvAttributes};
+use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::B256;
+use core::convert::Infallible;
 use reth_chainspec::EthChainSpec;
 use reth_evm::{ConfigureEvm, EvmEnv, ExecutionCtxFor};
 use reth_primitives_traits::{
@@ -19,7 +21,6 @@ use scroll_alloy_evm::{
     ScrollTransactionIntoTxEnv,
 };
 use scroll_alloy_hardforks::ScrollHardforks;
-use std::{convert::Infallible, sync::Arc};
 
 impl<ChainSpec, N, R> ConfigureEvm for ScrollEvmConfig<ChainSpec, N, R>
 where

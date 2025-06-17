@@ -1,7 +1,7 @@
 //! Execution primitives for EVM.
 
 use crate::ScrollEvmConfig;
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Address, B256};

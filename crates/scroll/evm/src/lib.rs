@@ -18,7 +18,7 @@ pub use receipt::ScrollRethReceiptBuilder;
 mod receipt;
 
 use crate::build::ScrollBlockAssembler;
-use std::sync::Arc;
+use alloc::sync::Arc;
 
 use alloy_primitives::{Address, BlockNumber, BlockTimestamp};
 use reth_primitives_traits::NodePrimitives;
