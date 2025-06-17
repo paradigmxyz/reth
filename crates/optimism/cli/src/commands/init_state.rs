@@ -3,8 +3,10 @@
 use alloy_primitives::{B256, U256};
 use clap::Parser;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment};
-use reth_cli_commands::init_state::without_evm;
+use reth_cli_commands::{
+    common::{AccessRights, CliNodeTypes, Environment},
+    init_state::without_evm,
+};
 use reth_db_common::init::init_from_state_dump;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpPrimitives;
