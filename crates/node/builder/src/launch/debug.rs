@@ -66,7 +66,7 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
 /// ## RPC Consensus Client
 ///
 /// When `--debug.rpc-consensus-ws <URL>` is provided, the launcher will:
-/// - Connect to an external RPC WebSocket endpoint
+/// - Connect to an external RPC `WebSocket` endpoint
 /// - Fetch blocks from that endpoint
 /// - Submit them to the local engine for execution
 /// - Useful for testing engine behavior with real network data
