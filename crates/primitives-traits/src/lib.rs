@@ -102,9 +102,8 @@
 //! The [bincode-crate](https://github.com/bincode-org/bincode) is often used by additional tools when sending data over the network.
 //! `bincode` crate doesn't work well with optionally serializable serde fields, but some of the consensus types require optional serialization for RPC compatibility. Read more: <https://github.com/bincode-org/bincode/issues/326>
 //!
-//! As a workaround this crate introduces the
-//! [`SerdeBincodeCompat`](serde_bincode_compat::SerdeBincodeCompat) trait used to a bincode
-//! compatible serde representation.
+//! As a workaround this crate introduces the `SerdeBincodeCompat` trait (available with the
+//! `serde-bincode-compat` feature) used to provide a bincode compatible serde representation.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",

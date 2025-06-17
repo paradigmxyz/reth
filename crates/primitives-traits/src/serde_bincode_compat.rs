@@ -7,11 +7,11 @@
 //!
 //! # Overview
 //!
-//! The main trait is [`SerdeBincodeCompat`], which provides a conversion mechanism between
+//! The main trait is `SerdeBincodeCompat`, which provides a conversion mechanism between
 //! types and their bincode-compatible representations. There are two main ways to implement
 //! this trait:
 //!
-//! 1. **Using RLP encoding** - Implement [`RlpBincode`] for types that already support RLP
+//! 1. **Using RLP encoding** - Implement `RlpBincode` for types that already support RLP
 //! 2. **Custom implementation** - Define a custom representation type
 //!
 //! # Examples
@@ -59,7 +59,7 @@ pub use block_bincode::{Block, BlockBody};
 /// // SerdeBincodeCompat is automatically implemented
 /// ```
 ///
-/// For custom implementations, see the examples in [`block_bincode`].
+/// For custom implementations, see the examples in the `block` module.
 ///
 /// The recommended way to add bincode compatible serialization is via the
 /// [`serde_with`] crate and the `serde_as` macro. See for reference [`header`].

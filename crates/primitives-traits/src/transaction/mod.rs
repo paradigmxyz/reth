@@ -2,7 +2,7 @@
 //!
 //! This module provides traits for working with blockchain transactions:
 //! - [`Transaction`] - Basic transaction interface
-//! - [`SignedTransaction`] - Transaction with signature and recovery methods
+//! - [`signed::SignedTransaction`] - Transaction with signature and recovery methods
 //! - [`FullTransaction`] - Transaction with database encoding support
 //!
 //! # Transaction Recovery
