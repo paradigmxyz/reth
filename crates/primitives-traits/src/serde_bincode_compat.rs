@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+use alloy_primitives::Bytes;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -38,6 +40,27 @@ impl SerdeBincodeCompat for alloy_consensus::Header {
 
 /// Type alias for the [`SerdeBincodeCompat::BincodeRepr`] associated type.
 pub type BincodeReprFor<'a, T> = <T as SerdeBincodeCompat>::BincodeRepr<'a>;
+
+/// A helper trait for using RLP-encoding for providing bincode-compatible serialization.
+///
+/// By implementing this trait, [`SerdeBincodeCompat`] will be automatically implemented for the
+/// type and RLP encoding will be used for serialization and deserialization for bincode
+/// compatibility.
+pub trait RlpBincode: alloy_rlp::Encodable + alloy_rlp::Decodable {}
+
+impl<T: RlpBincode + 'static> SerdeBincodeCompat for T {
+    type BincodeRepr<'a> = Bytes;
+
+    fn as_repr(&self) -> Self::BincodeRepr<'_> {
+        let mut buf = Vec::new();
+        self.encode(&mut buf);
+        buf.into()
+    }
+
+    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+        Self::decode(&mut repr.as_ref()).expect("Failed to decode bincode rlp representation")
+    }
+}
 
 mod block_bincode {
     use crate::serde_bincode_compat::SerdeBincodeCompat;
