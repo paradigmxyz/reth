@@ -482,7 +482,7 @@ where
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
-            break;
+            break
         }
 
         // Always delete the current shard from the database first
