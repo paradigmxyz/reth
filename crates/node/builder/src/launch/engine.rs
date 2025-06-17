@@ -353,6 +353,7 @@ where
                                         timestamp: head.timestamp(),
                                         total_difficulty: chainspec.final_paris_total_difficulty().filter(|_| chainspec.is_paris_active_at_block(head.number())).unwrap_or_default(),
                                     };
+                                    network_handle.update_status(head_block);
 
                                     let updated=BlockRangeUpdate{
                                         earliest:0,
