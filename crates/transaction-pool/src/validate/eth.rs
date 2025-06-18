@@ -969,6 +969,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             max_blob_count: AtomicU64::new(max_blob_count),
         };
 
+        // Ensure the kzg setup is loaded right away.
         let _kzg_settings = kzg_settings.get();
 
         let inner = EthTransactionValidatorInner {
