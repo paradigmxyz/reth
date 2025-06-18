@@ -3,6 +3,7 @@
 use alloy_primitives::{B256, U256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree};
+use rand::seq::IteratorRandom;
 use reth_trie_common::Nibbles;
 use reth_trie_sparse::SparseTrie;
 
@@ -22,13 +23,25 @@ fn update_leaf(c: &mut Criterion) {
                     for (path, value) in &leaves {
                         trie.update_leaf(path.clone(), value.clone()).unwrap();
                     }
-                    trie
+
+                    let new_leaves = leaves
+                        .iter()
+                        // Update 10% of existing leaves with new values
+                        .choose_multiple(&mut rand::rng(), leaf_count / 10)
+                        .into_iter()
+                        .map(|(path, _)| {
+                            (
+                                path.clone(),
+                                alloy_rlp::encode_fixed_size(&U256::from(path.len() * 2)).to_vec(),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+
+                    (trie, new_leaves)
                 },
-                |mut trie| {
-                    // Update existing leaves with new values
-                    for (i, (path, _)) in leaves.iter().enumerate().take(100) {
-                        let new_value = alloy_rlp::encode_fixed_size(&U256::from(i * 2)).to_vec();
-                        trie.update_leaf(path.clone(), new_value).unwrap();
+                |(mut trie, new_leaves)| {
+                    for (path, new_value) in new_leaves {
+                        trie.update_leaf(path, new_value).unwrap();
                     }
                     trie
                 },
@@ -51,11 +64,17 @@ fn remove_leaf(c: &mut Criterion) {
                     for (path, value) in &leaves {
                         trie.update_leaf(path.clone(), value.clone()).unwrap();
                     }
-                    trie
+
+                    let delete_leaves = leaves
+                        .iter()
+                        .map(|(path, _)| path)
+                        // Remove 10% leaves
+                        .choose_multiple(&mut rand::rng(), leaf_count / 10);
+
+                    (trie, delete_leaves)
                 },
-                |mut trie| {
-                    // Remove 100 leaves
-                    for (path, _) in leaves.iter().take(100) {
+                |(mut trie, delete_leaves)| {
+                    for path in delete_leaves {
                         trie.remove_leaf(path).unwrap();
                     }
                     trie
