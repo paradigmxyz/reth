@@ -330,6 +330,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerMessage::PooledTransactions(msg) => {
                 if msg.is_valid_for_version(self.conn.version()) {
                     self.queued_outgoing.push_back(EthMessage::from(msg).into());
+                } else {
+                    debug!(target: "net", ?msg,  version=?self.conn.version(), "Message is invalid for connection version, skipping");
                 }
             }
             PeerMessage::EthRequest(req) => {
@@ -828,6 +830,7 @@ enum RequestState<R> {
 }
 
 /// Outgoing messages that can be sent over the wire.
+#[derive(Debug)]
 pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     /// A message that is owned.
     Eth(EthMessage<N>),
