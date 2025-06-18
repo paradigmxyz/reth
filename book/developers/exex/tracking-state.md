@@ -27,7 +27,7 @@ but let's unpack what's going on here:
 
 1. Our ExEx is now a `struct` that contains the context and implements the `Future` trait. It's now pollable (hence `await`-able).
 1. We can't use `self` directly inside our `poll` method, and instead need to acquire a mutable reference to the data inside of the `Pin`.
-   Read more about pinning in [the book](https://rust-lang.github.io/async-book/04_pinning/01_chapter.html).
+   Read more about pinning in [the book](https://rust-lang.github.io/async-book/part-reference/pinning.html).
 1. We also can't use `await` directly inside `poll`, and instead need to poll futures manually.
    We wrap the call to `poll_recv(cx)` into a [`ready!`](https://doc.rust-lang.org/std/task/macro.ready.html) macro,
    so that if the channel of notifications has no value ready, we will instantly return `Poll::Pending` from our Future.

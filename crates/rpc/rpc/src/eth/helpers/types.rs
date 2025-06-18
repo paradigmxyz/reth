@@ -2,11 +2,12 @@
 
 use alloy_network::Ethereum;
 use reth_ethereum_primitives::EthPrimitives;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_types_compat::RpcConverter;
 
 /// An [`RpcConverter`] with its generics set to Ethereum specific.
-pub type EthRpcConverter = RpcConverter<EthPrimitives, Ethereum, EthApiError>;
+pub type EthRpcConverter = RpcConverter<EthPrimitives, Ethereum, EthEvmConfig, EthApiError>;
 
 //tests for simulate
 #[cfg(test)]

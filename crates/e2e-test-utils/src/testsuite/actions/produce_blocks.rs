@@ -1,7 +1,7 @@
 //! Block production actions for the e2e testing framework.
 
 use crate::testsuite::{
-    actions::{validate_fcu_response, Action, Sequence},
+    actions::{expect_fcu_not_syncing_or_accepted, validate_fcu_response, Action, Sequence},
     BlockInfo, Environment,
 };
 use alloy_primitives::{Bytes, B256};
@@ -242,7 +242,9 @@ where
             debug!("FCU result: {:?}", fcu_result);
 
             // validate the FCU status before proceeding
-            validate_fcu_response(&fcu_result, "GenerateNextPayload")?;
+            // Note: In the context of GenerateNextPayload, Syncing usually means the engine
+            // doesn't have the requested head block, which should be an error
+            expect_fcu_not_syncing_or_accepted(&fcu_result, "GenerateNextPayload")?;
 
             let payload_id = if let Some(payload_id) = fcu_result.payload_id {
                 debug!("Received new payload ID: {:?}", payload_id);
@@ -269,7 +271,10 @@ where
                 debug!("Fresh FCU result: {:?}", fresh_fcu_result);
 
                 // validate the fresh FCU status
-                validate_fcu_response(&fresh_fcu_result, "GenerateNextPayload (fresh)")?;
+                expect_fcu_not_syncing_or_accepted(
+                    &fresh_fcu_result,
+                    "GenerateNextPayload (fresh)",
+                )?;
 
                 if let Some(payload_id) = fresh_fcu_result.payload_id {
                     payload_id

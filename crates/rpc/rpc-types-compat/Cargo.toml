@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-primitives-traits.workspace = true
 reth-storage-api = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-evm.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -26,6 +27,10 @@ alloy-network.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+op-revm.workspace = true
+
+# revm
+revm-context.workspace = true
 
 # io
 serde.workspace = true

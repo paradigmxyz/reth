@@ -16,7 +16,7 @@ use crate::{
     session::{
         conn::EthRlpxConnection,
         handle::{ActiveSessionMessage, SessionCommand},
-        BlockRangeInfo, SessionId,
+        BlockRangeInfo, EthVersion, SessionId,
     },
 };
 use alloy_primitives::Sealable;
@@ -24,7 +24,7 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    message::{EthBroadcastMessage, RequestPair},
+    message::{EthBroadcastMessage, MessageError, RequestPair},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
@@ -43,10 +43,16 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
 
+/// The recommended interval at which a new range update should be sent to the remote peer.
+///
+/// This is set to 120 seconds (2 minutes) as per the Ethereum specification for eth69.
+pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(120);
+
 // Constants for timeout updating.
 
 /// Minimum timeout value
 const MINIMUM_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// Maximum timeout value
 const MAXIMUM_TIMEOUT: Duration = INITIAL_REQUEST_TIMEOUT;
 /// How much the new measurements affect the current timeout (X percent)
@@ -116,6 +122,12 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
         Option<(PollSender<ActiveSessionMessage<N>>, ActiveSessionMessage<N>)>,
     /// The eth69 range info for the remote peer.
     pub(crate) range_info: Option<BlockRangeInfo>,
+    /// The eth69 range info for the local node (this node).
+    /// This represents the range of blocks that this node can serve to other peers.
+    pub(crate) local_range_info: BlockRangeInfo,
+    /// Optional interval for sending periodic range updates to the remote peer (eth69+)
+    /// Recommended frequency is ~2 minutes per spec
+    pub(crate) range_update_interval: Option<Interval>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -255,7 +267,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetNodeData)
             }
             EthMessage::GetReceipts(req) => {
-                on_request!(req, Receipts, GetReceipts)
+                if self.conn.version() >= EthVersion::Eth69 {
+                    on_request!(req, Receipts69, GetReceipts69)
+                } else {
+                    on_request!(req, Receipts, GetReceipts)
+                }
             }
             EthMessage::Receipts(resp) => {
                 on_response!(resp, GetReceipts)
@@ -266,6 +282,17 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::BlockRangeUpdate(msg) => {
+                // Validate that earliest <= latest according to the spec
+                if msg.earliest > msg.latest {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(format!(
+                            "invalid block range: earliest ({}) > latest ({})",
+                            msg.earliest, msg.latest
+                        ))),
+                        message: EthMessage::BlockRangeUpdate(msg),
+                    };
+                }
+
                 if let Some(range_info) = self.range_info.as_ref() {
                     range_info.update(msg.earliest, msg.latest, msg.latest_hash);
                 }
@@ -700,6 +727,15 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
         }
 
+        if let Some(interval) = &mut this.range_update_interval {
+            // queue in new range updates if the interval is ready
+            while interval.poll_tick(cx).is_ready() {
+                this.queued_outgoing.push_back(
+                    EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
+                );
+            }
+        }
+
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
             if this.check_timed_out_requests(Instant::now()) {
@@ -998,6 +1034,12 @@ mod tests {
                         protocol_breach_request_timeout: PROTOCOL_BREACH_REQUEST_TIMEOUT,
                         terminate_message: None,
                         range_info: None,
+                        local_range_info: BlockRangeInfo::new(
+                            0,
+                            1000,
+                            alloy_primitives::B256::ZERO,
+                        ),
+                        range_update_interval: None,
                     }
                 }
                 ev => {
