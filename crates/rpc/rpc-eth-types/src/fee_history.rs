@@ -397,6 +397,21 @@ impl FeeHistoryEntry {
         }
     }
 
+    /// Calculate the base fee for the next block according to the EIP-1559 spec.
+    pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
+        // Create a minimal header with the required fields
+        let parent_header = Header {
+            gas_used: self.gas_used,
+            gas_limit: self.gas_limit,
+            base_fee_per_gas: Some(self.base_fee_per_gas),
+            timestamp: self.timestamp,
+            ..Default::default()
+        };
+
+        // Use the chain spec's centralized base fee calculation
+        chain_spec.next_block_base_fee(&parent_header, self.timestamp)
+    }
+
     /// Returns the blob fee for the next block according to the EIP-4844 spec.
     ///
     /// Returns `None` if `excess_blob_gas` is None.
@@ -414,20 +429,5 @@ impl FeeHistoryEntry {
         self.excess_blob_gas.and_then(|excess_blob_gas| {
             Some(self.blob_params?.next_block_excess_blob_gas(excess_blob_gas, self.blob_gas_used?))
         })
-    }
-
-    /// Calculate the base fee for the next block according to the EIP-1559 spec.
-    pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
-        // Create a minimal header with the required fields
-        let parent_header = Header {
-            gas_used: self.gas_used,
-            gas_limit: self.gas_limit,
-            base_fee_per_gas: Some(self.base_fee_per_gas),
-            timestamp: self.timestamp,
-            ..Default::default()
-        };
-
-        // Use the chain spec's centralized base fee calculation
-        chain_spec.next_block_base_fee(&parent_header, self.timestamp)
     }
 }
