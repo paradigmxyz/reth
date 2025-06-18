@@ -5,16 +5,25 @@
 
 extern crate alloc;
 
+pub mod blinded;
+
+mod node;
+use node::*;
+
+mod parallel_trie;
+pub use parallel_trie::*;
+
+mod rlp;
+use rlp::*;
+
 mod state;
 pub use state::*;
 
 mod trie;
 pub use trie::*;
 
-mod parallel_trie;
-pub use parallel_trie::*;
-
-pub mod blinded;
+mod updates;
+use updates::*;
 
 #[cfg(feature = "metrics")]
 mod metrics;
