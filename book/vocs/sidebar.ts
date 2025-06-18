@@ -24,7 +24,6 @@ export const sidebar: SidebarItem[] = [
     },
     {
         text: "Reth for Node Operators",
-        link: "/run/run-a-node",
         items: [
             {
                 text: "Installation",
@@ -104,7 +103,6 @@ export const sidebar: SidebarItem[] = [
     },
     {
         text: "Reth as a library",
-        link: "/sdk/overview",
         items: [
             {
                 text: "Overview",
@@ -177,7 +175,6 @@ export const sidebar: SidebarItem[] = [
     },
     {
         text: "Execution Extensions",
-        link: "/exex/overview",
         items: [
             {
                 text: "Overview",
@@ -203,8 +200,12 @@ export const sidebar: SidebarItem[] = [
     },
     {
         text: "Interacting with Reth over JSON-RPC",
-        link: "/jsonrpc/intro",
+        
         items: [
+            {
+                text: "Overview",
+                link: "/jsonrpc/intro",
+            },
             {
                 text: "eth",
                 link: "/jsonrpc/eth"
