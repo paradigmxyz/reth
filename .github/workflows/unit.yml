@@ -54,7 +54,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.98
       - if: "${{ matrix.type == 'book' }}"
         uses: arduino/setup-protoc@v3
         with:
@@ -87,7 +89,9 @@ jobs:
           fetch-depth: 1
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.98
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
