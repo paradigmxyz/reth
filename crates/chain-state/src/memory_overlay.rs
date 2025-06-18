@@ -4,8 +4,8 @@ use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, Stora
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
+    StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
@@ -222,7 +222,9 @@ impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {
 
         self.historical.storage(address, storage_key)
     }
+}
 
+impl<N: NodePrimitives> BytecodeReader for MemoryOverlayStateProviderRef<'_, N> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         for block in &self.in_memory {
             if let Some(contract) = block.execution_output.bytecode(code_hash) {

@@ -236,9 +236,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-eips"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8390cb5c872d53560635dabc02d616c1bb626dd0f7d6893f8725edb822573fed"
+checksum = "4f853de9ca1819f54de80de5d03bfc1bb7c9fafcf092b480a654447141bc354d"
 dependencies = [
  "alloy-eip2124",
  "alloy-eip2930",
@@ -9979,6 +9979,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-types",
  "parking_lot",
+ "reth-chain-state",
  "reth-chainspec",
  "reth-errors",
  "reth-evm",
