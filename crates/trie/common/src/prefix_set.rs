@@ -222,7 +222,7 @@ impl PrefixSet {
         self.keys.iter()
     }
 
-    /// Returns true if any entry should be considered changed.
+    /// Returns true if every entry should be considered changed.
     pub const fn all(&self) -> bool {
         self.all
     }
