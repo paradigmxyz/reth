@@ -10,7 +10,7 @@ use tracing::info;
 
 /// [`Node`] extension with support for debugging utilities.
 ///
-/// This trait provides additional the necessary conversion from RPC block type to the node's
+/// This trait provides additional necessary conversion from RPC block type to the node's
 /// primitive block type, e.g. `alloy_rpc_types_eth::Block` to the node's internal block
 /// representation.
 ///
