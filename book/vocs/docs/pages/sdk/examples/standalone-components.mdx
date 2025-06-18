@@ -1,0 +1,98 @@
+# How to Use Standalone Components
+
+Using Reth components independently of a full node.
+
+## Overview
+
+Reth's modular architecture allows you to use individual components without running a full node. This is useful for specialized applications, analysis tools, or custom integrations.
+
+## Interacting with the Database Directly
+
+### Opening the Database
+
+```rust
+// Example database opening will be added here
+```
+
+### Reading Block Data
+
+```rust
+// Example block data reading will be added here
+```
+
+### Reading Transaction Data
+
+```rust
+// Example transaction data reading will be added here
+```
+
+### Important Caveats
+
+- **Consistency**: Direct database access bypasses consistency guarantees
+- **Locking**: Be aware of potential lock conflicts with running nodes
+- **Schema Changes**: Database schema may change between versions
+- **Performance**: Direct access may impact node performance
+
+## Using the EVM Standalone
+
+Execute transactions without a full node context.
+
+### EVM Setup
+
+```rust
+// Example EVM setup will be added here
+```
+
+### Transaction Execution
+
+```rust
+// Example transaction execution will be added here
+```
+
+## Working with the Transaction Pool
+
+Use the transaction pool component independently.
+
+### Pool Setup
+
+```rust
+// Example pool setup will be added here
+```
+
+### Adding Transactions
+
+```rust
+// Example transaction addition will be added here
+```
+
+## Network Components
+
+Use networking components for custom p2p applications.
+
+### Network Setup
+
+```rust
+// Example network setup will be added here
+```
+
+### Custom Protocol Handling
+
+```rust
+// Example protocol handling will be added here
+```
+
+## Safety Considerations
+
+- Always use appropriate synchronization
+- Handle errors gracefully
+- Consider resource cleanup
+- Test thoroughly with realistic data
+- Monitor resource usage
+
+## Use Cases
+
+- Block explorers
+- Analytics tools
+- Custom indexers
+- Testing frameworks
+- Research applications

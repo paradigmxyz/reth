@@ -1,0 +1,63 @@
+# What Modifications and How
+
+Guide to common modifications and how to implement them.
+
+## Types of Modifications
+
+### Component Replacement
+Replace entire components with custom implementations.
+
+### Component Extension
+Extend existing components with additional functionality.
+
+### Configuration Changes
+Modify node behavior through configuration.
+
+### Custom Types
+Introduce new types for specific use cases.
+
+## Common Modification Patterns
+
+### Custom Transaction Pool
+Implement custom transaction ordering or validation logic.
+
+```rust
+// Example custom transaction pool implementation
+```
+
+### Custom EVM Configuration
+Modify EVM behavior for specific requirements.
+
+```rust
+// Example custom EVM config
+```
+
+### Additional RPC Methods
+Add custom RPC endpoints to your node.
+
+```rust
+// Example custom RPC methods
+```
+
+### Custom Consensus Rules
+Implement custom validation logic.
+
+```rust
+// Example custom consensus implementation
+```
+
+## Implementation Steps
+
+1. **Identify Components**: Determine which components need modification
+2. **Implement Traits**: Create custom implementations of required traits
+3. **Configure Node**: Wire custom components into the node builder
+4. **Test Integration**: Ensure components work together correctly
+5. **Performance Testing**: Validate performance characteristics
+
+## Best Practices
+
+- Start with small, incremental changes
+- Maintain compatibility with existing interfaces
+- Document your modifications thoroughly
+- Include comprehensive tests
+- Consider backwards compatibility
