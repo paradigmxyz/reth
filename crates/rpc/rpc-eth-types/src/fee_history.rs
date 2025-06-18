@@ -426,7 +426,7 @@ impl FeeHistoryEntry {
             timestamp: self.timestamp,
             ..Default::default()
         };
-        
+
         // Use the chain spec's centralized base fee calculation
         chain_spec.next_block_base_fee(&parent_header, self.timestamp)
     }

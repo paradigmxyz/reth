@@ -152,8 +152,8 @@ pub trait EthFees: LoadFee {
 
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
-                let fee = last_entry.next_block_base_fee(self.provider().chain_spec());
-                base_fee_per_gas.push(fee as u128);
+                base_fee_per_gas
+                    .push(last_entry.next_block_base_fee(self.provider().chain_spec()) as u128);
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
