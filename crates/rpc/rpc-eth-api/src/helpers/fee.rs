@@ -152,8 +152,8 @@ pub trait EthFees: LoadFee {
 
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
-                base_fee_per_gas
-                    .push(last_entry.next_block_base_fee(self.provider().chain_spec()) as u128);
+                let chain_spec = self.provider().chain_spec();
+                base_fee_per_gas.push(last_entry.next_block_base_fee(&chain_spec) as u128);
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
@@ -165,13 +165,12 @@ pub trait EthFees: LoadFee {
                     return Err(EthApiError::InvalidBlockRange.into())
                 }
 
-
+                let chain_spec = self.provider().chain_spec();
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
 
-                    let blob_params = self.provider()
-                        .chain_spec()
+                    let blob_params = chain_spec
                         .blob_params_at_timestamp(header.timestamp())
                         .unwrap_or_else(BlobParams::cancun);
 
@@ -208,15 +207,13 @@ pub trait EthFees: LoadFee {
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
                 base_fee_per_gas.push(
-                    self.provider().
-                        chain_spec().
-                        next_block_base_fee(last_header.header(), last_header.header().timestamp()) as u128);
+                    chain_spec.next_block_base_fee(last_header.header(), last_header.header().timestamp()) as u128);
                 // Same goes for the `base_fee_per_blob_gas`:
                 // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
                 base_fee_per_blob_gas.push(
                     last_header
                     .maybe_next_block_blob_fee(
-                        self.provider().chain_spec().blob_params_at_timestamp(last_header.timestamp())
+                        chain_spec.blob_params_at_timestamp(last_header.timestamp())
                     ).unwrap_or_default()
                 );
             };
