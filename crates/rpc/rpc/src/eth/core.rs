@@ -583,8 +583,8 @@ mod tests {
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
         let spec = mock_provider.chain_spec();
-        let fee = spec.next_block_base_fee(&last_header, last_header.timestamp);
-        base_fees_per_gas.push(fee as u128);
+        base_fees_per_gas
+            .push(spec.next_block_base_fee(&last_header, last_header.timestamp) as u128);
 
         let eth_api = build_test_eth_api(mock_provider);
 
