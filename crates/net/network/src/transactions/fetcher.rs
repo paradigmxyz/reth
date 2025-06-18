@@ -1285,6 +1285,7 @@ mod test {
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
+    use reth_eth_wire_types::EthVersion;
     use reth_ethereum_primitives::TransactionSigned;
     use std::{collections::HashSet, str::FromStr};
 
