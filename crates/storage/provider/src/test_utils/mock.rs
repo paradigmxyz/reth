@@ -881,7 +881,7 @@ where
 impl<T, ChainSpec> BytecodeReader for MockEthProvider<T, ChainSpec>
 where
     T: NodePrimitives,
-    ChainSpec: EthChainSpec + Send + Sync + 'static,
+    ChainSpec: Send + Sync,
 {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         let lock = self.accounts.lock();
