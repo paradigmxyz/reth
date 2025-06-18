@@ -1,3 +1,4 @@
+use alloc::{vec, vec::Vec};
 use alloy_trie::Nibbles;
 use reth_trie_common::RlpNode;
 use smallvec::SmallVec;
