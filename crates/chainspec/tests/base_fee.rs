@@ -17,10 +17,13 @@ fn default_chain_spec_base_fee_matches_formula() {
     let spec = ChainSpec::default();
     let parent = parent_header();
 
+    // For testing, assume next block has timestamp 12 seconds later
+    let next_timestamp = parent.timestamp + 12;
+
     let expected = parent
-        .next_block_base_fee(spec.base_fee_params_at_timestamp(parent.timestamp))
+        .next_block_base_fee(spec.base_fee_params_at_timestamp(next_timestamp))
         .unwrap_or_default();
 
-    let got = spec.next_block_base_fee(&parent);
+    let got = spec.next_block_base_fee(&parent, next_timestamp);
     assert_eq!(expected, got, "Base fee calculation does not match expected value");
 }

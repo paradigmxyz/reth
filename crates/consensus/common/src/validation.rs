@@ -266,7 +266,7 @@ pub fn validate_against_parent_eip1559_base_fee<
         {
             alloy_eips::eip1559::INITIAL_BASE_FEE
         } else {
-            chain_spec.next_block_base_fee(parent)
+            chain_spec.next_block_base_fee(parent, header.timestamp())
         };
         if expected_base_fee != base_fee {
             return Err(ConsensusError::BaseFeeDiff(GotExpected {

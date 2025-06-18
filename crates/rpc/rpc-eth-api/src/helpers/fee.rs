@@ -161,7 +161,11 @@ pub trait EthFees: LoadFee {
                         EthApiError::HeaderNotFound(BlockId::Hash(last_entry.header_hash.into()))
                     })?;
 
-                let fee = EthChainSpec::next_block_base_fee(&spec, block.header());
+                let fee = EthChainSpec::next_block_base_fee(
+                    &spec,
+                    block.header(),
+                    block.header().timestamp(),
+                );
                 base_fee_per_gas.push(fee as u128);
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
@@ -217,7 +221,7 @@ pub trait EthFees: LoadFee {
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
                 let spec = self.provider().chain_spec();
-                let fee = EthChainSpec::next_block_base_fee(&spec, last_header.header());
+                let fee = EthChainSpec::next_block_base_fee(&spec, last_header.header(), last_header.header().timestamp());
                    base_fee_per_gas.push(fee as u128);
 
                 // Same goes for the `base_fee_per_blob_gas`:

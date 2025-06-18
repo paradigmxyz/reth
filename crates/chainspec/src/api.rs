@@ -68,13 +68,16 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn final_paris_total_difficulty(&self) -> Option<U256>;
 
     /// Calculate the EIP-1559 base fee for the next block from the given parent header.
-    fn next_block_base_fee<H>(&self, parent: &H) -> u64
+    ///
+    /// The `target_timestamp` should be the timestamp of the block being calculated for,
+    /// not the parent block timestamp.
+    fn next_block_base_fee<H>(&self, parent: &H, target_timestamp: u64) -> u64
     where
         Self: Sized,
         H: BlockHeader + AlloyBlockHeader,
     {
         parent
-            .next_block_base_fee(self.base_fee_params_at_timestamp(parent.timestamp()))
+            .next_block_base_fee(self.base_fee_params_at_timestamp(target_timestamp))
             .unwrap_or_default()
     }
 }

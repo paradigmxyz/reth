@@ -214,7 +214,7 @@ where
                 BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
             });
 
-        let mut basefee = chain_spec.next_block_base_fee(&parent);
+        let mut basefee = chain_spec.next_block_base_fee(&parent, attributes.timestamp);
         let mut gas_limit = attributes.gas_limit;
 
         // If we are on the London fork boundary, we need to multiply the parent's gas limit by the
