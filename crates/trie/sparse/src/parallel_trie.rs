@@ -140,6 +140,13 @@ pub struct SparseSubtrie {
     values: HashMap<Nibbles, Vec<u8>>,
 }
 
+impl SparseSubtrie {
+    /// Creates a new sparse subtrie with the given root path.
+    pub fn new(path: Nibbles) -> Self {
+        Self { path, ..Default::default() }
+    }
+}
+
 /// Sparse Subtrie Type.
 ///
 /// Used to determine the type of subtrie a certain path belongs to:
@@ -179,7 +186,6 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use alloy_primitives::map::HashMap;
     use alloy_trie::Nibbles;
     use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
 
@@ -201,14 +207,11 @@ mod tests {
     fn test_get_changed_subtries() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 =
-            SparseSubtrie { path: Nibbles::from_nibbles([0x0, 0x0]), nodes: HashMap::default() };
+        let subtrie_1 = SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 =
-            SparseSubtrie { path: Nibbles::from_nibbles([0x1, 0x0]), nodes: HashMap::default() };
+        let subtrie_2 = SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 =
-            SparseSubtrie { path: Nibbles::from_nibbles([0x3, 0x0]), nodes: HashMap::default() };
+        let subtrie_3 = SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
@@ -238,7 +241,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>(),
             vec![(
-                subtrie_2.clone(),
+                subtrie_2,
                 vec![
                     Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x0]),
                     Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x1, 0x0])
@@ -248,21 +251,18 @@ mod tests {
         assert!(trie.subtries[subtrie_2_index].is_none());
 
         // First subtrie should remain unchanged
-        assert_eq!(trie.subtries[subtrie_1_index], Some(subtrie_1.clone()));
+        assert_eq!(trie.subtries[subtrie_1_index], Some(subtrie_1));
     }
 
     #[test]
     fn test_get_changed_subtries_all() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 =
-            SparseSubtrie { path: Nibbles::from_nibbles([0x0, 0x0]), nodes: HashMap::default() };
+        let subtrie_1 = SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 =
-            SparseSubtrie { path: Nibbles::from_nibbles([0x1, 0x0]), nodes: HashMap::default() };
+        let subtrie_2 = SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 =
-            SparseSubtrie { path: Nibbles::from_nibbles([0x3, 0x0]), nodes: HashMap::default() };
+        let subtrie_3 = SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
