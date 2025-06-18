@@ -31,10 +31,6 @@ pub trait FullEthApiServer:
         RpcHeader<Self::NetworkTypes>,
     > + FullEthApi
     + Clone
-// where
-//     <Self as RpcNodeCore>::Provider: ChainSpecProvider + HeaderProvider<Header =
-// alloy_consensus::Header>, <<Self as RpcNodeCore>::Provider as ChainSpecProvider>::ChainSpec:
-// EthChainSpec<Header = alloy_consensus::Header>,
 {
 }
 
