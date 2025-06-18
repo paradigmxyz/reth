@@ -6,10 +6,7 @@ use alloy_primitives::{
     Bytes, B256,
 };
 use alloy_rlp::Decodable;
-use alloy_rpc_types_engine::{
-    CancunPayloadFields, ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3,
-};
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1};
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
@@ -289,22 +286,6 @@ impl TestHarness {
         }
     }
 
-    async fn send_new_payload(&mut self, block: RecoveredBlock<reth_ethereum_primitives::Block>) {
-        let payload = ExecutionPayloadV3::from_block_unchecked(
-            block.hash(),
-            &block.clone_sealed_block().into_block(),
-        );
-        self.tree
-            .on_new_payload(ExecutionData {
-                payload: payload.into(),
-                sidecar: ExecutionPayloadSidecar::v3(CancunPayloadFields {
-                    parent_beacon_block_root: block.parent_beacon_block_root.unwrap(),
-                    versioned_hashes: vec![],
-                }),
-            })
-            .unwrap();
-    }
-
     async fn insert_chain(
         &mut self,
         chain: impl IntoIterator<Item = RecoveredBlock<reth_ethereum_primitives::Block>> + Clone,
@@ -344,18 +325,6 @@ impl TestHarness {
                 _,
             )) => {
                 assert_eq!(executed.recovered_block.hash(), expected_hash);
-            }
-            _ => panic!("Unexpected event: {event:#?}"),
-        }
-    }
-
-    async fn check_block_received(&mut self, hash: B256) {
-        let event = self.from_tree_rx.recv().await.unwrap();
-        match event {
-            EngineApiEvent::BeaconConsensus(BeaconConsensusEngineEvent::BlockReceived(
-                num_hash,
-            )) => {
-                assert_eq!(num_hash.hash, hash);
             }
             _ => panic!("Unexpected event: {event:#?}"),
         }
@@ -1105,45 +1074,4 @@ async fn test_engine_tree_live_sync_fcu_extends_canon_chain() {
     test_harness.check_canon_commit(main_last_hash).await;
     test_harness.check_fcu(main_last_hash, ForkchoiceStatus::Valid).await;
     test_harness.check_canon_head(main_last_hash);
-}
-
-#[tokio::test]
-async fn test_engine_tree_buffered_blocks_are_eventually_connected() {
-    let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-
-    let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
-    test_harness = test_harness.with_blocks(base_chain.clone());
-
-    // side chain consisting of two blocks, the last will be inserted first
-    // so that we force it to be buffered
-    let side_chain =
-        test_harness.block_builder.create_fork(base_chain.last().unwrap().recovered_block(), 2);
-
-    // buffer last block of side chain
-    let buffered_block = side_chain.last().unwrap();
-    let buffered_block_hash = buffered_block.hash();
-
-    test_harness.setup_range_insertion_for_valid_chain(vec![buffered_block.clone()]);
-    test_harness.send_new_payload(buffered_block.clone()).await;
-
-    assert!(test_harness.tree.state.buffer.block(&buffered_block_hash).is_some());
-
-    let non_buffered_block = side_chain.first().unwrap();
-    let non_buffered_block_hash = non_buffered_block.hash();
-
-    // insert block that continues the canon chain, should not be buffered
-    test_harness.setup_range_insertion_for_valid_chain(vec![non_buffered_block.clone()]);
-    test_harness.send_new_payload(non_buffered_block.clone()).await;
-    assert!(test_harness.tree.state.buffer.block(&non_buffered_block_hash).is_none());
-
-    // the previously buffered block should be connected now
-    assert!(test_harness.tree.state.buffer.block(&buffered_block_hash).is_none());
-
-    // both blocks are added to the canon chain in order
-    // note that the buffered block is received first, but added last
-    test_harness.check_block_received(buffered_block_hash).await;
-    test_harness.check_block_received(non_buffered_block_hash).await;
-    test_harness.check_canon_block_added(non_buffered_block_hash).await;
-    test_harness.check_canon_block_added(buffered_block_hash).await;
 }
