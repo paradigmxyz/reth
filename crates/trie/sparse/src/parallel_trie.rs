@@ -348,7 +348,7 @@ mod tests {
         // Add subtries at specific positions
         trie.subtries[subtrie_1_index] = Some(subtrie_1.clone());
         trie.subtries[subtrie_2_index] = Some(subtrie_2.clone());
-        trie.subtries[subtrie_3_index] = Some(subtrie_3);
+        trie.subtries[subtrie_3_index] = Some(subtrie_3.clone());
 
         // Create a prefix set that matches any key
         let mut prefix_set = PrefixSetMut::all().freeze();
@@ -360,7 +360,7 @@ mod tests {
                 .into_iter()
                 .map(|(subtrie, prefix_set)| { (subtrie, prefix_set.all()) })
                 .collect::<Vec<_>>(),
-            vec![(subtrie_1, true), (subtrie_2, true)]
+            vec![(subtrie_1, true), (subtrie_2, true), (subtrie_3, true)]
         );
         assert!(trie.subtries.iter().all(Option::is_none));
     }
