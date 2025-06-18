@@ -7,7 +7,7 @@ use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Typed2718};
 use alloy_primitives::{Address, Bytes, ChainId, Signature, TxKind, B256, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
 use core::mem;
-use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
+use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, InMemorySize};
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
 #[derive(
@@ -285,17 +285,4 @@ impl InMemorySize for TxPayment {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct BincodeCompatTxCustom(pub TxPayment);
-
-impl SerdeBincodeCompat for TxPayment {
-    type BincodeRepr<'a> = BincodeCompatTxCustom;
-
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        BincodeCompatTxCustom(self.clone())
-    }
-
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        repr.0.clone()
-    }
-}
+impl RlpBincode for TxPayment {}

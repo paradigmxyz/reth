@@ -2,8 +2,7 @@
 
 use crate::fees::{CallFees, CallFeesError};
 use alloy_consensus::{
-    error::ValueError, transaction::Recovered, EthereumTxEnvelope, Extended, SignableTransaction,
-    Transaction as ConsensusTransaction, TxEip4844,
+    error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction, TxEip4844,
 };
 use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, Signature, TxKind, U256};
@@ -23,7 +22,7 @@ use reth_evm::{
     ConfigureEvm, TxEnvFor,
 };
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{NodePrimitives, SignedTransaction, TxTy};
+use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
 use serde::{Deserialize, Serialize};
@@ -82,43 +81,67 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     ) -> Result<Self::TxEnv, Self::Error>;
 }
 
-/// Converts `self` into `T`.
+/// Converts `self` into `T`. The opposite of [`FromConsensusTx`].
 ///
 /// Should create an RPC transaction response object based on a consensus transaction, its signer
-/// [`Address`] and an additional context.
+/// [`Address`] and an additional context [`IntoRpcTx::TxInfo`].
+///
+/// Avoid implementing [`IntoRpcTx`] and use [`FromConsensusTx`] instead. Implementing it
+/// automatically provides an implementation of [`IntoRpcTx`] thanks to the blanket implementation
+/// in this crate.
+///
+/// Prefer using [`IntoRpcTx`] over [`FromConsensusTx`] when specifying trait bounds on a generic
+/// function to ensure that types that only implement [`IntoRpcTx`] can be used as well.
 pub trait IntoRpcTx<T> {
     /// An additional context, usually [`TransactionInfo`] in a wrapper that carries some
     /// implementation specific extra information.
     type TxInfo;
 
-    /// Performs the conversion.
+    /// Performs the conversion consuming `self` with `signer` and `tx_info`. See [`IntoRpcTx`]
+    /// for details.
     fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> T;
 }
 
-impl<BuiltIn, Other> IntoRpcTx<Transaction<Self>> for Extended<BuiltIn, Other>
-where
-    BuiltIn: ConsensusTransaction,
-    Other: ConsensusTransaction,
+/// Converts `T` into `self`. It is reciprocal of [`IntoRpcTx`].
+///
+/// Should create an RPC transaction response object based on a consensus transaction, its signer
+/// [`Address`] and an additional context [`FromConsensusTx::TxInfo`].
+///
+/// Prefer implementing [`FromConsensusTx`] over [`IntoRpcTx`] because it automatically provides an
+/// implementation of [`IntoRpcTx`] thanks to the blanket implementation in this crate.
+///
+/// Prefer using [`IntoRpcTx`] over using [`FromConsensusTx`] when specifying trait bounds on a
+/// generic function. This way, types that directly implement [`IntoRpcTx`] can be used as arguments
+/// as well.
+pub trait FromConsensusTx<T> {
+    /// An additional context, usually [`TransactionInfo`] in a wrapper that carries some
+    /// implementation specific extra information.
+    type TxInfo;
+
+    /// Performs the conversion consuming `tx` with `signer` and `tx_info`. See [`FromConsensusTx`]
+    /// for details.
+    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self;
+}
+
+impl<TxIn: alloy_consensus::Transaction, T: alloy_consensus::Transaction + From<TxIn>>
+    FromConsensusTx<TxIn> for Transaction<T>
 {
     type TxInfo = TransactionInfo;
 
-    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> Transaction<Self> {
-        let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
-        } = tx_info;
-        let effective_gas_price = base_fee
-            .map(|base_fee| {
-                self.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
-            })
-            .unwrap_or_else(|| self.max_fee_per_gas());
+    fn from_consensus_tx(tx: TxIn, signer: Address, tx_info: Self::TxInfo) -> Self {
+        Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info)
+    }
+}
 
-        Transaction {
-            inner: Recovered::new_unchecked(self, signer),
-            block_hash,
-            block_number,
-            transaction_index,
-            effective_gas_price: Some(effective_gas_price),
-        }
+impl<ConsensusTx, RpcTx> IntoRpcTx<RpcTx> for ConsensusTx
+where
+    ConsensusTx: alloy_consensus::Transaction,
+    RpcTx: FromConsensusTx<Self>,
+{
+    type TxInfo = RpcTx::TxInfo;
+
+    fn into_rpc_tx(self, signer: Address, tx_info: Self::TxInfo) -> RpcTx {
+        RpcTx::from_consensus_tx(self, signer, tx_info)
     }
 }
 
@@ -137,14 +160,6 @@ where
     /// [`eth_simulateV1`]: <https://github.com/ethereum/execution-apis/pull/484>
     /// [required fields]: TransactionRequest::buildable_type
     fn try_into_sim_tx(self) -> Result<T, ValueError<Self>>;
-}
-
-impl IntoRpcTx<Transaction> for EthereumTxEnvelope<TxEip4844> {
-    type TxInfo = TransactionInfo;
-
-    fn into_rpc_tx(self, signer: Address, tx_info: TransactionInfo) -> Transaction {
-        Transaction::from_transaction(self.with_signer(signer).convert(), tx_info)
-    }
 }
 
 /// Adds extra context to [`TransactionInfo`].
@@ -189,15 +204,13 @@ pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
     Ok(OpTransactionInfo::new(tx_info, deposit_meta))
 }
 
-impl IntoRpcTx<op_alloy_rpc_types::Transaction> for OpTxEnvelope {
+impl<T: op_alloy_consensus::OpTransaction + alloy_consensus::Transaction> FromConsensusTx<T>
+    for op_alloy_rpc_types::Transaction<T>
+{
     type TxInfo = OpTransactionInfo;
 
-    fn into_rpc_tx(
-        self,
-        signer: Address,
-        tx_info: OpTransactionInfo,
-    ) -> op_alloy_rpc_types::Transaction {
-        op_alloy_rpc_types::Transaction::from_transaction(self.with_signer(signer), tx_info)
+    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
+        Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
     }
 }
 

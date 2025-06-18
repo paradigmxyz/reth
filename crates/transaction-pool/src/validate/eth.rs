@@ -691,7 +691,7 @@ where
         {
             self.fork_tracker
                 .max_blob_count
-                .store(blob_params.max_blob_count, std::sync::atomic::Ordering::Relaxed);
+                .store(blob_params.max_blobs_per_tx, std::sync::atomic::Ordering::Relaxed);
         }
 
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
@@ -781,7 +781,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             osaka: false,
 
             // max blob count is prague by default
-            max_blob_count: BlobParams::prague().max_blob_count,
+            max_blob_count: BlobParams::prague().max_blobs_per_tx,
         }
     }
 
@@ -905,7 +905,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             .chain_spec()
             .blob_params_at_timestamp(timestamp)
             .unwrap_or_else(BlobParams::cancun)
-            .max_blob_count;
+            .max_blobs_per_tx;
         self
     }
 
@@ -955,11 +955,10 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             ..
         } = self;
 
-        // TODO: use osaka max blob count once <https://github.com/alloy-rs/alloy/pull/2427> is released
         let max_blob_count = if prague {
-            BlobParams::prague().max_blob_count
+            BlobParams::prague().max_blobs_per_tx
         } else {
-            BlobParams::cancun().max_blob_count
+            BlobParams::cancun().max_blobs_per_tx
         };
 
         let fork_tracker = ForkTracker {
@@ -969,6 +968,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             osaka: AtomicBool::new(osaka),
             max_blob_count: AtomicU64::new(max_blob_count),
         };
+
+        // Ensure the kzg setup is loaded right away.
+        let _kzg_settings = kzg_settings.get();
 
         let inner = EthTransactionValidatorInner {
             client,
@@ -1045,7 +1047,7 @@ pub struct ForkTracker {
     pub prague: AtomicBool,
     /// Tracks if osaka is activated at the block's timestamp.
     pub osaka: AtomicBool,
-    /// Tracks max blob count at the block's timestamp.
+    /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
 }
 
@@ -1070,7 +1072,7 @@ impl ForkTracker {
         self.osaka.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Returns the max blob count.
+    /// Returns the max allowed blob count per transaction.
     pub fn max_blob_count(&self) -> u64 {
         self.max_blob_count.load(std::sync::atomic::Ordering::Relaxed)
     }
