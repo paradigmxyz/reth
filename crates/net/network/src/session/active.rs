@@ -322,10 +322,20 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn on_internal_peer_message(&mut self, msg: PeerMessage<N>) {
         match msg {
             PeerMessage::NewBlockHashes(msg) => {
-                self.queued_outgoing.push_back(EthMessage::NewBlockHashes(msg).into());
+                // NewBlockHashes is invalid for eth69 and later versions
+                if self.conn.version() < EthVersion::Eth69 {
+                    self.queued_outgoing.push_back(EthMessage::NewBlockHashes(msg).into());
+                } else {
+                    debug!(target: "net", ?msg, version=?self.conn.version(), "NewBlockHashes is invalid for eth69 and later, skipping");
+                }
             }
             PeerMessage::NewBlock(msg) => {
-                self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
+                // NewBlock is invalid for eth69 and later versions
+                if self.conn.version() < EthVersion::Eth69 {
+                    self.queued_outgoing.push_back(EthBroadcastMessage::NewBlock(msg.block).into());
+                } else {
+                    debug!(target: "net", version=?self.conn.version(), "NewBlock is invalid for eth69 and later, skipping");
+                }
             }
             PeerMessage::PooledTransactions(msg) => {
                 if msg.is_valid_for_version(self.conn.version()) {
