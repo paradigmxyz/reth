@@ -1,3 +1,13 @@
+/*! 
+ * Compression module for NippyJar format.
+ * 
+ * # Security Warning
+ * 
+ * These compression implementations are designed for storing and retrieving data internally.
+ * They are not hardened to safely read potentially malicious data and could be vulnerable to
+ * decompression bombs or other attacks if used with untrusted input.
+ */
+
 use crate::NippyJarError;
 use serde::{Deserialize, Serialize};
 
