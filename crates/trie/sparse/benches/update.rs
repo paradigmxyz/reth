@@ -7,7 +7,7 @@ use rand::seq::IteratorRandom;
 use reth_trie_common::Nibbles;
 use reth_trie_sparse::SparseTrie;
 
-const LEAF_COUNTS: [usize; 3] = [100, 1_000, 5_000];
+const LEAF_COUNTS: [usize; 3] = [5_000, 10_000, 15_000];
 
 fn update_leaf(c: &mut Criterion) {
     let mut group = c.benchmark_group("update_leaf");
