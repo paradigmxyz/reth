@@ -7,7 +7,7 @@ use std::{
 };
 
 use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
-use alloy_eips::{eip1559::calc_next_block_base_fee, eip7840::BlobParams};
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TxGasAndReward;
 use futures::{
@@ -399,11 +399,11 @@ impl FeeHistoryEntry {
 
     /// Returns the base fee for the next block according to the EIP-1559 spec.
     pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
-        calc_next_block_base_fee(
+        chain_spec.next_block_base_fee(
             self.gas_used,
             self.gas_limit,
             self.base_fee_per_gas,
-            chain_spec.base_fee_params_at_timestamp(self.timestamp),
+            self.timestamp,
         )
     }
 

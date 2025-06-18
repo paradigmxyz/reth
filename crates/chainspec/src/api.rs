@@ -2,7 +2,10 @@ use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::Header;
-use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
+use alloy_eips::{
+    eip1559::{calc_next_block_base_fee, BaseFeeParams},
+    eip7840::BlobParams,
+};
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 use core::fmt::{Debug, Display};
@@ -65,6 +68,26 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Returns the final total difficulty if the Paris hardfork is known.
     fn final_paris_total_difficulty(&self) -> Option<U256>;
+
+    /// Calculate the base fee for the next block based on the parent block's gas usage.
+    ///
+    /// This implements the EIP-1559 base fee calculation algorithm, taking into account
+    /// the parent block's gas limit, gas used, and base fee to compute the next block's base fee.
+    fn next_block_base_fee(
+        &self,
+        parent_gas_used: u64,
+        parent_gas_limit: u64,
+        parent_base_fee: u64,
+        parent_timestamp: u64,
+    ) -> u64 {
+        let base_fee_params = self.base_fee_params_at_timestamp(parent_timestamp);
+        calc_next_block_base_fee(
+            parent_gas_used,
+            parent_gas_limit,
+            parent_base_fee,
+            base_fee_params,
+        )
+    }
 }
 
 impl EthChainSpec for ChainSpec {
