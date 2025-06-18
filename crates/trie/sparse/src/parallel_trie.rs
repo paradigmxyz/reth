@@ -83,7 +83,7 @@ impl ParallelSparseTrie {
         self
     }
 
-    /// Returns a list of [subtries](`SparseSubtrie`) identifying the subtries that have changed
+    /// Returns a list of [subtries](SparseSubtrie) identifying the subtries that have changed
     /// according to the provided [prefix set](PrefixSet).
     ///
     /// Along with the subtries, prefix sets are returned. Each prefix set contains the keys from
