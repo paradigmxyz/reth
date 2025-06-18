@@ -55,10 +55,13 @@ impl<T, H> TrieWitness<T, H> {
         }
     }
 
-    /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> TrieWitness<TF, H> {
+    /// Applies given operation on and sets the trie cursor factory.
+    pub fn with_trie_cursor_factory<TF, F>(self, f: F) -> TrieWitness<TF, H>
+    where
+        F: FnOnce(T) -> TF,
+    {
         TrieWitness {
-            trie_cursor_factory,
+            trie_cursor_factory: f(self.trie_cursor_factory),
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             always_include_root_node: self.always_include_root_node,
@@ -66,11 +69,14 @@ impl<T, H> TrieWitness<T, H> {
         }
     }
 
-    /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> TrieWitness<T, HF> {
+    /// Applies given operation on and sets the hashed cursor factory.
+    pub fn with_hashed_cursor_factory<HF, F>(self, f: F) -> TrieWitness<T, HF>
+    where
+        F: FnOnce(H) -> HF,
+    {
         TrieWitness {
             trie_cursor_factory: self.trie_cursor_factory,
-            hashed_cursor_factory,
+            hashed_cursor_factory: f(self.hashed_cursor_factory),
             prefix_sets: self.prefix_sets,
             always_include_root_node: self.always_include_root_node,
             witness: self.witness,

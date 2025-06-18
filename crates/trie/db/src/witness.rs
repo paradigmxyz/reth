@@ -29,15 +29,13 @@ impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
         let state_sorted = input.state.into_sorted();
         let trie_cursor_factory = self.trie_cursor_factory().clone();
         let hashed_cursor_factory = self.hashed_cursor_factory().clone();
-        Self::new(trie_cursor_factory.clone(), hashed_cursor_factory.clone())
-            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                trie_cursor_factory,
-                &nodes_sorted,
-            ))
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                hashed_cursor_factory,
-                &state_sorted,
-            ))
+        Self::new(trie_cursor_factory, hashed_cursor_factory)
+            .with_trie_cursor_factory(|factory| {
+                InMemoryTrieCursorFactory::new(factory, &nodes_sorted)
+            })
+            .with_hashed_cursor_factory(|factory| {
+                HashedPostStateCursorFactory::new(factory, &state_sorted)
+            })
             .with_prefix_sets_mut(input.prefix_sets)
             .compute(target)
     }
