@@ -393,7 +393,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives, PBundle: TransactionPolicies>
         let (command_tx, command_rx) = mpsc::unbounded_channel();
 
         let transaction_fetcher = TransactionFetcher::with_transaction_fetcher_config(
-            &transactions_manager_config.transaction_fetcher_config,
+            &transactions_manager_config.transaction_fetcher_config,network.clone(),
         );
 
         // install a listener for new __pending__ transactions that are allowed to be propagated

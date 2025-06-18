@@ -31,9 +31,7 @@ use super::{
     PeerMetadata, PooledTransactions, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use crate::{
-    cache::{LruCache, LruMap},
-    duration_metered_exec,
-    metrics::TransactionFetcherMetrics,
+    cache::{LruCache, LruMap}, duration_metered_exec, metrics::TransactionFetcherMetrics, NetworkHandle
 };
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
@@ -45,7 +43,7 @@ use reth_eth_wire::{
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
-use reth_network_api::PeerRequest;
+use reth_network_api::{PeerRequest, Peers, ReputationChangeKind};
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_primitives_traits::SignedTransaction;
@@ -66,6 +64,8 @@ use tracing::trace;
 #[derive(Debug)]
 #[pin_project]
 pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
+     /// Network access.
+     network: Option<NetworkHandle<N>>,
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
     pub active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active [`GetPooledTransactions`] requests.
@@ -94,6 +94,20 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.active_peers.remove(peer_id);
     }
 
+    /// Reports peer for sending bad transactions.
+    fn report_peer_bad_transactions(&self, peer_id: PeerId) {
+        self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+        self.metrics.reported_bad_transactions.increment(1);
+    }
+
+    /// Updates the reputation of peer.
+    fn report_peer(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        trace!(target: "net::tx", ?peer_id, ?kind, "reporting reputation change");
+        if let Some(network_handle)= &self.network {
+            network_handle.reputation_change(peer_id, kind);
+        }
+    }
+
     /// Updates metrics.
     #[inline]
     pub fn update_metrics(&self) {
@@ -120,7 +134,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Sets up transaction fetcher with config
-    pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
+    pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig, network: NetworkHandle<N>) -> Self {
         let TransactionFetcherConfig {
             max_inflight_requests,
             max_capacity_cache_txns_pending_fetch,
@@ -140,6 +154,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             ),
             info,
             metrics,
+            network:Some(network),
             ..Default::default()
         }
     }
@@ -970,7 +985,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 let transactions = valid_payload.into_data().into_values().collect();
 
                 if has_bad_transactions {
-                    self.remove_peer(&peer_id);
+                    self.report_peer_bad_transactions(peer_id);
                 }
 
                 FetchEvent::TransactionsFetched { peer_id, transactions }
@@ -1018,6 +1033,7 @@ impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
             ),
             info: TransactionFetcherInfo::default(),
             metrics: Default::default(),
+            network: None,
         }
     }
 }
