@@ -1,4 +1,15 @@
 //! Transaction abstraction
+//!
+//! This module provides traits for working with blockchain transactions:
+//! - [`Transaction`] - Basic transaction interface
+//! - [`signed::SignedTransaction`] - Transaction with signature and recovery methods
+//! - [`FullTransaction`] - Transaction with database encoding support
+//!
+//! # Transaction Recovery
+//!
+//! Transaction senders are not stored directly but recovered from signatures.
+//! Use `recover_signer` for post-EIP-2 transactions or `recover_signer_unchecked`
+//! for historical transactions.
 
 pub mod execute;
 pub mod signature;
