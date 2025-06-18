@@ -8,7 +8,7 @@ use reth_trie::{
 };
 
 /// Extends [`TrieWitness`] with operations specific for working with a database transaction.
-pub trait DatabaseTrieWitness<'a, TX> {
+pub trait DatabaseTrieWitness {
     /// Generates trie witness for target state based on [`TrieInput`].
     fn overlay_witness(
         &self,
@@ -17,7 +17,7 @@ pub trait DatabaseTrieWitness<'a, TX> {
     ) -> Result<B256Map<Bytes>, TrieWitnessError>;
 }
 
-impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
+impl<'a, TX: DbTx> DatabaseTrieWitness
     for TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
 {
     fn overlay_witness(

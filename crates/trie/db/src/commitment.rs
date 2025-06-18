@@ -16,7 +16,7 @@ pub trait StateCommitment: std::fmt::Debug + Clone + Send + Sync + Unpin + 'stat
     /// The state proof type.
     type StateProof<'a, TX: DbTx + 'a>: DatabaseProof<'a, TX>;
     /// The state witness type.
-    type StateWitness<'a, TX: DbTx + 'a>: DatabaseTrieWitness<'a, TX>;
+    type StateWitness<'a, TX: DbTx + 'a>: DatabaseTrieWitness;
     /// The key hasher type.
     type KeyHasher: KeyHasher;
 }
