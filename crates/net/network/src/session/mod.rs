@@ -1104,12 +1104,12 @@ async fn authenticate_stream<N: NetworkPrimitives>(
         }
     };
 
+    // Before trying status handshake, set up the version to negotiated shared version
+    status.set_eth_version(eth_version);
+
     let (conn, their_status) = if p2p_stream.shared_capabilities().len() == 1 {
         // if the shared caps are 1, we know both support the eth version
         // if the hello handshake was successful we can try status handshake
-        //
-        // Before trying status handshake, set up the version to negotiated shared version
-        status.set_eth_version(eth_version);
 
         // perform the eth protocol handshake
         match handshake
