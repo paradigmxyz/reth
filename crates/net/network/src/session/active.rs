@@ -951,7 +951,7 @@ mod tests {
             F: FnOnce(EthStream<P2PStream<ECIESStream<TcpStream>>, N>) -> O + Send + 'static,
             O: Future<Output = ()> + Send + Sync,
         {
-            let status = self.status;
+            let mut status = self.status;
             let fork_filter = self.fork_filter.clone();
             let local_peer_id = self.local_peer_id;
             let mut hello = self.hello.clone();
@@ -962,6 +962,9 @@ mod tests {
                 let sink = ECIESStream::connect(outgoing, key, local_peer_id).await.unwrap();
 
                 let (p2p_stream, _) = UnauthedP2PStream::new(sink).handshake(hello).await.unwrap();
+
+                let eth_version = p2p_stream.shared_capabilities().eth_version().unwrap();
+                status.set_eth_version(eth_version);
 
                 let (client_stream, _) = UnauthedEthStream::new(p2p_stream)
                     .handshake(status, fork_filter)
