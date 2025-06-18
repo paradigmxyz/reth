@@ -230,7 +230,7 @@ where
             gas_limit *= elasticity_multiplier as u64;
 
             // set the base fee to the initial base fee from the EIP-1559 spec
-            basefee = INITIAL_BASE_FEE as u64;
+            basefee = INITIAL_BASE_FEE;
         }
 
         let block_env = BlockEnv {

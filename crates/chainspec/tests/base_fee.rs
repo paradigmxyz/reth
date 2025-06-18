@@ -1,3 +1,5 @@
+//! Tests for centralized base fee calculation functionality.
+
 use alloy_consensus::Header;
 use alloy_eips::eip1559::INITIAL_BASE_FEE;
 use reth_chainspec::{ChainSpec, EthChainSpec};
