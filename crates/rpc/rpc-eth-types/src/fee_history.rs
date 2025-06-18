@@ -6,7 +6,7 @@ use std::{
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
-use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
+use alloy_consensus::{BlockHeader, Header, Transaction, TxReceipt};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TxGasAndReward;
@@ -414,5 +414,22 @@ impl FeeHistoryEntry {
         self.excess_blob_gas.and_then(|excess_blob_gas| {
             Some(self.blob_params?.next_block_excess_blob_gas(excess_blob_gas, self.blob_gas_used?))
         })
+    }
+
+    /// Calculate the base fee for the next block according to the EIP-1559 spec.
+    pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
+        // Create a minimal header with the required fields
+        let parent_header = Header {
+            gas_used: self.gas_used,
+            gas_limit: self.gas_limit,
+            base_fee_per_gas: Some(self.base_fee_per_gas),
+            timestamp: self.timestamp,
+            ..Default::default()
+        };
+        
+        // Use the chain spec to get the appropriate base fee params and calculate next fee
+        parent_header
+            .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp))
+            .unwrap_or_default()
     }
 }
