@@ -104,9 +104,11 @@ impl ParallelSparseTrie {
         &mut self,
         prefix_set: &mut PrefixSet,
     ) -> Vec<(SparseSubtrie, PrefixSet)> {
-        let mut subtries = Vec::new();
+        // Clone the prefix set to iterate over its keys. Cloning is cheap, it's just an Arc.
         let prefix_set_clone = prefix_set.clone();
         let mut prefix_set_iter = prefix_set_clone.into_iter();
+
+        let mut subtries = Vec::new();
         for subtrie in &mut self.subtries {
             if let Some(subtrie) = subtrie.take_if(|subtrie| prefix_set.contains(&subtrie.path)) {
                 let prefix_set = if prefix_set.all() {
