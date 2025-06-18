@@ -1,8 +1,9 @@
-use crate::{SparseNode, SparseTrieUpdates, TrieMasks};
+use crate::{blinded::BlindedProvider, SparseNode, SparseTrieUpdates, TrieMasks};
 use alloc::vec::Vec;
-use alloy_primitives::map::HashMap;
+use alloy_primitives::{map::HashMap, B256};
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{Nibbles, TrieNode};
+use reth_trie_common::{prefix_set::PrefixSet, Nibbles, TrieNode};
+use tracing::trace;
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
@@ -69,6 +70,75 @@ impl ParallelSparseTrie {
         todo!()
     }
 
+    /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
+    /// value.
+    ///
+    /// This method updates the internal prefix set and, if the leaf did not previously exist,
+    /// adjusts the trie structure by inserting new leaf nodes, splitting branch nodes, or
+    /// collapsing extension nodes as needed.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the update is successful.
+    ///
+    /// Note: If an update requires revealing a blinded node, an error is returned if the blinded
+    /// provider returns an error.
+    pub fn update_leaf(
+        &mut self,
+        key_path: Nibbles,
+        value: Vec<u8>,
+        masks: TrieMasks,
+        provider: impl BlindedProvider,
+    ) -> SparseTrieResult<()> {
+        let _key_path = key_path;
+        let _value = value;
+        let _masks = masks;
+        let _provider = provider;
+        todo!()
+    }
+
+    /// Removes a leaf node from the trie at the specified key path.
+    ///
+    /// This function removes the leaf value from the internal values map and then traverses
+    /// the trie to remove or adjust intermediate nodes, merging or collapsing them as necessary.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the leaf is successfully removed, otherwise returns an error
+    /// if the leaf is not present or if a blinded node prevents removal.
+    pub fn remove_leaf(
+        &mut self,
+        path: &Nibbles,
+        provider: impl BlindedProvider,
+    ) -> SparseTrieResult<()> {
+        let _path = path;
+        let _provider = provider;
+        todo!()
+    }
+
+    /// Recalculates and updates the RLP hashes of nodes up to level 2 of the trie.
+    ///
+    /// The root node is considered to be at level 0. This method is useful for optimizing
+    /// hash recalculations after localized changes to the trie structure.
+    ///
+    /// This function first identifies all nodes that have changed (based on the prefix set) below
+    /// level 2 of the trie, then recalculates their RLP representation.
+    pub fn update_subtrie_hashes(&mut self) -> SparseTrieResult<()> {
+        trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
+        todo!()
+    }
+
+    /// Calculates and returns the root hash of the trie.
+    ///
+    /// Before computing the hash, this function processes any remaining (dirty) nodes by
+    /// updating their RLP encodings. The root hash is either:
+    /// 1. The cached hash (if no dirty nodes were found)
+    /// 2. The keccak256 hash of the root node's RLP representation
+    pub fn root(&mut self) -> B256 {
+        trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
+        todo!()
+    }
+
     /// Configures the trie to retain information about updates.
     ///
     /// If `retain_updates` is true, the trie will record branch node updates and deletions.
@@ -92,6 +162,15 @@ pub struct SparseSubtrie {
     /// Map from leaf key paths to their values.
     /// All values are stored here instead of directly in leaf nodes.
     values: HashMap<Nibbles, Vec<u8>>,
+}
+
+impl SparseSubtrie {
+    /// Recalculates and updates the RLP hashes for the changed nodes in this subtrie.
+    pub fn update_hashes(&mut self, prefix_set: &mut PrefixSet) -> SparseTrieResult<()> {
+        trace!(target: "trie::parallel_sparse", path=?self.path, "Updating subtrie hashes");
+        let _prefix_set = prefix_set;
+        todo!()
+    }
 }
 
 /// Sparse Subtrie Type.
