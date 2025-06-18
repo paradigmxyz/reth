@@ -31,7 +31,10 @@ use super::{
     PeerMetadata, PooledTransactions, SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
 use crate::{
-    cache::{LruCache, LruMap}, duration_metered_exec, metrics::TransactionFetcherMetrics, NetworkHandle
+    cache::{LruCache, LruMap},
+    duration_metered_exec,
+    metrics::TransactionFetcherMetrics,
+    NetworkHandle,
 };
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
@@ -64,8 +67,8 @@ use tracing::trace;
 #[derive(Debug)]
 #[pin_project]
 pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
-     /// Network access.
-     network: Option<NetworkHandle<N>>,
+    /// Network access.
+    network: Option<NetworkHandle<N>>,
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
     pub active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active [`GetPooledTransactions`] requests.
@@ -103,7 +106,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     /// Updates the reputation of peer.
     fn report_peer(&self, peer_id: PeerId, kind: ReputationChangeKind) {
         trace!(target: "net::tx", ?peer_id, ?kind, "reporting reputation change");
-        if let Some(network_handle)= &self.network {
+        if let Some(network_handle) = &self.network {
             network_handle.reputation_change(peer_id, kind);
         }
     }
@@ -134,7 +137,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Sets up transaction fetcher with config
-    pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig, network: NetworkHandle<N>) -> Self {
+    pub fn with_transaction_fetcher_config(
+        config: &TransactionFetcherConfig,
+        network: NetworkHandle<N>,
+    ) -> Self {
         let TransactionFetcherConfig {
             max_inflight_requests,
             max_capacity_cache_txns_pending_fetch,
@@ -154,7 +160,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             ),
             info,
             metrics,
-            network:Some(network),
+            network: Some(network),
             ..Default::default()
         }
     }
