@@ -14,6 +14,13 @@
       "description": "",
       "type": "datasource",
       "pluginId": "__expr__"
+    },
+    {
+      "name": "VAR_INSTANCE_LABEL",
+      "type": "constant",
+      "label": "Instance Label",
+      "value": "job",
+      "description": ""
     }
   ],
   "__elements": {},
@@ -1790,6 +1797,268 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
+      "description": "The metric is the amount of gas processed in a block",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "sishort"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "id": 1004,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.5.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "hide": false,
+          "legendFormat": "p90",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "hide": false,
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "hide": false,
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Engine API newPayload Total Gas",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The throughput of the Engine API newPayload method. The metric is the amount of gas processed in a block, divided by the time it took to process the newPayload request.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "si: gas/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "id": 1003,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.5.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "hide": false,
+          "legendFormat": "p90",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "hide": false,
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "hide": false,
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Engine API newPayload Throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "description": "The throughput of the node's executor. The metric is the amount of gas processed in a block, divided by the time it took to process the block.\n\nNote: For mainnet, the block range 2,383,397-2,620,384 will be slow because of the 2016 DoS attack.",
       "fieldConfig": {
         "defaults": {
@@ -1847,7 +2116,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 29
+        "y": 37
       },
       "id": 56,
       "options": {
@@ -2041,7 +2310,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 29
+        "y": 37
       },
       "id": 240,
       "options": {
@@ -2102,7 +2371,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 45
       },
       "id": 87,
       "panels": [],
@@ -2175,7 +2444,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 38
+        "y": 46
       },
       "id": 84,
       "options": {
@@ -2286,7 +2555,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 38
+        "y": 46
       },
       "id": 249,
       "options": {
@@ -2396,7 +2665,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 46
+        "y": 54
       },
       "id": 213,
       "options": {
@@ -2495,7 +2764,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 46
+        "y": 54
       },
       "id": 212,
       "options": {
@@ -2738,7 +3007,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 54
+        "y": 62
       },
       "id": 1000,
       "options": {
@@ -2848,7 +3117,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 54
+        "y": 62
       },
       "id": 258,
       "options": {
@@ -3015,7 +3284,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 62
+        "y": 70
       },
       "id": 85,
       "options": {
@@ -3113,7 +3382,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 62
+        "y": 70
       },
       "id": 83,
       "options": {
@@ -3152,7 +3421,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 78
       },
       "id": 46,
       "panels": [],
@@ -3225,7 +3494,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 71
+        "y": 79
       },
       "id": 1001,
       "options": {
@@ -3345,7 +3614,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 71
+        "y": 79
       },
       "id": 251,
       "options": {
@@ -3484,7 +3753,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 79
+        "y": 87
       },
       "id": 252,
       "options": {
@@ -3529,7 +3798,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 87
+        "y": 95
       },
       "id": 214,
       "panels": [],
@@ -3600,7 +3869,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 88
+        "y": 96
       },
       "id": 255,
       "options": {
@@ -3699,7 +3968,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 88
+        "y": 96
       },
       "id": 254,
       "options": {
@@ -3798,7 +4067,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 96
+        "y": 104
       },
       "id": 257,
       "options": {
@@ -3897,7 +4166,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 96
+        "y": 104
       },
       "id": 256,
       "options": {
@@ -3996,7 +4265,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 112
       },
       "id": 260,
       "options": {
@@ -4095,7 +4364,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 104
+        "y": 112
       },
       "id": 259,
       "options": {
@@ -4194,7 +4463,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 112
+        "y": 120
       },
       "id": 262,
       "options": {
@@ -4294,7 +4563,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 120
       },
       "id": 261,
       "options": {
@@ -4394,7 +4663,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 120
+        "y": 128
       },
       "id": 263,
       "options": {
@@ -4435,7 +4704,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 128
+        "y": 136
       },
       "id": 38,
       "panels": [],
@@ -4506,7 +4775,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 129
+        "y": 137
       },
       "id": 40,
       "options": {
@@ -4567,7 +4836,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 129
+        "y": 137
       },
       "id": 42,
       "maxDataPoints": 25,
@@ -4695,7 +4964,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 137
+        "y": 145
       },
       "id": 117,
       "options": {
@@ -4793,7 +5062,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 137
+        "y": 145
       },
       "id": 116,
       "options": {
@@ -4922,7 +5191,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 145
+        "y": 153
       },
       "id": 119,
       "options": {
@@ -5079,7 +5348,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 145
+        "y": 153
       },
       "id": 250,
       "options": {
@@ -5174,7 +5443,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 153
+        "y": 161
       },
       "id": 48,
       "options": {
@@ -5281,7 +5550,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 153
+        "y": 161
       },
       "id": 118,
       "options": {
@@ -5344,7 +5613,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 161
+        "y": 169
       },
       "id": 50,
       "options": {
@@ -5450,7 +5719,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 161
+        "y": 169
       },
       "id": 52,
       "options": {
@@ -5549,7 +5818,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 169
+        "y": 177
       },
       "id": 113,
       "options": {
@@ -5709,7 +5978,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 169
+        "y": 177
       },
       "id": 58,
       "options": {
@@ -5748,7 +6017,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 177
+        "y": 185
       },
       "id": 203,
       "panels": [],
@@ -5782,7 +6051,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 178
+        "y": 186
       },
       "id": 202,
       "options": {
@@ -5938,7 +6207,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 178
+        "y": 186
       },
       "id": 204,
       "options": {
@@ -6086,7 +6355,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 178
+        "y": 186
       },
       "id": 205,
       "options": {
@@ -6185,7 +6454,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 186
+        "y": 194
       },
       "id": 206,
       "options": {
@@ -6284,7 +6553,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 186
+        "y": 194
       },
       "id": 207,
       "options": {
@@ -6323,7 +6592,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 194
+        "y": 202
       },
       "id": 79,
       "panels": [],
@@ -6396,7 +6665,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 195
+        "y": 203
       },
       "id": 74,
       "options": {
@@ -6495,7 +6764,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 195
+        "y": 203
       },
       "id": 80,
       "options": {
@@ -6594,7 +6863,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 203
+        "y": 211
       },
       "id": 1002,
       "options": {
@@ -6693,7 +6962,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 203
+        "y": 211
       },
       "id": 190,
       "options": {
@@ -6733,7 +7002,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 211
+        "y": 219
       },
       "id": 108,
       "panels": [],
@@ -6831,7 +7100,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 212
+        "y": 220
       },
       "id": 109,
       "options": {
@@ -6894,7 +7163,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 212
+        "y": 220
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -7024,7 +7293,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 220
+        "y": 228
       },
       "id": 120,
       "options": {
@@ -7083,7 +7352,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 220
+        "y": 228
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -7196,8 +7465,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7249,7 +7517,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 228
+        "y": 236
       },
       "id": 198,
       "options": {
@@ -7454,8 +7722,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7471,7 +7738,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 228
+        "y": 236
       },
       "id": 246,
       "options": {
@@ -7511,7 +7778,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 236
+        "y": 244
       },
       "id": 24,
       "panels": [],
@@ -7567,8 +7834,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7608,7 +7874,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 237
+        "y": 245
       },
       "id": 26,
       "options": {
@@ -7727,8 +7993,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7744,7 +8009,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 237
+        "y": 245
       },
       "id": 33,
       "options": {
@@ -7850,8 +8115,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7866,7 +8130,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 245
+        "y": 253
       },
       "id": 36,
       "options": {
@@ -7917,7 +8181,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 253
+        "y": 261
       },
       "id": 32,
       "panels": [],
@@ -8022,7 +8286,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 254
+        "y": 262
       },
       "id": 30,
       "options": {
@@ -8187,7 +8451,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 254
+        "y": 262
       },
       "id": 28,
       "options": {
@@ -8306,7 +8570,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 262
+        "y": 270
       },
       "id": 35,
       "options": {
@@ -8431,7 +8695,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 262
+        "y": 270
       },
       "id": 73,
       "options": {
@@ -8557,7 +8821,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 270
+        "y": 278
       },
       "id": 102,
       "options": {
@@ -8621,7 +8885,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 278
+        "y": 286
       },
       "id": 226,
       "panels": [],
@@ -8717,7 +8981,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 279
+        "y": 287
       },
       "id": 225,
       "options": {
@@ -8844,7 +9108,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 279
+        "y": 287
       },
       "id": 227,
       "options": {
@@ -8971,7 +9235,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 287
+        "y": 295
       },
       "id": 235,
       "options": {
@@ -9098,7 +9362,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 287
+        "y": 295
       },
       "id": 234,
       "options": {
@@ -9142,7 +9406,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 295
+        "y": 303
       },
       "id": 68,
       "panels": [],
@@ -9213,7 +9477,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 296
+        "y": 304
       },
       "id": 60,
       "options": {
@@ -9308,7 +9572,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 296
+        "y": 304
       },
       "id": 62,
       "options": {
@@ -9403,7 +9667,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 304
+        "y": 312
       },
       "id": 64,
       "options": {
@@ -9441,7 +9705,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 312
+        "y": 320
       },
       "id": 105,
       "panels": [],
@@ -9512,7 +9776,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 313
+        "y": 321
       },
       "id": 106,
       "options": {
@@ -9609,7 +9873,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 313
+        "y": 321
       },
       "id": 107,
       "options": {
@@ -9705,7 +9969,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 321
+        "y": 329
       },
       "id": 217,
       "options": {
@@ -9744,7 +10008,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 329
+        "y": 337
       },
       "id": 97,
       "panels": [],
@@ -9827,7 +10091,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 330
+        "y": 338
       },
       "id": 98,
       "options": {
@@ -9989,7 +10253,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 330
+        "y": 338
       },
       "id": 101,
       "options": {
@@ -10086,7 +10350,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 338
+        "y": 346
       },
       "id": 99,
       "options": {
@@ -10183,7 +10447,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 338
+        "y": 346
       },
       "id": 100,
       "options": {
@@ -10280,7 +10544,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 346
+        "y": 354
       },
       "id": 248,
       "options": {
@@ -10392,7 +10656,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 346
+        "y": 354
       },
       "id": 247,
       "options": {
@@ -10451,7 +10715,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 354
+        "y": 362
       },
       "id": 236,
       "panels": [
@@ -10929,7 +11193,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 355
+        "y": 363
       },
       "id": 241,
       "panels": [
@@ -11271,10 +11535,8 @@
           "uid": "${datasource}"
         },
         "definition": "label_values(reth_info,$instance_label)",
-        "hide": 0,
         "includeAll": false,
         "label": "Instance",
-        "multi": false,
         "name": "instance",
         "options": [],
         "query": {
@@ -11284,7 +11546,6 @@
         },
         "refresh": 1,
         "regex": "",
-        "skipUrlSync": false,
         "sort": 1,
         "type": "query"
       },
@@ -11303,9 +11564,21 @@
         "hide": 2,
         "label": "Instance Label",
         "name": "instance_label",
-        "query": "job",
-        "skipUrlSync": false,
-        "type": "constant"
+        "query": "${VAR_INSTANCE_LABEL}",
+        "skipUrlSync": true,
+        "type": "constant",
+        "current": {
+          "value": "${VAR_INSTANCE_LABEL}",
+          "text": "${VAR_INSTANCE_LABEL}",
+          "selected": false
+        },
+        "options": [
+          {
+            "value": "${VAR_INSTANCE_LABEL}",
+            "text": "${VAR_INSTANCE_LABEL}",
+            "selected": false
+          }
+        ]
       }
     ]
   },
@@ -11317,6 +11590,6 @@
   "timezone": "",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 4,
+  "version": 10,
   "weekStart": ""
 }
