@@ -165,4 +165,23 @@ mod tests {
             SparseSubtrieType::Lower(255)
         );
     }
+
+    #[test]
+    fn sparse_subtrie_type_full_range() {
+        for i in 0..0xff {
+            let first_nibble = i >> 4;
+            let second_nibble = i & 0x0f;
+            let upper_path = Nibbles::from_nibbles([first_nibble, second_nibble]);
+            assert_eq!(
+                SparseSubtrieType::from_path(&upper_path),
+                SparseSubtrieType::Upper
+            );
+
+            let lower_path = Nibbles::from_nibbles([first_nibble, second_nibble, 0]);
+            assert_eq!(
+                SparseSubtrieType::from_path(&lower_path),
+                SparseSubtrieType::Lower(i as usize)
+            );
+        }
+    }
 }
