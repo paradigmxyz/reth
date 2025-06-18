@@ -21,14 +21,18 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockHashOrNumber;
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
-use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxNumber, B256, U256};
+use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{network::Network, Provider};
 use alloy_rpc_types::BlockId;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
-use reth_db_api::mock::{DatabaseMock, TxMock};
-use reth_errors::ProviderError;
+use reth_db_api::{
+    mock::{DatabaseMock, TxMock},
+    models::StoredBlockBodyIndices,
+};
+use reth_errors::{ProviderError, ProviderResult};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
 use reth_primitives::{
     Account, Bytecode, RecoveredBlock, SealedBlock, SealedHeader, TransactionMeta,
@@ -43,7 +47,10 @@ use reth_provider::{
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
-use reth_storage_api::{BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StatsReader};
+use reth_storage_api::{
+    BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
+    ReceiptProviderIdExt, StatsReader,
+};
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
 use std::{
     collections::BTreeMap,
@@ -134,6 +141,13 @@ impl<P, Node: NodeTypes, N> AlloyRethProvider<P, Node, N> {
         F: Future<Output = T>,
     {
         tokio::task::block_in_place(move || Handle::current().block_on(fut))
+    }
+
+    /// Get a reference to the conon state notification sender
+    pub const fn canon_state_notification(
+        &self,
+    ) -> &broadcast::Sender<CanonStateNotification<PrimitivesTy<Node>>> {
+        &self.canon_state_notification
     }
 }
 
@@ -257,6 +271,275 @@ where
 
     fn finalized_block_num_hash(&self) -> Result<Option<alloy_eips::BlockNumHash>, ProviderError> {
         // RPC doesn't provide finalized block number and hash
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<P, Node, N> HeaderProvider for AlloyRethProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    type Header = HeaderTy<Node>;
+
+    fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Self::Header>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn headers_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Self::Header>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn sealed_header(
+        &self,
+        _number: BlockNumber,
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn sealed_headers_while(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+        _predicate: impl FnMut(&SealedHeader<Self::Header>) -> bool,
+    ) -> ProviderResult<Vec<SealedHeader<Self::Header>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<P, Node, N> BlockBodyIndicesProvider for AlloyRethProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_body_indices_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<P, Node, N> BlockReader for AlloyRethProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    type Block = BlockTy<Node>;
+
+    fn find_block_by_hash(
+        &self,
+        _hash: B256,
+        _source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn recovered_block(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn sealed_block_with_senders(
+        &self,
+        _id: BlockHashOrNumber,
+        _transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_range(&self, _range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn block_with_senders_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn recovered_block_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<P, Node, N> BlockReaderIdExt for AlloyRethProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    fn block_by_id(&self, _id: BlockId) -> ProviderResult<Option<Self::Block>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn sealed_header_by_id(
+        &self,
+        _id: BlockId,
+    ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn header_by_id(&self, _id: BlockId) -> ProviderResult<Option<Self::Header>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<P, Node, N> ReceiptProvider for AlloyRethProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    type Receipt = ReceiptTy<Node>;
+
+    fn receipt(&self, _id: TxNumber) -> ProviderResult<Option<Self::Receipt>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn receipts_by_block(
+        &self,
+        _block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn receipts_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Self::Receipt>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn receipts_by_block_range(
+        &self,
+        _block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<P, Node, N> ReceiptProviderIdExt for AlloyRethProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+}
+
+impl<P, Node, N> TransactionsProvider for AlloyRethProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    type Transaction = TxTy<Node>;
+
+    fn transaction_id(&self, _tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transaction_by_id(&self, _id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transaction_by_id_unhashed(
+        &self,
+        _id: TxNumber,
+    ) -> ProviderResult<Option<Self::Transaction>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transaction_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transaction_by_hash_with_meta(
+        &self,
+        _hash: TxHash,
+    ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transactions_by_block(
+        &self,
+        _block: BlockHashOrNumber,
+    ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transactions_by_block_range(
+        &self,
+        _range: impl RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Transaction>>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transactions_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Self::Transaction>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn senders_by_tx_range(
+        &self,
+        _range: impl RangeBounds<TxNumber>,
+    ) -> ProviderResult<Vec<Address>> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn transaction_sender(&self, _id: TxNumber) -> ProviderResult<Option<Address>> {
         Err(ProviderError::UnsupportedProvider)
     }
 }
