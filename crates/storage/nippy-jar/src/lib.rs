@@ -1,8 +1,12 @@
-//! Immutable data store format.
-//!
-//! *Warning*: The `NippyJar` encoding format and its implementations are
-//! designed for storing and retrieving data internally. They are not hardened
-//! to safely read potentially malicious data.
+/*! 
+ * NippyJar - A file format for storing compressed columnar data.
+ * 
+ * # Security Warning
+ * 
+ * The `NippyJar` and `Compact` encoding formats and their implementations are designed for storing 
+ * and retrieving data internally. They are not hardened to safely read potentially malicious data.
+ * This library should not be used to decode untrusted input from external sources without proper validation.
+ */
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
