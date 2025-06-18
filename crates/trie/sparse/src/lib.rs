@@ -8,13 +8,13 @@ extern crate alloc;
 pub mod blinded;
 
 mod node;
-use node::*;
+pub use node::*;
 
 mod parallel_trie;
 pub use parallel_trie::*;
 
 mod rlp;
-use rlp::*;
+pub use rlp::*;
 
 mod state;
 pub use state::*;
@@ -23,7 +23,7 @@ mod trie;
 pub use trie::*;
 
 mod updates;
-use updates::*;
+pub use updates::*;
 
 #[cfg(feature = "metrics")]
 mod metrics;

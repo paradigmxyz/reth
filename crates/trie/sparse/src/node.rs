@@ -24,14 +24,17 @@ pub enum SparseNodeType {
 }
 
 impl SparseNodeType {
+    /// Returns true if the node is a hash.
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash)
     }
 
+    /// Returns true if the node is a branch.
     pub const fn is_branch(&self) -> bool {
         matches!(self, Self::Branch { .. })
     }
 
+    /// Returns true if the node should be stored in the database.
     pub const fn store_in_db_trie(&self) -> Option<bool> {
         match *self {
             Self::Extension { store_in_db_trie } | Self::Branch { store_in_db_trie } => {

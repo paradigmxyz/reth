@@ -7,8 +7,11 @@ use alloy_trie::{BranchNodeCompact, Nibbles};
 /// one to make batch updates to a persistent database.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SparseTrieUpdates {
+    /// Collection of updated intermediate nodes indexed by full path.
     pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    /// Collection of removed intermediate nodes indexed by full path.
     pub removed_nodes: HashSet<Nibbles>,
+    /// Flag indicating whether the trie was wiped.
     pub wiped: bool,
 }
 
