@@ -176,7 +176,6 @@ where
             )
             .or_else(|| (spec_id.into_eth_spec().is_enabled_in(SpecId::CANCUN)).then_some(0))
             .map(|gas| BlobExcessGasAndPrice::new(gas, false));
-        let spec = self.chain_spec();
         let block_env = BlockEnv {
             number: parent.number() + 1,
             beneficiary: attributes.suggested_fee_recipient,
@@ -185,7 +184,7 @@ where
             prevrandao: Some(attributes.prev_randao),
             gas_limit: attributes.gas_limit,
             // calculate basefee based on parent block's gas usage
-            basefee: spec.next_block_base_fee(parent, attributes.timestamp),
+            basefee: self.chain_spec().next_block_base_fee(parent, attributes.timestamp),
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
