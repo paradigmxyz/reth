@@ -57,7 +57,6 @@ pub mod tx_manager {
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).
 pub mod tx_fetcher {
-    use crate::transactions::fetcher::TransactionFetcherInfo;
     use reth_network_types::peers::config::{
         DEFAULT_MAX_COUNT_PEERS_INBOUND, DEFAULT_MAX_COUNT_PEERS_OUTBOUND,
     };
@@ -256,26 +255,4 @@ pub mod tx_fetcher {
     ///
     /// Default is 8 hashes.
     pub const DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST: usize = 8;
-
-    /// Returns the approx number of transaction hashes that a
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request will have capacity
-    /// for w.r.t. the [`Eth68`](reth_eth_wire::EthVersion::Eth68) protocol version. This is useful
-    /// for preallocating memory.
-    pub const fn approx_capacity_get_pooled_transactions_req_eth68(
-        info: &TransactionFetcherInfo,
-    ) -> usize {
-        let max_size_expected_response =
-            info.soft_limit_byte_size_pooled_transactions_response_on_pack_request;
-
-        max_size_expected_response / MEDIAN_BYTE_SIZE_SMALL_LEGACY_TX_ENCODED +
-            DEFAULT_MARGINAL_COUNT_HASHES_GET_POOLED_TRANSACTIONS_REQUEST
-    }
-
-    /// Returns the approx number of transactions that a
-    /// [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions) request will
-    /// have capacity for w.r.t. the [`Eth66`](reth_eth_wire::EthVersion::Eth66) protocol version.
-    /// This is useful for preallocating memory.
-    pub const fn approx_capacity_get_pooled_transactions_req_eth66() -> usize {
-        SOFT_LIMIT_COUNT_HASHES_IN_GET_POOLED_TRANSACTIONS_REQUEST
-    }
 }
