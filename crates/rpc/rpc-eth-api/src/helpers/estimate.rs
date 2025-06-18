@@ -2,10 +2,9 @@
 
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
-use alloy_primitives::{TxKind, U256};
+use alloy_primitives::U256;
 use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
 use futures::Future;
-use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{Database, EvmEnvFor, TransactionEnv, TxEnvFor};
 use reth_provider::StateProvider;
@@ -81,28 +80,28 @@ pub trait EstimateCall: Call {
             apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
         }
 
-        // Optimize for simple transfer transactions, potentially reducing the gas estimate.
-        if tx_env.input().is_empty() {
-            if let TxKind::Call(to) = tx_env.kind() {
-                if let Ok(code) = db.db.account_code(&to) {
-                    let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
-                    if no_code_callee {
-                        // If the tx is a simple transfer (call to an account with no code) we can
-                        // shortcircuit. But simply returning
-                        // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
-                        // field combos that bump the price up, so we try executing the function
-                        // with the minimum gas limit to make sure.
-                        let mut tx_env = tx_env.clone();
-                        tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
-                        if let Ok((res, _)) = self.transact(&mut db, evm_env.clone(), tx_env) {
-                            if res.result.is_success() {
-                                return Ok(U256::from(MIN_TRANSACTION_GAS))
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        // [TODO]: Due to the existence of tokenRatio, simple transfer transactions in Mantle cannot be optimized.
+        // if tx_env.input().is_empty() {
+        //     if let TxKind::Call(to) = tx_env.kind() {
+        //         if let Ok(code) = db.db.account_code(&to) {
+        //             let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
+        //             if no_code_callee {
+        //                 // If the tx is a simple transfer (call to an account with no code) we
+        // can                 // shortcircuit. But simply returning
+        //                 // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
+        //                 // field combos that bump the price up, so we try executing the function
+        //                 // with the minimum gas limit to make sure.
+        //                 let mut tx_env = tx_env.clone();
+        //                 tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
+        //                 if let Ok((res, _)) = self.transact(&mut db, evm_env.clone(), tx_env) {
+        //                     if res.result.is_success() {
+        //                         return Ok(U256::from(MIN_TRANSACTION_GAS))
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
 
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
@@ -150,6 +149,7 @@ pub trait EstimateCall: Call {
                 ethres => ethres?,
             };
 
+        // [TODO]: Maybe not working for Mantle
         let gas_refund = match res.result {
             ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
             ExecutionResult::Halt { reason, .. } => {
@@ -256,7 +256,7 @@ pub trait EstimateCall: Call {
             mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
         }
 
-        Ok(U256::from(highest_gas_limit))
+        Ok(U256::from(highest_gas_limit.saturating_mul(120).div_ceil(100)))
     }
 
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].

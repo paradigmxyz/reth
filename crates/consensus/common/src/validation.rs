@@ -3,8 +3,8 @@
 use alloy_consensus::{
     constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH,
 };
-use alloy_eips::{calc_next_block_base_fee, eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
-use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
+use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
     constants::MAXIMUM_GAS_LIMIT_BLOCK, Block, BlockBody, BlockHeader, GotExpected, SealedBlock,
