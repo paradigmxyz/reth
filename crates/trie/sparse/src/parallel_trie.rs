@@ -135,13 +135,17 @@ impl SparseSubtrieType {
         if path.len() <= 2 {
             Self::Upper
         } else {
-            Self::Lower(path_subtrie_index(path))
+            Self::Lower(path_subtrie_index_unchecked(path))
         }
     }
 }
 
-// Convert first two nibbles of the path into an index in the range [0, 255].
-fn path_subtrie_index(path: &Nibbles) -> usize {
+/// Convert first two nibbles of the path into a lower subtrie index in the range [0, 255].
+///
+/// # Panics
+///
+/// If the path is shorter than two nibbles.
+fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
     (path[0] << 4 | path[1]) as usize
 }
 
@@ -152,7 +156,7 @@ mod tests {
     use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
 
     use crate::{
-        parallel_trie::{path_subtrie_index, SparseSubtrieType},
+        parallel_trie::{path_subtrie_index_unchecked, SparseSubtrieType},
         ParallelSparseTrie, SparseSubtrie,
     };
 
@@ -167,15 +171,14 @@ mod tests {
 
     #[test]
     fn test_get_changed_subtries() {
-        // Create a trie with some subtries
+        // Create a trie with two subtries
         let mut trie = ParallelSparseTrie::default();
-
         let subtrie_1 =
             SparseSubtrie { path: Nibbles::from_nibbles([0x0, 0x0]), nodes: HashMap::default() };
-        let subtrie_1_index = path_subtrie_index(&subtrie_1.path);
+        let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
         let subtrie_2 =
             SparseSubtrie { path: Nibbles::from_nibbles([0x1, 0x0]), nodes: HashMap::default() };
-        let subtrie_2_index = path_subtrie_index(&subtrie_2.path);
+        let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
 
         // Add subtries at specific positions
         trie.subtries[subtrie_1_index] = Some(subtrie_1.clone());
