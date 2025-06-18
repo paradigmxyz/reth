@@ -73,6 +73,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// not the parent block timestamp.
     fn next_block_base_fee<H>(&self, parent: &H, target_timestamp: u64) -> u64
     where
+        Self: Sized,
         H: AlloyBlockHeader,
     {
         parent
