@@ -34,8 +34,8 @@ use reth_primitives::{
     Account, Bytecode, RecoveredBlock, SealedBlock, SealedHeader, TransactionMeta,
 };
 use reth_provider::{
-    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, CanonChainTracker,
-    CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
+    AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
+    CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
     ChainStateBlockReader, ChainStateBlockWriter, ChangeSetReader, DatabaseProviderFactory,
     HeaderProvider, PruneCheckpointReader, ReceiptProvider, StageCheckpointReader, StateProvider,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageReader,
@@ -575,11 +575,6 @@ where
         })
     }
 
-    fn bytecode_by_hash(&self, _code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
-        // Cannot fetch bytecode by hash via RPC
-        Err(ProviderError::UnsupportedProvider)
-    }
-
     fn account_code(&self, addr: &Address) -> Result<Option<Bytecode>, ProviderError> {
         self.block_on_async(async {
             let code = self
@@ -603,6 +598,18 @@ where
 
     fn account_nonce(&self, addr: &Address) -> Result<Option<u64>, ProviderError> {
         self.get_account(*addr).map(|acc| acc.map(|a| a.nonce))
+    }
+}
+
+impl<P, Node, N> BytecodeReader for AlloyRethStateProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    fn bytecode_by_hash(&self, _code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
+        // Cannot fetch bytecode by hash via RPC
+        Err(ProviderError::UnsupportedProvider)
     }
 }
 
