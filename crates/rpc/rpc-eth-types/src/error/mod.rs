@@ -148,14 +148,14 @@ pub enum EthApiError {
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
     /// Error thrown when waiting for transaction confirmation times out
-    #[error("Transaction timeout: {message}")]
-    TransactionTimeout {
+    #[error(
+        "Transaction {hash} was added to the mempool but wasn't confirmed within {duration:?}."
+    )]
+    TransactionConfirmationTimeout {
         /// Hash of the transaction that timed out
         hash: B256,
         /// Duration that was waited before timing out
         duration: Duration,
-        /// Descriptive message about the timeout
-        message: String,
     },
     /// Any other error
     #[error("{0}")]
@@ -224,8 +224,8 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                     block_id_to_str(end_id),
                 ),
             ),
-            EthApiError::TransactionTimeout { hash: _h, duration: _, message } => {
-                rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), message)
+            err @ EthApiError::TransactionConfirmationTimeout { .. } => {
+                rpc_error_with_code(EthRpcErrorCode::TransactionRejected.code(), err.to_string())
             }
             EthApiError::Unsupported(msg) => internal_rpc_err(msg),
             EthApiError::InternalJsTracerError(msg) => internal_rpc_err(msg),

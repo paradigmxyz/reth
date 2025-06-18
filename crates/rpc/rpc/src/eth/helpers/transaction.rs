@@ -13,7 +13,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool}
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt> + reth_rpc_eth_api::helpers::LoadReceipt,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>,
     Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
 {
     #[inline]

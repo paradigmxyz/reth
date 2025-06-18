@@ -20,7 +20,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
 use reth_rpc_eth_types::{
-    utils::binary_search, EthApiError, EthApiError::TransactionTimeout, SignError,
+    utils::binary_search, EthApiError, EthApiError::TransactionConfirmationTimeout, SignError,
     TransactionSource,
 };
 use reth_rpc_types_compat::transaction::TransactionCompat;
@@ -83,7 +83,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             let hash = EthTransactions::send_raw_transaction(&this, tx).await?;
             let mut stream = this.provider().canonical_state_stream();
             const TIMEOUT_DURATION: tokio::time::Duration = tokio::time::Duration::from_secs(30);
-            match tokio::time::timeout(TIMEOUT_DURATION, async {
+            tokio::time::timeout(TIMEOUT_DURATION, async {
                 while let Some(notification) = stream.next().await {
                     let chain = notification.committed();
                     for block in chain.blocks_iter() {
@@ -94,27 +94,18 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                         }
                     }
                 }
-                Err(Self::Error::from_eth_err(reth_rpc_eth_types::EthApiError::TransactionTimeout {
+                Err(Self::Error::from_eth_err(TransactionConfirmationTimeout {
                     hash,
                     duration: TIMEOUT_DURATION,
-                    message: format!(
-                        "Transaction {hash:?} was added to the mempool but stream ended before confirmation. \
-                         Please use eth_getTransactionReceipt to poll for the receipt."
-                    ),
                 }))
             })
             .await
-            {
-                Ok(result) => result,
-                Err(_elapsed) => Err(Self::Error::from_eth_err(TransactionTimeout {
+            .unwrap_or_else(|_elapsed| {
+                Err(Self::Error::from_eth_err(TransactionConfirmationTimeout {
                     hash,
                     duration: TIMEOUT_DURATION,
-                    message: format!(
-                        "Transaction {hash:?} was added to the mempool but wasn't processed in {TIMEOUT_DURATION:?}. \
-                         Please use eth_getTransactionReceipt to poll for the receipt."
-                    ),
-                })),
-            }
+                }))
+            })
         }
     }
 
