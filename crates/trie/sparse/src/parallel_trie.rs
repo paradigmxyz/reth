@@ -2,7 +2,7 @@ use crate::{SparseNode, SparseTrieUpdates, TrieMasks};
 use alloc::vec::Vec;
 use alloy_primitives::map::HashMap;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{Nibbles, TrieNode};
+use reth_trie_common::{prefix_set::PrefixSet, Nibbles, TrieNode};
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
@@ -86,6 +86,22 @@ impl ParallelSparseTrie {
             self.updates = Some(SparseTrieUpdates::default());
         }
         self
+    }
+
+    /// Returns a list of [`SparseSubtrie`] identifying the subtries that have changed according to
+    /// the provided [prefix set](PrefixSet).
+    ///
+    /// This method helps optimize hash recalculations by identifying which specific
+    /// subtries need to be updated. Each subtrie can then be updated in parallel.
+    #[allow(unused)]
+    fn get_changed_subtries(&mut self, prefix_set: &mut PrefixSet) -> Vec<SparseSubtrie> {
+        let mut changed_subtries = Vec::new();
+        for subtrie in &mut self.subtries {
+            if let Some(subtrie) = subtrie.take_if(|subtrie| prefix_set.contains(&subtrie.path)) {
+                changed_subtries.push(subtrie);
+            }
+        }
+        changed_subtries
     }
 }
 
