@@ -970,6 +970,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             max_blob_count: AtomicU64::new(max_blob_count),
         };
 
+        let _kzg_settings = kzg_settings.get();
+
         let inner = EthTransactionValidatorInner {
             client,
             eip2718,
