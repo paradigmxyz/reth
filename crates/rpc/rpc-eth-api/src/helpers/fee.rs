@@ -207,9 +207,7 @@ pub trait EthFees: LoadFee {
                 //
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
-                let fee = self.provider().chain_spec().next_block_base_fee(last_header.header(), last_header.header().timestamp());
-                base_fee_per_gas.push(fee as u128);
-
+                base_fee_per_gas.push(self.provider().chain_spec().next_block_base_fee(last_header.header(), last_header.header().timestamp()) as u128);
                 // Same goes for the `base_fee_per_blob_gas`:
                 // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
                 base_fee_per_blob_gas.push(
