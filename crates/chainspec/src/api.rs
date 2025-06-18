@@ -14,7 +14,7 @@ use reth_primitives_traits::AlloyBlockHeader;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// The header type of the network.
-    type Header: AlloyBlockHeader;
+    type Header;
 
     /// Returns the [`Chain`] object this spec targets.
     fn chain(&self) -> Chain;
