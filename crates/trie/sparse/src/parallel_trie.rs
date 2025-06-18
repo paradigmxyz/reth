@@ -37,16 +37,17 @@ impl Default for ParallelSparseTrie {
 
 impl ParallelSparseTrie {
     fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut SparseSubtrie> {
-        // get the index into subtries array using upper two nibbles of the path
-        let idx =
-            path.split_at_checked(2).map(|(upper, _)| ((upper[0] << 4) | upper[1]) as usize)?;
+        match SparseSubtrieType::from_path(path) {
+            SparseSubtrieType::Upper => None,
+            SparseSubtrieType::Lower(idx) => {
+                if self.subtries[idx].is_none() {
+                    let upper_path = Nibbles::unpack([idx as u8]);
+                    self.subtries[idx] = Some(SparseSubtrie::new(upper_path));
+                }
 
-        if self.subtries[idx].is_none() {
-            let upper_path = Nibbles::unpack([idx as u8]);
-            self.subtries[idx] = Some(SparseSubtrie::new(upper_path));
+                self.subtries[idx].as_mut()
+            }
         }
-
-        self.subtries[idx].as_mut()
     }
 
     /// Creates a new revealed sparse trie from the given root node.
@@ -158,7 +159,8 @@ impl SparseSubtrie {
     /// Returns true if the child path is found in a lower trie, but the current path is in the
     /// upper trie.
     fn cross_level_child(current_path: &Nibbles, child_path: &Nibbles) -> bool {
-        return current_path.len() <= 2 && child_path.len() > 2
+        matches!(SparseSubtrieType::from_path(current_path), SparseSubtrieType::Upper) &&
+            matches!(SparseSubtrieType::from_path(child_path), SparseSubtrieType::Lower(_))
     }
 
     /// Internal implementation of the method of the same name on ParallelSparseTrie.
