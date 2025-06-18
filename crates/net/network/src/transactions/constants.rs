@@ -201,14 +201,16 @@ pub mod tx_fetcher {
 
     /// Default divisor of the max inflight request when calculating search breadth of the search
     /// for any idle peer to which to send a request filled with hashes pending fetch. The max
-    /// inflight requests is configured in [`TransactionFetcherInfo`].
+    /// inflight requests is configured in
+    /// [`TransactionFetcherInfo`](crate::transactions::fetcher::TransactionFetcherInfo).
     ///
     /// Default is 3 requests.
     pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_IDLE_PEER: usize = 3;
 
     /// Default divisor of the max inflight request when calculating search breadth of the search
     /// for the intersection of hashes announced by a peer and hashes pending fetch. The max
-    /// inflight requests is configured in [`TransactionFetcherInfo`].
+    /// inflight requests is configured in
+    /// [`TransactionFetcherInfo`](crate::transactions::fetcher::TransactionFetcherInfo).
     ///
     /// Default is 3 requests.
     pub const DEFAULT_DIVISOR_MAX_COUNT_INFLIGHT_REQUESTS_ON_FIND_INTERSECTION: usize = 3;
