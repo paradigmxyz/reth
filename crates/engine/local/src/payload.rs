@@ -73,9 +73,10 @@ where
 pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
 
 /// Provides local payload attributes builder functionality
-pub trait LocalPayloadAttributesAddOn<N: FullNodeComponents>: Send + Sync + 'static {
+pub trait LocalPayloadAttributesAddOn<N: FullNodeComponents>: Send + 'static {
     /// The payload attributes type this builder produces
     type PayloadAttributes;
+
     /// Creates a local payload attributes builder
     fn local_payload_attributes_builder(
         &self,
