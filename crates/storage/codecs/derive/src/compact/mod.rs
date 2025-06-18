@@ -1,3 +1,13 @@
+/*! 
+ * Compact - A space-efficient encoding format for Ethereum data.
+ * 
+ * # Security Warning
+ * 
+ * The `Compact` encoding format and its implementations are designed for storing 
+ * and retrieving data internally. They are not hardened to safely read potentially malicious data.
+ * This library should not be used to decode untrusted input from external sources without proper validation.
+ */
+
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
