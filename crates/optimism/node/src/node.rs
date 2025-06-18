@@ -86,7 +86,7 @@ impl<N> OpNodeTypes for N where
 pub trait OpFullNodeTypes:
     NodeTypes<
     ChainSpec: OpHardforks,
-    Primitives = OpPrimitives,
+    Primitives: OpPayloadPrimitives,
     Storage = OpStorage,
     Payload: EngineTypes<ExecutionData = OpExecutionData>,
 >
@@ -96,7 +96,7 @@ pub trait OpFullNodeTypes:
 impl<N> OpFullNodeTypes for N where
     N: NodeTypes<
         ChainSpec: OpHardforks,
-        Primitives = OpPrimitives,
+        Primitives: OpPayloadPrimitives,
         Storage = OpStorage,
         Payload: EngineTypes<ExecutionData = OpExecutionData>,
     >
