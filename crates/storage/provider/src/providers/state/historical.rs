@@ -385,7 +385,8 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> StateProof
 
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         input.prepend(self.revert_state()?);
-        TrieWitness::overlay_witness(self.tx(), input, target)
+        TrieWitness::from_tx(self.tx())
+            .overlay_witness(input, target)
             .map_err(ProviderError::from)
             .map(|hm| hm.into_values().collect())
     }

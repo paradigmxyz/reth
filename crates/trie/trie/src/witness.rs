@@ -90,6 +90,25 @@ impl<T, H> TrieWitness<T, H> {
         self.always_include_root_node = true;
         self
     }
+
+    /// Returns reference to [`TrieCursorFactory`] type.
+    pub fn trie_cursor_factory(&self) -> &T {
+        &self.trie_cursor_factory
+    }
+
+    /// Returns reference to [`HashedCursorFactory`] type.
+    pub fn hashed_cursor_factory(&self) -> &H {
+        &self.hashed_cursor_factory
+    }
+
+    /// Constructs a new instance from given database transaction.
+    pub fn from_tx<'a, TX>(tx: &'a TX) -> Self
+    where
+        T: From<&'a TX>,
+        H: From<&'a TX>,
+    {
+        Self::new(T::from(tx), H::from(tx))
+    }
 }
 
 impl<T, H> TrieWitness<T, H>

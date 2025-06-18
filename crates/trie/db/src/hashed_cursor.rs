@@ -25,6 +25,12 @@ impl<'a, TX> DatabaseHashedCursorFactory<'a, TX> {
     }
 }
 
+impl<'a, TX> From<&'a TX> for DatabaseHashedCursorFactory<'a, TX> {
+    fn from(tx: &'a TX) -> Self {
+        Self::new(tx)
+    }
+}
+
 impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<'_, TX> {
     type AccountCursor = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>;
     type StorageCursor =
