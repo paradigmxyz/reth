@@ -7,42 +7,55 @@ export const sidebar: SidebarItem[] = [
             {
                 text: "Overview",
                 link: "/overview"
+            },
+            {
+                text: "Why Reth?",
+                link: "/introduction/why-reth"
+            },
+            {
+                text: "Benchmarks",
+                link: "/introduction/benchmarks"
+            },
+            {
+                text: "Contributing",
+                link: "/introduction/contributing"
             }
         ]
     },
     {
-        text: "Installation",
-        items: [
-            {
-                text: "Overview",
-                link: "/installation/overview"
-            },
-            {
-                text: "Pre-Built Binaries",
-                link: "/installation/binaries"
-            },
-            {
-                text: "Docker",
-                link: "/installation/docker"
-            },
-            {
-                text: "Build from Source",
-                link: "/installation/source"
-            },
-            {
-                text: "Build for ARM devices",
-                link: "/installation/build-for-arm-devices"
-            },
-            {
-                text: "Update Priorities",
-                link: "/installation/priorities"
-            }
-        ]
-    },
-    {
-        text: "Run a Node",
+        text: "Reth for Node Operators",
         link: "/run/run-a-node",
         items: [
+            {
+                text: "Installation",
+                collapsed: true,
+                items: [
+                    {
+                        text: "Overview",
+                        link: "/installation/overview"
+                    },
+                    {
+                        text: "Pre-Built Binaries",
+                        link: "/installation/binaries"
+                    },
+                    {
+                        text: "Docker",
+                        link: "/installation/docker"
+                    },
+                    {
+                        text: "Build from Source",
+                        link: "/installation/source"
+                    },
+                    {
+                        text: "Build for ARM devices",
+                        link: "/installation/build-for-arm-devices"
+                    },
+                    {
+                        text: "Update Priorities",
+                        link: "/installation/priorities"
+                    }
+                ]
+            },
             {
                 text: "Mainnet or official testnets",
                 link: "/run/mainnet"
@@ -82,6 +95,109 @@ export const sidebar: SidebarItem[] = [
             {
                 text: "Troubleshooting",
                 link: "/run/troubleshooting"
+            },
+            {
+                text: "Profiling",
+                link: "/run/profiling"
+            }
+        ]
+    },
+    {
+        text: "Reth as a library",
+        link: "/sdk/overview",
+        items: [
+            {
+                text: "Overview",
+                link: "/sdk/overview"
+            },
+            {
+                text: "Typesystem",
+                items: [
+                    {
+                        text: "Block",
+                        link: "/sdk/typesystem/block"
+                    },
+                    {
+                        text: "Transaction types and various representations",
+                        items: [
+                            {
+                                text: "Consensus, Pooled, RPC",
+                                link: "/sdk/typesystem/transaction-types"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                text: "What is in a node",
+                items: [
+                    {
+                        text: "Node Components: network, pool, consensus, evm, rpc",
+                        link: "/sdk/node-components"
+                    }
+                ]
+            },
+            {
+                text: "Build a custom node",
+                items: [
+                    {
+                        text: "Prerequisites and Considerations",
+                        link: "/sdk/custom-node/prerequisites"
+                    },
+                    {
+                        text: "What modifications and how",
+                        link: "/sdk/custom-node/modifications"
+                    }
+                ]
+            },
+            {
+                text: "Examples",
+                items: [
+                    {
+                        text: "How to modify an existing node",
+                        items: [
+                            {
+                                text: "Additional features: RPC endpoints, services",
+                                link: "/sdk/examples/modify-node"
+                            }
+                        ]
+                    },
+                    {
+                        text: "How to use standalone components",
+                        items: [
+                            {
+                                text: "Interact with the disk directly + caveats",
+                                link: "/sdk/examples/standalone-components"
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        text: "Execution Extensions",
+        link: "/exex/overview",
+        items: [
+            {
+                text: "Overview",
+                link: "/exex/overview"
+            },
+            {
+                text: "How do ExExes work?",
+                link: "/exex/how-it-works"
+            },
+            {
+                text: "Hello World",
+                link: "/exex/hello-world"
+            },
+            {
+                text: "Tracking State",
+                link: "/exex/tracking-state"
+            },
+            {
+                text: "Remote",
+                link: "/exex/remote"
             }
         ]
     },
@@ -120,42 +236,6 @@ export const sidebar: SidebarItem[] = [
             {
                 text: "rpc",
                 link: "/jsonrpc/rpc"
-            }
-        ]
-    },
-    {
-        text: "Developers",
-        link: "/developers/developers",
-        items: [
-            {
-                text: "Execution Extensions",
-                
-                items: [
-                    {
-                        text: "Overview",
-                        link: "/developers/exex/overview",
-                    },
-                    {
-                        text: "How do ExExes work?",
-                        link: "/developers/exex/how-it-works"
-                    },
-                    {
-                        text: "Hello World",
-                        link: "/developers/exex/hello-world"
-                    },
-                    {
-                        text: "Tracking State",
-                        link: "/developers/exex/tracking-state"
-                    },
-                    {
-                        text: "Remote",
-                        link: "/developers/exex/remote"
-                    }
-                ]
-            },
-            {
-                text: "Contribute",
-                link: "/developers/contribute"
             }
         ]
     },

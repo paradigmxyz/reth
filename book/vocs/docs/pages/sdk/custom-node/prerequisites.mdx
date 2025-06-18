@@ -1,0 +1,50 @@
+# Prerequisites and Considerations
+
+What you need to know before building a custom Reth node.
+
+## Prerequisites
+
+### Rust Knowledge
+- Understanding of Rust ownership, lifetimes, and async programming
+- Familiarity with traits and generics
+- Experience with error handling
+
+### Ethereum Understanding
+- Knowledge of Ethereum protocol fundamentals
+- Understanding of transaction lifecycle
+- Familiarity with consensus mechanisms
+
+### Development Environment
+- Rust toolchain (latest stable)
+- Git for version control
+- Sufficient system resources for compilation
+
+## Key Considerations
+
+### Performance Implications
+- Custom components may impact node performance
+- Consider profiling and benchmarking your modifications
+- Memory usage and CPU overhead
+
+### Compatibility
+- Ensure compatibility with Ethereum specifications
+- Consider impact on network participation
+- Maintain interoperability with other clients
+
+### Maintenance
+- Plan for ongoing maintenance and updates
+- Consider impact of Reth version upgrades
+- Testing strategy for custom components
+
+### Security
+- Custom code introduces potential security risks
+- Follow Rust security best practices
+- Regular security audits for production use
+
+## Architecture Decisions
+
+Before starting, consider:
+
+- Which components need customization
+- Whether to extend existing types or create new ones
+- How to integrate with existing Reth infrastructure

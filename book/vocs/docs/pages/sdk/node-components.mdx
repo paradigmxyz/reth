@@ -1,0 +1,49 @@
+# Node Components
+
+Understanding the core components that make up a Reth node.
+
+## Overview
+
+A Reth node consists of several key components that work together to provide Ethereum execution layer functionality.
+
+## Core Components
+
+### Network Layer
+Handles peer-to-peer communication and block/transaction propagation.
+
+- **Responsibilities**: Peer discovery, block sync, transaction gossip
+- **Key traits**: `NetworkPrimitives`, `NetworkTypes`
+
+### Transaction Pool
+Manages pending transactions before they are included in blocks.
+
+- **Responsibilities**: Transaction validation, fee estimation, mempool management
+- **Key traits**: `TransactionPool`, `PoolTransaction`
+
+### Consensus Engine
+Handles consensus-related operations and block validation.
+
+- **Responsibilities**: Block validation, fork choice, consensus rule enforcement
+- **Key traits**: `Consensus`, `HeaderValidator`
+
+### EVM (Execution Engine)
+Executes transactions and maintains state.
+
+- **Responsibilities**: Transaction execution, state management, gas calculation
+- **Key traits**: `ConfigureEvm`, `EvmConfig`
+
+### RPC Server
+Provides JSON-RPC API endpoints for external interaction.
+
+- **Responsibilities**: API endpoints, request handling, response formatting
+- **Key traits**: `RpcAddOns`, `EthApiTypes`
+
+## Component Interactions
+
+```rust
+// Example of how components interact will be added here
+```
+
+## Customization Points
+
+Each component can be customized or replaced to fit specific requirements.
