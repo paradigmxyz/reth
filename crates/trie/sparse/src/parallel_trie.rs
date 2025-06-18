@@ -114,3 +114,76 @@ pub struct SparseSubtrie {
     /// The map from paths to sparse trie nodes within this subtrie.
     nodes: HashMap<Nibbles, SparseNode>,
 }
+
+/// Sparse Subtrie Type.
+///
+/// Used to determine the type of subtrie a certain path belongs to:
+/// - Paths in the range `0x..=0xff` belong to the upper subtrie.
+/// - Paths in the range `0x000..` belong to one of the lower subtries. The index of the lower
+///   subtrie is determined by the path first nibbles of the path.
+///
+/// There can be at most 256 lower subtries.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum SparseSubtrieType {
+    /// Upper subtrie with paths in the range `0x..=0xff`
+    Upper,
+    /// Lower subtrie with paths in the range `0x000..`. Includes the index of the subtrie,
+    /// according to the path prefix.
+    Lower(usize),
+}
+
+impl SparseSubtrieType {
+    /// Returns the type of subtrie based on the given path.
+    pub fn from_path(path: &Nibbles) -> Self {
+        if path.len() <= 2 {
+            Self::Upper
+        } else {
+            // Convert first two nibbles of the path into a number.
+            let index = (path[0] << 4 | path[1]) as usize;
+            Self::Lower(index)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloy_trie::Nibbles;
+
+    use crate::parallel_trie::SparseSubtrieType;
+
+    #[test]
+    fn sparse_subtrie_type() {
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 0])),
+            SparseSubtrieType::Upper
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 15])),
+            SparseSubtrieType::Upper
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 0, 0])),
+            SparseSubtrieType::Lower(0)
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 1, 0])),
+            SparseSubtrieType::Lower(1)
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 15, 0])),
+            SparseSubtrieType::Lower(15)
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 0, 0])),
+            SparseSubtrieType::Lower(240)
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 1, 0])),
+            SparseSubtrieType::Lower(241)
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 15, 0])),
+            SparseSubtrieType::Lower(255)
+        );
+    }
+}
