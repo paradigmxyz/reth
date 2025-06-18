@@ -18,9 +18,6 @@ pub mod compact_ids {
     /// Identifier for [`LegacyAnalyzed`](revm_bytecode::Bytecode::LegacyAnalyzed).
     pub const LEGACY_ANALYZED_BYTECODE_ID: u8 = 2;
 
-    /// Identifier for [`Eof`](revm_bytecode::Bytecode::Eof).
-    pub const EOF_BYTECODE_ID: u8 = 3;
-
     /// Identifier for [`Eip7702`](revm_bytecode::Bytecode::Eip7702).
     pub const EIP7702_BYTECODE_ID: u8 = 4;
 }
@@ -125,12 +122,12 @@ impl reth_codecs::Compact for Bytecode {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        use compact_ids::{EIP7702_BYTECODE_ID, EOF_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID};
+        use compact_ids::{EIP7702_BYTECODE_ID, LEGACY_ANALYZED_BYTECODE_ID};
 
         let bytecode = match &self.0 {
             RevmBytecode::LegacyAnalyzed(analyzed) => analyzed.bytecode(),
-            RevmBytecode::Eof(eof) => eof.raw(),
             RevmBytecode::Eip7702(eip7702) => eip7702.raw(),
+            _ => unreachable!("RevmBytecode::Eof will be removed in upcoming revm version"),
         };
         buf.put_u32(bytecode.len() as u32);
         buf.put_slice(bytecode.as_ref());
@@ -143,13 +140,12 @@ impl reth_codecs::Compact for Bytecode {
                 buf.put_slice(map);
                 1 + 8 + map.len()
             }
-            RevmBytecode::Eof(_) => {
-                buf.put_u8(EOF_BYTECODE_ID);
-                1
-            }
             RevmBytecode::Eip7702(_) => {
                 buf.put_u8(EIP7702_BYTECODE_ID);
                 1
+            }
+            _ => {
+                unreachable!("RevmBytecode::Eof will be removed in upcoming revm version")
             }
         };
         len + bytecode.len() + 4
@@ -192,8 +188,8 @@ impl reth_codecs::Compact for Bytecode {
                     revm_bytecode::JumpTable::from_slice(buf, jump_table_len),
                 ))
             }
-            EOF_BYTECODE_ID | EIP7702_BYTECODE_ID => {
-                // EOF and EIP-7702 bytecode objects will be decoded from the raw bytecode
+            EIP7702_BYTECODE_ID => {
+                // EIP-7702 bytecode objects will be decoded from the raw bytecode
                 Self(RevmBytecode::new_raw(bytes))
             }
             _ => unreachable!("Junk data in database: unknown Bytecode variant"),
