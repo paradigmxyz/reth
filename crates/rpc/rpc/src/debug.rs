@@ -34,7 +34,7 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
