@@ -1505,8 +1505,8 @@ where
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
-        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash).cloned() {
-            return Ok(Some(block.block))
+        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
+            return Ok(Some(block.block.clone()))
         }
 
         let (block, senders) = self
@@ -1914,12 +1914,13 @@ where
             let old = old
                 .iter()
                 .filter_map(|block| {
-                    let (_, trie) = self
+                    let trie = self
                         .state
                         .tree_state
                         .persisted_trie_updates
-                        .get(&block.recovered_block.hash())
-                        .cloned()?;
+                        .get(&block.recovered_block.hash())?
+                        .1
+                        .clone();
                     Some(ExecutedBlockWithTrieUpdates {
                         block: block.clone(),
                         trie: ExecutedTrieUpdates::Present(trie),
@@ -2283,7 +2284,7 @@ where
             // background task or try to compute it in parallel
             if use_state_root_task {
                 match handle.state_root() {
-                    Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
+                    Ok(StateRootComputeOutcome { state_root, trie_updates, trie }) => {
                         let elapsed = execution_finish.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
@@ -2297,6 +2298,9 @@ where
                                 "State root task returned incorrect state root"
                             );
                         }
+
+                        // hold on to the sparse trie for the next payload
+                        self.payload_processor.set_sparse_trie(trie);
                     }
                     Err(error) => {
                         debug!(target: "engine::tree", %error, "Background parallel state root computation failed");

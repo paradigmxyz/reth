@@ -599,7 +599,9 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
                 let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
                 self.state_by_block_hash(hash)
             }
-            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Earliest => {
+                self.history_by_block_number(self.earliest_block_number()?)
+            }
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => {
                 let hash = self

@@ -15,7 +15,7 @@ use reth_codecs::{
     alloy::transaction::{FromTxCompact, ToTxCompact},
     Compact,
 };
-use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
+use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, InMemorySize};
 use reth_op::{
     primitives::{Extended, SignedTransaction},
     OpTransaction,
@@ -198,20 +198,7 @@ impl ToTxCompact for CustomTransactionEnvelope {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BincodeCompatSignedTxCustom(pub Signed<TxPayment>);
-
-impl SerdeBincodeCompat for CustomTransactionEnvelope {
-    type BincodeRepr<'a> = BincodeCompatSignedTxCustom;
-
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        BincodeCompatSignedTxCustom(self.inner.clone())
-    }
-
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        Self { inner: repr.0.clone() }
-    }
-}
+impl RlpBincode for CustomTransactionEnvelope {}
 
 impl reth_codecs::alloy::transaction::Envelope for CustomTransactionEnvelope {
     fn signature(&self) -> &Signature {

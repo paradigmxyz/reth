@@ -2,8 +2,7 @@
 
 use crate::fees::{CallFees, CallFeesError};
 use alloy_consensus::{
-    error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction,
-    Transaction as ConsensusTransaction, TxEip4844,
+    error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction, TxEip4844,
 };
 use alloy_network::Network;
 use alloy_primitives::{Address, Bytes, Signature, TxKind, U256};
@@ -23,7 +22,7 @@ use reth_evm::{
     ConfigureEvm, TxEnvFor,
 };
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{NodePrimitives, SignedTransaction, TxTy};
+use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
 use serde::{Deserialize, Serialize};
@@ -124,32 +123,19 @@ pub trait FromConsensusTx<T> {
     fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self;
 }
 
-impl<T: ConsensusTransaction> FromConsensusTx<T> for Transaction<T> {
+impl<TxIn: alloy_consensus::Transaction, T: alloy_consensus::Transaction + From<TxIn>>
+    FromConsensusTx<TxIn> for Transaction<T>
+{
     type TxInfo = TransactionInfo;
 
-    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
-        let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
-        } = tx_info;
-        let effective_gas_price = base_fee
-            .map(|base_fee| {
-                tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
-            })
-            .unwrap_or_else(|| tx.max_fee_per_gas());
-
-        Self {
-            inner: Recovered::new_unchecked(tx, signer),
-            block_hash,
-            block_number,
-            transaction_index,
-            effective_gas_price: Some(effective_gas_price),
-        }
+    fn from_consensus_tx(tx: TxIn, signer: Address, tx_info: Self::TxInfo) -> Self {
+        Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info)
     }
 }
 
 impl<ConsensusTx, RpcTx> IntoRpcTx<RpcTx> for ConsensusTx
 where
-    ConsensusTx: ConsensusTransaction,
+    ConsensusTx: alloy_consensus::Transaction,
     RpcTx: FromConsensusTx<Self>,
 {
     type TxInfo = RpcTx::TxInfo;
@@ -174,14 +160,6 @@ where
     /// [`eth_simulateV1`]: <https://github.com/ethereum/execution-apis/pull/484>
     /// [required fields]: TransactionRequest::buildable_type
     fn try_into_sim_tx(self) -> Result<T, ValueError<Self>>;
-}
-
-impl IntoRpcTx<Transaction> for EthereumTxEnvelope<TxEip4844> {
-    type TxInfo = TransactionInfo;
-
-    fn into_rpc_tx(self, signer: Address, tx_info: TransactionInfo) -> Transaction {
-        Transaction::from_transaction(self.with_signer(signer).convert(), tx_info)
-    }
 }
 
 /// Adds extra context to [`TransactionInfo`].
@@ -226,11 +204,13 @@ pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
     Ok(OpTransactionInfo::new(tx_info, deposit_meta))
 }
 
-impl FromConsensusTx<OpTxEnvelope> for op_alloy_rpc_types::Transaction {
+impl<T: op_alloy_consensus::OpTransaction + alloy_consensus::Transaction> FromConsensusTx<T>
+    for op_alloy_rpc_types::Transaction<T>
+{
     type TxInfo = OpTransactionInfo;
 
-    fn from_consensus_tx(tx: OpTxEnvelope, signer: Address, tx_info: Self::TxInfo) -> Self {
-        Self::from_transaction(tx.with_signer(signer), tx_info)
+    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
+        Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
     }
 }
 
