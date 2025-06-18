@@ -957,9 +957,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
         // TODO: use osaka max blob count once <https://github.com/alloy-rs/alloy/pull/2427> is released
         let max_blob_count = if prague {
-            BlobParams::prague().max_blob_count
+            BlobParams::prague().max_blobs_per_tx
         } else {
-            BlobParams::cancun().max_blob_count
+            BlobParams::cancun().max_blobs_per_tx
         };
 
         let fork_tracker = ForkTracker {
