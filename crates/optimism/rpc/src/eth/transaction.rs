@@ -27,9 +27,7 @@ use std::{
 
 impl<N> EthTransactions for OpEthApi<N>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>
-        + reth_rpc_eth_api::helpers::LoadReceipt
-        + EthApiTypes<Error = OpEthApiError>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<Error = OpEthApiError>,
     N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
 {
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
