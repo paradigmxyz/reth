@@ -427,9 +427,7 @@ impl FeeHistoryEntry {
             ..Default::default()
         };
         
-        // Use the chain spec to get the appropriate base fee params and calculate next fee
-        parent_header
-            .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(self.timestamp))
-            .unwrap_or_default()
+        // Use the chain spec's centralized base fee calculation
+        chain_spec.next_block_base_fee(&parent_header, self.timestamp)
     }
 }
