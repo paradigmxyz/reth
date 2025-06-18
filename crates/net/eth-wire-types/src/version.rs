@@ -34,8 +34,7 @@ impl EthVersion {
     pub const LATEST: Self = Self::Eth68;
 
     /// All known eth vesions
-    pub const ALL_VERSIONS: &'static [EthVersion] =
-        &[Self::Eth69, Self::Eth68, Self::Eth67, Self::Eth66];
+    pub const ALL_VERSIONS: &'static [Self] = &[Self::Eth69, Self::Eth68, Self::Eth67, Self::Eth66];
 
     /// Returns the total number of messages the protocol version supports.
     pub const fn total_messages(&self) -> u8 {
