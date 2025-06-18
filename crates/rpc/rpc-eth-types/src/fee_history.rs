@@ -399,8 +399,6 @@ impl FeeHistoryEntry {
 
     /// Calculate the base fee for the next block according to the EIP-1559 spec.
     pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
-        // Create a minimal header with the required fields
-        // Custom overrides of next_block_base_fee that use more than these fields are not supported here.
         let parent_header = Header {
             gas_used: self.gas_used,
             gas_limit: self.gas_limit,
@@ -409,7 +407,6 @@ impl FeeHistoryEntry {
             ..Default::default()
         };
 
-        // Use the chain spec's centralized base fee calculation
         chain_spec.next_block_base_fee(&parent_header, self.timestamp)
     }
 
