@@ -2,7 +2,10 @@ use crate::{blinded::BlindedProvider, SparseNode, SparseTrieUpdates, TrieMasks};
 use alloc::vec::Vec;
 use alloy_primitives::{map::HashMap, B256};
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{prefix_set::PrefixSet, Nibbles, TrieNode};
+use reth_trie_common::{
+    prefix_set::{PrefixSet, PrefixSetMut},
+    Nibbles, TrieNode,
+};
 use tracing::trace;
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
@@ -149,6 +152,49 @@ impl ParallelSparseTrie {
         }
         self
     }
+
+    /// Returns a list of [subtries](SparseSubtrie) identifying the subtries that have changed
+    /// according to the provided [prefix set](PrefixSet).
+    ///
+    /// Along with the subtries, prefix sets are returned. Each prefix set contains the keys from
+    /// the original prefix set that belong to the subtrie.
+    ///
+    /// This method helps optimize hash recalculations by identifying which specific
+    /// subtries need to be updated. Each subtrie can then be updated in parallel.
+    #[allow(unused)]
+    fn get_changed_subtries(
+        &mut self,
+        prefix_set: &mut PrefixSet,
+    ) -> Vec<(SparseSubtrie, PrefixSet)> {
+        // Clone the prefix set to iterate over its keys. Cloning is cheap, it's just an Arc.
+        let prefix_set_clone = prefix_set.clone();
+        let mut prefix_set_iter = prefix_set_clone.into_iter();
+
+        let mut subtries = Vec::new();
+        for subtrie in &mut self.subtries {
+            if let Some(subtrie) = subtrie.take_if(|subtrie| prefix_set.contains(&subtrie.path)) {
+                let prefix_set = if prefix_set.all() {
+                    PrefixSetMut::all()
+                } else {
+                    // Take those keys from the original prefix set that start with the subtrie path
+                    //
+                    // Subtries are stored in the order of their paths, so we can use the same
+                    // prefix set iterator.
+                    PrefixSetMut::from(
+                        prefix_set_iter
+                            .by_ref()
+                            .skip_while(|key| key < &&subtrie.path)
+                            .take_while(|key| key.has_prefix(&subtrie.path))
+                            .cloned(),
+                    )
+                }
+                .freeze();
+
+                subtries.push((subtrie, prefix_set));
+            }
+        }
+        subtries
+    }
 }
 
 /// This is a subtrie of the [`ParallelSparseTrie`] that contains a map from path to sparse trie
@@ -168,6 +214,11 @@ pub struct SparseSubtrie {
 }
 
 impl SparseSubtrie {
+    /// Creates a new sparse subtrie with the given root path.
+    pub fn new(path: Nibbles) -> Self {
+        Self { path, ..Default::default() }
+    }
+
     /// Recalculates and updates the RLP hashes for the changed nodes in this subtrie.
     pub fn update_hashes(&mut self, prefix_set: &mut PrefixSet) -> SparseTrieResult<()> {
         trace!(target: "trie::parallel_sparse", path=?self.path, "Updating subtrie hashes");
@@ -199,18 +250,120 @@ impl SparseSubtrieType {
         if path.len() <= 2 {
             Self::Upper
         } else {
-            // Convert first two nibbles of the path into a number.
-            let index = (path[0] << 4 | path[1]) as usize;
-            Self::Lower(index)
+            Self::Lower(path_subtrie_index_unchecked(path))
         }
     }
+}
+
+/// Convert first two nibbles of the path into a lower subtrie index in the range [0, 255].
+///
+/// # Panics
+///
+/// If the path is shorter than two nibbles.
+fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
+    (path[0] << 4 | path[1]) as usize
 }
 
 #[cfg(test)]
 mod tests {
     use alloy_trie::Nibbles;
+    use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
 
-    use crate::parallel_trie::SparseSubtrieType;
+    use crate::{
+        parallel_trie::{path_subtrie_index_unchecked, SparseSubtrieType},
+        ParallelSparseTrie, SparseSubtrie,
+    };
+
+    #[test]
+    fn test_get_changed_subtries_empty() {
+        let mut trie = ParallelSparseTrie::default();
+        let mut prefix_set = PrefixSet::default();
+
+        let changed = trie.get_changed_subtries(&mut prefix_set);
+        assert!(changed.is_empty());
+    }
+
+    #[test]
+    fn test_get_changed_subtries() {
+        // Create a trie with three subtries
+        let mut trie = ParallelSparseTrie::default();
+        let subtrie_1 = SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]));
+        let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
+        let subtrie_2 = SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]));
+        let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
+        let subtrie_3 = SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]));
+        let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
+
+        // Add subtries at specific positions
+        trie.subtries[subtrie_1_index] = Some(subtrie_1.clone());
+        trie.subtries[subtrie_2_index] = Some(subtrie_2.clone());
+        trie.subtries[subtrie_3_index] = Some(subtrie_3);
+
+        // Create a prefix set with the keys that match only the second subtrie
+        let mut prefix_set = PrefixSetMut::from([
+            // Doesn't match any subtries
+            Nibbles::from_nibbles_unchecked([0x0]),
+            // Match second subtrie
+            Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x0]),
+            Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x1, 0x0]),
+            // Doesn't match any subtries
+            Nibbles::from_nibbles_unchecked([0x2, 0x0, 0x0]),
+        ])
+        .freeze();
+
+        // Second subtrie should be removed and returned
+        let changed = trie.get_changed_subtries(&mut prefix_set);
+        assert_eq!(
+            changed
+                .into_iter()
+                .map(|(subtrie, prefix_set)| {
+                    (subtrie, prefix_set.iter().cloned().collect::<Vec<_>>())
+                })
+                .collect::<Vec<_>>(),
+            vec![(
+                subtrie_2,
+                vec![
+                    Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x0]),
+                    Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x1, 0x0])
+                ]
+            )]
+        );
+        assert!(trie.subtries[subtrie_2_index].is_none());
+
+        // First subtrie should remain unchanged
+        assert_eq!(trie.subtries[subtrie_1_index], Some(subtrie_1));
+    }
+
+    #[test]
+    fn test_get_changed_subtries_all() {
+        // Create a trie with three subtries
+        let mut trie = ParallelSparseTrie::default();
+        let subtrie_1 = SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]));
+        let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
+        let subtrie_2 = SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]));
+        let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
+        let subtrie_3 = SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]));
+        let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
+
+        // Add subtries at specific positions
+        trie.subtries[subtrie_1_index] = Some(subtrie_1.clone());
+        trie.subtries[subtrie_2_index] = Some(subtrie_2.clone());
+        trie.subtries[subtrie_3_index] = Some(subtrie_3.clone());
+
+        // Create a prefix set that matches any key
+        let mut prefix_set = PrefixSetMut::all().freeze();
+
+        // All subtries should be removed and returned
+        let changed = trie.get_changed_subtries(&mut prefix_set);
+        assert_eq!(
+            changed
+                .into_iter()
+                .map(|(subtrie, prefix_set)| { (subtrie, prefix_set.all()) })
+                .collect::<Vec<_>>(),
+            vec![(subtrie_1, true), (subtrie_2, true), (subtrie_3, true)]
+        );
+        assert!(trie.subtries.iter().all(Option::is_none));
+    }
 
     #[test]
     fn sparse_subtrie_type() {
