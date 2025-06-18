@@ -129,22 +129,7 @@ impl<TxIn: alloy_consensus::Transaction, T: alloy_consensus::Transaction + From<
     type TxInfo = TransactionInfo;
 
     fn from_consensus_tx(tx: TxIn, signer: Address, tx_info: Self::TxInfo) -> Self {
-        let TransactionInfo {
-            block_hash, block_number, index: transaction_index, base_fee, ..
-        } = tx_info;
-        let effective_gas_price = base_fee
-            .map(|base_fee| {
-                tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128
-            })
-            .unwrap_or_else(|| tx.max_fee_per_gas());
-
-        Self {
-            inner: Recovered::new_unchecked(tx, signer).convert(),
-            block_hash,
-            block_number,
-            transaction_index,
-            effective_gas_price: Some(effective_gas_price),
-        }
+        Self::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info)
     }
 }
 
