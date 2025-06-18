@@ -71,6 +71,7 @@ impl SparseSubtrieType {
         if path.len() <= 2 {
             Self::Upper
         } else {
+            // Convert first two nibbles of the path into a number.
             let index = (path[0] << 4 | path[1]) as usize;
             Self::Lower(index)
         }
