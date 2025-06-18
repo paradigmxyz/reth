@@ -2184,9 +2184,21 @@ where
         //    root task proof calculation will include a lot of unrelated paths in the prefix sets.
         //    It's cheaper to run a parallel state root that does one walk over trie tables while
         //    accounting for the prefix sets.
+        let has_ancestors_with_missing_trie_updates =
+            self.has_ancestors_with_missing_trie_updates(block.sealed_header());
         let mut use_state_root_task = run_parallel_state_root &&
             self.config.use_state_root_task() &&
-            !self.has_ancestors_with_missing_trie_updates(block.sealed_header());
+            !has_ancestors_with_missing_trie_updates;
+
+        debug!(
+            target: "engine::tree",
+            block=?block_num_hash,
+            run_parallel_state_root,
+            has_ancestors_with_missing_trie_updates,
+            use_state_root_task,
+            config_allows_state_root_task=self.config.use_state_root_task(),
+            "Deciding which state root algorithm to run"
+        );
 
         // use prewarming background task
         let header = block.clone_sealed_header();
@@ -2226,6 +2238,7 @@ where
                     &self.config,
                 )
             } else {
+                debug!(target: "engine::tree", block=?block_num_hash, "Disabling state root task due to non-empty prefix sets");
                 use_state_root_task = false;
                 self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
             }
@@ -2283,6 +2296,7 @@ where
             // if we new payload extends the current canonical change we attempt to use the
             // background task or try to compute it in parallel
             if use_state_root_task {
+                debug!(target: "engine::tree", block=?block_num_hash, "Using sparse trie state root algorithm");
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates, trie }) => {
                         let elapsed = execution_finish.elapsed();
@@ -2307,6 +2321,7 @@ where
                     }
                 }
             } else {
+                debug!(target: "engine::tree", block=?block_num_hash, "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
                     persisting_kind,
                     block.header().parent_hash(),
