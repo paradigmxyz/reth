@@ -147,7 +147,7 @@ pub trait Block:
         } else {
             // Fall back to recovery if lengths don't match
             let Ok(senders) = self.body().recover_signers_unchecked() else {
-                return Err(BlockRecoveryError::new(self))
+                return Err(BlockRecoveryError::new(self));
             };
             senders
         };
@@ -173,7 +173,7 @@ pub trait Block:
         <Self::Body as BlockBody>::Transaction: SignedTransaction,
     {
         let Ok(signers) = self.body().recover_signers() else {
-            return Err(BlockRecoveryError::new(self))
+            return Err(BlockRecoveryError::new(self));
         };
         Ok(RecoveredBlock::new_unhashed(self, signers))
     }

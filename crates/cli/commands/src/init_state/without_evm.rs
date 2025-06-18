@@ -148,7 +148,7 @@ where
     while let Ok(append_result) = rx.recv() {
         if let Err(err) = append_result {
             tracing::error!(target: "reth::cli", "Error appending dummy chain: {err}");
-            return Err(err)
+            return Err(err);
         }
     }
 

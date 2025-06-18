@@ -249,7 +249,7 @@ where
                             Box::new(state),
                             hashed_entries_walked,
                             trie_updates,
-                        ))
+                        ));
                     }
                 }
             }
@@ -406,7 +406,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok((EMPTY_ROOT_HASH, 0, StorageTrieUpdates::deleted()))
+            return Ok((EMPTY_ROOT_HASH, 0, StorageTrieUpdates::deleted()));
         }
 
         let mut tracker = TrieTracker::default();

@@ -73,7 +73,7 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
                 return Err(ConsensusError::GasLimitInvalidIncrease {
                     parent_gas_limit,
                     child_gas_limit: header.gas_limit(),
-                })
+                });
             }
         }
         // Check for a decrease in gas limit beyond the allowed threshold.
@@ -83,13 +83,13 @@ impl<ChainSpec: EthChainSpec + EthereumHardforks> EthBeaconConsensus<ChainSpec> 
             return Err(ConsensusError::GasLimitInvalidDecrease {
                 parent_gas_limit,
                 child_gas_limit: header.gas_limit(),
-            })
+            });
         }
         // Check if the self gas limit is below the minimum required limit.
         else if header.gas_limit() < MINIMUM_GAS_LIMIT {
             return Err(ConsensusError::GasLimitInvalidMinimum {
                 child_gas_limit: header.gas_limit(),
-            })
+            });
         }
 
         Ok(())
@@ -177,11 +177,11 @@ where
         if self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) &&
             header.withdrawals_root().is_none()
         {
-            return Err(ConsensusError::WithdrawalsRootMissing)
+            return Err(ConsensusError::WithdrawalsRootMissing);
         } else if !self.chain_spec.is_shanghai_active_at_timestamp(header.timestamp()) &&
             header.withdrawals_root().is_some()
         {
-            return Err(ConsensusError::WithdrawalsRootUnexpected)
+            return Err(ConsensusError::WithdrawalsRootUnexpected);
         }
 
         // Ensures that EIP-4844 fields are valid once cancun is active.
@@ -193,19 +193,19 @@ where
                     .unwrap_or_else(BlobParams::cancun),
             )?;
         } else if header.blob_gas_used().is_some() {
-            return Err(ConsensusError::BlobGasUsedUnexpected)
+            return Err(ConsensusError::BlobGasUsedUnexpected);
         } else if header.excess_blob_gas().is_some() {
-            return Err(ConsensusError::ExcessBlobGasUnexpected)
+            return Err(ConsensusError::ExcessBlobGasUnexpected);
         } else if header.parent_beacon_block_root().is_some() {
-            return Err(ConsensusError::ParentBeaconBlockRootUnexpected)
+            return Err(ConsensusError::ParentBeaconBlockRootUnexpected);
         }
 
         if self.chain_spec.is_prague_active_at_timestamp(header.timestamp()) {
             if header.requests_hash().is_none() {
-                return Err(ConsensusError::RequestsHashMissing)
+                return Err(ConsensusError::RequestsHashMissing);
             }
         } else if header.requests_hash().is_some() {
-            return Err(ConsensusError::RequestsHashUnexpected)
+            return Err(ConsensusError::RequestsHashUnexpected);
         }
 
         Ok(())

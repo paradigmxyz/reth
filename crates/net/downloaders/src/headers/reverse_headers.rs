@@ -160,7 +160,7 @@ where
 
         // If only a few peers are connected we keep it low
         if num_peers < self.min_concurrent_requests {
-            return max_dynamic
+            return max_dynamic;
         }
 
         max_dynamic.min(self.max_concurrent_requests)
@@ -183,7 +183,7 @@ where
                 // headers so follow-up requests will use that as start.
                 self.next_request_block_number -= request.limit;
 
-                return Some(request)
+                return Some(request);
             }
         }
 
@@ -272,7 +272,7 @@ where
                     trace!(target: "downloaders::headers", %error ,"Failed to validate header");
                     return Err(
                         HeadersResponseError { request, peer_id: Some(peer_id), error }.into()
-                    )
+                    );
                 }
             } else {
                 self.validate_sync_target(&parent, request.clone(), peer_id)?;
@@ -299,7 +299,7 @@ where
                         error: Box::new(error),
                     },
                 }
-                .into())
+                .into());
             }
 
             // If the header is valid on its own, but not against its parent, we return it as
@@ -324,7 +324,7 @@ where
                     header: Box::new(last_header.clone()),
                     error: Box::new(error),
                 }
-                .into())
+                .into());
             }
         }
 
@@ -397,7 +397,7 @@ where
                         peer_id: Some(peer_id),
                         error: DownloadError::EmptyResponse,
                     }
-                    .into())
+                    .into());
                 }
 
                 let header = headers.swap_remove(0);
@@ -413,7 +413,7 @@ where
                                     GotExpected { got: target.hash(), expected: hash }.into(),
                                 ),
                             }
-                            .into())
+                            .into());
                         }
                     }
                     SyncTargetBlock::Number(number) => {
@@ -426,7 +426,7 @@ where
                                     expected: number,
                                 }),
                             }
-                            .into())
+                            .into());
                         }
                     }
                 }
@@ -475,7 +475,7 @@ where
                         peer_id: Some(peer_id),
                         error: DownloadError::EmptyResponse,
                     }
-                    .into())
+                    .into());
                 }
 
                 if (headers.len() as u64) != request.limit {
@@ -487,7 +487,7 @@ where
                         }),
                         request,
                     }
-                    .into())
+                    .into());
                 }
 
                 // sort headers from highest to lowest block number
@@ -507,7 +507,7 @@ where
                             expected: requested_block_number,
                         }),
                     }
-                    .into())
+                    .into());
                 }
 
                 // check if the response is the next expected
@@ -578,7 +578,7 @@ where
                     self.metrics.buffered_responses.decrement(1.);
 
                     if let Err(err) = self.process_next_headers(request, headers, peer_id) {
-                        return Some(err)
+                        return Some(err);
                     }
                 }
                 Ordering::Greater => {
@@ -729,7 +729,7 @@ where
                         .map(|h| h.number())
                     {
                         self.sync_target = Some(new_sync_target.with_number(target_number));
-                        return
+                        return;
                     }
 
                     trace!(target: "downloaders::headers", new=?target, "Request new sync target");
@@ -796,7 +796,7 @@ where
                 sync_target=?this.sync_target,
                 "The downloader sync boundaries have not been set"
             );
-            return Poll::Pending
+            return Poll::Pending;
         }
 
         // If we have a new tip request we need to complete that first before we send batched
@@ -810,7 +810,7 @@ where
                             trace!(target: "downloaders::headers", %error, "invalid sync target response");
                             if error.is_channel_closed() {
                                 // download channel closed which means the network was dropped
-                                return Poll::Ready(None)
+                                return Poll::Ready(None);
                             }
 
                             this.penalize_peer(error.peer_id, &error.error);
@@ -820,13 +820,13 @@ where
                         }
                         Err(ReverseHeadersDownloaderError::Downloader(error)) => {
                             this.clear();
-                            return Poll::Ready(Some(Err(error)))
+                            return Poll::Ready(Some(Err(error)));
                         }
                     };
                 }
                 Poll::Pending => {
                     this.sync_target_request = Some(req);
-                    return Poll::Pending
+                    return Poll::Pending;
                 }
             }
         }
@@ -852,13 +852,13 @@ where
                     Err(ReverseHeadersDownloaderError::Response(error)) => {
                         if error.is_channel_closed() {
                             // download channel closed which means the network was dropped
-                            return Poll::Ready(None)
+                            return Poll::Ready(None);
                         }
                         this.on_headers_error(error);
                     }
                     Err(ReverseHeadersDownloaderError::Downloader(error)) => {
                         this.clear();
-                        return Poll::Ready(Some(Err(error)))
+                        return Poll::Ready(Some(Err(error)));
                     }
                 };
             }
@@ -883,7 +883,7 @@ where
                     this.submit_request(request, Priority::Normal);
                 } else {
                     // no more requests
-                    break
+                    break;
                 }
             }
 
@@ -900,11 +900,11 @@ where
                 trace!(target: "downloaders::headers", batch=%next_batch.len(), "Returning validated batch");
 
                 this.metrics.total_flushed.increment(next_batch.len() as u64);
-                return Poll::Ready(Some(Ok(next_batch)))
+                return Poll::Ready(Some(Ok(next_batch)));
             }
 
             if !progress {
-                break
+                break;
             }
         }
 
@@ -913,10 +913,10 @@ where
             let next_batch = this.split_next_batch();
             if next_batch.is_empty() {
                 this.clear();
-                return Poll::Ready(None)
+                return Poll::Ready(None);
             }
             this.metrics.total_flushed.increment(next_batch.len() as u64);
-            return Poll::Ready(Some(Ok(next_batch)))
+            return Poll::Ready(Some(Ok(next_batch)));
         }
 
         Poll::Pending
@@ -1009,7 +1009,7 @@ impl HeadersResponseError {
     /// Returns true if the error was caused by a closed channel to the network.
     const fn is_channel_closed(&self) -> bool {
         if let DownloadError::RequestError(ref err) = self.error {
-            return err.is_channel_closed()
+            return err.is_channel_closed();
         }
         false
     }

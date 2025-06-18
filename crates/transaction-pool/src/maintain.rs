@@ -458,7 +458,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     // keep track of mined blob transactions
                     blob_store_tracker.add_new_chain_blocks(&blocks);
 
-                    continue
+                    continue;
                 }
 
                 let mut changed_accounts = Vec::with_capacity(state.state().len());
@@ -608,14 +608,14 @@ where
     P: TransactionPool<Transaction: PoolTransaction<Consensus: SignedTransaction>>,
 {
     if !file_path.exists() {
-        return Ok(())
+        return Ok(());
     }
 
     debug!(target: "txpool", txs_file =?file_path, "Check local persistent storage for saved transactions");
     let data = reth_fs_util::read(file_path)?;
 
     if data.is_empty() {
-        return Ok(())
+        return Ok(());
     }
 
     let txs_signed: Vec<<P::Transaction as PoolTransaction>::Consensus> =
@@ -644,7 +644,7 @@ where
     let local_transactions = pool.get_local_transactions();
     if local_transactions.is_empty() {
         trace!(target: "txpool", "no local transactions to save");
-        return
+        return;
     }
 
     let local_transactions = local_transactions
@@ -693,7 +693,7 @@ pub async fn backup_local_transactions_task<P>(
 {
     let Some(transactions_path) = config.transactions_path else {
         // nothing to do
-        return
+        return;
     };
 
     if let Err(err) = load_and_reinsert_transactions(pool.clone(), &transactions_path).await {

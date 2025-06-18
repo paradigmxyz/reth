@@ -25,7 +25,7 @@ pub trait RessProtocolProvider: Send + Sync {
                 headers.len() >= MAX_HEADERS_SERVE ||
                 total_bytes > SOFT_RESPONSE_LIMIT
             {
-                break
+                break;
             }
         }
         Ok(headers)
@@ -43,10 +43,10 @@ pub trait RessProtocolProvider: Send + Sync {
                 total_bytes += body.length();
                 bodies.push(body);
                 if bodies.len() >= MAX_BODIES_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
-                    break
+                    break;
                 }
             } else {
-                break
+                break;
             }
         }
         Ok(bodies)

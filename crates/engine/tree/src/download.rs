@@ -144,7 +144,7 @@ where
     /// given hash.
     fn download_full_block(&mut self, hash: B256) -> bool {
         if self.is_inflight_request(hash) {
-            return false
+            return false;
         }
         self.push_pending_event(DownloadOutcome::NewDownloadStarted {
             remaining_blocks: 1,
@@ -256,7 +256,7 @@ where
                 if peek.0 .0.hash() == block.0 .0.hash() {
                     PeekMut::pop(peek);
                 } else {
-                    break
+                    break;
                 }
             }
             downloaded_blocks.push(block.0.into());

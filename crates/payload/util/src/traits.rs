@@ -78,9 +78,9 @@ where
         loop {
             let tx = self.best.next()?;
             if self.invalid.contains(tx.sender_ref()) {
-                continue
+                continue;
             }
-            return Some(tx.transaction.clone())
+            return Some(tx.transaction.clone());
         }
     }
 

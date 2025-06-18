@@ -157,7 +157,7 @@ impl Case for BlockchainTestCase {
     fn run(&self) -> Result<(), Error> {
         // If the test is marked for skipping, return a Skipped error immediately.
         if self.skip {
-            return Err(Error::Skipped)
+            return Err(Error::Skipped);
         }
 
         // Iterate through test cases, filtering by the network type to exclude specific forks.
@@ -280,7 +280,7 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             StateRoot::overlay_root_with_updates(provider.tx_ref(), hashed_state.clone())
                 .map_err(|_| Error::BlockProcessingFailed { block_number })?;
         if computed_state_root != block.state_root {
-            return Err(Error::BlockProcessingFailed { block_number })
+            return Err(Error::BlockProcessingFailed { block_number });
         }
 
         // Commit the post state/state diff to the database

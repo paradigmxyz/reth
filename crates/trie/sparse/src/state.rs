@@ -231,7 +231,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         // Reveal the remaining proof nodes.
         for (path, bytes) in proof {
             if self.revealed_account_paths.contains(&path) {
-                continue
+                continue;
             }
             let node = TrieNode::decode(&mut &bytes[..])?;
             trie.reveal_node(path.clone(), node, TrieMasks::none())?;
@@ -278,7 +278,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         for (path, bytes) in proof {
             // If the node is already revealed, skip it.
             if revealed_nodes.contains(&path) {
-                continue
+                continue;
             }
             let node = TrieNode::decode(&mut &bytes[..])?;
             trie.reveal_node(path.clone(), node, TrieMasks::none())?;
@@ -590,13 +590,13 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
         // Validate root node.
         let Some((path, node)) = proof.next() else { return Ok(None) };
         if !path.is_empty() {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
+            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into());
         }
 
         // Decode root node and perform sanity check.
         let root_node = TrieNode::decode(&mut &node[..])?;
         if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
+            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into());
         }
 
         Ok(Some(root_node))
@@ -613,7 +613,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 path,
                 node: alloy_rlp::encode(&root_node).into(),
             }
-            .into())
+            .into());
         }
 
         // Perform sanity check.
@@ -622,7 +622,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 path,
                 node: alloy_rlp::encode(&root_node).into(),
             }
-            .into())
+            .into());
         }
 
         Ok(Some(root_node))
@@ -796,7 +796,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
                 EMPTY_ROOT_HASH
             }
         } else {
-            return Err(SparseTrieErrorKind::Blind.into())
+            return Err(SparseTrieErrorKind::Blind.into());
         };
 
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
@@ -818,7 +818,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// will be removed.
     pub fn update_account_storage_root(&mut self, address: B256) -> SparseStateTrieResult<()> {
         if !self.is_account_revealed(address) {
-            return Err(SparseTrieErrorKind::Blind.into())
+            return Err(SparseTrieErrorKind::Blind.into());
         }
 
         // Nothing to update if the account doesn't exist in the trie.
@@ -828,7 +828,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             .transpose()?
         else {
             trace!(target: "trie::sparse", ?address, "Account not found in trie, skipping storage root update");
-            return Ok(())
+            return Ok(());
         };
 
         // Calculate the new storage root. If the storage trie doesn't exist, the storage root will
@@ -915,7 +915,7 @@ fn filter_revealed_nodes(
         // If the node is already revealed, skip it.
         if revealed_nodes.contains(&path) {
             result.skipped_nodes += 1;
-            continue
+            continue;
         }
 
         result.new_nodes += 1;

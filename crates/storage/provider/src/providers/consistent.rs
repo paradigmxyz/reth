@@ -148,7 +148,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Option<ExecutionOutcome<ReceiptTy<N>>>> {
         if range.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
         let start_block_number = *range.start();
         let end_block_number = *range.end();
@@ -165,10 +165,10 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // get transaction receipts
         let Some(from_transaction_num) = block_bodies.first().map(|body| body.1.first_tx_num())
         else {
-            return Ok(None)
+            return Ok(None);
         };
         let Some(to_transaction_num) = block_bodies.last().map(|body| body.1.last_tx_num()) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         let mut account_changeset = Vec::new();
@@ -327,7 +327,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         });
 
         if start > end {
-            return Ok(vec![])
+            return Ok(vec![]);
         }
 
         // Split range into storage_range and in-memory range. If the in-memory range is not
@@ -375,7 +375,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             // The predicate was not met, if the number of items differs from the expected. So, we
             // return what we have.
             if items.len() as u64 != storage_range.end() - storage_range.start() + 1 {
-                return Ok(items)
+                return Ok(items);
             }
         }
 
@@ -385,7 +385,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
                 if let Some(item) = map_block_state_item(block, &mut predicate) {
                     items.push(item);
                 } else {
-                    break
+                    break;
                 }
             }
         }
@@ -448,7 +448,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         });
 
         if start > end {
-            return Ok(vec![])
+            return Ok(vec![]);
         }
 
         let mut tx_range = start..=end;
@@ -482,7 +482,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             // transaction, advance
             if *tx_range.start() >= in_memory_tx_num + block_tx_count as u64 {
                 in_memory_tx_num += block_tx_count as u64;
-                continue
+                continue;
             }
 
             // This should only be more than 0 once, in case of a partial range inside a block.
@@ -497,7 +497,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
 
             // Break if the range has been fully processed
             if in_memory_tx_num > *tx_range.end() {
-                break
+                break;
             }
 
             // Set updated range
@@ -540,7 +540,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         // database lookup
         if let HashOrNumber::Number(id) = id {
             if id < in_memory_tx_num {
-                return fetch_from_db(provider)
+                return fetch_from_db(provider);
             }
         }
 
@@ -553,12 +553,12 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
                 match id {
                     HashOrNumber::Hash(tx_hash) => {
                         if tx_hash == block.body().transactions()[tx_index].trie_hash() {
-                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state)
+                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state);
                         }
                     }
                     HashOrNumber::Number(id) => {
                         if id == in_memory_tx_num {
-                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state)
+                            return fetch_from_block_state(tx_index, in_memory_tx_num, block_state);
                         }
                     }
                 }
@@ -569,7 +569,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
 
         // Not found in-memory, so check database.
         if let HashOrNumber::Hash(_) = id {
-            return fetch_from_db(provider)
+            return fetch_from_db(provider);
         }
 
         Ok(None)
@@ -587,7 +587,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         M: Fn(&BlockState<N::Primitives>) -> ProviderResult<R>,
     {
         if let Some(Some(block_state)) = self.head_block.as_ref().map(|b| b.block_on_chain(id)) {
-            return fetch_from_block_state(block_state)
+            return fetch_from_block_state(block_state);
         }
         fetch_from_db(&self.storage_provider)
     }
@@ -802,7 +802,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
                 |db_provider| db_provider.find_block_by_hash(hash, BlockSource::Canonical),
                 |block_state| Ok(Some(block_state.block_ref().recovered_block().clone_block())),
             )? {
-                return Ok(Some(block))
+                return Ok(Some(block));
             }
         }
 
@@ -811,7 +811,7 @@ impl<N: ProviderNodeTypes> BlockReader for ConsistentProvider<N> {
                 .canonical_in_memory_state
                 .pending_block()
                 .filter(|b| b.hash() == hash)
-                .map(|b| b.into_block()))
+                .map(|b| b.into_block()));
         }
 
         Ok(None)
@@ -947,7 +947,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
 
     fn transaction_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Transaction>> {
         if let Some(tx) = self.head_block.as_ref().and_then(|b| b.transaction_on_chain(hash)) {
-            return Ok(Some(tx))
+            return Ok(Some(tx));
         }
 
         self.storage_provider.transaction_by_hash(hash)
@@ -960,7 +960,7 @@ impl<N: ProviderNodeTypes> TransactionsProvider for ConsistentProvider<N> {
         if let Some((tx, meta)) =
             self.head_block.as_ref().and_then(|b| b.transaction_meta_on_chain(tx_hash))
         {
-            return Ok(Some((tx, meta)))
+            return Ok(Some((tx, meta)));
         }
 
         self.storage_provider.transaction_by_hash_with_meta(tx_hash)
@@ -1342,7 +1342,7 @@ impl<N: ProviderNodeTypes> StorageChangeSetReader for ConsistentProvider<N> {
                 .unwrap_or(true);
 
             if !storage_history_exists {
-                return Err(ProviderError::StateAtBlockPruned(block_number))
+                return Err(ProviderError::StateAtBlockPruned(block_number));
             }
 
             self.storage_provider.storage_changeset(block_number)
@@ -1388,7 +1388,7 @@ impl<N: ProviderNodeTypes> ChangeSetReader for ConsistentProvider<N> {
                 .unwrap_or(true);
 
             if !account_history_exists {
-                return Err(ProviderError::StateAtBlockPruned(block_number))
+                return Err(ProviderError::StateAtBlockPruned(block_number));
             }
 
             self.storage_provider.account_block_changeset(block_number)

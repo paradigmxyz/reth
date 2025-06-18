@@ -80,7 +80,7 @@ pub trait EthBlocks: LoadBlock {
                     .provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body().transactions().len()))
+                    .map(|block| block.body().transactions().len()));
             }
 
             let block_hash = match self
@@ -147,7 +147,7 @@ pub trait EthBlocks: LoadBlock {
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)
-                    .map(|b| b.map(|(b, r)| (b.clone_sealed_block(), r)))
+                    .map(|b| b.map(|(b, r)| (b.clone_sealed_block(), r)));
             }
 
             Ok(None)

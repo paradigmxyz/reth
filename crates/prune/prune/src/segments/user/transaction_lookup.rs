@@ -43,7 +43,7 @@ where
             Some(range) => range,
             None => {
                 trace!(target: "pruner", "No transaction lookup entries to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         }
         .into_inner();
@@ -65,7 +65,7 @@ where
         if hashes.len() != tx_count {
             return Err(PrunerError::InconsistentData(
                 "Unexpected number of transaction hashes retrieved by transaction number range",
-            ))
+            ));
         }
 
         let mut limiter = input.limiter;

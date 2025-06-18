@@ -213,7 +213,7 @@ impl FromStr for InvalidBlockSelection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.is_empty() {
-            return Ok(Self(Default::default()))
+            return Ok(Self(Default::default()));
         }
         let hooks = s.split(',').map(str::trim).peekable();
         Self::try_from_selection(hooks)

@@ -29,7 +29,7 @@ where
         Some(range) => range,
         None => {
             trace!(target: "pruner", "No receipts to prune");
-            return Ok(SegmentOutput::done())
+            return Ok(SegmentOutput::done());
         }
     };
     let tx_range_end = *tx_range.end();

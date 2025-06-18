@@ -60,7 +60,7 @@ where
             return Err(PayloadError::BlockHash {
                 execution: sealed_block.hash(),
                 consensus: expected_hash,
-            })?
+            })?;
         }
 
         shanghai::ensure_well_formed_fields(

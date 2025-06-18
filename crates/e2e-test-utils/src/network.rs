@@ -47,7 +47,7 @@ where
                 NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
                     let peer_id = info.peer_id;
                     info!("Session established with peer: {:?}", peer_id);
-                    return Some(peer_id)
+                    return Some(peer_id);
                 }
                 _ => {}
             }

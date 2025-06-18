@@ -276,7 +276,7 @@ impl RlpDecodableReceipt for OpReceipt {
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, OpTxType::Legacy)
+            return Self::rlp_decode_inner(buf, OpTxType::Legacy);
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt

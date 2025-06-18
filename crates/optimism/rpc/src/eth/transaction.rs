@@ -57,7 +57,7 @@ where
                     tracing::warn!(target: "rpc::eth", %err, %hash, "successfully sent tx to sequencer, but failed to persist in local tx pool");
             });
 
-            return Ok(hash)
+            return Ok(hash);
         }
 
         // submit the transaction to the pool with a `Local` origin

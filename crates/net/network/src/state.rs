@@ -208,7 +208,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         for (peer_id, peer) in peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
-                continue
+                continue;
             }
 
             // Queue a `NewBlock` message for the peer
@@ -228,7 +228,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             }
 
             if count >= num_propagate {
-                break
+                break;
             }
         }
     }
@@ -241,7 +241,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         for (peer_id, peer) in &mut self.active_peers {
             if peer.blocks.contains(&msg.hash) {
                 // skip peers which already reported the block
-                continue
+                continue;
             }
 
             if self.state_fetcher.update_peer_block(peer_id, msg.hash, number) {
@@ -430,7 +430,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
         loop {
             // drain buffered messages
             if let Some(message) = self.queued_messages.pop_front() {
-                return Poll::Ready(message)
+                return Poll::Ready(message);
             }
 
             while let Poll::Ready(discovery) = self.discovery.poll(cx) {
@@ -500,7 +500,7 @@ impl<N: NetworkPrimitives> NetworkState<N> {
             // We need to poll again tn case we have received any responses because they may have
             // triggered follow-up requests.
             if self.queued_messages.is_empty() {
-                return Poll::Pending
+                return Poll::Pending;
             }
         }
     }

@@ -89,7 +89,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> ImportOpCommand<C> {
                 body.transactions.retain(|_| {
                     if is_dup_tx(block_number) {
                         total_filtered_out_dup_txns += 1;
-                        return false
+                        return false;
                     }
                     true
                 })

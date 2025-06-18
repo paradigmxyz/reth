@@ -78,7 +78,7 @@ fn read_file(
 ) -> Result<Vec<u8>, SuperchainConfigError> {
     for entry in archive.entries() {
         if entry.filename().as_str()? == file_path {
-            return Ok(entry.data().to_vec())
+            return Ok(entry.data().to_vec());
         }
     }
     Err(SuperchainConfigError::FileNotFound(file_path.to_string()))
@@ -127,7 +127,7 @@ mod tests {
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>();
             if filename.first().unwrap().ne(&"genesis") {
-                continue
+                continue;
             }
             read_superchain_metadata(
                 &filename.get(2).unwrap().replace(".json.zz", ""),

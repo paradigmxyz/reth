@@ -140,7 +140,7 @@ where
                 // FIXME: we don't necessarily have access to the parent block here because the
                 // parent block isn't necessarily part of the canonical chain yet. Instead this
                 // function should receive the list of in memory blocks as input
-                return Ok(())
+                return Ok(());
             };
             let predeploy_storage_updates = state_updates
                 .storages

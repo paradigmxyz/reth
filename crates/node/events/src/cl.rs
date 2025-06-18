@@ -51,18 +51,18 @@ impl<H: Send + Sync> Stream for ConsensusLayerHealthEvents<H> {
             if let Some(fork_choice) = this.canon_chain.last_received_update_timestamp() {
                 if fork_choice.elapsed() <= NO_FORKCHOICE_UPDATE_RECEIVED_PERIOD {
                     // We had an FCU, and it's recent. CL is healthy.
-                    continue
+                    continue;
                 }
                 // We had an FCU, but it's too old.
                 return Poll::Ready(Some(
                     ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(
                         fork_choice.elapsed(),
                     ),
-                ))
+                ));
             }
 
             // We never had both FCU and transition config exchange.
-            return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen))
+            return Poll::Ready(Some(ConsensusLayerHealthEvent::NeverSeen));
         }
     }
 }

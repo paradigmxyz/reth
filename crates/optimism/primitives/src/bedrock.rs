@@ -43,12 +43,12 @@ pub const BLOCK_NUMS_REPLAYED_TX: [u64; 6] = [
 /// with replayed transaction happen to only contain the single transaction.
 pub fn is_dup_tx(block_number: u64) -> bool {
     if block_number > BLOCK_NUMS_REPLAYED_TX[5] {
-        return false
+        return false;
     }
 
     // these blocks just have one transaction!
     if BLOCK_NUMS_REPLAYED_TX.contains(&block_number) {
-        return true
+        return true;
     }
 
     false

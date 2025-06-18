@@ -175,7 +175,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         let mut next_expected_nonce = on_chain.nonce;
         for (id, tx) in self.all().descendant_txs_inclusive(&on_chain) {
             if next_expected_nonce != id.nonce {
-                break
+                break;
             }
             next_expected_nonce = id.next_nonce();
             last_consecutive_tx = Some(tx);
@@ -652,7 +652,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_code_hash: Option<B256>,
     ) -> PoolResult<AddedTransaction<T::Transaction>> {
         if self.contains(tx.hash()) {
-            return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported))
+            return Err(PoolError::new(*tx.hash(), PoolErrorKind::AlreadyImported));
         }
 
         self.validate_auth(&tx, on_chain_nonce, on_chain_code_hash)?;
@@ -761,7 +761,7 @@ impl<T: TransactionOrdering> TxPool<T> {
         if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY)) &&
             !self.all_transactions.auths.contains_key(&transaction.sender_id())
         {
-            return Ok(())
+            return Ok(());
         }
 
         let mut txs_by_sender =
@@ -775,14 +775,14 @@ impl<T: TransactionOrdering> TxPool<T> {
                     PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
                         Eip7702PoolTransactionError::OutOfOrderTxFromDelegated,
                     )),
-                ))
+                ));
             }
-            return Ok(())
+            return Ok(());
         }
 
         if txs_by_sender.any(|id| id == &transaction.transaction_id) {
             // Transaction replacement is supported
-            return Ok(())
+            return Ok(());
         }
 
         Err(PoolError::new(
@@ -819,7 +819,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                         PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::Eip7702(
                             Eip7702PoolTransactionError::AuthorityReserved,
                         )),
-                    ))
+                    ));
                 }
             }
         }
@@ -1004,7 +1004,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 }
                 id = descendant;
             } else {
-                return
+                return;
             }
         }
     }
@@ -1273,7 +1273,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             if *count == 1 {
                 entry.remove();
                 self.metrics.all_transactions_by_all_senders.decrement(1.0);
-                return
+                return;
             }
             *count -= 1;
             self.metrics.all_transactions_by_all_senders.decrement(1.0);
@@ -1348,7 +1348,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 ($iter:ident) => {
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
-                            break 'this
+                            break 'this;
                         }
                         iter.next();
                     }
@@ -1367,7 +1367,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                         current: tx.subpool,
                         destination: Destination::Discard,
                     });
-                    continue 'transactions
+                    continue 'transactions;
                 }
 
                 let ancestor = TransactionId::ancestor(id.nonce, info.state_nonce, id.sender);
@@ -1390,7 +1390,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
             if tx.state.has_nonce_gap() {
                 next_sender!(iter);
-                continue 'transactions
+                continue 'transactions;
             }
 
             // Since this is the first transaction of the sender, it has no parked ancestors
@@ -1413,7 +1413,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             while let Some((peek, tx)) = iter.peek_mut() {
                 if peek.sender != id.sender {
                     // Found the next sender we need to check
-                    continue 'transactions
+                    continue 'transactions;
                 }
 
                 if tx.transaction.nonce() == next_nonce_in_line {
@@ -1422,7 +1422,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 } else {
                     // can short circuit if there's still a nonce gap
                     next_sender!(iter);
-                    continue 'transactions
+                    continue 'transactions;
                 }
 
                 // update for next iteration of this sender's loop
@@ -1667,7 +1667,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             if current_txs >= self.max_account_slots && transaction.nonce() > on_chain_nonce {
                 return Err(InsertErr::ExceededSenderTransactionsCapacity {
                     transaction: Arc::new(transaction),
-                })
+                });
             }
         }
         if transaction.gas_limit() > self.block_gas_limit {
@@ -1675,12 +1675,12 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 block_gas_limit: self.block_gas_limit,
                 tx_gas_limit: transaction.gas_limit(),
                 transaction: Arc::new(transaction),
-            })
+            });
         }
 
         if self.contains_conflicting_transaction(&transaction) {
             // blob vs non blob transactions are mutually exclusive for the same sender
-            return Err(InsertErr::TxTypeConflict { transaction: Arc::new(transaction) })
+            return Err(InsertErr::TxTypeConflict { transaction: Arc::new(transaction) });
         }
 
         Ok(transaction)
@@ -1701,13 +1701,13 @@ impl<T: PoolTransaction> AllTransactions<T> {
             let Some(ancestor_tx) = self.txs.get(&ancestor) else {
                 // ancestor tx is missing, so we can't insert the new blob
                 self.metrics.blob_transactions_nonce_gaps.increment(1);
-                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
+                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) });
             };
             if ancestor_tx.state.has_nonce_gap() {
                 // the ancestor transaction already has a nonce gap, so we can't insert the new
                 // blob
                 self.metrics.blob_transactions_nonce_gaps.increment(1);
-                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
+                return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) });
             }
 
             // the max cost executing this transaction requires
@@ -1716,7 +1716,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             // check if the new blob would go into overdraft
             if cumulative_cost > on_chain_balance {
                 // the transaction would go into overdraft
-                return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
+                return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) });
             }
 
             // ensure that a replacement would not shift already propagated blob transactions into
@@ -1733,14 +1733,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
                         cumulative_cost += tx.transaction.cost();
                         if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
                             // the transaction would shift
-                            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
+                            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) });
                         }
                     }
                 }
             }
         } else if new_blob_tx.cost() > &on_chain_balance {
             // the transaction would go into overdraft
-            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) })
+            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) });
         }
 
         Ok(new_blob_tx)
@@ -1831,7 +1831,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         let fee_cap = transaction.max_fee_per_gas();
 
         if fee_cap < self.minimal_protocol_basefee as u128 {
-            return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap })
+            return Err(InsertErr::FeeCapBelowMinimumProtocolFeeCap { transaction, fee_cap });
         }
         if fee_cap >= self.pending_fees.base_fee as u128 {
             state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
@@ -1864,7 +1864,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     return Err(InsertErr::Underpriced {
                         transaction: pool_tx.transaction,
                         existing: *entry.get().transaction.hash(),
-                    })
+                    });
                 }
                 let new_hash = *pool_tx.transaction.hash();
                 let new_transaction = pool_tx.transaction.clone();
@@ -1904,7 +1904,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
                 // If there's a nonce gap, we can shortcircuit
                 if next_nonce != id.nonce {
-                    break
+                    break;
                 }
 
                 // close the nonce gap

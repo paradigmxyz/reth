@@ -54,7 +54,7 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
             Some(range) => (*range.start(), *range.end()),
             None => {
                 trace!(target: "pruner", "No headers to prune");
-                return Ok(SegmentOutput::done())
+                return Ok(SegmentOutput::done());
             }
         };
 
@@ -144,7 +144,7 @@ where
     type Item = Result<HeaderTablesIterItem, PrunerError>;
     fn next(&mut self) -> Option<Self::Item> {
         if self.limiter.is_limit_reached() {
-            return None
+            return None;
         }
 
         let mut pruned_block_headers = None;
@@ -157,7 +157,7 @@ where
             &mut |_| false,
             &mut |row| pruned_block_headers = Some(row.0),
         ) {
-            return Some(Err(err.into()))
+            return Some(Err(err.into()));
         }
 
         if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
@@ -166,7 +166,7 @@ where
             &mut |_| false,
             &mut |row| pruned_block_td = Some(row.0),
         ) {
-            return Some(Err(err.into()))
+            return Some(Err(err.into()));
         }
 
         if let Err(err) = self.provider.tx_ref().prune_table_with_range_step(
@@ -175,13 +175,13 @@ where
             &mut |_| false,
             &mut |row| pruned_block_canonical = Some(row.0),
         ) {
-            return Some(Err(err.into()))
+            return Some(Err(err.into()));
         }
 
         if ![pruned_block_headers, pruned_block_td, pruned_block_canonical].iter().all_equal() {
             return Some(Err(PrunerError::InconsistentData(
                 "All headers-related tables should be pruned up to the same height",
-            )))
+            )));
         }
 
         pruned_block_headers.map(move |block| {
