@@ -81,11 +81,14 @@ impl ParallelSparseTrie {
     }
 }
 
-/// This is a subtrie of the `ParallelSparseTrie` that contains a map from path to sparse trie
+/// This is a subtrie of the [`ParallelSparseTrie`] that contains a map from path to sparse trie
 /// nodes.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub struct SparseSubtrie {
     /// The root path of this subtrie.
+    ///
+    /// This is the _full_ path to this subtrie, meaning it includes the first two nibbles that we
+    /// also use for indexing subtries in the [`ParallelSparseTrie`].
     path: Nibbles,
     /// The map from paths to sparse trie nodes within this subtrie.
     nodes: HashMap<Nibbles, SparseNode>,
