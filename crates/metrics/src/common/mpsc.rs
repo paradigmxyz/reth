@@ -128,51 +128,6 @@ impl<T> Stream for UnboundedMeteredReceiver<T> {
     }
 }
 
-/// A wrapper type around [`OwnedPermit`](mpsc::OwnedPermit) that updates metrics accounting
-/// when sending
-#[derive(Debug)]
-pub struct OwnedPermit<T> {
-    permit: mpsc::OwnedPermit<T>,
-    /// Holds metrics for this type
-    metrics: MeteredSenderMetrics,
-}
-
-impl<T> OwnedPermit<T> {
-    /// Creates a new [`OwnedPermit`] wrapping the provided [`mpsc::OwnedPermit`] with given metrics
-    /// handle.
-    pub const fn new(permit: mpsc::OwnedPermit<T>, metrics: MeteredSenderMetrics) -> Self {
-        Self { permit, metrics }
-    }
-
-    /// Sends a value using the reserved capacity and update metrics accordingly.
-    pub fn send(self, value: T) -> MeteredSender<T> {
-        let Self { permit, metrics } = self;
-        metrics.messages_sent_total.increment(1);
-        MeteredSender { sender: permit.send(value), metrics }
-    }
-}
-
-/// A wrapper type around [Permit](mpsc::Permit) that updates metrics accounting
-/// when sending
-#[derive(Debug)]
-pub struct Permit<'a, T> {
-    permit: mpsc::Permit<'a, T>,
-    metrics_ref: &'a MeteredSenderMetrics,
-}
-
-impl<'a, T> Permit<'a, T> {
-    /// Creates a new [`Permit`] wrapping the provided [`mpsc::Permit`] with given metrics ref.
-    pub const fn new(permit: mpsc::Permit<'a, T>, metrics_ref: &'a MeteredSenderMetrics) -> Self {
-        Self { permit, metrics_ref }
-    }
-
-    /// Sends a value using the reserved capacity and updates metrics accordingly.
-    pub fn send(self, value: T) {
-        self.metrics_ref.messages_sent_total.increment(1);
-        self.permit.send(value);
-    }
-}
-
 /// A wrapper type around [Sender](mpsc::Sender) that updates metrics on send.
 #[derive(Debug)]
 pub struct MeteredSender<T> {
@@ -261,6 +216,51 @@ impl<T> MeteredSender<T> {
 impl<T> Clone for MeteredSender<T> {
     fn clone(&self) -> Self {
         Self { sender: self.sender.clone(), metrics: self.metrics.clone() }
+    }
+}
+
+/// A wrapper type around [`OwnedPermit`](mpsc::OwnedPermit) that updates metrics accounting
+/// when sending
+#[derive(Debug)]
+pub struct OwnedPermit<T> {
+    permit: mpsc::OwnedPermit<T>,
+    /// Holds metrics for this type
+    metrics: MeteredSenderMetrics,
+}
+
+impl<T> OwnedPermit<T> {
+    /// Creates a new [`OwnedPermit`] wrapping the provided [`mpsc::OwnedPermit`] with given metrics
+    /// handle.
+    pub const fn new(permit: mpsc::OwnedPermit<T>, metrics: MeteredSenderMetrics) -> Self {
+        Self { permit, metrics }
+    }
+
+    /// Sends a value using the reserved capacity and update metrics accordingly.
+    pub fn send(self, value: T) -> MeteredSender<T> {
+        let Self { permit, metrics } = self;
+        metrics.messages_sent_total.increment(1);
+        MeteredSender { sender: permit.send(value), metrics }
+    }
+}
+
+/// A wrapper type around [Permit](mpsc::Permit) that updates metrics accounting
+/// when sending
+#[derive(Debug)]
+pub struct Permit<'a, T> {
+    permit: mpsc::Permit<'a, T>,
+    metrics_ref: &'a MeteredSenderMetrics,
+}
+
+impl<'a, T> Permit<'a, T> {
+    /// Creates a new [`Permit`] wrapping the provided [`mpsc::Permit`] with given metrics ref.
+    pub const fn new(permit: mpsc::Permit<'a, T>, metrics_ref: &'a MeteredSenderMetrics) -> Self {
+        Self { permit, metrics_ref }
+    }
+
+    /// Sends a value using the reserved capacity and updates metrics accordingly.
+    pub fn send(self, value: T) {
+        self.metrics_ref.messages_sent_total.increment(1);
+        self.permit.send(value);
     }
 }
 
