@@ -17,7 +17,7 @@ use reth_trie_common::{Nibbles, TrieNode, CHILD_INDEX_RANGE};
 /// - All keys in `values` collection are full leaf paths.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ParallelSparseTrie {
-    /// The root of the sparse trie.
+    /// This contains the trie nodes for the upper part of the trie.
     upper_subtrie: SparseSubtrie,
     /// An array containing the subtries at the second level of the trie.
     subtries: [Option<SparseSubtrie>; 256],
@@ -28,7 +28,7 @@ pub struct ParallelSparseTrie {
 impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
-            upper_subtrie: SparseSubtrie::new(Nibbles::new()),
+            upper_subtrie: SparseSubtrie::default(),
             subtries: [const { None }; 256],
             updates: None,
         }
@@ -47,6 +47,21 @@ impl ParallelSparseTrie {
         }
 
         self.subtries[idx].as_mut()
+    }
+
+    /// Creates a new revealed sparse trie from the given root node.
+    ///
+    /// # Returns
+    ///
+    /// A [`ParallelSparseTrie`] if successful, or an error if revealing fails.
+    pub fn from_root(
+        root_node: TrieNode,
+        masks: TrieMasks,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        let mut trie = Self::default().with_updates(retain_updates);
+        trie.reveal_node(Nibbles::default(), root_node, masks)?;
+        Ok(trie)
     }
 
     /// Reveals a trie node if it has not been revealed before.
@@ -108,6 +123,17 @@ impl ParallelSparseTrie {
         }
 
         Ok(())
+    }
+
+    /// Configures the trie to retain information about updates.
+    ///
+    /// If `retain_updates` is true, the trie will record branch node updates and deletions.
+    /// This information can then be used to efficiently update an external database.
+    pub fn with_updates(mut self, retain_updates: bool) -> Self {
+        if retain_updates {
+            self.updates = Some(SparseTrieUpdates::default());
+        }
+        self
     }
 }
 
