@@ -22,7 +22,6 @@
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
-pub use cors::CorsDomainError;
 use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
@@ -65,6 +64,8 @@ use std::{
 };
 use tower::Layer;
 use tower_http::cors::CorsLayer;
+
+pub use cors::CorsDomainError;
 
 // re-export for convenience
 pub use jsonrpsee::server::ServerBuilder;
