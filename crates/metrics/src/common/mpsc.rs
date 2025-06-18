@@ -128,7 +128,7 @@ impl<T> Stream for UnboundedMeteredReceiver<T> {
     }
 }
 
-/// A wrapper type around [OwnedPermit](mpsc::OwnedPermit) that updates metrics accounting
+/// A wrapper type around [`OwnedPermit`](mpsc::OwnedPermit) that updates metrics accounting
 /// when sending
 #[derive(Debug)]
 pub struct OwnedPermit<T> {
@@ -140,7 +140,7 @@ pub struct OwnedPermit<T> {
 impl<T> OwnedPermit<T> {
     /// Creates a new [`OwnedPermit`] wrapping the provided [`mpsc::OwnedPermit`] with given metrics
     /// handle.
-    pub fn new(permit: mpsc::OwnedPermit<T>, metrics: MeteredSenderMetrics) -> OwnedPermit<T> {
+    pub const fn new(permit: mpsc::OwnedPermit<T>, metrics: MeteredSenderMetrics) -> Self {
         Self { permit, metrics }
     }
 
@@ -162,10 +162,7 @@ pub struct Permit<'a, T> {
 
 impl<'a, T> Permit<'a, T> {
     /// Creates a new [`Permit`] wrapping the provided [`mpsc::Permit`] with given metrics ref.
-    pub fn new(
-        permit: mpsc::Permit<'a, T>,
-        metrics_ref: &'a MeteredSenderMetrics,
-    ) -> Permit<'a, T> {
+    pub const fn new(permit: mpsc::Permit<'a, T>, metrics_ref: &'a MeteredSenderMetrics) -> Self {
         Self { permit, metrics_ref }
     }
 
@@ -194,14 +191,12 @@ impl<T> MeteredSender<T> {
     /// Tries to acquire a permit to send a message without waiting.
     ///
     /// See also [Sender](mpsc::Sender)'s `try_reserve_owned`.
-    pub fn try_reserve_owned(self) -> Result<OwnedPermit<T>, TrySendError<MeteredSender<T>>> {
+    pub fn try_reserve_owned(self) -> Result<OwnedPermit<T>, TrySendError<Self>> {
         let Self { sender, metrics } = self;
         sender.try_reserve_owned().map(|permit| OwnedPermit::new(permit, metrics.clone())).map_err(
             |err| match err {
                 TrySendError::Full(sender) => TrySendError::Full(Self { sender, metrics }),
-                TrySendError::Closed(sender) => {
-                    TrySendError::Closed(Self { sender, metrics })
-                }
+                TrySendError::Closed(sender) => TrySendError::Closed(Self { sender, metrics }),
             },
         )
     }
