@@ -9,5 +9,11 @@ export default defineConfig({
     // https://vite.dev/guide/static-deploy.html#github-pages
     // Deploying to owner.github.io/reth - base must be set to '/reth
     base: '/reth',
+  },
+  theme: {
+    accentColor: {
+      light: '#1f1f1f',
+      dark: '#ffffff',
+    }
   }
 })
