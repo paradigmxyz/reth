@@ -2104,7 +2104,7 @@ impl RlpNodeBuffers {
 }
 
 /// RLP node path stack item.
-#[derive(Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct RlpNodePathStackItem {
     /// Level at which the node is located. Higher numbers correspond to lower levels in the trie.
     pub level: usize,
@@ -2131,9 +2131,12 @@ pub struct RlpNodeStackItem {
 /// one to make batch updates to a persistent database.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SparseTrieUpdates {
-    pub(crate) updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    pub(crate) removed_nodes: HashSet<Nibbles>,
-    pub(crate) wiped: bool,
+    /// Collection of updated intermediate nodes indexed by full path.
+    pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    /// Collection of removed intermediate nodes indexed by full path.
+    pub removed_nodes: HashSet<Nibbles>,
+    /// Flag indicating whether the trie was wiped.
+    pub wiped: bool,
 }
 
 impl SparseTrieUpdates {
@@ -2149,6 +2152,13 @@ impl SparseTrieUpdates {
         self.updated_nodes.clear();
         self.removed_nodes.clear();
         self.wiped = false;
+    }
+
+    /// Extends the updates with another set of updates.
+    pub fn extend(&mut self, other: Self) {
+        self.updated_nodes.extend(other.updated_nodes);
+        self.removed_nodes.extend(other.removed_nodes);
+        self.wiped |= other.wiped;
     }
 }
 

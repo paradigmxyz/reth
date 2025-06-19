@@ -11,9 +11,6 @@ pub use state::*;
 mod trie;
 pub use trie::*;
 
-mod parallel_trie;
-pub use parallel_trie::*;
-
 pub mod blinded;
 
 #[cfg(feature = "metrics")]
