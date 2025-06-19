@@ -206,7 +206,7 @@ mod tests {
         assert_eq!(result, BlockId::Number(BlockNumberOrTag::Latest));
     }
 
-    /// Tests that the function defaults to "latest" if the parameter is missing.
+    /// Tests that the function returns nothing if the parameter is missing or empty.
     #[test]
     fn defaults_to_latest_when_param_is_missing() {
         let params = Params::new(Some(r#"["0x0000000000000000000000000000000000000000"]"#));
@@ -214,7 +214,7 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// Tests that the function returns an error for invalid input.
+    /// Tests that the function doesn't parse anyhing if the parameter is not a valid BlockId.
     #[test]
     fn returns_error_for_invalid_input() {
         let params = Params::new(Some(r#"[true]"#));
