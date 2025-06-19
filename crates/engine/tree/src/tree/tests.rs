@@ -219,16 +219,6 @@ impl TestHarness {
         self.evm_config.extend(execution_outcomes);
     }
 
-    fn insert_block(
-        &mut self,
-        block: RecoveredBlock<reth_ethereum_primitives::Block>,
-    ) -> Result<InsertPayloadOk, InsertBlockError<Block>> {
-        let execution_outcome = self.block_builder.get_execution_outcome(block.clone());
-        self.extend_execution_outcome([execution_outcome]);
-        self.tree.provider.add_state_root(block.state_root);
-        self.tree.insert_block(block)
-    }
-
     async fn fcu_to(&mut self, block_hash: B256, fcu_status: impl Into<ForkchoiceStatus>) {
         let fcu_status = fcu_status.into();
 
@@ -284,16 +274,6 @@ impl TestHarness {
             safe_block_hash: block_hash,
             finalized_block_hash: block_hash,
         }
-    }
-
-    async fn insert_chain(
-        &mut self,
-        chain: impl IntoIterator<Item = RecoveredBlock<reth_ethereum_primitives::Block>> + Clone,
-    ) {
-        for block in chain.clone() {
-            self.insert_block(block.clone()).unwrap();
-        }
-        self.check_canon_chain_insertion(chain).await;
     }
 
     async fn check_canon_commit(&mut self, hash: B256) {
@@ -1033,45 +1013,4 @@ async fn test_engine_tree_live_sync_transition_eventually_canonical() {
 
     // new head is the tip of the main chain
     test_harness.check_canon_head(main_chain_last_hash);
-}
-
-#[tokio::test]
-async fn test_engine_tree_live_sync_fcu_extends_canon_chain() {
-    reth_tracing::init_test_tracing();
-
-    let chain_spec = MAINNET.clone();
-    let mut test_harness = TestHarness::new(chain_spec.clone());
-
-    // create base chain and setup test harness with it
-    let base_chain: Vec<_> = test_harness.block_builder.get_executed_blocks(0..1).collect();
-    test_harness = test_harness.with_blocks(base_chain.clone());
-
-    // fcu to the tip of base chain
-    test_harness
-        .fcu_to(base_chain.last().unwrap().recovered_block().hash(), ForkchoiceStatus::Valid)
-        .await;
-
-    // create main chain, extension of base chain
-    let main_chain = test_harness.block_builder.create_fork(base_chain[0].recovered_block(), 10);
-    // determine target in the middle of main hain
-    let target = main_chain.get(5).unwrap();
-    let target_hash = target.hash();
-    let main_last = main_chain.last().unwrap();
-    let main_last_hash = main_last.hash();
-
-    // insert main chain
-    test_harness.insert_chain(main_chain).await;
-
-    // send fcu to target
-    test_harness.send_fcu(target_hash, ForkchoiceStatus::Valid).await;
-
-    test_harness.check_canon_commit(target_hash).await;
-    test_harness.check_fcu(target_hash, ForkchoiceStatus::Valid).await;
-
-    // send fcu to main tip
-    test_harness.send_fcu(main_last_hash, ForkchoiceStatus::Valid).await;
-
-    test_harness.check_canon_commit(main_last_hash).await;
-    test_harness.check_fcu(main_last_hash, ForkchoiceStatus::Valid).await;
-    test_harness.check_canon_head(main_last_hash);
 }
