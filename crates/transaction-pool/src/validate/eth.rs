@@ -28,7 +28,7 @@ use reth_primitives_traits::{
     constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Block,
     GotExpected, SealedBlock,
 };
-use reth_storage_api::{StateProvider, StateProviderFactory};
+use reth_storage_api::{AccountInfoReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -89,7 +89,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn StateProvider>>,
+        state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one_with_provider(origin, transaction, state)
     }
@@ -232,7 +232,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        maybe_state: &mut Option<Box<dyn StateProvider>>,
+        maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
@@ -241,7 +241,7 @@ where
                 if maybe_state.is_none() {
                     match self.client.latest() {
                         Ok(new_state) => {
-                            *maybe_state = Some(new_state);
+                            *maybe_state = Some(Box::new(new_state));
                         }
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
@@ -481,7 +481,7 @@ where
         state: P,
     ) -> TransactionValidationOutcome<Tx>
     where
-        P: StateProvider,
+        P: AccountInfoReader,
     {
         // Use provider to get account info
         let account = match state.basic_account(transaction.sender_ref()) {
