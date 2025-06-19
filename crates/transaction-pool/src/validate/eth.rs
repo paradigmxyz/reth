@@ -76,7 +76,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.inner.validate_one(origin, transaction)
+        self.inner.validate_one_with_provider(origin, transaction, &mut None)
     }
 
     /// Validates a single transaction with the provided state provider.
@@ -92,31 +92,6 @@ where
         state: &mut Option<Box<dyn StateProvider>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one_with_provider(origin, transaction, state)
-    }
-
-    /// Validates all given transactions.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub fn validate_all(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        self.inner.validate_batch(transactions)
-    }
-
-    /// Validates all given transactions with origin.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub fn validate_all_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Tx> + Send,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        self.inner.validate_batch_with_origin(origin, transactions)
     }
 }
 
@@ -139,7 +114,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions)
+        self.inner.validate_batch(transactions)
     }
 
     async fn validate_transactions_with_origin(
@@ -147,7 +122,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all_with_origin(origin, transactions)
+        self.inner.validate_batch_with_origin(origin, transactions)
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -631,16 +606,6 @@ where
             },
             authorities,
         }
-    }
-
-    /// Validates a single transaction.
-    fn validate_one(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        let mut provider = None;
-        self.validate_one_with_provider(origin, transaction, &mut provider)
     }
 
     /// Validates all given transactions.
