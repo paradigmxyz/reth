@@ -2101,25 +2101,25 @@ impl RlpNodeBuffers {
 }
 
 /// RLP node path stack item.
-#[derive(Debug)]
-struct RlpNodePathStackItem {
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RlpNodePathStackItem {
     /// Level at which the node is located. Higher numbers correspond to lower levels in the trie.
-    level: usize,
+    pub level: usize,
     /// Path to the node.
-    path: Nibbles,
+    pub path: Nibbles,
     /// Whether the path is in the prefix set. If [`None`], then unknown yet.
-    is_in_prefix_set: Option<bool>,
+    pub is_in_prefix_set: Option<bool>,
 }
 
 /// RLP node stack item.
-#[derive(Debug)]
-struct RlpNodeStackItem {
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RlpNodeStackItem {
     /// Path to the node.
-    path: Nibbles,
+    pub path: Nibbles,
     /// RLP node.
-    rlp_node: RlpNode,
+    pub rlp_node: RlpNode,
     /// Type of the node.
-    node_type: SparseNodeType,
+    pub node_type: SparseNodeType,
 }
 
 /// Tracks modifications to the sparse trie structure.
@@ -2146,6 +2146,13 @@ impl SparseTrieUpdates {
         self.updated_nodes.clear();
         self.removed_nodes.clear();
         self.wiped = false;
+    }
+
+    /// Extends the updates with another set of updates.
+    pub fn extend(&mut self, other: Self) {
+        self.updated_nodes.extend(other.updated_nodes);
+        self.removed_nodes.extend(other.removed_nodes);
+        self.wiped |= other.wiped;
     }
 }
 

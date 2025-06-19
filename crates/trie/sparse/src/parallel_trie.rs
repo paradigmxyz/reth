@@ -1,4 +1,9 @@
-use crate::{blinded::BlindedProvider, SparseNode, SparseTrieUpdates, TrieMasks};
+use std::sync::mpsc;
+
+use crate::{
+    blinded::BlindedProvider, RlpNodePathStackItem, RlpNodeStackItem, SparseNode,
+    SparseTrieUpdates, TrieMasks,
+};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
     map::{Entry, HashMap},
@@ -9,8 +14,9 @@ use alloy_trie::TrieMask;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
-    Nibbles, TrieNode, CHILD_INDEX_RANGE,
+    Nibbles, RlpNode, TrieNode, CHILD_INDEX_RANGE,
 };
+use smallvec::SmallVec;
 use tracing::trace;
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
@@ -23,9 +29,12 @@ use tracing::trace;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct ParallelSparseTrie {
     /// This contains the trie nodes for the upper part of the trie.
-    upper_subtrie: SparseSubtrie,
+    upper_subtrie: Box<SparseSubtrie>,
     /// An array containing the subtries at the second level of the trie.
-    lower_subtries: Box<[Option<SparseSubtrie>; 256]>,
+    lower_subtries: [Option<Box<SparseSubtrie>>; 256],
+    /// Set of prefixes (key paths) that have been marked as updated.
+    /// This is used to track which parts of the trie need to be recalculated.
+    prefix_set: PrefixSetMut,
     /// Optional tracking of trie updates for later use.
     updates: Option<SparseTrieUpdates>,
 }
@@ -33,30 +42,15 @@ pub struct ParallelSparseTrie {
 impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
-            upper_subtrie: SparseSubtrie::default(),
-            lower_subtries: Box::new([const { None }; 256]),
+            upper_subtrie: Box::default(),
+            lower_subtries: [const { None }; 256],
+            prefix_set: PrefixSetMut::default(),
             updates: None,
         }
     }
 }
 
 impl ParallelSparseTrie {
-    /// Returns mutable ref to the lower `SparseSubtrie` for the given path, or None if the path
-    /// belongs to the upper trie.
-    fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut SparseSubtrie> {
-        match SparseSubtrieType::from_path(path) {
-            SparseSubtrieType::Upper => None,
-            SparseSubtrieType::Lower(idx) => {
-                if self.lower_subtries[idx].is_none() {
-                    let upper_path = path.slice(..2);
-                    self.lower_subtries[idx] = Some(SparseSubtrie::new(upper_path));
-                }
-
-                self.lower_subtries[idx].as_mut()
-            }
-        }
-    }
-
     /// Creates a new revealed sparse trie from the given root node.
     ///
     /// # Returns
@@ -70,6 +64,15 @@ impl ParallelSparseTrie {
         let mut trie = Self::default().with_updates(retain_updates);
         trie.reveal_node(Nibbles::default(), root_node, masks)?;
         Ok(trie)
+    }
+
+    /// Configures the trie to retain information about updates.
+    ///
+    /// If `retain_updates` is true, the trie will record branch node updates and deletions.
+    /// This information can then be used to efficiently update an external database.
+    pub fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.updates = retain_updates.then_some(SparseTrieUpdates::default());
+        self
     }
 
     /// Reveals a trie node if it has not been revealed before.
@@ -186,9 +189,25 @@ impl ParallelSparseTrie {
     ///
     /// This function first identifies all nodes that have changed (based on the prefix set) below
     /// level 2 of the trie, then recalculates their RLP representation.
-    pub fn update_subtrie_hashes(&mut self) -> SparseTrieResult<()> {
+    pub fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
-        todo!()
+
+        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
+        let changed_subtries = self.get_changed_subtries(&mut prefix_set);
+
+        let (tx, rx) = mpsc::channel();
+        // TODO: call `update_hashes` on each subtrie in parallel
+        for (subtrie, _) in changed_subtries {
+            tx.send(subtrie).unwrap();
+        }
+        drop(tx);
+
+        for subtrie in rx {
+            let index = SparseSubtrieType::from_path(&subtrie.path)
+                .lower_index()
+                .expect("updating only lower subtries");
+            self.lower_subtries[index] = Some(subtrie);
+        }
     }
 
     /// Calculates and returns the root hash of the trie.
@@ -202,15 +221,33 @@ impl ParallelSparseTrie {
         todo!()
     }
 
-    /// Configures the trie to retain information about updates.
+    /// Consumes and returns the currently accumulated trie updates.
     ///
-    /// If `retain_updates` is true, the trie will record branch node updates and deletions.
-    /// This information can then be used to efficiently update an external database.
-    pub fn with_updates(mut self, retain_updates: bool) -> Self {
-        if retain_updates {
-            self.updates = Some(SparseTrieUpdates::default());
+    /// This is useful when you want to apply the updates to an external database,
+    /// and then start tracking a new set of updates.
+    pub fn take_updates(&mut self) -> SparseTrieUpdates {
+        core::iter::once(&mut self.upper_subtrie)
+            .chain(self.lower_subtries.iter_mut().flatten())
+            .fold(SparseTrieUpdates::default(), |mut acc, subtrie| {
+                acc.extend(subtrie.take_updates());
+                acc
+            })
+    }
+
+    /// Returns mutable ref to the lower `SparseSubtrie` for the given path, or None if the path
+    /// belongs to the upper trie.
+    fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
+        match SparseSubtrieType::from_path(path) {
+            SparseSubtrieType::Upper => None,
+            SparseSubtrieType::Lower(idx) => {
+                if self.lower_subtries[idx].is_none() {
+                    let upper_path = path.slice(..2);
+                    self.lower_subtries[idx] = Some(Box::new(SparseSubtrie::new(upper_path)));
+                }
+
+                self.lower_subtries[idx].as_mut()
+            }
         }
-        self
     }
 
     /// Returns a list of [subtries](SparseSubtrie) identifying the subtries that have changed
@@ -221,17 +258,16 @@ impl ParallelSparseTrie {
     ///
     /// This method helps optimize hash recalculations by identifying which specific
     /// subtries need to be updated. Each subtrie can then be updated in parallel.
-    #[allow(unused)]
     fn get_changed_subtries(
         &mut self,
         prefix_set: &mut PrefixSet,
-    ) -> Vec<(SparseSubtrie, PrefixSet)> {
+    ) -> Vec<(Box<SparseSubtrie>, PrefixSet)> {
         // Clone the prefix set to iterate over its keys. Cloning is cheap, it's just an Arc.
         let prefix_set_clone = prefix_set.clone();
         let mut prefix_set_iter = prefix_set_clone.into_iter();
 
         let mut subtries = Vec::new();
-        for subtrie in self.lower_subtries.iter_mut() {
+        for subtrie in &mut self.lower_subtries {
             if let Some(subtrie) = subtrie.take_if(|subtrie| prefix_set.contains(&subtrie.path)) {
                 let prefix_set = if prefix_set.all() {
                     PrefixSetMut::all()
@@ -275,11 +311,23 @@ pub struct SparseSubtrie {
     /// Map from leaf key paths to their values.
     /// All values are stored here instead of directly in leaf nodes.
     values: HashMap<Nibbles, Vec<u8>>,
+    updates: Option<SparseTrieUpdates>,
+    /// Reusable buffers for [`SparseSubtrie::update_hashes`].
+    buffers: SparseSubtrieBuffers,
 }
 
 impl SparseSubtrie {
     fn new(path: Nibbles) -> Self {
         Self { path, ..Default::default() }
+    }
+
+    /// Configures the subtrie to retain information about updates.
+    ///
+    /// If `retain_updates` is true, the trie will record branch node updates and deletions.
+    /// This information can then be used to efficiently update an external database.
+    pub fn with_updates(mut self, retain_updates: bool) -> Self {
+        self.updates = retain_updates.then_some(SparseTrieUpdates::default());
+        self
     }
 
     /// Returns true if the current path and its child are both found in the same level. This
@@ -486,10 +534,18 @@ impl SparseSubtrie {
     }
 
     /// Recalculates and updates the RLP hashes for the changed nodes in this subtrie.
-    pub fn update_hashes(&mut self, prefix_set: &mut PrefixSet) -> SparseTrieResult<()> {
+    #[allow(unused)]
+    fn update_hashes(&self, _prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", path=?self.path, "Updating subtrie hashes");
-        let _prefix_set = prefix_set;
         todo!()
+    }
+
+    /// Consumes and returns the currently accumulated trie updates.
+    ///
+    /// This is useful when you want to apply the updates to an external database,
+    /// and then start tracking a new set of updates.
+    fn take_updates(&mut self) -> SparseTrieUpdates {
+        self.updates.take().unwrap_or_default()
     }
 }
 
@@ -519,6 +575,31 @@ impl SparseSubtrieType {
             Self::Lower(path_subtrie_index_unchecked(path))
         }
     }
+
+    /// Returns the index of the lower subtrie, if it exists.
+    pub const fn lower_index(&self) -> Option<usize> {
+        match self {
+            Self::Upper => None,
+            Self::Lower(index) => Some(*index),
+        }
+    }
+}
+
+/// Collection of reusable buffers for [`SparseSubtrie::update_hashes`].
+///
+/// These buffers reduce allocations when computing RLP representations during trie updates.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct SparseSubtrieBuffers {
+    /// Stack of RLP node paths
+    path_stack: Vec<RlpNodePathStackItem>,
+    /// Stack of RLP nodes
+    rlp_node_stack: Vec<RlpNodeStackItem>,
+    /// Reusable branch child path
+    branch_child_buf: SmallVec<[Nibbles; 16]>,
+    /// Reusable branch value stack
+    branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    /// Reusable RLP buffer
+    rlp_buf: Vec<u8>,
 }
 
 /// Convert first two nibbles of the path into a lower subtrie index in the range [0, 255].
@@ -597,11 +678,11 @@ mod tests {
     fn test_get_changed_subtries() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]));
+        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]));
+        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]));
+        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
@@ -648,11 +729,11 @@ mod tests {
     fn test_get_changed_subtries_all() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0]));
+        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0]));
+        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0]));
+        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
@@ -864,5 +945,30 @@ mod tests {
                 Some(&SparseNode::Hash(child_hashes[i])),
             );
         }
+    }
+
+    #[test]
+    fn test_update_subtrie_hashes() {
+        // Create a trie with three subtries
+        let mut trie = ParallelSparseTrie::default();
+        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
+        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
+        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
+
+        // Add subtries at specific positions
+        trie.lower_subtries[subtrie_1_index] = Some(subtrie_1.clone());
+        trie.lower_subtries[subtrie_2_index] = Some(subtrie_2.clone());
+        trie.lower_subtries[subtrie_3_index] = Some(subtrie_3.clone());
+
+        // Update subtrie hashes
+        trie.update_subtrie_hashes();
+
+        // Ensure subtries were returned
+        assert_eq!(trie.lower_subtries[subtrie_1_index], Some(subtrie_1));
+        assert_eq!(trie.lower_subtries[subtrie_2_index], Some(subtrie_2));
+        assert_eq!(trie.lower_subtries[subtrie_3_index], Some(subtrie_3));
     }
 }
