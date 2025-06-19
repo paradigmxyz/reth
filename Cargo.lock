@@ -10586,6 +10586,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-trie-common",
  "reth-trie-sparse",
+ "smallvec",
  "tracing",
 ]
 

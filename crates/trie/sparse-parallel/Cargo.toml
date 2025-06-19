@@ -23,6 +23,9 @@ alloy-trie.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
+# misc
+smallvec.workspace = true
+
 [dev-dependencies]
 # reth
 reth-primitives-traits.workspace = true
