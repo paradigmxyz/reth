@@ -607,7 +607,7 @@ impl SparseSubtrieType {
     }
 }
 
-/// Collection of reusable buffers for [`SparseSubtrie::update_hashes`].
+/// Collection of reusable buffers for calculating subtrie hashes.
 ///
 /// These buffers reduce allocations when computing RLP representations during trie updates.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -624,7 +624,7 @@ pub struct SparseSubtrieBuffers {
     rlp_buf: Vec<u8>,
 }
 
-/// Changed subtrie returned by [`ParallelSparseTrie::take_changed_subtries`].
+/// Changed subtrie.
 #[derive(Debug)]
 struct ChangedSubtrie {
     /// Lower subtrie index in the range [0, 255].
