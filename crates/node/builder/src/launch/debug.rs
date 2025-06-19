@@ -64,7 +64,6 @@ where
                     let rpc_block =
                         serde_json::from_value(json).expect("Block deserialization cannot fail");
                     <<N::Types as NodeTypes>::Primitives as RpcBlockConversion>::rpc_to_primitive_block(rpc_block)
-                        .expect("Block conversion cannot fail")
                 })
                 .await?;
 
@@ -99,7 +98,6 @@ where
                 })?,
                 |rpc_block| {
                     <<N::Types as NodeTypes>::Primitives as RpcBlockConversion>::rpc_to_primitive_block(rpc_block)
-                        .expect("Block conversion cannot fail")
                 },
             );
             let rpc_consensus_client = DebugConsensusClient::new(

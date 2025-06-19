@@ -378,7 +378,7 @@ where
         let rpc_block: <Node::Primitives as RpcBlockConversion>::RpcBlock =
             serde_json::from_value(json).map_err(ProviderError::other)?;
 
-        Ok(<Node::Primitives as RpcBlockConversion>::rpc_to_primitive_block(rpc_block))
+        Ok(Some(<Node::Primitives as RpcBlockConversion>::rpc_to_primitive_block(rpc_block)))
     }
 
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {

@@ -8,5 +8,5 @@ pub trait RpcBlockConversion: NodePrimitives {
     type RpcBlock: serde::Serialize + serde::de::DeserializeOwned + 'static;
 
     /// Converts an RPC block to the node's primitive block type.
-    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> Option<Self::Block>;
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> Self::Block;
 }
