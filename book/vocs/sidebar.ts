@@ -61,13 +61,14 @@ export const sidebar: SidebarItem[] = [
             },
             {
                 text: "Running a Node",
-                link: "/run/running-a-node"
-            },
-            {
-                text: "Networks",
                 items: [
                     {
+                        text: "Networks",
+                        link: "/run/networks"
+                    },
+                    {
                         text: "Ethereum",
+                        link: "/run/networks/ethereum",
                         items: [
                             {
                                 text: "Snapshots",
@@ -77,6 +78,7 @@ export const sidebar: SidebarItem[] = [
                     },
                     {
                         text: "Opstack Networks",
+                        link: "/run/networks/opstack",
                         items: [
                             {
                                 text: "Caveats OP-Mainnet",
