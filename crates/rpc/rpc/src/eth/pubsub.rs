@@ -1,7 +1,5 @@
 //! `eth_` `PubSub` RPC handler implementation
-
-use std::sync::Arc;
-
+use crate::eth::helpers::SyncListener;
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
@@ -23,8 +21,10 @@ use reth_storage_api::BlockNumReader;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{NewTransactionEvent, PoolConsensusTx, TransactionPool};
 use serde::Serialize;
+use std::sync::Arc;
+use tokio::time::{interval, Duration};
 use tokio_stream::{
-    wrappers::{BroadcastStream, ReceiverStream},
+    wrappers::{BroadcastStream, IntervalStream, ReceiverStream},
     Stream,
 };
 use tracing::error;
@@ -155,12 +155,8 @@ where
                 pipe_from_stream(accepted_sink, self.pending_transaction_hashes_stream()).await
             }
             SubscriptionKind::Syncing => {
-                // get new block subscription
-                let mut canon_state = BroadcastStream::new(
-                    self.inner.eth_api.provider().subscribe_to_canonical_state(),
-                );
                 // get current sync status
-                let mut initial_sync_status = self.inner.eth_api.network().is_syncing();
+                let initial_sync_status = self.inner.eth_api.network().is_syncing();
                 let current_sub_res = self.sync_status(initial_sync_status);
 
                 // send the current status immediately
@@ -175,13 +171,17 @@ where
                     return Ok(())
                 }
 
-                while canon_state.next().await.is_some() {
+                if initial_sync_status {
+                    // wait until sync completes checking every 12 seconds
+                    SyncListener::new(
+                        self.inner.eth_api.network().clone(),
+                        IntervalStream::new(interval(Duration::from_secs(12))).map(|_| ()),
+                    )
+                    .await;
+
                     let current_syncing = self.inner.eth_api.network().is_syncing();
                     // Only send a new response if the sync status has changed
                     if current_syncing != initial_sync_status {
-                        // Update the sync status on each new block
-                        initial_sync_status = current_syncing;
-
                         // send a new message now that the status changed
                         let sync_status = self.sync_status(current_syncing);
                         let msg = SubscriptionMessage::new(
@@ -192,7 +192,7 @@ where
                         .map_err(SubscriptionSerializeError::new)?;
 
                         if accepted_sink.send(msg).await.is_err() {
-                            break
+                            return Ok(())
                         }
                     }
                 }
