@@ -179,7 +179,8 @@ mod tests {
     use super::*;
     use alloy_eips::{BlockId, BlockNumberOrTag};
     use jsonrpsee::types::Params;
-    /// Tests that various valid BlockId types can be parsed from the first parameter.
+
+    /// Tests that various valid id types can be parsed from the first parameter.
     #[test]
     fn parses_block_id_from_first_param() {
         // Test with a block number
@@ -214,7 +215,7 @@ mod tests {
         assert!(result.is_none());
     }
 
-    /// Tests that the function doesn't parse anyhing if the parameter is not a valid BlockId.
+    /// Tests that the function doesn't parse anyhing if the parameter is not a valid block id.
     #[test]
     fn returns_error_for_invalid_input() {
         let params = Params::new(Some(r#"[true]"#));
