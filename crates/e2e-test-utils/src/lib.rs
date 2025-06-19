@@ -9,7 +9,7 @@ use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
     EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
-    NodeConfig, NodeHandle, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
+    NodeConfig, NodeHandle, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter, PayloadAttrTy,
     PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
@@ -53,8 +53,7 @@ where
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
     N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
-    LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes>,
+    LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<PayloadAttrTy<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
