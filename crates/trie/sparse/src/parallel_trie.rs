@@ -215,8 +215,8 @@ impl ParallelSparseTrie {
         drop(tx);
 
         // Return updated subtries back to the trie
-        for (i, subtrie) in rx {
-            self.lower_subtries[i] = Some(subtrie);
+        for (index, subtrie) in rx {
+            self.lower_subtries[index] = Some(subtrie);
         }
     }
 
@@ -736,7 +736,7 @@ mod tests {
             Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x0]),
             Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x1, 0x0]),
         ]);
-        prefix_set.extend(unchanged_prefix_set.clone());
+        prefix_set.extend(unchanged_prefix_set);
         let mut prefix_set = prefix_set.freeze();
 
         // Second subtrie should be removed and returned
@@ -1006,8 +1006,8 @@ mod tests {
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
-        trie.lower_subtries[subtrie_1_index] = Some(subtrie_1.clone());
-        trie.lower_subtries[subtrie_2_index] = Some(subtrie_2.clone());
+        trie.lower_subtries[subtrie_1_index] = Some(subtrie_1);
+        trie.lower_subtries[subtrie_2_index] = Some(subtrie_2);
         trie.lower_subtries[subtrie_3_index] = Some(subtrie_3);
 
         let unchanged_prefix_set = PrefixSetMut::from([
