@@ -147,6 +147,11 @@ pub use block::{
     Block, FullBlock, RecoveredBlock, SealedBlock,
 };
 
+#[cfg(feature = "serde")]
+mod rpc;
+#[cfg(feature = "serde")]
+pub use rpc::RpcBlockConversion;
+
 mod withdrawal;
 pub use alloy_eips::eip2718::WithEncoded;
 

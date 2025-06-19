@@ -18,6 +18,9 @@ pub use receipt::*;
 #[cfg(test)]
 mod transaction;
 
+#[cfg(feature = "serde")]
+mod rpc;
+
 pub use alloy_consensus::{transaction::PooledTransaction, TxType};
 use alloy_consensus::{TxEip4844, TxEip4844WithSidecar};
 use alloy_eips::eip7594::BlobTransactionSidecarVariant;

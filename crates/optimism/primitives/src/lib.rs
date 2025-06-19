@@ -20,6 +20,9 @@ pub mod transaction;
 pub use transaction::*;
 
 mod receipt;
+#[cfg(feature = "serde")]
+mod rpc;
+
 pub use receipt::{DepositReceipt, OpReceipt};
 
 /// Optimism-specific block type.

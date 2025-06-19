@@ -16,6 +16,7 @@ workspace = true
 reth-storage-api.workspace = true
 reth-chainspec.workspace = true
 reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-errors.workspace = true
 reth-execution-types.workspace = true
@@ -39,6 +40,7 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 # other
 tracing.workspace = true
+serde_json.workspace = true
 
 # revm
 revm.workspace = true
