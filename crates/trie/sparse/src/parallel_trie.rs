@@ -43,7 +43,7 @@ impl ParallelSparseTrie {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
                 if self.lower_subtries[idx].is_none() {
-                    let upper_path = Nibbles::unpack([idx as u8]);
+                    let upper_path = path.slice(..2);
                     self.lower_subtries[idx] = Some(SparseSubtrie::new(upper_path));
                 }
 
@@ -158,14 +158,14 @@ impl SparseSubtrie {
         Self { path, ..Default::default() }
     }
 
-    /// Returns true if the child path is found in a lower trie, but the current path is in the
-    /// upper trie.
-    fn cross_level_child(current_path: &Nibbles, child_path: &Nibbles) -> bool {
-        matches!(SparseSubtrieType::from_path(current_path), SparseSubtrieType::Upper) &&
-            matches!(SparseSubtrieType::from_path(child_path), SparseSubtrieType::Lower(_))
+    /// Returns true if the current path and its child are both found in the same level. This
+    /// function assumes that if current_path is in a lower level that the child_path is too.
+    fn is_child_same_level(current_path: &Nibbles, child_path: &Nibbles) -> bool {
+        !matches!(SparseSubtrieType::from_path(current_path), SparseSubtrieType::Upper) ||
+            !matches!(SparseSubtrieType::from_path(child_path), SparseSubtrieType::Lower(_))
     }
 
-    /// Internal implementation of the method of the same name on ParallelSparseTrie.
+    /// Internal implementation of the method of the same name on `ParallelSparseTrie`.
     fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -191,7 +191,7 @@ impl SparseSubtrie {
                     if branch.state_mask.is_bit_set(idx) {
                         let mut child_path = path.clone();
                         child_path.push_unchecked(idx);
-                        if !Self::cross_level_child(&path, &child_path) {
+                        if Self::is_child_same_level(&path, &child_path) {
                             // Reveal each child node or hash it has, but only if the child is on
                             // the same level as the parent.
                             self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
@@ -246,7 +246,7 @@ impl SparseSubtrie {
                             hash: Some(*hash),
                             store_in_db_trie: None,
                         });
-                        if !Self::cross_level_child(&path, &child_path) {
+                        if Self::is_child_same_level(&path, &child_path) {
                             self.reveal_node_or_hash(child_path, &ext.child)?;
                         }
                     }
@@ -266,7 +266,7 @@ impl SparseSubtrie {
                     let mut child_path = entry.key().clone();
                     child_path.extend_from_slice_unchecked(&ext.key);
                     entry.insert(SparseNode::new_ext(ext.key.clone()));
-                    if !Self::cross_level_child(&path, &child_path) {
+                    if Self::is_child_same_level(&path, &child_path) {
                         self.reveal_node_or_hash(child_path, &ext.child)?;
                     }
                 }
@@ -384,11 +384,67 @@ impl SparseSubtrieType {
     }
 }
 
+/// Convert first two nibbles of the path into a lower subtrie index in the range [0, 255].
+///
+/// # Panics
+///
+/// If the path is shorter than two nibbles.
+fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
+    (path[0] << 4 | path[1]) as usize
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::{
+        parallel_trie::{path_subtrie_index_unchecked, ParallelSparseTrie, SparseSubtrieType},
+        SparseNode, TrieMasks,
+    };
+    use alloy_primitives::B256;
+    use alloy_rlp::Encodable;
     use alloy_trie::Nibbles;
+    use assert_matches::assert_matches;
+    use reth_primitives_traits::Account;
+    use reth_trie_common::{
+        BranchNode, ExtensionNode, LeafNode, RlpNode, TrieMask, TrieNode, EMPTY_ROOT_HASH,
+    };
 
-    use crate::parallel_trie::SparseSubtrieType;
+    // Test helpers
+    fn encode_account_value(nonce: u64) -> Vec<u8> {
+        let account = Account { nonce, ..Default::default() };
+        let trie_account = account.into_trie_account(EMPTY_ROOT_HASH);
+        let mut buf = Vec::new();
+        trie_account.encode(&mut buf);
+        buf
+    }
+
+    fn create_leaf_node(key: &[u8], value_nonce: u64) -> TrieNode {
+        TrieNode::Leaf(LeafNode::new(
+            Nibbles::from_nibbles_unchecked(key.to_vec()),
+            encode_account_value(value_nonce),
+        ))
+    }
+
+    fn create_extension_node(key: &[u8], child_hash: B256) -> TrieNode {
+        TrieNode::Extension(ExtensionNode::new(
+            Nibbles::from_nibbles_unchecked(key.to_vec()),
+            RlpNode::word_rlp(&child_hash),
+        ))
+    }
+
+    fn create_branch_node_with_children(
+        children_indices: &[u8],
+        child_hashes: &[B256],
+    ) -> TrieNode {
+        let mut stack = Vec::new();
+        let mut state_mask = 0u16;
+
+        for (&idx, &hash) in children_indices.iter().zip(child_hashes.iter()) {
+            state_mask |= 1 << idx;
+            stack.push(RlpNode::word_rlp(&hash));
+        }
+
+        TrieNode::Branch(BranchNode::new(stack, TrieMask::new(state_mask)))
+    }
 
     #[test]
     fn sparse_subtrie_type() {
@@ -424,5 +480,160 @@ mod tests {
             SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 15, 0])),
             SparseSubtrieType::Lower(255)
         );
+    }
+
+    #[test]
+    fn reveal_node_leaves() {
+        let mut trie = ParallelSparseTrie::default();
+
+        // Reveal leaf in the upper trie
+        {
+            let path = Nibbles::from_nibbles([0x1, 0x2]);
+            let node = create_leaf_node(&[0x3, 0x4], 42);
+            let masks = TrieMasks::none();
+
+            trie.reveal_node(path.clone(), node, masks).unwrap();
+
+            assert_matches!(
+                trie.upper_subtrie.nodes.get(&path),
+                Some(SparseNode::Leaf { key, hash: None })
+                if key == &Nibbles::from_nibbles([0x3, 0x4])
+            );
+
+            let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+            assert_eq!(trie.upper_subtrie.values.get(&full_path), Some(&encode_account_value(42)));
+        }
+
+        // Reveal leaf in a lower trie
+        {
+            let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+            let node = create_leaf_node(&[0x4, 0x5], 42);
+            let masks = TrieMasks::none();
+
+            trie.reveal_node(path.clone(), node, masks).unwrap();
+
+            // Check that the lower subtrie was created
+            let idx = path_subtrie_index_unchecked(&path);
+            assert!(trie.lower_subtries[idx].is_some());
+
+            let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+            assert_matches!(
+                lower_subtrie.nodes.get(&path),
+                Some(SparseNode::Leaf { key, hash: None })
+                if key == &Nibbles::from_nibbles([0x4, 0x5])
+            );
+        }
+    }
+
+    #[test]
+    fn reveal_node_extension_all_upper() {
+        let mut trie = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles([0x1]);
+        let child_hash = B256::repeat_byte(0xab);
+        let node = create_extension_node(&[0x2], child_hash);
+        let masks = TrieMasks::none();
+
+        trie.reveal_node(path.clone(), node, masks).unwrap();
+
+        assert_matches!(
+            trie.upper_subtrie.nodes.get(&path),
+            Some(SparseNode::Extension { key, hash: None, .. })
+            if key == &Nibbles::from_nibbles([0x2])
+        );
+
+        // Child path should be in upper trie
+        let child_path = Nibbles::from_nibbles([0x1, 0x2]);
+        assert_eq!(trie.upper_subtrie.nodes.get(&child_path), Some(&SparseNode::Hash(child_hash)));
+    }
+
+    #[test]
+    fn reveal_node_extension_cross_level() {
+        let mut trie = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles([0x1, 0x2]);
+        let child_hash = B256::repeat_byte(0xcd);
+        let node = create_extension_node(&[0x3], child_hash);
+        let masks = TrieMasks::none();
+
+        trie.reveal_node(path.clone(), node, masks).unwrap();
+
+        // Extension node should be in upper trie
+        assert_matches!(
+            trie.upper_subtrie.nodes.get(&path),
+            Some(SparseNode::Extension { key, hash: None, .. })
+            if key == &Nibbles::from_nibbles([0x3])
+        );
+
+        // Child path (0x1, 0x2, 0x3) should be in lower trie
+        let child_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let idx = path_subtrie_index_unchecked(&child_path);
+        assert!(trie.lower_subtries[idx].is_some());
+
+        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        assert_eq!(lower_subtrie.nodes.get(&child_path), Some(&SparseNode::Hash(child_hash)));
+    }
+
+    #[test]
+    fn reveal_node_branch_all_upper() {
+        let mut trie = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles([0x1]);
+        let child_hashes = [B256::repeat_byte(0x11), B256::repeat_byte(0x22)];
+        let node = create_branch_node_with_children(&[0x0, 0x5], &child_hashes);
+        let masks = TrieMasks::none();
+
+        trie.reveal_node(path.clone(), node, masks).unwrap();
+
+        // Branch node should be in upper trie
+        assert_matches!(
+            trie.upper_subtrie.nodes.get(&path),
+            Some(SparseNode::Branch { state_mask, hash: None, .. })
+            if *state_mask == 0b0000000000100001.into()
+        );
+
+        // Children should be in upper trie (paths of length 2)
+        let child_path_0 = Nibbles::from_nibbles([0x1, 0x0]);
+        let child_path_5 = Nibbles::from_nibbles([0x1, 0x5]);
+        assert_eq!(
+            trie.upper_subtrie.nodes.get(&child_path_0),
+            Some(&SparseNode::Hash(child_hashes[0]))
+        );
+        assert_eq!(
+            trie.upper_subtrie.nodes.get(&child_path_5),
+            Some(&SparseNode::Hash(child_hashes[1]))
+        );
+    }
+
+    #[test]
+    fn reveal_node_branch_cross_level() {
+        let mut trie = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles([0x1, 0x2]); // Exactly 2 nibbles - boundary case
+        let child_hashes =
+            [B256::repeat_byte(0x33), B256::repeat_byte(0x44), B256::repeat_byte(0x55)];
+        let node = create_branch_node_with_children(&[0x0, 0x7, 0xf], &child_hashes);
+        let masks = TrieMasks::none();
+
+        trie.reveal_node(path.clone(), node, masks).unwrap();
+
+        // Branch node should be in upper trie
+        assert_matches!(
+            trie.upper_subtrie.nodes.get(&path),
+            Some(SparseNode::Branch { state_mask, hash: None, .. })
+            if *state_mask == 0b1000000010000001.into()
+        );
+
+        // All children should be in lower tries since they have paths of length 3
+        let child_paths = [
+            Nibbles::from_nibbles([0x1, 0x2, 0x0]),
+            Nibbles::from_nibbles([0x1, 0x2, 0x7]),
+            Nibbles::from_nibbles([0x1, 0x2, 0xf]),
+        ];
+
+        for (i, child_path) in child_paths.iter().enumerate() {
+            let idx = path_subtrie_index_unchecked(&child_path);
+            let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+            assert_eq!(
+                lower_subtrie.nodes.get(child_path),
+                Some(&SparseNode::Hash(child_hashes[i])),
+            );
+        }
     }
 }
