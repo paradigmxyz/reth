@@ -560,7 +560,7 @@ impl SparseSubtrie {
     /// Recalculates and updates the RLP hashes for the changed nodes in this subtrie.
     ///
     /// The function starts from the subtrie root, traverses down to leaves, and then calculates
-    /// the hashes from leaves back up to the root. It uses a stack from [`RlpNodeBuffers`] to
+    /// the hashes from leaves back up to the root. It uses a stack from [`SparseSubtrieBuffers`] to
     /// track the traversal and accumulate RLP encodings.
     ///
     /// # Parameters
