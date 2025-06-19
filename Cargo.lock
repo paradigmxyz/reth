@@ -10569,6 +10569,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-trie-sparse-parallel"
+version = "1.4.8"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie",
+ "arbitrary",
+ "assert_matches",
+ "codspeed-criterion-compat",
+ "itertools 0.14.0",
+ "pretty_assertions",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
+ "rand 0.9.1",
+ "reth-execution-errors",
+ "reth-primitives-traits",
+ "reth-provider",
+ "reth-storage-api",
+ "reth-testing-utils",
+ "reth-tracing",
+ "reth-trie",
+ "reth-trie-common",
+ "reth-trie-db",
+ "reth-trie-sparse",
+ "tracing",
+]
+
+[[package]]
 name = "reth-zstd-compressors"
 version = "1.4.8"
 dependencies = [

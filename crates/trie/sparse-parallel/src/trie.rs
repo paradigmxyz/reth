@@ -1,5 +1,3 @@
-use crate::{blinded::BlindedProvider, SparseNode, SparseTrieUpdates, TrieMasks};
-use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
@@ -11,6 +9,7 @@ use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     Nibbles, TrieNode, CHILD_INDEX_RANGE,
 };
+use reth_trie_sparse::{blinded::BlindedProvider, SparseNode, SparseTrieUpdates, TrieMasks};
 use tracing::trace;
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
@@ -532,9 +531,8 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        parallel_trie::{path_subtrie_index_unchecked, SparseSubtrieType},
-        ParallelSparseTrie, SparseNode, SparseSubtrie, TrieMasks,
+    use super::{
+        path_subtrie_index_unchecked, ParallelSparseTrie, SparseSubtrie, SparseSubtrieType,
     };
     use alloy_primitives::B256;
     use alloy_rlp::Encodable;
@@ -545,6 +543,7 @@ mod tests {
         prefix_set::{PrefixSet, PrefixSetMut},
         BranchNode, ExtensionNode, LeafNode, RlpNode, TrieMask, TrieNode, EMPTY_ROOT_HASH,
     };
+    use reth_trie_sparse::{SparseNode, TrieMasks};
 
     // Test helpers
     fn encode_account_value(nonce: u64) -> Vec<u8> {
