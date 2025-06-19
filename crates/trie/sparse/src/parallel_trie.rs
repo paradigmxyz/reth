@@ -5,6 +5,7 @@ use alloy_primitives::{
     B256,
 };
 use alloy_rlp::Decodable;
+use alloy_trie::TrieMask;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -24,7 +25,7 @@ pub struct ParallelSparseTrie {
     /// This contains the trie nodes for the upper part of the trie.
     upper_subtrie: SparseSubtrie,
     /// An array containing the subtries at the second level of the trie.
-    lower_subtries: [Option<SparseSubtrie>; 256],
+    lower_subtries: Box<[Option<SparseSubtrie>; 256]>,
     /// Optional tracking of trie updates for later use.
     updates: Option<SparseTrieUpdates>,
 }
@@ -33,7 +34,7 @@ impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
             upper_subtrie: SparseSubtrie::default(),
-            lower_subtries: [const { None }; 256],
+            lower_subtries: Box::new([const { None }; 256]),
             updates: None,
         }
     }
@@ -230,7 +231,7 @@ impl ParallelSparseTrie {
         let mut prefix_set_iter = prefix_set_clone.into_iter();
 
         let mut subtries = Vec::new();
-        for subtrie in &mut self.lower_subtries {
+        for subtrie in self.lower_subtries.iter_mut() {
             if let Some(subtrie) = subtrie.take_if(|subtrie| prefix_set.contains(&subtrie.path)) {
                 let prefix_set = if prefix_set.all() {
                     PrefixSetMut::all()
@@ -267,6 +268,10 @@ pub struct SparseSubtrie {
     path: Nibbles,
     /// The map from paths to sparse trie nodes within this subtrie.
     nodes: HashMap<Nibbles, SparseNode>,
+    /// When a branch is set, the corresponding child subtree is stored in the database.
+    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// When a bit is set, the corresponding child is stored as a hash in the database.
+    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// Map from leaf key paths to their values.
     /// All values are stored here instead of directly in leaf nodes.
     values: HashMap<Nibbles, Vec<u8>>,
