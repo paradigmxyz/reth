@@ -34,7 +34,9 @@ impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
             upper_subtrie: SparseSubtrie::default(),
-            lower_subtries: Box::new([const { None }; 256]),
+            // Prevent the stack allocation by immediately allocating a vector on the heap, and then
+            // converting it into a boxed slice.
+            lower_subtries: vec![None; 256].into_boxed_slice().try_into().unwrap(),
             updates: None,
         }
     }
