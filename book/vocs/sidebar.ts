@@ -26,6 +26,10 @@ export const sidebar: SidebarItem[] = [
         text: "Reth for Node Operators",
         items: [
             {
+                text: "System Requirements",
+                link: "/run/system-requirements"
+            },
+            {
                 text: "Installation",
                 collapsed: true,
                 items: [
@@ -56,48 +60,47 @@ export const sidebar: SidebarItem[] = [
                 ]
             },
             {
-                text: "Mainnet or official testnets",
-                link: "/run/mainnet"
+                text: "Running a Node",
+                link: "/run/running-a-node"
             },
             {
-                text: "OP Stack",
-                link: "/run/optimism"
+                text: "Networks",
+                items: [
+                    {
+                        text: "Ethereum",
+                        items: [
+                            {
+                                text: "Snapshots",
+                                link: "/run/networks/ethereum/snapshots"
+                            }
+                        ]
+                    },
+                    {
+                        text: "Opstack Networks",
+                        items: [
+                            {
+                                text: "Caveats OP-Mainnet",
+                                link: "/run/networks/opstack/op-mainnet-caveats"
+                            }
+                        ]
+                    },
+                    {
+                        text: "Private testnets",
+                        link: "/run/networks/private-testnets"
+                    }
+                ]
             },
             {
-                text: "Run an OP Mainnet Node",
-                link: "/run/sync-op-mainnet"
+                text: "Configuration",
+                link: "/run/configuration"
             },
             {
-                text: "Private testnet",
-                link: "/run/private-testnet"
+                text: "Monitoring",
+                link: "/run/monitoring"
             },
             {
-                text: "Metrics",
-                link: "/run/observability"
-            },
-            {
-                text: "Configuring Reth",
-                link: "/run/config"
-            },
-            {
-                text: "Transaction types",
-                link: "/run/transactions"
-            },
-            {
-                text: "Pruning & Full Node",
-                link: "/run/pruning"
-            },
-            {
-                text: "Ports",
-                link: "/run/ports"
-            },
-            {
-                text: "Troubleshooting",
-                link: "/run/troubleshooting"
-            },
-            {
-                text: "Profiling",
-                link: "/run/profiling"
+                text: "FAQ",
+                link: "/run/faq"
             }
         ]
     },
@@ -116,11 +119,20 @@ export const sidebar: SidebarItem[] = [
                         link: "/sdk/typesystem/block"
                     },
                     {
-                        text: "Transaction types and various representations",
+                        text: "Transaction types",
+                        collapsed: true,
                         items: [
                             {
-                                text: "Consensus, Pooled, RPC",
-                                link: "/sdk/typesystem/transaction-types"
+                                text: "Consensus",
+                                link: "/sdk/typesystem/transaction-types/consensus"
+                            },
+                            {
+                                text: "Pooled",
+                                link: "/sdk/typesystem/transaction-types/pooled"
+                            },
+                            {
+                                text: "RPC",
+                                link: "/sdk/typesystem/transaction-types/rpc"
                             }
                         ]
                     }
@@ -128,10 +140,27 @@ export const sidebar: SidebarItem[] = [
             },
             {
                 text: "What is in a node",
+                collapsed: true,
                 items: [
                     {
-                        text: "Node Components: network, pool, consensus, evm, rpc",
-                        link: "/sdk/node-components"
+                        text: "Network",
+                        link: "/sdk/node-components/network"
+                    },
+                    {
+                        text: "Pool",
+                        link: "/sdk/node-components/pool"
+                    },
+                    {
+                        text: "Consensus",
+                        link: "/sdk/node-components/consensus"
+                    },
+                    {
+                        text: "EVM",
+                        link: "/sdk/node-components/evm"
+                    },
+                    {
+                        text: "RPC",
+                        link: "/sdk/node-components/rpc"
                     }
                 ]
             },
