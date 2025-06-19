@@ -280,8 +280,7 @@ impl SparseSubtrie {
     /// Returns true if the current path and its child are both found in the same level. This
     /// function assumes that if `current_path` is in a lower level that `child_path` is too.
     fn is_child_same_level(current_path: &Nibbles, child_path: &Nibbles) -> bool {
-        !matches!(SparseSubtrieType::from_path(current_path), SparseSubtrieType::Upper) ||
-            !matches!(SparseSubtrieType::from_path(child_path), SparseSubtrieType::Lower(_))
+        core::mem::discriminant(SparseSubtrieType::from_path(current_path)) == core::mem::discriminant(SparseSubtrieType::from_path(child_path))
     }
 
     /// Internal implementation of the method of the same name on `ParallelSparseTrie`.
