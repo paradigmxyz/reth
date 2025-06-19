@@ -278,7 +278,7 @@ impl SparseSubtrie {
     }
 
     /// Returns true if the current path and its child are both found in the same level. This
-    /// function assumes that if current_path is in a lower level that the child_path is too.
+    /// function assumes that if `current_path` is in a lower level that `child_path` is too.
     fn is_child_same_level(current_path: &Nibbles, child_path: &Nibbles) -> bool {
         !matches!(SparseSubtrieType::from_path(current_path), SparseSubtrieType::Upper) ||
             !matches!(SparseSubtrieType::from_path(child_path), SparseSubtrieType::Lower(_))
@@ -544,14 +544,14 @@ mod tests {
 
     fn create_leaf_node(key: &[u8], value_nonce: u64) -> TrieNode {
         TrieNode::Leaf(LeafNode::new(
-            Nibbles::from_nibbles_unchecked(key.to_vec()),
+            Nibbles::from_nibbles_unchecked(key),
             encode_account_value(value_nonce),
         ))
     }
 
     fn create_extension_node(key: &[u8], child_hash: B256) -> TrieNode {
         TrieNode::Extension(ExtensionNode::new(
-            Nibbles::from_nibbles_unchecked(key.to_vec()),
+            Nibbles::from_nibbles_unchecked(key),
             RlpNode::word_rlp(&child_hash),
         ))
     }
@@ -844,7 +844,7 @@ mod tests {
         ];
 
         for (i, child_path) in child_paths.iter().enumerate() {
-            let idx = path_subtrie_index_unchecked(&child_path);
+            let idx = path_subtrie_index_unchecked(child_path);
             let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
             assert_eq!(
                 lower_subtrie.nodes.get(child_path),
