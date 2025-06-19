@@ -68,27 +68,27 @@ export const sidebar: SidebarItem[] = [
                     },
                     {
                         text: "Ethereum",
-                        link: "/run/networks/ethereum",
+                        link: "/run/ethereum",
                         items: [
                             {
                                 text: "Snapshots",
-                                link: "/run/networks/ethereum/snapshots"
+                                link: "/run/ethereum/snapshots"
                             }
                         ]
                     },
                     {
                         text: "Opstack Networks",
-                        link: "/run/networks/opstack",
+                        link: "/run/opstack",
                         items: [
                             {
                                 text: "Caveats OP-Mainnet",
-                                link: "/run/networks/opstack/op-mainnet-caveats"
+                                link: "/run/opstack/op-mainnet-caveats"
                             }
                         ]
                     },
                     {
                         text: "Private testnets",
-                        link: "/run/networks/private-testnets"
+                        link: "/run/private-testnets"
                     }
                 ]
             },
