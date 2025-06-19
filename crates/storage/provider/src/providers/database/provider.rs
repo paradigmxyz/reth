@@ -452,18 +452,20 @@ impl<
     }
 }
 
-/// For a given key, unwind all history shards that are below the given block number.
+/// For a given key, unwind all history shards that contain block numbers at or above the given
+/// block number.
 ///
 /// S - Sharded key subtype.
 /// T - Table to walk over.
 /// C - Cursor implementation.
 ///
 /// This function walks the entries from the given start key and deletes all shards that belong to
-/// the key and are below the given block number.
+/// the key and contain block numbers at or above the given block number. Shards entirely below
+/// the block number are preserved.
 ///
-/// The boundary shard (the shard is split by the block number) is removed from the database. Any
-/// indices that are above the block number are filtered out. The boundary shard is returned for
-/// reinsertion (if it's not empty).
+/// The boundary shard (the shard that spans across the block number) is removed from the database.
+/// Any indices that are below the block number are filtered out and returned for reinsertion.
+/// The boundary shard is returned for reinsertion (if it's not empty).
 fn unwind_history_shards<S, T, C>(
     cursor: &mut C,
     start_key: T::Key,
@@ -475,27 +477,41 @@ where
     T::Key: AsRef<ShardedKey<S>>,
     C: DbCursorRO<T> + DbCursorRW<T>,
 {
+    // Start from the given key and iterate through shards
     let mut item = cursor.seek_exact(start_key)?;
     while let Some((sharded_key, list)) = item {
         // If the shard does not belong to the key, break.
         if !shard_belongs_to_key(&sharded_key) {
             break
         }
+
+        // Always delete the current shard from the database first
+        // We'll decide later what (if anything) to reinsert
         cursor.delete_current()?;
 
-        // Check the first item.
-        // If it is greater or eq to the block number, delete it.
+        // Get the first (lowest) block number in this shard
+        // All block numbers in a shard are sorted in ascending order
         let first = list.iter().next().expect("List can't be empty");
+
+        // Case 1: Entire shard is at or above the unwinding point
+        // Keep it deleted (don't return anything for reinsertion)
         if first >= block_number {
             item = cursor.prev()?;
             continue
-        } else if block_number <= sharded_key.as_ref().highest_block_number {
-            // Filter out all elements greater than block number.
+        }
+        // Case 2: This is a boundary shard (spans across the unwinding point)
+        // The shard contains some blocks below and some at/above the unwinding point
+        else if block_number <= sharded_key.as_ref().highest_block_number {
+            // Return only the block numbers that are below the unwinding point
+            // These will be reinserted to preserve the historical data
             return Ok(list.iter().take_while(|i| *i < block_number).collect::<Vec<_>>())
         }
+        // Case 3: Entire shard is below the unwinding point
+        // Return all block numbers for reinsertion (preserve entire shard)
         return Ok(list.iter().collect::<Vec<_>>())
     }
 
+    // No shards found or all processed
     Ok(Vec::new())
 }
 

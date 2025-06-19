@@ -1,10 +1,18 @@
 //! Commonly used types and traits in Reth.
 //!
-//! This crate contains various primitive traits used across reth's components.
-//! It provides the [`Block`] trait which is used to represent a block and all its components.
-//! A [`Block`] is composed of a [`Header`] and a [`BlockBody`]. In ethereum (and optimism), a block
-//! body consists of a list of transactions, a list of uncle headers, and a list of withdrawals. For
-//! optimism, uncle headers and withdrawals are always empty lists.
+//! ## Overview
+//!
+//! This crate defines various traits and types that form the foundation of the reth stack.
+//! The top-level trait is [`Block`] which represents a block in the blockchain. A [`Block`] is
+//! composed of a [`Header`] and a [`BlockBody`]. A [`BlockBody`] contains the transactions in the
+//! block and additional data that is part of the block. In ethereum, this includes uncle headers
+//! and withdrawals. For optimism, uncle headers and withdrawals are always empty lists.
+//!
+//! The most common types you'll use are:
+//! - [`Block`] - A basic block with header and body
+//! - [`SealedBlock`] - A block with its hash cached
+//! - [`SealedHeader`] - A header with its hash cached
+//! - [`RecoveredBlock`] - A sealed block with sender addresses recovered
 //!
 //! ## Feature Flags
 //!
@@ -13,19 +21,13 @@
 //!   types.
 //! - `reth-codec`: Enables db codec support for reth types including zstd compression for certain
 //!   types.
+//! - `rpc-compat`: Adds RPC compatibility functions for the types in this crate, e.g. rpc type
+//!   conversions.
 //! - `serde`: Adds serde support for all types.
 //! - `secp256k1`: Adds secp256k1 support for transaction signing/recovery. (By default the no-std
 //!   friendly `k256` is used)
 //! - `rayon`: Uses `rayon` for parallel transaction sender recovery in [`BlockBody`] by default.
 //! - `serde-bincode-compat` provides helpers for dealing with the `bincode` crate.
-//!
-//! ## Overview
-//!
-//! This crate defines various traits and types that form the foundation of the reth stack.
-//! The top-level trait is [`Block`] which represents a block in the blockchain. A [`Block`] is
-//! composed of a [`Header`] and a [`BlockBody`]. A [`BlockBody`] contains the transactions in the
-//! block any additional data that is part of the block. A [`Header`] contains the metadata of the
-//! block.
 //!
 //! ### Sealing (Hashing)
 //!
@@ -53,14 +55,55 @@
 //! mainnet. Newer transactions must always be recovered with the regular `recover` functions, see
 //! also [`recover_signer`](crypto::secp256k1::recover_signer).
 //!
+//! ## Error Handling
+//!
+//! Most operations that can fail return `Result` types:
+//! - [`RecoveryError`](transaction::signed::RecoveryError) - Transaction signature recovery failed
+//! - [`BlockRecoveryError`](block::error::BlockRecoveryError) - Block-level recovery failed
+//! - [`GotExpected`] / [`GotExpectedBoxed`] - Generic error for mismatched values
+//!
+//! Recovery errors typically indicate invalid signatures or corrupted data. The block recovery
+//! error preserves the original block for further inspection.
+//!
+//! ### Example
+//!
+//! ```rust
+//! # use reth_primitives_traits::{SealedBlock, RecoveredBlock};
+//! # use reth_primitives_traits::block::error::BlockRecoveryError;
+//! # fn example<B: reth_primitives_traits::Block>(sealed_block: SealedBlock<B>) -> Result<(), BlockRecoveryError<SealedBlock<B>>>
+//! # where B::Body: reth_primitives_traits::BlockBody<Transaction: reth_primitives_traits::SignedTransaction> {
+//! // Attempt to recover senders from a sealed block
+//! match sealed_block.try_recover() {
+//!     Ok(recovered) => {
+//!         // Successfully recovered all senders
+//!         println!("Recovered {} senders", recovered.senders().len());
+//!         Ok(())
+//!     }
+//!     Err(err) => {
+//!         // Recovery failed - the block is returned in the error
+//!         println!("Failed to recover senders for block");
+//!         // You can still access the original block
+//!         let block = err.into_inner();
+//!         let hash = block.hash();
+//!         Err(BlockRecoveryError::new(block))
+//!     }
+//! }
+//! # }
+//! ```
+//!
+//! ## Performance Considerations
+//!
+//! - **Hashing**: Block hashing is expensive. Use [`SealedBlock`] to cache hashes.
+//! - **Recovery**: Sender recovery is CPU-intensive. Use [`RecoveredBlock`] to cache results.
+//! - **Parallel Recovery**: Enable the `rayon` feature for parallel transaction recovery.
+//!
 //! ## Bincode serde compatibility
 //!
 //! The [bincode-crate](https://github.com/bincode-org/bincode) is often used by additional tools when sending data over the network.
 //! `bincode` crate doesn't work well with optionally serializable serde fields, but some of the consensus types require optional serialization for RPC compatibility. Read more: <https://github.com/bincode-org/bincode/issues/326>
 //!
-//! As a workaround this crate introduces the
-//! [`SerdeBincodeCompat`](serde_bincode_compat::SerdeBincodeCompat) trait used to a bincode
-//! compatible serde representation.
+//! As a workaround this crate introduces the `SerdeBincodeCompat` trait (available with the
+//! `serde-bincode-compat` feature) used to provide a bincode compatible serde representation.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -126,7 +169,7 @@ mod extended;
 pub use extended::Extended;
 /// Common header types
 pub mod header;
-pub use header::{Header, HeaderError, SealedHeader, SealedHeaderFor};
+pub use header::{Header, SealedHeader, SealedHeaderFor};
 
 /// Bincode-compatible serde implementations for common abstracted types in Reth.
 ///

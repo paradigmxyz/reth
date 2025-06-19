@@ -1505,8 +1505,8 @@ where
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
-        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash).cloned() {
-            return Ok(Some(block.block))
+        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
+            return Ok(Some(block.block.clone()))
         }
 
         let (block, senders) = self
@@ -1914,12 +1914,13 @@ where
             let old = old
                 .iter()
                 .filter_map(|block| {
-                    let (_, trie) = self
+                    let trie = self
                         .state
                         .tree_state
                         .persisted_trie_updates
-                        .get(&block.recovered_block.hash())
-                        .cloned()?;
+                        .get(&block.recovered_block.hash())?
+                        .1
+                        .clone();
                     Some(ExecutedBlockWithTrieUpdates {
                         block: block.clone(),
                         trie: ExecutedTrieUpdates::Present(trie),
@@ -2183,9 +2184,21 @@ where
         //    root task proof calculation will include a lot of unrelated paths in the prefix sets.
         //    It's cheaper to run a parallel state root that does one walk over trie tables while
         //    accounting for the prefix sets.
+        let has_ancestors_with_missing_trie_updates =
+            self.has_ancestors_with_missing_trie_updates(block.sealed_header());
         let mut use_state_root_task = run_parallel_state_root &&
             self.config.use_state_root_task() &&
-            !self.has_ancestors_with_missing_trie_updates(block.sealed_header());
+            !has_ancestors_with_missing_trie_updates;
+
+        debug!(
+            target: "engine::tree",
+            block=?block_num_hash,
+            run_parallel_state_root,
+            has_ancestors_with_missing_trie_updates,
+            use_state_root_task,
+            config_allows_state_root_task=self.config.use_state_root_task(),
+            "Deciding which state root algorithm to run"
+        );
 
         // use prewarming background task
         let header = block.clone_sealed_header();
@@ -2225,6 +2238,7 @@ where
                     &self.config,
                 )
             } else {
+                debug!(target: "engine::tree", block=?block_num_hash, "Disabling state root task due to non-empty prefix sets");
                 use_state_root_task = false;
                 self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
             }
@@ -2282,6 +2296,7 @@ where
             // if we new payload extends the current canonical change we attempt to use the
             // background task or try to compute it in parallel
             if use_state_root_task {
+                debug!(target: "engine::tree", block=?block_num_hash, "Using sparse trie state root algorithm");
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates, trie }) => {
                         let elapsed = execution_finish.elapsed();
@@ -2306,6 +2321,7 @@ where
                     }
                 }
             } else {
+                debug!(target: "engine::tree", block=?block_num_hash, "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
                     persisting_kind,
                     block.header().parent_hash(),

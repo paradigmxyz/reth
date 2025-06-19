@@ -582,11 +582,9 @@ mod tests {
 
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
-        base_fees_per_gas.push(BaseFeeParams::ethereum().next_block_base_fee(
-            last_header.gas_used,
-            last_header.gas_limit,
-            last_header.base_fee_per_gas.unwrap_or_default(),
-        ) as u128);
+        base_fees_per_gas
+            .push(last_header.next_block_base_fee(BaseFeeParams::ethereum()).unwrap_or_default()
+                as u128);
 
         let eth_api = build_test_eth_api(mock_provider);
 

@@ -61,7 +61,7 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
     fn convert_block_number(&self, num: BlockNumberOrTag) -> ProviderResult<Option<BlockNumber>> {
         let num = match num {
             BlockNumberOrTag::Latest => self.best_block_number()?,
-            BlockNumberOrTag::Earliest => 0,
+            BlockNumberOrTag::Earliest => self.earliest_block_number()?,
             BlockNumberOrTag::Pending => {
                 return self
                     .pending_block_num_hash()
@@ -89,7 +89,7 @@ pub trait BlockIdReader: BlockNumReader + Send + Sync {
                     .map(|res_opt| res_opt.map(|num_hash| num_hash.hash)),
                 BlockNumberOrTag::Finalized => self.finalized_block_hash(),
                 BlockNumberOrTag::Safe => self.safe_block_hash(),
-                BlockNumberOrTag::Earliest => self.block_hash(0),
+                BlockNumberOrTag::Earliest => self.block_hash(self.earliest_block_number()?),
                 BlockNumberOrTag::Number(num) => self.block_hash(num),
             },
         }
