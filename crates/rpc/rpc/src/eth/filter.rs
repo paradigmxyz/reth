@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
-use futures::{future::TryFutureExt, StreamExt};
+use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{Block, NodePrimitives, SealedHeader};
@@ -961,12 +961,15 @@ impl<
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         for header in self.headers_iter.by_ref() {
-            // Try cache first for recent blocks
-            let cache_result =
-                self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?;
+            // Check cache first - this avoids database hits for recent blocks
+            let (maybe_block, maybe_receipts) = self
+                .filter_inner
+                .eth_cache()
+                .maybe_cached_block_and_receipts(header.hash())
+                .await?;
 
-            let (receipts, recovered_block) = match cache_result {
-                Some((receipts, maybe_block)) => {
+            let (receipts, recovered_block) = match maybe_receipts {
+                Some(receipts) => {
                     // Already cached - check if it has matching logs
                     let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
                         &self.filter,
@@ -981,7 +984,7 @@ impl<
                     }
                 }
                 None => {
-                    // Cache miss - fallback to provider
+                    // Not in cache - fetch directly from provider without caching
                     match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
                         Some(receipts) => {
                             // Check if this block has matching logs before caching
@@ -1057,30 +1060,40 @@ impl<
             range_headers.push(next_header);
         }
 
-        // Use efficient batch method for receipts and blocks
-        let block_hashes: Vec<alloy_primitives::B256> =
-            range_headers.iter().map(|header| header.hash()).collect();
-
-        let mut receipt_stream =
-            self.filter_inner.eth_cache().get_receipts_and_maybe_block_stream(block_hashes);
-
+        // Process each header individually to avoid queuing for all receipts
         for header in range_headers {
-            if let Some(Ok(Some((receipts, recovered_block)))) = receipt_stream.next().await {
-                if !receipts.is_empty() {
-                    // Check if this block has matching logs before adding to results
-                    let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
-                        &self.filter,
-                        header.num_hash(),
-                        &receipts,
-                    );
+            // First check if already cached to avoid unnecessary provider calls
+            let (maybe_block, maybe_receipts) = self
+                .filter_inner
+                .eth_cache()
+                .maybe_cached_block_and_receipts(header.hash())
+                .await?;
 
-                    if has_matching_logs {
-                        self.next.push_back(ReceiptBlockResult {
-                            receipts,
-                            recovered_block,
-                            header,
-                        });
+            let receipts = match maybe_receipts {
+                Some(receipts) => receipts,
+                None => {
+                    // Not cached - fetch directly from provider without queuing
+                    match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
+                        Some(receipts) => Arc::new(receipts),
+                        None => continue, // No receipts found
                     }
+                }
+            };
+
+            if !receipts.is_empty() {
+                // Check if this block has matching logs before adding to results
+                let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
+                    &self.filter,
+                    header.num_hash(),
+                    &receipts,
+                );
+
+                if has_matching_logs {
+                    self.next.push_back(ReceiptBlockResult {
+                        receipts,
+                        recovered_block: maybe_block,
+                        header,
+                    });
                 }
             }
         }
