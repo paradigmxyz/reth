@@ -193,7 +193,7 @@ impl ParallelSparseTrie {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
-        let changed_subtries = self.get_changed_subtries(&mut prefix_set);
+        let changed_subtries = self.take_changed_subtries(&mut prefix_set);
 
         let (tx, rx) = mpsc::channel();
         // TODO: call `update_hashes` on each subtrie in parallel
@@ -251,14 +251,16 @@ impl ParallelSparseTrie {
     }
 
     /// Returns a list of [subtries](SparseSubtrie) identifying the subtries that have changed
-    /// according to the provided [prefix set](PrefixSet).
+    /// according to the provided [prefix set](PrefixSet). Along with the subtries, prefix sets are
+    /// returned. Each prefix set contains the keys from the original prefix set that belong to
+    /// the subtrie.
     ///
-    /// Along with the subtries, prefix sets are returned. Each prefix set contains the keys from
-    /// the original prefix set that belong to the subtrie.
+    /// IMPORTANT: The method removes the subtries from `lower_subtries`, and the caller is
+    /// responsible for returning the subtries back into the array.
     ///
     /// This method helps optimize hash recalculations by identifying which specific
     /// subtries need to be updated. Each subtrie can then be updated in parallel.
-    fn get_changed_subtries(
+    fn take_changed_subtries(
         &mut self,
         prefix_set: &mut PrefixSet,
     ) -> Vec<(Box<SparseSubtrie>, PrefixSet)> {
@@ -670,7 +672,7 @@ mod tests {
         let mut trie = ParallelSparseTrie::default();
         let mut prefix_set = PrefixSet::default();
 
-        let changed = trie.get_changed_subtries(&mut prefix_set);
+        let changed = trie.take_changed_subtries(&mut prefix_set);
         assert!(changed.is_empty());
     }
 
@@ -703,7 +705,7 @@ mod tests {
         .freeze();
 
         // Second subtrie should be removed and returned
-        let changed = trie.get_changed_subtries(&mut prefix_set);
+        let changed = trie.take_changed_subtries(&mut prefix_set);
         assert_eq!(
             changed
                 .into_iter()
@@ -745,7 +747,7 @@ mod tests {
         let mut prefix_set = PrefixSetMut::all().freeze();
 
         // All subtries should be removed and returned
-        let changed = trie.get_changed_subtries(&mut prefix_set);
+        let changed = trie.take_changed_subtries(&mut prefix_set);
         assert_eq!(
             changed
                 .into_iter()
