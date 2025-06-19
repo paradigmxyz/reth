@@ -4,6 +4,7 @@ use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_json_rpc::RpcObject;
 use alloy_network::{Network, ReceiptResponse, TransactionResponse};
 use alloy_rpc_types_eth::Block;
+use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc_types_compat::TransactionCompat;
 use reth_storage_api::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -77,13 +78,13 @@ pub type RpcError<T> = <T as EthApiTypes>::Error;
 pub trait FullEthApiTypes
 where
     Self: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider,
+            Provider: TransactionsProvider + ReceiptProvider + CanonStateSubscriptions,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
-                <Self::Provider as TransactionsProvider>::Transaction,
+                Primitives = <Self as RpcNodeCore>::Primitives,
                 Transaction = RpcTransaction<Self::NetworkTypes>,
                 Error = RpcError<Self>,
             >,
@@ -93,13 +94,13 @@ where
 
 impl<T> FullEthApiTypes for T where
     T: RpcNodeCore<
-            Provider: TransactionsProvider + ReceiptProvider,
+            Provider: TransactionsProvider + ReceiptProvider + CanonStateSubscriptions,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
             TransactionCompat: TransactionCompat<
-                <Self::Provider as TransactionsProvider>::Transaction,
+                Primitives = <Self as RpcNodeCore>::Primitives,
                 Transaction = RpcTransaction<T::NetworkTypes>,
                 Error = RpcError<T>,
             >,

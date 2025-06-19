@@ -4,11 +4,11 @@
 //!
 //! Examples include creating, encoding, and decoding protocol messages.
 //!
-//! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/wiki/wiki/Ethereum-Wire-Protocol).
+//! Reference: [Ethereum Wire Protocol](https://github.com/ethereum/devp2p/blob/master/caps/eth.md).
 
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, NewBlock, NewPooledTransactionHashes66,
+    GetNodeData, GetPooledTransactions, GetReceipts, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
     Transactions,
 };
@@ -16,7 +16,7 @@ use crate::{
     status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
     RawCapabilityMessage, Receipts69, SharedTransactions,
 };
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{boxed::Box, string::String, sync::Arc};
 use alloy_primitives::{
     bytes::{Buf, BufMut},
     Bytes,
@@ -37,6 +37,9 @@ pub enum MessageError {
     /// Thrown when rlp decoding a message failed.
     #[error("RLP error: {0}")]
     RlpError(#[from] alloy_rlp::Error),
+    /// Other message error with custom message
+    #[error("{0}")]
+    Other(String),
 }
 
 /// An `eth` protocol message, containing a message ID and payload.
@@ -69,16 +72,10 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 StatusMessage::Eth69(StatusEth69::decode(buf)?)
             }),
             EthMessageID::NewBlockHashes => {
-                if version.is_eth69() {
-                    return Err(MessageError::Invalid(version, EthMessageID::NewBlockHashes));
-                }
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
             }
             EthMessageID::NewBlock => {
-                if version.is_eth69() {
-                    return Err(MessageError::Invalid(version, EthMessageID::NewBlock));
-                }
-                EthMessage::NewBlock(Box::new(NewBlock::decode(buf)?))
+                EthMessage::NewBlock(Box::new(N::NewBlockPayload::decode(buf)?))
             }
             EthMessageID::Transactions => EthMessage::Transactions(Transactions::decode(buf)?),
             EthMessageID::NewPooledTransactionHashes => {
@@ -218,9 +215,9 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a `NewBlock` message broadcast to the network.
     #[cfg_attr(
         feature = "serde",
-        serde(bound = "N::Block: serde::Serialize + serde::de::DeserializeOwned")
+        serde(bound = "N::NewBlockPayload: serde::Serialize + serde::de::DeserializeOwned")
     )]
-    NewBlock(Box<NewBlock<N::Block>>),
+    NewBlock(Box<N::NewBlockPayload>),
     /// Represents a Transactions message broadcast to the network.
     #[cfg_attr(
         feature = "serde",
@@ -328,6 +325,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             self,
             Self::PooledTransactions(_) |
                 Self::Receipts(_) |
+                Self::Receipts69(_) |
                 Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
                 Self::NodeData(_)
@@ -394,7 +392,7 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EthBroadcastMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a new block broadcast message.
-    NewBlock(Arc<NewBlock<N::Block>>),
+    NewBlock(Arc<N::NewBlockPayload>),
     /// Represents a transactions broadcast message.
     Transactions(SharedTransactions<N::BroadcastedTransaction>),
 }

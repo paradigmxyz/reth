@@ -259,6 +259,7 @@ impl NodeState {
                     txs=block.body().transactions().len(),
                     gas=%format_gas(block.gas_used()),
                     gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
+                    gas_limit=%format_gas(block.gas_limit()),
                     full=%format!("{:.1}%", block.gas_used() as f64 * 100.0 / block.gas_limit() as f64),
                     base_fee=%format!("{:.2}gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
                     blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
@@ -279,6 +280,9 @@ impl NodeState {
             }
             BeaconConsensusEngineEvent::InvalidBlock(block) => {
                 warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
+            }
+            BeaconConsensusEngineEvent::BlockReceived(num_hash) => {
+                info!(number=num_hash.number, hash=?num_hash.hash, "Received block from consensus engine");
             }
         }
     }

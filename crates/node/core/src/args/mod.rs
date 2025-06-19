@@ -64,5 +64,9 @@ pub use engine::EngineArgs;
 mod ress_args;
 pub use ress_args::RessArgs;
 
+/// `EraArgs` for configuring ERA files import.
+mod era;
+pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
+
 mod error;
 pub mod types;

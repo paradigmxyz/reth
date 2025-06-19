@@ -2,14 +2,17 @@
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_chains::{ChainKind, NamedChain};
 use clap::{Args, Parser};
-use eyre::{eyre, OptionExt};
+use eyre::eyre;
 use reqwest::{Client, Url};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_era_downloader::{read_dir, EraClient, EraStream, EraStreamConfig};
 use reth_era_utils as era;
 use reth_etl::Collector;
-use reth_node_core::{dirs::data_dir, version::SHORT_VERSION};
+use reth_fs_util as fs;
+use reth_node_core::version::SHORT_VERSION;
+use reth_provider::StaticFileProviderFactory;
+use reth_static_file_types::StaticFileSegment;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -48,10 +51,11 @@ impl TryFromChain for ChainKind {
     fn try_to_url(&self) -> eyre::Result<Url> {
         Ok(match self {
             ChainKind::Named(NamedChain::Mainnet) => {
-                Url::parse("https://era.ithaca.xyz/era1/").expect("URL should be valid")
+                Url::parse("https://era.ithaca.xyz/era1/index.html").expect("URL should be valid")
             }
             ChainKind::Named(NamedChain::Sepolia) => {
-                Url::parse("https://era.ithaca.xyz/sepolia-era1/").expect("URL should be valid")
+                Url::parse("https://era.ithaca.xyz/sepolia-era1/index.html")
+                    .expect("URL should be valid")
             }
             chain => return Err(eyre!("No known host for ERA files on chain {chain:?}")),
         })
@@ -68,24 +72,33 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportEraC
 
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 
-        let hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
-        let provider_factory = &provider_factory.provider_rw()?.0;
+        let mut hash_collector = Collector::new(config.stages.etl.file_size, config.stages.etl.dir);
+
+        let next_block = provider_factory
+            .static_file_provider()
+            .get_highest_static_file_block(StaticFileSegment::Headers)
+            .unwrap_or_default() +
+            1;
 
         if let Some(path) = self.import.path {
-            let stream = read_dir(path)?;
+            let stream = read_dir(path, next_block)?;
 
-            era::import(stream, provider_factory, hash_collector)?;
+            era::import(stream, &provider_factory, &mut hash_collector)?;
         } else {
             let url = match self.import.url {
                 Some(url) => url,
                 None => self.env.chain.chain().kind().try_to_url()?,
             };
-            let folder = data_dir().ok_or_eyre("Missing data directory")?.join("era");
-            let folder = folder.into_boxed_path();
-            let client = EraClient::new(Client::new(), url, folder);
-            let stream = EraStream::new(client, EraStreamConfig::default());
+            let folder =
+                self.env.datadir.resolve_datadir(self.env.chain.chain()).data_dir().join("era");
 
-            era::import(stream, provider_factory, hash_collector)?;
+            fs::create_dir_all(&folder)?;
+
+            let config = EraStreamConfig::default().start_from(next_block);
+            let client = EraClient::new(Client::new(), url, folder);
+            let stream = EraStream::new(client, config);
+
+            era::import(stream, &provider_factory, &mut hash_collector)?;
         }
 
         Ok(())

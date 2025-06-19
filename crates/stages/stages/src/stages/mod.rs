@@ -25,6 +25,7 @@ mod sender_recovery;
 mod tx_lookup;
 
 pub use bodies::*;
+pub use era::*;
 pub use execution::*;
 pub use finish::*;
 pub use hashing_account::*;
@@ -38,7 +39,9 @@ pub use s3::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;
 
+mod era;
 mod utils;
+
 use utils::*;
 
 #[cfg(test)]
@@ -61,7 +64,7 @@ mod tests {
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_exex::ExExManagerHandle;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock};
     use reth_provider::{
@@ -154,7 +157,7 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EthExecutorProvider::ethereum(Arc::new(
+                EthEvmConfig::ethereum(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 )),
                 Arc::new(EthBeaconConsensus::new(Arc::new(
@@ -166,7 +169,7 @@ mod tests {
                     max_cumulative_gas: None,
                     max_duration: None,
                 },
-                MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+                MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
                 ExExManagerHandle::empty(),
             );
 

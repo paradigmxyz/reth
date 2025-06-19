@@ -34,7 +34,7 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
@@ -528,7 +528,7 @@ where
                     // Execute all transactions until index
                     for tx in transactions {
                         let tx_env = this.eth_api().evm_config().tx_env(tx);
-                        let (res, _) = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
+                        let res = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }

@@ -10,7 +10,7 @@ use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetReceipts, HeadersDirection, NetworkPrimitives, NodeData, Receipts,
+    GetReceipts, HeadersDirection, NetworkPrimitives, NodeData, Receipts, Receipts69,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
@@ -190,19 +190,45 @@ where
     ) {
         self.metrics.eth_receipts_requests_received_total.increment(1);
 
-        let mut receipts = Vec::new();
+        let receipts = self.get_receipts_response(request, |receipts_by_block| {
+            receipts_by_block.into_iter().map(ReceiptWithBloom::from).collect::<Vec<_>>()
+        });
 
+        let _ = response.send(Ok(Receipts(receipts)));
+    }
+
+    fn on_receipts69_request(
+        &self,
+        _peer_id: PeerId,
+        request: GetReceipts,
+        response: oneshot::Sender<RequestResult<Receipts69<C::Receipt>>>,
+    ) {
+        self.metrics.eth_receipts_requests_received_total.increment(1);
+
+        let receipts = self.get_receipts_response(request, |receipts_by_block| {
+            // skip bloom filter for eth69
+            receipts_by_block
+        });
+
+        let _ = response.send(Ok(Receipts69(receipts)));
+    }
+
+    #[inline]
+    fn get_receipts_response<T, F>(&self, request: GetReceipts, transform_fn: F) -> Vec<Vec<T>>
+    where
+        F: Fn(Vec<C::Receipt>) -> Vec<T>,
+        T: Encodable,
+    {
+        let mut receipts = Vec::new();
         let mut total_bytes = 0;
 
         for hash in request.0 {
             if let Some(receipts_by_block) =
                 self.client.receipts_by_block(BlockHashOrNumber::Hash(hash)).unwrap_or_default()
             {
-                let receipt =
-                    receipts_by_block.into_iter().map(ReceiptWithBloom::from).collect::<Vec<_>>();
-
-                total_bytes += receipt.length();
-                receipts.push(receipt);
+                let transformed_receipts = transform_fn(receipts_by_block);
+                total_bytes += transformed_receipts.length();
+                receipts.push(transformed_receipts);
 
                 if receipts.len() >= MAX_RECEIPTS_SERVE || total_bytes > SOFT_RESPONSE_LIMIT {
                     break
@@ -212,7 +238,7 @@ where
             }
         }
 
-        let _ = response.send(Ok(Receipts(receipts)));
+        receipts
     }
 }
 
@@ -251,6 +277,9 @@ where
                     }
                     IncomingEthRequest::GetReceipts { peer_id, request, response } => {
                         this.on_receipts_request(peer_id, request, response)
+                    }
+                    IncomingEthRequest::GetReceipts69 { peer_id, request, response } => {
+                        this.on_receipts69_request(peer_id, request, response)
                     }
                 }
             },
@@ -314,5 +343,16 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         request: GetReceipts,
         /// The channel sender for the response containing receipts.
         response: oneshot::Sender<RequestResult<Receipts<N::Receipt>>>,
+    },
+    /// Request Receipts from the peer without bloom filter.
+    ///
+    /// The response should be sent through the channel.
+    GetReceipts69 {
+        /// The ID of the peer to request receipts from.
+        peer_id: PeerId,
+        /// The specific receipts requested.
+        request: GetReceipts,
+        /// The channel sender for the response containing Receipts69.
+        response: oneshot::Sender<RequestResult<Receipts69<N::Receipt>>>,
     },
 }

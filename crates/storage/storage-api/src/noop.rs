@@ -2,10 +2,10 @@
 
 use crate::{
     AccountReader, BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader,
-    BlockReader, BlockReaderIdExt, BlockSource, ChangeSetReader, HashedPostStateProvider,
-    HeaderProvider, NodePrimitivesProvider, OmmersProvider, PruneCheckpointReader, ReceiptProvider,
-    ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider, StateProvider,
-    StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
+    HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
+    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant, TransactionsProvider,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
@@ -146,10 +146,6 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReaderIdExt for NoopProvider<C, N> 
     fn header_by_id(&self, _id: BlockId) -> ProviderResult<Option<N::BlockHeader>> {
         Ok(None)
     }
-
-    fn ommers_by_id(&self, _id: BlockId) -> ProviderResult<Option<Vec<N::BlockHeader>>> {
-        Ok(None)
-    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
@@ -167,11 +163,7 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         Ok(None)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(None)
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
@@ -463,7 +455,9 @@ impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
     ) -> ProviderResult<Option<StorageValue>> {
         Ok(None)
     }
+}
 
+impl<C: Send + Sync, N: NodePrimitives> BytecodeReader for NoopProvider<C, N> {
     fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         Ok(None)
     }
@@ -494,7 +488,9 @@ impl<C: Send + Sync + 'static, N: NodePrimitives> StateProviderFactory for NoopP
 
                 self.history_by_block_hash(hash)
             }
-            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Earliest => {
+                self.history_by_block_number(self.earliest_block_number()?)
+            }
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
         }
@@ -532,12 +528,6 @@ impl<C: Send + Sync, N: NodePrimitives> StageCheckpointReader for NoopProvider<C
 
     fn get_all_checkpoints(&self) -> ProviderResult<Vec<(String, StageCheckpoint)>> {
         Ok(Vec::new())
-    }
-}
-
-impl<C: Send + Sync, N: NodePrimitives> OmmersProvider for NoopProvider<C, N> {
-    fn ommers(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        Ok(None)
     }
 }
 
