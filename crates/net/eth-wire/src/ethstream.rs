@@ -64,6 +64,9 @@ where
     /// Consumes the [`UnauthedEthStream`] and returns an [`EthStream`] after the `Status`
     /// handshake is completed successfully. This also returns the `Status` message sent by the
     /// remote peer.
+    ///
+    /// Caution: This expects that the [`UnifiedStatus`] has the proper eth version configured, with
+    /// ETH69 the initial status message changed.
     pub async fn handshake<N: NetworkPrimitives>(
         self,
         status: UnifiedStatus,

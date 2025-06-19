@@ -13,7 +13,22 @@ use derive_more::Deref;
 
 /// A block with senders recovered from the block's transactions.
 ///
-/// This type is a [`SealedBlock`] with a list of senders that match the transactions in the block.
+/// This type represents a [`SealedBlock`] where all transaction senders have been
+/// recovered and verified. Recovery is an expensive operation that extracts the
+/// sender address from each transaction's signature.
+///
+/// # Construction
+///
+/// - [`RecoveredBlock::new`] / [`RecoveredBlock::new_unhashed`] - Create with pre-recovered senders
+///   (unchecked)
+/// - [`RecoveredBlock::try_new`] / [`RecoveredBlock::try_new_unhashed`] - Create with validation
+/// - [`RecoveredBlock::try_recover`] - Recover from a block
+/// - [`RecoveredBlock::try_recover_sealed`] - Recover from a sealed block
+///
+/// # Performance
+///
+/// Sender recovery is computationally expensive. Cache recovered blocks when possible
+/// to avoid repeated recovery operations.
 ///
 /// ## Sealing
 ///
@@ -551,11 +566,10 @@ mod rpc_compat {
     where
         B: BlockTrait,
     {
-        /// Converts the block block into an RPC [`Block`] instance with the given
-        /// [`BlockTransactionsKind`].
+        /// Converts the block into an RPC [`Block`] with the given [`BlockTransactionsKind`].
         ///
-        /// The `tx_resp_builder` closure is used to build the transaction response for each
-        /// transaction.
+        /// The `tx_resp_builder` closure transforms each transaction into the desired response
+        /// type.
         pub fn into_rpc_block<T, F, E>(
             self,
             kind: BlockTransactionsKind,
@@ -573,15 +587,13 @@ mod rpc_compat {
             }
         }
 
-        /// Clones the block and converts it into a [`Block`] response with the given
-        /// [`BlockTransactionsKind`]
+        /// Converts the block to an RPC [`Block`] without consuming self.
         ///
-        /// This is a convenience method that avoids the need to explicitly clone the block
-        /// before calling [`Self::into_rpc_block`]. For transaction hashes, it only clones
-        /// the necessary parts for better efficiency.
+        /// For transaction hashes, only necessary parts are cloned for efficiency.
+        /// For full transactions, the entire block is cloned.
         ///
-        /// The `tx_resp_builder` closure is used to build the transaction response for each
-        /// transaction.
+        /// The `tx_resp_builder` closure transforms each transaction into the desired response
+        /// type.
         pub fn clone_into_rpc_block<T, F, E>(
             &self,
             kind: BlockTransactionsKind,
@@ -599,12 +611,10 @@ mod rpc_compat {
             }
         }
 
-        /// Create a new [`Block`] instance from a [`RecoveredBlock`] reference.
+        /// Creates an RPC [`Block`] with transaction hashes from a reference.
         ///
-        /// This will populate the `transactions` field with only the hashes of the transactions in
-        /// the block: [`BlockTransactions::Hashes`]
-        ///
-        /// This method only clones the necessary parts and avoids cloning the entire block.
+        /// Returns [`BlockTransactions::Hashes`] containing only transaction hashes.
+        /// Efficiently clones only necessary parts, not the entire block.
         pub fn to_rpc_block_with_tx_hashes<T>(&self) -> Block<T, Header<B::Header>> {
             let transactions = self.body().transaction_hashes_iter().copied().collect();
             let rlp_length = self.rlp_length();
@@ -619,11 +629,10 @@ mod rpc_compat {
             Block { header, uncles, transactions, withdrawals }
         }
 
-        /// Create a new [`Block`] response from a [`RecoveredBlock`], using the
-        /// total difficulty to populate its field in the rpc response.
+        /// Converts the block into an RPC [`Block`] with transaction hashes.
         ///
-        /// This will populate the `transactions` field with only the hashes of the transactions in
-        /// the block: [`BlockTransactions::Hashes`]
+        /// Consumes self and returns [`BlockTransactions::Hashes`] containing only transaction
+        /// hashes.
         pub fn into_rpc_block_with_tx_hashes<T>(self) -> Block<T, Header<B::Header>> {
             let transactions = self.body().transaction_hashes_iter().copied().collect();
             let rlp_length = self.rlp_length();
@@ -637,11 +646,10 @@ mod rpc_compat {
             Block { header, uncles, transactions, withdrawals }
         }
 
-        /// Create a new [`Block`] response from a [`RecoveredBlock`], using the given closure to
-        /// create the rpc transactions.
+        /// Converts the block into an RPC [`Block`] with full transaction objects.
         ///
-        /// This will populate the `transactions` field with the _full_
-        /// transaction objects: [`BlockTransactions::Full`]
+        /// Returns [`BlockTransactions::Full`] with complete transaction data.
+        /// The `tx_resp_builder` closure transforms each transaction with its metadata.
         pub fn into_rpc_block_full<T, F, E>(
             self,
             tx_resp_builder: F,
@@ -693,17 +701,15 @@ mod rpc_compat {
     where
         T: SignedTransaction,
     {
-        /// Create a `RecoveredBlock` from an alloy RPC block.
+        /// Creates a `RecoveredBlock` from an RPC block.
+        ///
+        /// Converts the RPC block to consensus format and recovers transaction senders.
+        /// Works with any transaction type `U` that can be converted to `T`.
         ///
         /// # Examples
         /// ```ignore
-        /// // Works with default Transaction type
         /// let rpc_block: alloy_rpc_types_eth::Block = get_rpc_block();
         /// let recovered = RecoveredBlock::from_rpc_block(rpc_block)?;
-        ///
-        /// // Also works with custom transaction types that implement From<U>
-        /// let custom_rpc_block: alloy_rpc_types_eth::Block<CustomTx> = get_custom_rpc_block();
-        /// let recovered = RecoveredBlock::from_rpc_block(custom_rpc_block)?;
         /// ```
         pub fn from_rpc_block<U>(
             block: alloy_rpc_types_eth::Block<U>,
