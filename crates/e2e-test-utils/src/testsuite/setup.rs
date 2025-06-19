@@ -1,6 +1,9 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{setup_engine, testsuite::Environment, NodeBuilderHelper, PayloadAttributesBuilder};
+use crate::{
+    setup_engine_with_connection, testsuite::Environment, NodeBuilderHelper,
+    PayloadAttributesBuilder,
+};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
@@ -157,12 +160,13 @@ where
             )
         };
 
-        let result = setup_engine::<N>(
+        let result = setup_engine_with_connection::<N>(
             node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
             is_dev,
             self.tree_config.clone(),
             attributes_generator,
+            self.network.connect_nodes,
         )
         .await;
 
@@ -292,16 +296,23 @@ pub struct Genesis {}
 pub struct NetworkSetup {
     /// Number of nodes to create
     pub node_count: usize,
+    /// Whether nodes should be connected to each other
+    pub connect_nodes: bool,
 }
 
 impl NetworkSetup {
     /// Create a new network setup with a single node
     pub const fn single_node() -> Self {
-        Self { node_count: 1 }
+        Self { node_count: 1, connect_nodes: true }
     }
 
-    /// Create a new network setup with multiple nodes
+    /// Create a new network setup with multiple nodes (connected)
     pub const fn multi_node(count: usize) -> Self {
-        Self { node_count: count }
+        Self { node_count: count, connect_nodes: true }
+    }
+
+    /// Create a new network setup with multiple nodes (disconnected)
+    pub const fn multi_node_unconnected(count: usize) -> Self {
+        Self { node_count: count, connect_nodes: false }
     }
 }
