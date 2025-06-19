@@ -83,8 +83,8 @@ pub struct TriePrefixSets {
 /// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
 /// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb, 0xc]));
 /// let mut prefix_set = prefix_set_mut.freeze();
-/// assert!(prefix_set.contains(&[0xa, 0xb]));
-/// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
+/// assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb])));
+/// assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc])));
 /// ```
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct PrefixSetMut {
