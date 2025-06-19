@@ -251,10 +251,7 @@ mod tests {
             ..Default::default()
         };
         let base_fee = next_block_base_fee(&op_chain_spec, &parent, 0);
-        assert_eq!(
-            base_fee.unwrap(),
-            op_chain_spec.next_block_base_fee(&parent, 0)
-        );
+        assert_eq!(base_fee.unwrap(), op_chain_spec.next_block_base_fee(&parent, 0));
     }
 
     #[test]
@@ -269,10 +266,7 @@ mod tests {
             ..Default::default()
         };
         let base_fee = next_block_base_fee(&op_chain_spec, &parent, 1800000005);
-        assert_eq!(
-            base_fee.unwrap(),
-            op_chain_spec.next_block_base_fee(&parent, 0)
-        );
+        assert_eq!(base_fee.unwrap(), op_chain_spec.next_block_base_fee(&parent, 0));
     }
 
     #[test]
