@@ -69,7 +69,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Calculate the EIP-1559 base fee for the next block from the given parent header.
     ///
-    /// The `target_timestamp` should be the timestamp of the block being calculated for,
+    /// The `target_timestamp` should generally be the timestamp of the block being calculated for,
     /// not the parent block timestamp.
     ///
     /// Caution: Implementers must only use `gas_used`, `gas_limit`, `base_fee_per_gas`, and
