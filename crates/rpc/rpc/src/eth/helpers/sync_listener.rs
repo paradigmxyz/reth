@@ -6,10 +6,10 @@ use reth_network_api::NetworkInfo;
 use std::{
     future::Future,
     pin::Pin,
-    task::{Context, Poll},
+    task::{ready, Context, Poll},
 };
 
-/// Future that resolves once the node is no longer syncing.
+/// This future resolves once the node is no longer syncing: [`NetworkInfo::is_syncing`].
 #[must_use = "futures do nothing unless polled"]
 #[pin_project]
 #[derive(Debug)]
@@ -26,19 +26,23 @@ impl<N, St> SyncListener<N, St> {
     }
 }
 
-impl<N, St> Future for SyncListener<N, St>
+impl<N, St, Out> Future for SyncListener<N, St>
 where
     N: NetworkInfo,
-    St: Stream<Item = ()> + Unpin,
+    St: Stream<Item = Out> + Unpin,
 {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
+
         if !this.network_info.is_syncing() {
             return Poll::Ready(());
         }
-        while let Poll::Ready(tick_event) = this.tick.as_mut().poll_next(cx) {
+
+        loop {
+            let tick_event = ready!(this.tick.as_mut().poll_next(cx));
+
             match tick_event {
                 Some(_) => {
                     if !this.network_info.is_syncing() {
@@ -48,7 +52,6 @@ where
                 None => return Poll::Ready(()),
             }
         }
-        Poll::Pending
     }
 }
 
@@ -107,7 +110,7 @@ mod tests {
     #[tokio::test]
     async fn completes_immediately_if_not_syncing() {
         let network = TestNetwork { syncing: Arc::new(AtomicBool::new(false)) };
-        let fut = SyncListener::new(network, stream::pending());
+        let fut = SyncListener::new(network, stream::pending::<()>());
         fut.await;
     }
 
