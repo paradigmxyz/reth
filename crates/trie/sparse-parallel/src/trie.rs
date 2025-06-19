@@ -183,12 +183,26 @@ impl ParallelSparseTrie {
         &mut self,
         key_path: Nibbles,
         value: Vec<u8>,
-        provider: impl BlindedProvider,
+        provider: impl BlindedProvider + Clone,
     ) -> SparseTrieResult<()> {
-        let _key_path = key_path;
-        let _value = value;
-        let _provider = provider;
-        todo!()
+        self.prefix_set.insert(key_path.clone());
+
+        // Start at the root, traversing until we find either the node to update or a subtrie to
+        // update.
+        //
+        // There are a few cases to consider:
+        // 1. The leaf will end up in the upper subtrie. This is the case usually if the trie is
+        //    small, but in general it can happen for any leaf where existing nodes share at most 1
+        //    nibble with the leaf.
+        // 2. There is a leaf or extension node that shares a 2-nibble prefix with the leaf. In this
+        //    case, we have to create a split branch node. We may need to create a new subtrie in
+        //    this situation, for example if it's two leaves that share a 2-nibble prefix.
+        // 3. There are nodes that share at least 2 nibbles with the leaf's path. In this case, we
+        //    call `update_leaf` on the subtrie that the leaf would be in.
+
+        // subtrie.update_leaf(key_path.clone(), value, provider)?;
+
+        Ok(())
     }
 
     /// Returns the next node in the traversal path from the given path towards the leaf for the
@@ -848,7 +862,8 @@ impl SparseSubtrie {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the update is successful.
+    /// Returns the `Ok` if the update is successful.
+    /// If a split branch was added this is returned as well, along with its path.
     ///
     /// Note: If an update requires revealing a blinded node, an error is returned if the blinded
     /// provider returns an error.
@@ -858,7 +873,7 @@ impl SparseSubtrie {
         value: Vec<u8>,
         provider: impl BlindedProvider,
     ) -> SparseTrieResult<()> {
-        let existing = self.inner.values.insert(path.clone(), value);
+        let existing = self.inner.values.insert(path, value);
         if existing.is_some() {
             // trie structure unchanged, return immediately
             return Ok(())
@@ -875,7 +890,7 @@ impl SparseSubtrie {
                     return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
                 }
                 SparseNode::Leaf { key: current_key, .. } => {
-                    current.extend_from_slice_unchecked(current_key);
+                    current.extend(current_key);
 
                     // this leaf is being updated
                     if current == path {
@@ -893,7 +908,10 @@ impl SparseSubtrie {
                     self.nodes.reserve(3);
                     self.nodes.insert(
                         current.slice(..common),
-                        SparseNode::new_split_branch(current[common], path[common]),
+                        SparseNode::new_split_branch(
+                            current.get_unchecked(common),
+                            path.get_unchecked(common),
+                        ),
                     );
                     self.nodes.insert(
                         path.slice(..=common),
@@ -907,7 +925,7 @@ impl SparseSubtrie {
                     break;
                 }
                 SparseNode::Extension { key, .. } => {
-                    current.extend_from_slice(key);
+                    current.extend(key);
 
                     if !path.starts_with(&current) {
                         // find the common prefix
@@ -933,7 +951,7 @@ impl SparseSubtrie {
                                         "Revealing extension node child",
                                     );
                                     self.reveal_node(
-                                        current.clone(),
+                                        current,
                                         &decoded,
                                         TrieMasks { hash_mask, tree_mask },
                                     )?;
@@ -944,7 +962,10 @@ impl SparseSubtrie {
                         // create state mask for new branch node
                         // NOTE: this might overwrite the current extension node
                         self.nodes.reserve(3);
-                        let branch = SparseNode::new_split_branch(current[common], path[common]);
+                        let branch = SparseNode::new_split_branch(
+                            current.get_unchecked(common),
+                            path.get_unchecked(common),
+                        );
                         self.nodes.insert(current.slice(..common), branch);
 
                         // create new leaf
@@ -961,7 +982,7 @@ impl SparseSubtrie {
                     }
                 }
                 SparseNode::Branch { state_mask, .. } => {
-                    let nibble = path[current.len()];
+                    let nibble = path.get_unchecked(current.len());
                     current.push_unchecked(nibble);
                     if !state_mask.is_bit_set(nibble) {
                         state_mask.set_bit(nibble);
@@ -975,7 +996,6 @@ impl SparseSubtrie {
 
         Ok(())
     }
-
 
     /// Internal implementation of the method of the same name on `ParallelSparseTrie`.
     fn reveal_node(
@@ -1668,11 +1688,6 @@ mod tests {
     use itertools::Itertools;
     use reth_execution_errors::SparseTrieError;
     use reth_primitives_traits::Account;
-    use reth_trie_common::{
-        prefix_set::PrefixSetMut, BranchNode, ExtensionNode, LeafNode, RlpNode, TrieMask, TrieNode,
-        EMPTY_ROOT_HASH, HashBuilder, proof::{ProofNodes, ProofRetainer},
-        updates::TrieUpdates,
-    };
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
         node_iter::{TrieElement, TrieNodeIter},
@@ -1682,6 +1697,13 @@ mod tests {
     use reth_trie_sparse::{
         blinded::{BlindedProvider, RevealedNode, DefaultBlindedProvider},
         SparseNode, TrieMasks,
+    };
+    use reth_trie_common::{
+        prefix_set::PrefixSetMut,
+        proof::{ProofNodes, ProofRetainer},
+        updates::TrieUpdates,
+        BranchNode, ExtensionNode, HashBuilder, LeafNode, RlpNode, TrieMask, TrieNode,
+        EMPTY_ROOT_HASH,
     };
 
     /// Mock blinded provider for testing that allows pre-setting nodes at specific paths.
@@ -1901,10 +1923,7 @@ mod tests {
     }
 
     /// Assert that the sparse subtrie nodes and the proof nodes from the hash builder are equal.
-    fn assert_eq_sparse_subtrie_proof_nodes(
-        sparse_trie: &SparseSubtrie,
-        proof_nodes: ProofNodes,
-    ) {
+    fn assert_eq_sparse_subtrie_proof_nodes(sparse_trie: &SparseSubtrie, proof_nodes: ProofNodes) {
         let proof_nodes = proof_nodes
             .into_nodes_sorted()
             .into_iter()
@@ -3041,5 +3060,34 @@ mod tests {
         // assert_eq!(sparse_root, hash_builder_root);
         // assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
         assert_eq_sparse_subtrie_proof_nodes(&sparse, hash_builder_proof_nodes);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_empty_update_one() {
+        let key = Nibbles::unpack(B256::with_last_byte(42));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let (_hash_builder_root, _hash_builder_updates, hash_builder_proof_nodes, _, _) =
+            run_hash_builder(
+                [(key.clone(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key.clone()],
+            );
+
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+        sparse.update_leaf(key, value_encoded(), DefaultBlindedProvider).unwrap();
+        // let sparse_root = sparse.root();
+        // let sparse_updates = sparse.take_updates();
+
+        // assert_eq!(sparse_root, hash_builder_root);
+        // assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        // assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+        assert_eq_sparse_subtrie_proof_nodes(&sparse.upper_subtrie, hash_builder_proof_nodes);
     }
 }
