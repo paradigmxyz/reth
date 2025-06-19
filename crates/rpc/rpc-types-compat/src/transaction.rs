@@ -15,7 +15,6 @@ use reth_evm::{
 };
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
@@ -25,7 +24,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     type Primitives: NodePrimitives;
 
     /// RPC transaction response type.
-    type Transaction: Serialize + for<'de> Deserialize<'de> + Send + Sync + Unpin + Clone + Debug;
+    type Network: Network + Unpin;
 
     /// A set of variables for executing a transaction.
     type TxEnv;
@@ -39,7 +38,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     fn fill_pending(
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
-    ) -> Result<Self::Transaction, Self::Error> {
+    ) -> Result<<Self::Network as Network>::TransactionResponse, Self::Error> {
         self.fill(tx, TransactionInfo::default())
     }
 
@@ -52,7 +51,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
         tx_inf: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error>;
+    ) -> Result<<Self::Network as Network>::TransactionResponse, Self::Error>;
 
     /// Builds a fake transaction from a transaction request for inclusion into block built in
     /// `eth_simulateV1`.
@@ -375,7 +374,7 @@ where
         + Sync,
 {
     type Primitives = N;
-    type Transaction = <E as Network>::TransactionResponse;
+    type Network = E;
     type TxEnv = TxEnvFor<Evm>;
     type Error = Err;
 
@@ -383,7 +382,7 @@ where
         &self,
         tx: Recovered<TxTy<N>>,
         tx_info: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error> {
+    ) -> Result<<E as Network>::TransactionResponse, Self::Error> {
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 

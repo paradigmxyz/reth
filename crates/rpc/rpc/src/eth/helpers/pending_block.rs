@@ -1,5 +1,6 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
+use crate::EthApi;
 use alloy_consensus::BlockHeader;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
@@ -8,9 +9,10 @@ use reth_primitives_traits::SealedHeader;
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
-    FromEvmError, RpcNodeCore,
+    EthApiTypes, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
+use reth_rpc_types_compat::TransactionCompat;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     StateProviderFactory,
@@ -18,14 +20,18 @@ use reth_storage_api::{
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm_primitives::B256;
 
-use crate::EthApi;
-
 impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: SpawnBlocking<
-            NetworkTypes: RpcTypes<Header = alloy_rpc_types_eth::Header>,
+            NetworkTypes: alloy_network::Network<
+                HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
+            > + RpcTypes<
+                Header = <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::HeaderResponse,
+                Transaction = <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::TransactionResponse,
+            >,
             Error: FromEvmError<Self::Evm>,
+            TransactionCompat: TransactionCompat<Network = <Self as EthApiTypes>::NetworkTypes>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<
                 Transaction = reth_ethereum_primitives::TransactionSigned,

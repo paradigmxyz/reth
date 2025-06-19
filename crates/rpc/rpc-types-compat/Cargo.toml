@@ -33,7 +33,6 @@ op-revm = { workspace = true, optional = true }
 revm-context.workspace = true
 
 # io
-serde.workspace = true
 jsonrpsee-types.workspace = true
 
 # error

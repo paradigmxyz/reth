@@ -42,7 +42,7 @@ impl<T: SignedTransaction> TransactionSource<T> {
     pub fn into_transaction<Builder>(
         self,
         resp_builder: &Builder,
-    ) -> Result<Builder::Transaction, Builder::Error>
+    ) -> Result<<Builder::Network as alloy_network::Network>::TransactionResponse, Builder::Error>
     where
         Builder: TransactionCompat<Primitives: NodePrimitives<SignedTx = T>>,
     {

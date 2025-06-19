@@ -191,7 +191,12 @@ pub fn build_simulated_block<T, B, Halt: Clone>(
     results: Vec<ExecutionResult<Halt>>,
     full_transactions: bool,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
+) -> Result<
+    SimulatedBlock<
+        Block<<T::Network as alloy_network::Network>::TransactionResponse, Header<B::Header>>,
+    >,
+    T::Error,
+>
 where
     T: TransactionCompat<
         Primitives: NodePrimitives<SignedTx = BlockTx<B>>,

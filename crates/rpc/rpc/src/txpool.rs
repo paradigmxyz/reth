@@ -38,11 +38,19 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
     Eth: TransactionCompat<Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>>,
 {
-    fn content(&self) -> Result<TxpoolContent<Eth::Transaction>, Eth::Error> {
+    fn content(
+        &self,
+    ) -> Result<
+        TxpoolContent<<Eth::Network as alloy_network::Network>::TransactionResponse>,
+        Eth::Error,
+    > {
         #[inline]
         fn insert<Tx, RpcTxB>(
             tx: &Tx,
-            content: &mut BTreeMap<Address, BTreeMap<String, RpcTxB::Transaction>>,
+            content: &mut BTreeMap<
+                Address,
+                BTreeMap<String, <RpcTxB::Network as alloy_network::Network>::TransactionResponse>,
+            >,
             resp_builder: &RpcTxB,
         ) -> Result<(), RpcTxB::Error>
         where
@@ -72,7 +80,8 @@ where
 }
 
 #[async_trait]
-impl<Pool, Eth> TxPoolApiServer<Eth::Transaction> for TxPoolApi<Pool, Eth>
+impl<Pool, Eth> TxPoolApiServer<<Eth::Network as alloy_network::Network>::TransactionResponse>
+    for TxPoolApi<Pool, Eth>
 where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
     Eth: TransactionCompat<Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>> + 'static,
@@ -129,7 +138,8 @@ where
     async fn txpool_content_from(
         &self,
         from: Address,
-    ) -> RpcResult<TxpoolContentFrom<Eth::Transaction>> {
+    ) -> RpcResult<TxpoolContentFrom<<Eth::Network as alloy_network::Network>::TransactionResponse>>
+    {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
         Ok(self.content().map_err(Into::into)?.remove_from(&from))
     }
@@ -139,7 +149,10 @@ where
     ///
     /// See [here](https://geth.ethereum.org/docs/rpc/ns-txpool#txpool_content) for more details
     /// Handler for `txpool_content`
-    async fn txpool_content(&self) -> RpcResult<TxpoolContent<Eth::Transaction>> {
+    async fn txpool_content(
+        &self,
+    ) -> RpcResult<TxpoolContent<<Eth::Network as alloy_network::Network>::TransactionResponse>>
+    {
         trace!(target: "rpc::eth", "Serving txpool_content");
         Ok(self.content().map_err(Into::into)?)
     }

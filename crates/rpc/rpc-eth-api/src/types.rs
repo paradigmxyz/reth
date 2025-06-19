@@ -83,9 +83,13 @@ where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
+            NetworkTypes: Network
+                              + RpcTypes<
+                Transaction = <<Self as EthApiTypes>::NetworkTypes as Network>::TransactionResponse,
+            >,
             TransactionCompat: TransactionCompat<
                 Primitives = <Self as RpcNodeCore>::Primitives,
-                Transaction = RpcTransaction<Self::NetworkTypes>,
+                Network = <Self as EthApiTypes>::NetworkTypes,
                 Error = RpcError<Self>,
             >,
         >,
@@ -99,9 +103,13 @@ impl<T> FullEthApiTypes for T where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
+            NetworkTypes: Network
+                              + RpcTypes<
+                Transaction = <<Self as EthApiTypes>::NetworkTypes as Network>::TransactionResponse,
+            >,
             TransactionCompat: TransactionCompat<
                 Primitives = <Self as RpcNodeCore>::Primitives,
-                Transaction = RpcTransaction<T::NetworkTypes>,
+                Network = <Self as EthApiTypes>::NetworkTypes,
                 Error = RpcError<T>,
             >,
         >

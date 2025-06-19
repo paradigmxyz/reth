@@ -10008,6 +10008,7 @@ version = "1.4.8"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-sol-types",
@@ -10093,7 +10094,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-storage-api",
  "revm-context",
- "serde",
  "thiserror 2.0.12",
 ]
 

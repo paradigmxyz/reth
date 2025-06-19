@@ -19,6 +19,7 @@ use reth_primitives_traits::{
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_rpc_types_compat::TransactionCompat;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     ReceiptProvider, StateProviderFactory,
@@ -37,10 +38,14 @@ use tracing::debug;
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadPendingBlock:
     EthApiTypes<
-        NetworkTypes: RpcTypes<
-            Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
+        NetworkTypes: alloy_network::Network<
+            HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
+        > + RpcTypes<
+            Header = <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::HeaderResponse,
+            Transaction = <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::TransactionResponse,
         >,
         Error: FromEvmError<Self::Evm>,
+        TransactionCompat: TransactionCompat<Network = <Self as EthApiTypes>::NetworkTypes>,
     > + RpcNodeCore<
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
