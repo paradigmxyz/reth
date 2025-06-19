@@ -256,7 +256,7 @@ pub trait EstimateCall: Call {
             mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
         }
 
-        Ok(U256::from(highest_gas_limit.saturating_mul(120).div_ceil(100)))
+        Ok(U256::from(highest_gas_limit.saturating_mul(120) / 100))
     }
 
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
