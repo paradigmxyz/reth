@@ -183,12 +183,10 @@ impl ParallelSparseTrie {
         &mut self,
         key_path: Nibbles,
         value: Vec<u8>,
-        masks: TrieMasks,
         provider: impl BlindedProvider,
     ) -> SparseTrieResult<()> {
         let _key_path = key_path;
         let _value = value;
-        let _masks = masks;
         let _provider = provider;
         todo!()
     }
@@ -840,6 +838,144 @@ impl SparseSubtrie {
         let child_level = core::mem::discriminant(&SparseSubtrieType::from_path(child_path));
         current_level == child_level
     }
+
+    /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
+    /// value.
+    ///
+    /// This method updates the internal prefix set and, if the leaf did not previously exist,
+    /// adjusts the trie structure by inserting new leaf nodes, splitting branch nodes, or
+    /// collapsing extension nodes as needed.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the update is successful.
+    ///
+    /// Note: If an update requires revealing a blinded node, an error is returned if the blinded
+    /// provider returns an error.
+    pub fn update_leaf(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+        provider: impl BlindedProvider,
+    ) -> SparseTrieResult<()> {
+        let existing = self.inner.values.insert(path.clone(), value);
+        if existing.is_some() {
+            // trie structure unchanged, return immediately
+            return Ok(())
+        }
+
+        let mut current = Nibbles::default();
+        while let Some(node) = self.nodes.get_mut(&current) {
+            match node {
+                SparseNode::Empty => {
+                    *node = SparseNode::new_leaf(path);
+                    break
+                }
+                &mut SparseNode::Hash(hash) => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
+                }
+                SparseNode::Leaf { key: current_key, .. } => {
+                    current.extend_from_slice_unchecked(current_key);
+
+                    // this leaf is being updated
+                    if current == path {
+                        unreachable!("we already checked leaf presence in the beginning");
+                    }
+
+                    // find the common prefix
+                    let common = current.common_prefix_length(&path);
+
+                    // update existing node
+                    let new_ext_key = current.slice(current.len() - current_key.len()..common);
+                    *node = SparseNode::new_ext(new_ext_key);
+
+                    // create a branch node and corresponding leaves
+                    self.nodes.reserve(3);
+                    self.nodes.insert(
+                        current.slice(..common),
+                        SparseNode::new_split_branch(current[common], path[common]),
+                    );
+                    self.nodes.insert(
+                        path.slice(..=common),
+                        SparseNode::new_leaf(path.slice(common + 1..)),
+                    );
+                    self.nodes.insert(
+                        current.slice(..=common),
+                        SparseNode::new_leaf(current.slice(common + 1..)),
+                    );
+
+                    break;
+                }
+                SparseNode::Extension { key, .. } => {
+                    current.extend_from_slice(key);
+
+                    if !path.starts_with(&current) {
+                        // find the common prefix
+                        let common = current.common_prefix_length(&path);
+                        *key = current.slice(current.len() - key.len()..common);
+
+                        // If branch node updates retention is enabled, we need to query the
+                        // extension node child to later set the hash mask for a parent branch node
+                        // correctly.
+                        if self.inner.updates.is_some() {
+                            // Check if the extension node child is a hash that needs to be revealed
+                            if self.nodes.get(&current).unwrap().is_hash() {
+                                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                                    provider.blinded_node(&current)?
+                                {
+                                    let decoded = TrieNode::decode(&mut &node[..])?;
+                                    trace!(
+                                        target: "trie::sparse",
+                                        ?current,
+                                        ?decoded,
+                                        ?tree_mask,
+                                        ?hash_mask,
+                                        "Revealing extension node child",
+                                    );
+                                    self.reveal_node(
+                                        current.clone(),
+                                        &decoded,
+                                        TrieMasks { hash_mask, tree_mask },
+                                    )?;
+                                }
+                            }
+                        }
+
+                        // create state mask for new branch node
+                        // NOTE: this might overwrite the current extension node
+                        self.nodes.reserve(3);
+                        let branch = SparseNode::new_split_branch(current[common], path[common]);
+                        self.nodes.insert(current.slice(..common), branch);
+
+                        // create new leaf
+                        let new_leaf = SparseNode::new_leaf(path.slice(common + 1..));
+                        self.nodes.insert(path.slice(..=common), new_leaf);
+
+                        // recreate extension to previous child if needed
+                        let key = current.slice(common + 1..);
+                        if !key.is_empty() {
+                            self.nodes.insert(current.slice(..=common), SparseNode::new_ext(key));
+                        }
+
+                        break;
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    let nibble = path[current.len()];
+                    current.push_unchecked(nibble);
+                    if !state_mask.is_bit_set(nibble) {
+                        state_mask.set_bit(nibble);
+                        let new_leaf = SparseNode::new_leaf(path.slice(current.len()..));
+                        self.nodes.insert(current, new_leaf);
+                        break;
+                    }
+                }
+            };
+        }
+
+        Ok(())
+    }
+
 
     /// Internal implementation of the method of the same name on `ParallelSparseTrie`.
     fn reveal_node(
@@ -1532,21 +1668,19 @@ mod tests {
     use itertools::Itertools;
     use reth_execution_errors::SparseTrieError;
     use reth_primitives_traits::Account;
+    use reth_trie_common::{
+        prefix_set::PrefixSetMut, BranchNode, ExtensionNode, LeafNode, RlpNode, TrieMask, TrieNode,
+        EMPTY_ROOT_HASH, HashBuilder, proof::{ProofNodes, ProofRetainer},
+        updates::TrieUpdates,
+    };
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor},
-        walker::TrieWalker,
-    };
-    use reth_trie_common::{
-        prefix_set::PrefixSetMut,
-        proof::{ProofNodes, ProofRetainer},
-        updates::TrieUpdates,
-        BranchNode, ExtensionNode, HashBuilder, HashedPostState, LeafNode, RlpNode, TrieMask,
-        TrieNode, EMPTY_ROOT_HASH,
+        walker::TrieWalker, HashedPostState,
     };
     use reth_trie_sparse::{
-        blinded::{BlindedProvider, RevealedNode},
+        blinded::{BlindedProvider, RevealedNode, DefaultBlindedProvider},
         SparseNode, TrieMasks,
     };
 
@@ -1734,6 +1868,52 @@ mod tests {
 
         for ((proof_node_path, proof_node), (sparse_node_path, sparse_node)) in
             proof_nodes.zip(all_sparse_nodes)
+        {
+            assert_eq!(&proof_node_path, sparse_node_path);
+
+            let equals = match (&proof_node, &sparse_node) {
+                // Both nodes are empty
+                (TrieNode::EmptyRoot, SparseNode::Empty) => true,
+                // Both nodes are branches and have the same state mask
+                (
+                    TrieNode::Branch(BranchNode { state_mask: proof_state_mask, .. }),
+                    SparseNode::Branch { state_mask: sparse_state_mask, .. },
+                ) => proof_state_mask == sparse_state_mask,
+                // Both nodes are extensions and have the same key
+                (
+                    TrieNode::Extension(ExtensionNode { key: proof_key, .. }),
+                    SparseNode::Extension { key: sparse_key, .. },
+                ) |
+                // Both nodes are leaves and have the same key
+                (
+                    TrieNode::Leaf(LeafNode { key: proof_key, .. }),
+                    SparseNode::Leaf { key: sparse_key, .. },
+                ) => proof_key == sparse_key,
+                // Empty and hash nodes are specific to the sparse trie, skip them
+                (_, SparseNode::Empty | SparseNode::Hash(_)) => continue,
+                _ => false,
+            };
+            assert!(
+                equals,
+                "path: {proof_node_path:?}\nproof node: {proof_node:?}\nsparse node: {sparse_node:?}"
+            );
+        }
+    }
+
+    /// Assert that the sparse subtrie nodes and the proof nodes from the hash builder are equal.
+    fn assert_eq_sparse_subtrie_proof_nodes(
+        sparse_trie: &SparseSubtrie,
+        proof_nodes: ProofNodes,
+    ) {
+        let proof_nodes = proof_nodes
+            .into_nodes_sorted()
+            .into_iter()
+            .map(|(path, node)| (path, TrieNode::decode(&mut node.as_ref()).unwrap()));
+
+        let sparse_nodes = sparse_trie.nodes.iter().sorted_by_key(|(path, _)| *path);
+
+        for ((proof_node_path, proof_node), (sparse_node_path, sparse_node)) in
+            proof_nodes.zip(sparse_nodes)
         {
             assert_eq!(&proof_node_path, sparse_node_path);
 
@@ -2251,7 +2431,6 @@ mod tests {
         );
 
         // Compare hashes between hash builder and subtrie
-
         let hash_builder_branch_1_hash =
             RlpNode::from_rlp(proof_nodes.get(&branch_1_path).unwrap().as_ref()).as_hash().unwrap();
         let subtrie_branch_1_hash = subtrie.nodes.get(&branch_1_path).unwrap().hash().unwrap();
@@ -2834,5 +3013,33 @@ mod tests {
         assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_some());
         assert!(leaf_1_subtrie.nodes.get(&leaf_1_path).unwrap().hash().is_some());
         assert!(leaf_2_subtrie.nodes.get(&leaf_2_path).unwrap().hash().is_some());
+    }
+
+    #[test]
+    fn sparse_subtrie_empty_update_one() {
+        let key = Nibbles::unpack(B256::with_last_byte(42));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let (_hash_builder_root, _hash_builder_updates, hash_builder_proof_nodes, _, _) =
+            run_hash_builder(
+                [(key.clone(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key.clone()],
+            );
+
+        let mut sparse = SparseSubtrie::default().with_updates(true);
+        sparse.update_leaf(key, value_encoded(), DefaultBlindedProvider).unwrap();
+        // let sparse_root = sparse.root();
+        // let sparse_updates = sparse.take_updates();
+
+        // assert_eq!(sparse_root, hash_builder_root);
+        // assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq_sparse_subtrie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 }
