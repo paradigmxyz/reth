@@ -1924,7 +1924,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
 
 /// Enum representing sparse trie node type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SparseNodeType {
+pub enum SparseNodeType {
     /// Empty trie node.
     Empty,
     /// A placeholder that stores only the hash for a node that has not been fully revealed.
@@ -1944,15 +1944,15 @@ enum SparseNodeType {
 }
 
 impl SparseNodeType {
-    const fn is_hash(&self) -> bool {
+    pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash)
     }
 
-    const fn is_branch(&self) -> bool {
+    pub const fn is_branch(&self) -> bool {
         matches!(self, Self::Branch { .. })
     }
 
-    const fn store_in_db_trie(&self) -> Option<bool> {
+    pub const fn store_in_db_trie(&self) -> Option<bool> {
         match *self {
             Self::Extension { store_in_db_trie } | Self::Branch { store_in_db_trie } => {
                 store_in_db_trie
@@ -2101,25 +2101,25 @@ impl RlpNodeBuffers {
 }
 
 /// RLP node path stack item.
-#[derive(Debug)]
-struct RlpNodePathStackItem {
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct RlpNodePathStackItem {
     /// Level at which the node is located. Higher numbers correspond to lower levels in the trie.
-    level: usize,
+    pub level: usize,
     /// Path to the node.
-    path: Nibbles,
+    pub path: Nibbles,
     /// Whether the path is in the prefix set. If [`None`], then unknown yet.
-    is_in_prefix_set: Option<bool>,
+    pub is_in_prefix_set: Option<bool>,
 }
 
 /// RLP node stack item.
-#[derive(Debug)]
-struct RlpNodeStackItem {
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RlpNodeStackItem {
     /// Path to the node.
-    path: Nibbles,
+    pub path: Nibbles,
     /// RLP node.
-    rlp_node: RlpNode,
+    pub rlp_node: RlpNode,
     /// Type of the node.
-    node_type: SparseNodeType,
+    pub node_type: SparseNodeType,
 }
 
 /// Tracks modifications to the sparse trie structure.
