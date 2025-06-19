@@ -897,9 +897,28 @@ impl<
         let block_count = to_block - from_block + 1;
         let distance_from_tip = chain_tip.saturating_sub(to_block);
 
+        // Count potential bloom filter matches to estimate cache pressure
+        let bloom_matches = sealed_headers
+            .iter()
+            .filter(|header| filter.matches_bloom(header.logs_bloom()))
+            .count();
+
+        // Adjust cached mode threshold based on potential cache pressure
+        // But only for larger ranges - small ranges should stay in CachedMode for selective caching
+        let adjusted_cached_threshold = if block_count > 100 && bloom_matches > 20 {
+            // If many blocks match bloom filter in a large range, be more conservative with caching
+            CACHED_MODE_BLOCK_THRESHOLD / 2
+        } else if block_count > 100 && bloom_matches > 10 {
+            // Moderate bloom matches in large range, slightly reduce threshold
+            (CACHED_MODE_BLOCK_THRESHOLD * 3) / 4
+        } else {
+            CACHED_MODE_BLOCK_THRESHOLD
+        };
+
         // use cached mode for recent blocks (close to chain tip) and small ranges
-        if block_count <= CACHED_MODE_BLOCK_THRESHOLD &&
-            distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
+        // but be more conservative when many blocks might be cached
+        if block_count <= adjusted_cached_threshold &&
+            distance_from_tip <= adjusted_cached_threshold &&
             !sealed_headers.is_empty()
         {
             Self::Cached(CachedMode {
