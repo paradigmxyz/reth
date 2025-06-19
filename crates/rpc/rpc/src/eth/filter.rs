@@ -16,7 +16,7 @@ use reth_rpc_eth_api::{
     RpcNodeCoreExt, RpcTransaction, TransactionCompat,
 };
 use reth_rpc_eth_types::{
-    logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
+    logs_utils::{self, append_matching_block_logs, block_has_matching_logs, ProviderOrBlock},
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
@@ -599,6 +599,7 @@ where
         // initialize the appropriate range mode based on collected headers
         let mut range_mode = RangeMode::new(
             self.clone(),
+            filter.clone(),
             matching_headers,
             from_block,
             to_block,
@@ -886,6 +887,7 @@ impl<
     /// Creates a new `RangeMode`.
     fn new(
         filter_inner: Arc<EthFilterInner<Eth>>,
+        filter: Filter,
         sealed_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
         from_block: u64,
         to_block: u64,
@@ -900,10 +902,15 @@ impl<
             distance_from_tip <= CACHED_MODE_BLOCK_THRESHOLD &&
             !sealed_headers.is_empty()
         {
-            Self::Cached(CachedMode { filter_inner, headers_iter: sealed_headers.into_iter() })
+            Self::Cached(CachedMode {
+                filter_inner,
+                filter,
+                headers_iter: sealed_headers.into_iter(),
+            })
         } else {
             Self::Range(RangeBlockMode {
                 filter_inner,
+                filter,
                 iter: sealed_headers.into_iter().peekable(),
                 next: VecDeque::new(),
                 max_range: max_headers_range as usize,
@@ -925,6 +932,7 @@ struct CachedMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
+    filter: Filter,
     headers_iter: std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
 }
 
@@ -939,11 +947,35 @@ impl<
                 self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?;
 
             let (receipts, recovered_block) = match cache_result {
-                Some((receipts, maybe_block)) => (receipts, maybe_block),
+                Some((receipts, maybe_block)) => {
+                    // Already cached - check if it has matching logs
+                    let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
+                        &self.filter,
+                        header.num_hash(),
+                        &receipts,
+                    );
+
+                    if has_matching_logs {
+                        (receipts, maybe_block)
+                    } else {
+                        continue; // Skip blocks without matching logs
+                    }
+                }
                 None => {
                     // Cache miss - fallback to provider
                     match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
                         Some(receipts) => {
+                            // Check if this block has matching logs before caching
+                            let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
+                                &self.filter,
+                                header.num_hash(),
+                                &receipts,
+                            );
+
+                            if !has_matching_logs {
+                                continue; // Skip blocks without matching logs - don't cache
+                            }
+
                             let recovered_block = self
                                 .filter_inner
                                 .provider()
@@ -970,6 +1002,7 @@ struct RangeBlockMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
 > {
     filter_inner: Arc<EthFilterInner<Eth>>,
+    filter: Filter,
     iter: Peekable<std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
     next: VecDeque<ReceiptBlockResult<Eth::Provider>>,
     max_range: usize,
@@ -1015,7 +1048,20 @@ impl<
         for header in range_headers {
             if let Some(Ok(Some((receipts, recovered_block)))) = receipt_stream.next().await {
                 if !receipts.is_empty() {
-                    self.next.push_back(ReceiptBlockResult { receipts, recovered_block, header });
+                    // Check if this block has matching logs before adding to results
+                    let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
+                        &self.filter,
+                        header.num_hash(),
+                        &receipts,
+                    );
+
+                    if has_matching_logs {
+                        self.next.push_back(ReceiptBlockResult {
+                            receipts,
+                            recovered_block,
+                            header,
+                        });
+                    }
                 }
             }
         }
@@ -1092,6 +1138,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
+            filter: Filter::default(),
             iter: headers.into_iter().peekable(),
             next: VecDeque::new(),
             max_range,
@@ -1169,6 +1216,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
+            filter: Filter::default(),
             iter: headers.into_iter().peekable(),
             next: VecDeque::from([mock_result_1, mock_result_2]), // Queue two results
             max_range: 100,
@@ -1238,6 +1286,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
+            filter: Filter::default(),
             iter: headers.into_iter().peekable(),
             next: VecDeque::new(),
             max_range: 100,
@@ -1263,23 +1312,28 @@ mod tests {
         provider.add_header(block_hash_2, header_2.clone());
         provider.add_header(block_hash_3, header_3.clone());
 
-        // create mock receipts to test provider fetching
+        // create mock receipts to test provider fetching with mock logs
+        let mock_log = alloy_primitives::Log {
+            address: alloy_primitives::Address::ZERO,
+            data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
+        };
+        
         let receipt_100_1 = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 21_000,
-            logs: vec![],
+            logs: vec![mock_log.clone()],
             success: true,
         };
         let receipt_100_2 = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Eip1559,
             cumulative_gas_used: 42_000,
-            logs: vec![],
+            logs: vec![mock_log.clone()],
             success: true,
         };
         let receipt_101_1 = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Eip2930,
             cumulative_gas_used: 30_000,
-            logs: vec![],
+            logs: vec![mock_log.clone()],
             success: false,
         };
 
@@ -1301,8 +1355,12 @@ mod tests {
             SealedHeader::new(header_3, block_hash_3),
         ];
 
+        // Create a filter that matches any logs (no restrictions)
+        let test_filter = Filter::default();
+
         let mut range_mode = RangeBlockMode {
             filter_inner,
+            filter: test_filter,
             iter: headers.into_iter().peekable(),
             next: VecDeque::new(),
             max_range: 3, // include the 3 blocks in the first queried results
@@ -1380,6 +1438,7 @@ mod tests {
 
         let mut range_mode = RangeBlockMode {
             filter_inner,
+            filter: Filter::default(),
             iter: headers.into_iter().peekable(),
             next: VecDeque::new(),
             max_range: 1,
@@ -1416,11 +1475,16 @@ mod tests {
             test_hash,
         );
 
-        // add a mock receipt to the provider
+        // add a mock receipt to the provider with a mock log
+        let mock_log = alloy_primitives::Log {
+            address: alloy_primitives::Address::ZERO,
+            data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
+        };
+        
         let mock_receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 21_000,
-            logs: vec![],
+            logs: vec![mock_log],
             success: true,
         };
 
@@ -1438,7 +1502,14 @@ mod tests {
 
         let headers = vec![test_header.clone()];
 
-        let mut cached_mode = CachedMode { filter_inner, headers_iter: headers.into_iter() };
+        // Create a filter that matches any logs (no restrictions)
+        let test_filter = Filter::default();
+
+        let mut cached_mode = CachedMode {
+            filter_inner,
+            filter: test_filter,
+            headers_iter: headers.into_iter(),
+        };
 
         // should find the receipt from provider fallback (cache will be empty)
         let result = cached_mode.next().await.expect("next should succeed");
@@ -1473,7 +1544,14 @@ mod tests {
 
         let headers: Vec<SealedHeader<alloy_consensus::Header>> = vec![];
 
-        let mut cached_mode = CachedMode { filter_inner, headers_iter: headers.into_iter() };
+        // Create a filter that matches any logs (no restrictions)  
+        let test_filter = Filter::default();
+
+        let mut cached_mode = CachedMode {
+            filter_inner,
+            filter: test_filter,
+            headers_iter: headers.into_iter(),
+        };
 
         // should immediately return None for empty headers
         let result = cached_mode.next().await.expect("next should succeed");
