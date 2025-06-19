@@ -20,7 +20,7 @@ pub struct ParallelSparseTrie {
     /// This contains the trie nodes for the upper part of the trie.
     upper_subtrie: SparseSubtrie,
     /// An array containing the subtries at the second level of the trie.
-    subtries: [Option<SparseSubtrie>; 256],
+    lower_subtries: [Option<SparseSubtrie>; 256],
     /// Optional tracking of trie updates for later use.
     updates: Option<SparseTrieUpdates>,
 }
@@ -29,23 +29,25 @@ impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
             upper_subtrie: SparseSubtrie::default(),
-            subtries: [const { None }; 256],
+            lower_subtries: [const { None }; 256],
             updates: None,
         }
     }
 }
 
 impl ParallelSparseTrie {
+    /// Returns mutable ref to the lower `SparseSubtrie` for the given path, or None if the path
+    /// belongs to the upper trie.
     fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut SparseSubtrie> {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
-                if self.subtries[idx].is_none() {
+                if self.lower_subtries[idx].is_none() {
                     let upper_path = Nibbles::unpack([idx as u8]);
-                    self.subtries[idx] = Some(SparseSubtrie::new(upper_path));
+                    self.lower_subtries[idx] = Some(SparseSubtrie::new(upper_path));
                 }
 
-                self.subtries[idx].as_mut()
+                self.lower_subtries[idx].as_mut()
             }
         }
     }
