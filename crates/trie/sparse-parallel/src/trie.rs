@@ -1,10 +1,5 @@
 use std::sync::mpsc;
 
-use crate::{
-    blinded::BlindedProvider, RlpNodePathStackItem, RlpNodeStackItem, SparseNode,
-    SparseTrieUpdates, TrieMasks,
-};
-use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
@@ -15,6 +10,10 @@ use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
     Nibbles, RlpNode, TrieNode, CHILD_INDEX_RANGE,
+};
+use reth_trie_sparse::{
+    blinded::BlindedProvider, RlpNodePathStackItem, RlpNodeStackItem, SparseNode,
+    SparseTrieUpdates, TrieMasks,
 };
 use smallvec::SmallVec;
 use tracing::trace;
@@ -648,10 +647,10 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        parallel_trie::{path_subtrie_index_unchecked, ChangedSubtrie, SparseSubtrieType},
-        ParallelSparseTrie, SparseNode, SparseSubtrie, TrieMasks,
+    use super::{
+        path_subtrie_index_unchecked, ParallelSparseTrie, SparseSubtrie, SparseSubtrieType,
     };
+    use crate::trie::ChangedSubtrie;
     use alloy_primitives::B256;
     use alloy_rlp::Encodable;
     use alloy_trie::Nibbles;
@@ -661,6 +660,7 @@ mod tests {
         prefix_set::PrefixSetMut, BranchNode, ExtensionNode, LeafNode, RlpNode, TrieMask, TrieNode,
         EMPTY_ROOT_HASH,
     };
+    use reth_trie_sparse::{SparseNode, TrieMasks};
 
     // Test helpers
     fn encode_account_value(nonce: u64) -> Vec<u8> {
