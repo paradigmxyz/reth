@@ -47,13 +47,13 @@ impl Default for ParallelSparseTrie {
 impl ParallelSparseTrie {
     /// Returns mutable ref to the lower `SparseSubtrie` for the given path, or None if the path
     /// belongs to the upper trie.
-    fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut SparseSubtrie> {
+    fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
                 if self.lower_subtries[idx].is_none() {
                     let upper_path = path.slice(..2);
-                    self.lower_subtries[idx] = Some(SparseSubtrie::new(upper_path));
+                    self.lower_subtries[idx] = Some(Box::new(SparseSubtrie::new(upper_path)));
                 }
 
                 self.lower_subtries[idx].as_mut()
