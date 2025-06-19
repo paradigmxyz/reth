@@ -103,6 +103,7 @@ test-utils = [
     "reth-payload-builder/test-utils",
     "reth-stages/test-utils",
     "reth-db-api/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
 ]
@@ -111,4 +112,5 @@ op = [
     "reth-db-api/op",
     "reth-engine-local/op",
     "reth-evm/op",
+    "reth-primitives-traits/op",
 ]

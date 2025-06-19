@@ -53,6 +53,7 @@ test-utils = [
 std = [
     "alloy-consensus/std",
     "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
     "alloy-rlp/std",
     "reth-primitives-traits/std",
     "reth-zstd-compressors?/std",
@@ -73,6 +74,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-consensus/k256",
     "alloy-primitives/arbitrary",
+    "alloy-rpc-types-eth/arbitrary",
     "reth-codecs?/arbitrary",
     "reth-primitives-traits/arbitrary",
     "alloy-eips/arbitrary",

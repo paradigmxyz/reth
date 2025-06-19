@@ -57,6 +57,7 @@ std = [
     "reth-codecs?/std",
     "alloy-consensus/std",
     "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
     "serde?/std",
     "bytes?/std",
     "alloy-rlp/std",
@@ -108,4 +109,5 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-eips/arbitrary",
+    "alloy-rpc-types-eth/arbitrary",
 ]
