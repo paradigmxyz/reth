@@ -504,17 +504,6 @@ where
 
 impl<N, NetworkT, EV, EB> LocalPayloadAttributesAddOn<N>
     for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
-where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives = OpPrimitives,
-            Payload: EngineTypes<ExecutionData = OpExecutionData>,
-        >,
-    >,
-    OpEthApiBuilder<NetworkT>: EthApiBuilder<N> + 'static,
-    EV: EngineValidatorBuilder<N> + Default + 'static,
-    EB: EngineApiBuilder<N> + 'static,
 {
     type PayloadAttributes = OpPayloadAttributes;
 
