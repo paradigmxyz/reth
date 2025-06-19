@@ -9,11 +9,15 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
-use alloy_evm::block::BlockExecutor;
+use alloy_evm::{
+    block::{BlockExecutor, StateChangeSource},
+    Evm,
+};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
+use core::borrow::BorrowMut;
 use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
@@ -30,11 +34,14 @@ use reth_engine_primitives::{
     ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
-use reth_evm::{ConfigureEvm, Evm, SpecFor};
+use reth_evm::{
+    execute::{BlockExecutionError, BlockExecutionOutput},
+    ConfigureEvm, Database, OnStateHook, SpecFor,
+};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
-    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -47,6 +54,10 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm::{
+    database::{states::bundle_state::BundleRetention, State as RevmState},
+    state::EvmState,
+};
 use state::TreeState;
 use std::{
     borrow::Cow,
@@ -88,7 +99,6 @@ pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
-use reth_evm::execute::BlockExecutionOutput;
 
 pub mod state;
 
@@ -220,6 +230,28 @@ pub enum TreeAction {
         /// The sync target head hash
         sync_target_head: B256,
     },
+}
+
+/// Wrapper struct that combines metrics and state hook
+struct MeteredStateHook {
+    metrics: reth_evm::metrics::ExecutorMetrics,
+    inner_hook: Box<dyn OnStateHook>,
+}
+
+impl OnStateHook for MeteredStateHook {
+    fn on_state(&mut self, source: StateChangeSource, state: &EvmState) {
+        // Update the metrics for the number of accounts, storage slots and bytecodes loaded
+        let accounts = state.keys().len();
+        let storage_slots = state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = state.values().filter(|account| !account.info.is_empty_code_hash()).count();
+
+        self.metrics.accounts_loaded_histogram.record(accounts as f64);
+        self.metrics.storage_slots_loaded_histogram.record(storage_slots as f64);
+        self.metrics.bytecodes_loaded_histogram.record(bytecodes as f64);
+
+        // Call the original state hook
+        self.inner_hook.on_state(source, state);
+    }
 }
 
 /// The engine API tree handler implementation.
@@ -2448,15 +2480,95 @@ where
         }
 
         let execution_start = Instant::now();
-        let output = self.metrics.executor.execute_metered(
-            executor,
-            block,
-            Box::new(handle.state_hook()),
-        )?;
+        let output = self.execute_metered(executor, block, Box::new(handle.state_hook()))?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree", elapsed = ?execution_time, number=?block.number(), "Executed block");
         Ok((output, execution_finish))
+    }
+
+    /// Execute and validate the given block, applying metering and tracking execution metrics.
+    fn metered<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R
+    where
+        F: FnOnce() -> R,
+        B: reth_primitives_traits::Block,
+    {
+        // Execute the block and record the elapsed time.
+        let execute_start = Instant::now();
+        let output = f();
+        let execution_duration = execute_start.elapsed().as_secs_f64();
+
+        // Update gas metrics.
+        self.metrics.executor.gas_processed_total.increment(block.header().gas_used());
+        self.metrics
+            .executor
+            .gas_per_second
+            .set(block.header().gas_used() as f64 / execution_duration);
+        self.metrics.executor.gas_used_histogram.record(block.header().gas_used() as f64);
+        self.metrics.executor.execution_histogram.record(execution_duration);
+        self.metrics.executor.execution_duration.set(execution_duration);
+
+        output
+    }
+
+    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
+    /// execution.
+    ///
+    /// Compared to [`Self::metered_one`], this method additionally updates metrics for the number
+    /// of accounts, storage slots and bytecodes loaded and updated.
+    /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
+    /// execution.
+    pub fn execute_metered<E, DB>(
+        &self,
+        executor: E,
+        input: &RecoveredBlock<impl Block<Body: BlockBody<Transaction = E::Transaction>>>,
+        state_hook: Box<dyn OnStateHook>,
+    ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
+    where
+        DB: Database,
+        E: BlockExecutor<Evm: Evm<DB: BorrowMut<RevmState<DB>>>>,
+    {
+        // clone here is cheap, all the metrics are Option<Arc<_>>. additionally
+        // they are globally registered so that the data recorded in the hook will
+        // be accessible.
+        let wrapper =
+            MeteredStateHook { metrics: self.metrics.executor.clone(), inner_hook: state_hook };
+
+        let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
+
+        // Use metered to execute and track timing/gas metrics
+        let (mut db, result) = self.metered(input, || {
+            executor.apply_pre_execution_changes()?;
+            for tx in input.transactions_recovered() {
+                executor.execute_transaction(tx)?;
+            }
+            executor.finish().map(|(evm, result)| (evm.into_db(), result))
+        })?;
+
+        // merge transactions into bundle state
+        db.borrow_mut().merge_transitions(BundleRetention::Reverts);
+        let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
+
+        // Update the metrics for the number of accounts, storage slots and bytecodes updated
+        let accounts = output.state.state.len();
+        let storage_slots =
+            output.state.state.values().map(|account| account.storage.len()).sum::<usize>();
+        let bytecodes = output.state.contracts.len();
+
+        self.metrics.executor.accounts_updated_histogram.record(accounts as f64);
+        self.metrics.executor.storage_slots_updated_histogram.record(storage_slots as f64);
+        self.metrics.executor.bytecodes_updated_histogram.record(bytecodes as f64);
+
+        Ok(output)
+    }
+
+    /// Execute the given block and update metrics for the execution.
+    pub fn metered_one<F, R, B>(&self, input: &RecoveredBlock<B>, f: F) -> R
+    where
+        F: FnOnce(&RecoveredBlock<B>) -> R,
+        B: reth_primitives_traits::Block,
+    {
+        self.metered(input, || f(input))
     }
 
     /// Compute state root for the given hashed post state in parallel.
