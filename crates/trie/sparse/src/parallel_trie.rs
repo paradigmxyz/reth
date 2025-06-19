@@ -302,6 +302,13 @@ impl SparseSubtrie {
             return Ok(())
         }
 
+        if let Some(tree_mask) = masks.tree_mask {
+            self.branch_node_tree_masks.insert(path.clone(), tree_mask);
+        }
+        if let Some(hash_mask) = masks.hash_mask {
+            self.branch_node_hash_masks.insert(path.clone(), hash_mask);
+        }
+
         match node {
             TrieNode::EmptyRoot => {
                 // For an empty root, ensure that we are at the root path, and at the upper subtrie.
