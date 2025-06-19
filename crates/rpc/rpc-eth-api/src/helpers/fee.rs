@@ -15,6 +15,7 @@ use reth_rpc_eth_types::{
 };
 use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider};
 use tracing::debug;
+
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
 pub trait EthFees: LoadFee {
