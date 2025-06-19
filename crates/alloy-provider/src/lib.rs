@@ -361,10 +361,14 @@ where
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         let block_response = match id {
             BlockHashOrNumber::Hash(hash) => self.block_on_async(async {
-                self.provider.get_block_by_hash(hash).await.map_err(ProviderError::other)
+                self.provider.get_block_by_hash(hash).full().await.map_err(ProviderError::other)
             }),
             BlockHashOrNumber::Number(num) => self.block_on_async(async {
-                self.provider.get_block_by_number(num.into()).await.map_err(ProviderError::other)
+                self.provider
+                    .get_block_by_number(num.into())
+                    .full()
+                    .await
+                    .map_err(ProviderError::other)
             }),
         }?;
 
