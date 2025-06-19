@@ -1,5 +1,5 @@
 use crate::{blinded::BlindedProvider, SparseNode, SparseTrieUpdates, TrieMasks};
-use alloc::vec::Vec;
+use alloc::{boxed::Box, vec::Vec};
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
@@ -280,7 +280,9 @@ impl SparseSubtrie {
     /// Returns true if the current path and its child are both found in the same level. This
     /// function assumes that if `current_path` is in a lower level then `child_path` is too.
     fn is_child_same_level(current_path: &Nibbles, child_path: &Nibbles) -> bool {
-        core::mem::discriminant(SparseSubtrieType::from_path(current_path)) == core::mem::discriminant(SparseSubtrieType::from_path(child_path))
+        let current_level = core::mem::discriminant(&SparseSubtrieType::from_path(current_path));
+        let child_level = core::mem::discriminant(&SparseSubtrieType::from_path(child_path));
+        current_level == child_level
     }
 
     /// Internal implementation of the method of the same name on `ParallelSparseTrie`.
