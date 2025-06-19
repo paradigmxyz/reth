@@ -33,7 +33,7 @@ where
             BuiltPayload = EthBuiltPayload,
         > + 'static,
 {
-    PayloadBuilderService::new(Default::default(), futures_util::stream::empty())
+    PayloadBuilderService::new(Default::default(), futures_util::stream::empty(), 3)
 }
 
 /// Creates a new [`PayloadBuilderService`] for testing purposes and spawns it in the background.
