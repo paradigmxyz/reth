@@ -649,7 +649,7 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
 #[cfg(test)]
 mod tests {
     use crate::{
-        parallel_trie::{path_subtrie_index_unchecked, SparseSubtrieType},
+        parallel_trie::{path_subtrie_index_unchecked, ChangedSubtrie, SparseSubtrieType},
         ParallelSparseTrie, SparseNode, SparseSubtrie, TrieMasks,
     };
     use alloy_primitives::B256;
@@ -705,9 +705,9 @@ mod tests {
         let mut trie = ParallelSparseTrie::default();
         let mut prefix_set = PrefixSetMut::from([Nibbles::default()]).freeze();
 
-        let changed = trie.take_changed_lower_subtries(&mut prefix_set);
-        assert!(changed.subtries.is_empty());
-        assert_eq!(changed.unchanged_prefix_set, PrefixSetMut::from(prefix_set.iter().cloned()));
+        let (subtries, unchanged_prefix_set) = trie.take_changed_lower_subtries(&mut prefix_set);
+        assert!(subtries.is_empty());
+        assert_eq!(unchanged_prefix_set, PrefixSetMut::from(prefix_set.iter().cloned()));
     }
 
     #[test]
@@ -740,13 +740,12 @@ mod tests {
         let mut prefix_set = prefix_set.freeze();
 
         // Second subtrie should be removed and returned
-        let changed = trie.take_changed_lower_subtries(&mut prefix_set);
+        let (subtries, unchanged_prefix_set) = trie.take_changed_lower_subtries(&mut prefix_set);
         assert_eq!(
-            changed
-                .subtries
+            subtries
                 .into_iter()
-                .map(|(i, subtrie, prefix_set)| {
-                    (i, subtrie, prefix_set.iter().cloned().collect::<Vec<_>>())
+                .map(|ChangedSubtrie { index, subtrie, prefix_set }| {
+                    (index, subtrie, prefix_set.iter().cloned().collect::<Vec<_>>())
                 })
                 .collect::<Vec<_>>(),
             vec![(
@@ -758,7 +757,7 @@ mod tests {
                 ]
             )]
         );
-        assert_eq!(changed.unchanged_prefix_set, unchanged_prefix_set);
+        assert_eq!(unchanged_prefix_set, unchanged_prefix_set);
         assert!(trie.lower_subtries[subtrie_2_index].is_none());
 
         // First subtrie should remain unchanged
@@ -785,12 +784,13 @@ mod tests {
         let mut prefix_set = PrefixSetMut::all().freeze();
 
         // All subtries should be removed and returned
-        let changed = trie.take_changed_lower_subtries(&mut prefix_set);
+        let (subtries, unchanged_prefix_set) = trie.take_changed_lower_subtries(&mut prefix_set);
         assert_eq!(
-            changed
-                .subtries
+            subtries
                 .into_iter()
-                .map(|(i, subtrie, prefix_set)| { (i, subtrie, prefix_set.all()) })
+                .map(|ChangedSubtrie { index, subtrie, prefix_set }| {
+                    (index, subtrie, prefix_set.all())
+                })
                 .collect::<Vec<_>>(),
             vec![
                 (subtrie_1_index, subtrie_1, true),
@@ -798,6 +798,8 @@ mod tests {
                 (subtrie_3_index, subtrie_3, true)
             ]
         );
+        assert_eq!(unchanged_prefix_set, PrefixSetMut::all());
+
         assert!(trie.lower_subtries.iter().all(Option::is_none));
     }
 

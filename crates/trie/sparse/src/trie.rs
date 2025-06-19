@@ -1924,7 +1924,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
 
 /// Enum representing sparse trie node type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SparseNodeType {
+pub enum SparseNodeType {
     /// Empty trie node.
     Empty,
     /// A placeholder that stores only the hash for a node that has not been fully revealed.
