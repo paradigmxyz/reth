@@ -43,7 +43,7 @@ use tracing::info;
 /// ```
 pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     /// RPC block type. Used by [`DebugConsensusClient`] to fetch blocks and submit them to the
-    /// engine. This is inteded to match the block format returned by the external RPC endpoint.
+    /// engine. This is intended to match the block format returned by the external RPC endpoint.
     type RpcBlock: Serialize + DeserializeOwned + 'static;
 
     /// Converts an RPC block to a primitive block.
