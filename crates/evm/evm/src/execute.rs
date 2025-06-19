@@ -242,9 +242,6 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
 /// - `NextBlockEnvAttributes`: Provides the configuration for the new block
 /// - [`BlockExecutor`]: Executes transactions and produces results
 /// - [`BlockBuilder`]: Orchestrates the entire process and calls the assembler
-///
-/// Different chains may have different assembly rules, which is why this is a trait
-/// rather than a fixed implementation.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockAssembler<F: BlockExecutorFactory> {
     /// The block type produced by the assembler.
