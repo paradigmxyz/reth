@@ -102,7 +102,30 @@ export const sidebar: SidebarItem[] = [
             },
             {
                 text: "FAQ",
-                link: "/run/faq"
+                link: "/run/faq",
+                collapsed: true,
+                items: [
+                    {
+                        text: "Transaction Types",
+                        link: "/run/faq/transactions"
+                    },
+                    {
+                        text: "Pruning & Full Node",
+                        link: "/run/faq/pruning"
+                    },
+                    {
+                        text: "Ports",
+                        link: "/run/faq/ports"
+                    },
+                    {
+                        text: "Profiling",
+                        link: "/run/faq/profiling"
+                    },
+                    {
+                        text: "Sync OP Mainnet",
+                        link: "/run/faq/sync-op-mainnet"
+                    }
+                ]
             }
         ]
     },
