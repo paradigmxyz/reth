@@ -1317,7 +1317,7 @@ mod tests {
             address: alloy_primitives::Address::ZERO,
             data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
         };
-        
+
         let receipt_100_1 = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 21_000,
@@ -1480,7 +1480,7 @@ mod tests {
             address: alloy_primitives::Address::ZERO,
             data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
         };
-        
+
         let mock_receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 21_000,
@@ -1505,11 +1505,8 @@ mod tests {
         // Create a filter that matches any logs (no restrictions)
         let test_filter = Filter::default();
 
-        let mut cached_mode = CachedMode {
-            filter_inner,
-            filter: test_filter,
-            headers_iter: headers.into_iter(),
-        };
+        let mut cached_mode =
+            CachedMode { filter_inner, filter: test_filter, headers_iter: headers.into_iter() };
 
         // should find the receipt from provider fallback (cache will be empty)
         let result = cached_mode.next().await.expect("next should succeed");
@@ -1544,14 +1541,11 @@ mod tests {
 
         let headers: Vec<SealedHeader<alloy_consensus::Header>> = vec![];
 
-        // Create a filter that matches any logs (no restrictions)  
+        // Create a filter that matches any logs (no restrictions)
         let test_filter = Filter::default();
 
-        let mut cached_mode = CachedMode {
-            filter_inner,
-            filter: test_filter,
-            headers_iter: headers.into_iter(),
-        };
+        let mut cached_mode =
+            CachedMode { filter_inner, filter: test_filter, headers_iter: headers.into_iter() };
 
         // should immediately return None for empty headers
         let result = cached_mode.next().await.expect("next should succeed");
