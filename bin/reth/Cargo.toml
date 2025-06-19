@@ -1,5 +1,6 @@
 [package]
 name = "reth"
+authors = ["Paradigm <team@paradigm.xyz>"]
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -130,3 +131,26 @@ min-trace-logs = [
 [[bin]]
 name = "reth"
 path = "src/main.rs"
+
+[package.metadata.deb]
+maintainer = "Paradigm <team@paradigm.xyz>"
+extended-description = """\
+Reth is a new Ethereum full node implementation that is focused on being \
+user-friendly, highly modular, as well as being fast and efficient."""
+
+depends = "$auto, systemd"
+section = "net"
+priority = "optional"
+maintainer-scripts = "debian/"
+
+# System integration
+systemd-units = { enable = false, start = false }
+
+# Assets to include in the package
+assets = [
+    ["target/release/reth", "usr/bin/", "755"],
+    ["debian/reth.service", "lib/systemd/system/", "644"],
+    ["../../README.md", "usr/share/doc/reth/", "644"],
+]
+
+default-features = false

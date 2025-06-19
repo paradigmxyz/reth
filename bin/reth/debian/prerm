@@ -1,0 +1,12 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "remove" ]; then
+    # Stop service if running
+    systemctl stop reth || true
+    systemctl disable reth || true
+fi
+
+#DEBHELPER#
+
+exit 0
