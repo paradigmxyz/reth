@@ -248,7 +248,7 @@ pub enum InvalidPoolTransactionError {
         balance: U256,
     },
     /// EIP-2681 error thrown if the nonce is higher or equal than `U64::max`
-    /// https://eips.ethereum.org/EIPS/eip-2681
+    /// `<https://eips.ethereum.org/EIPS/eip-2681>`
     #[error("nonce exceeds u64 limit")]
     Eip2681,
     /// EIP-4844 related errors
