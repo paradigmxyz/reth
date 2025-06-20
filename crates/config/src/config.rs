@@ -1000,6 +1000,7 @@ receipts = 'full'
                 receipts: Some(PruneMode::Distance(1000)),
                 account_history: None,
                 storage_history: Some(PruneMode::Before(5000)),
+                bodies_history: None,
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([(
                     Address::random(),
                     PruneMode::Full,
@@ -1015,6 +1016,7 @@ receipts = 'full'
                 receipts: Some(PruneMode::Full),
                 account_history: Some(PruneMode::Distance(2000)),
                 storage_history: Some(PruneMode::Distance(3000)),
+                bodies_history: None,
                 receipts_log_filter: ReceiptsLogPruneConfig(BTreeMap::from([
                     (Address::random(), PruneMode::Distance(1000)),
                     (Address::random(), PruneMode::Before(2000)),

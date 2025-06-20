@@ -497,8 +497,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            NippyJar::<SegmentHeader>::load(&self.path.join(segment.filename(&fixed_block_range)))
-                .map_err(ProviderError::other)?
+            let file = self.path.join(segment.filename(&fixed_block_range));
+            debug!(
+                target: "provider::static_file",
+                ?file,
+                ?fixed_block_range,
+                ?block,
+                "Loading static file jar for deletion"
+            );
+            NippyJar::<SegmentHeader>::load(&file).map_err(ProviderError::other)?
         };
 
         jar.delete().map_err(ProviderError::other)?;
