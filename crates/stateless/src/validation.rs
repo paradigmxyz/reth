@@ -135,14 +135,14 @@ where
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
     let current_block = track_cycles!(
-        "recover-signers",
+        "recover_signers",
         current_block
             .try_into_recovered()
             .map_err(|err| StatelessValidationError::SignerRecovery(Box::new(err)))?
     );
 
     let mut ancestor_headers: Vec<Header> = track_cycles!(
-        "decode-headers",
+        "decode_headers",
         witness
             .headers
             .iter()
@@ -176,7 +176,7 @@ where
 
     // First verify that the pre-state reads are correct
     let (mut trie, bytecode) =
-        track_cycles!("verify-witness", StatelessTrie::new(&witness, pre_state_root)?);
+        track_cycles!("verify_witness", StatelessTrie::new(&witness, pre_state_root)?);
 
     // Create an in-memory database that will use the reads to validate the block
     let db = WitnessDatabase::new(&trie, bytecode, ancestor_hashes);
@@ -184,7 +184,7 @@ where
     // Execute the block
     let executor = evm_config.executor(db);
     let output = track_cycles!(
-        "block-execution",
+        "block_execution",
         executor
             .execute(&current_block)
             .map_err(|e| StatelessValidationError::StatelessExecutionFailed(e.to_string()))?
@@ -195,7 +195,7 @@ where
         .map_err(StatelessValidationError::ConsensusValidationFailed)?;
 
     // Compute and check the post state root
-    track_cycles!("post-state-compute", {
+    track_cycles!("post_state_compute", {
         let hashed_state =
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(&output.state.state);
         let state_root = trie.calculate_state_root(hashed_state)?;
