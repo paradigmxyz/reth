@@ -981,6 +981,8 @@ fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{
         path_subtrie_index_unchecked, ParallelSparseTrie, SparseSubtrie, SparseSubtrieType,
     };
@@ -998,6 +1000,7 @@ mod tests {
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor},
         walker::TrieWalker,
+        BranchNodeCompact,
     };
     use reth_trie_common::{
         prefix_set::PrefixSetMut,
@@ -1006,7 +1009,7 @@ mod tests {
         BranchNode, ExtensionNode, HashBuilder, HashedPostState, LeafNode, RlpNode, TrieMask,
         TrieNode, EMPTY_ROOT_HASH,
     };
-    use reth_trie_sparse::{SparseNode, TrieMasks};
+    use reth_trie_sparse::{SparseNode, SparseTrieUpdates, TrieMasks};
 
     fn create_account(nonce: u64) -> Account {
         Account { nonce, ..Default::default() }
@@ -1461,7 +1464,8 @@ mod tests {
 
     #[test]
     fn test_subtrie_update_hashes() {
-        let mut subtrie = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let mut subtrie =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])).with_updates(true));
 
         // Create leaf nodes with paths 0x000...0, 0x00010...0, 0x0010...0
         let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
@@ -1556,5 +1560,27 @@ mod tests {
             RlpNode::from_rlp(proof_nodes.get(&leaf_3_path).unwrap().as_ref()).as_hash().unwrap();
         let subtrie_leaf_3_hash = subtrie.nodes.get(&leaf_3_path).unwrap().hash().unwrap();
         assert_eq!(hash_builder_leaf_3_hash, subtrie_leaf_3_hash);
+
+        // Assert trie updates
+        assert_eq!(
+            subtrie.take_updates(),
+            SparseTrieUpdates {
+                updated_nodes: HashMap::from_iter([(
+                    branch_2_path,
+                    BranchNodeCompact {
+                        // Leaf node at nibble 0, branch node at nibble 1
+                        state_mask: TrieMask::new(0b11),
+                        // No children branch nodes are stored in the database
+                        tree_mask: TrieMask::default(),
+                        // Branch node at nibble 1
+                        hash_mask: TrieMask::new(0b1),
+                        // Hash for the branch node at nibble 1
+                        hashes: Arc::new(vec![subtrie_branch_1_hash]),
+                        root_hash: None
+                    }
+                )]),
+                ..Default::default()
+            }
+        );
     }
 }
