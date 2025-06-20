@@ -18,6 +18,13 @@ use reth_trie_sparse::{
 use smallvec::SmallVec;
 use tracing::trace;
 
+/// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
+/// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
+const UPPER_TRIE_MAX_DEPTH: usize = 2;
+
+/// Number of lower subtries which are managed by the [`ParallelSparseTrie`].
+const NUM_LOWER_SUBTRIES: usize = 1 << (UPPER_TRIE_MAX_DEPTH * 4);
+
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
 /// ## Invariants
@@ -30,7 +37,7 @@ pub struct ParallelSparseTrie {
     /// This contains the trie nodes for the upper part of the trie.
     upper_subtrie: Box<SparseSubtrie>,
     /// An array containing the subtries at the second level of the trie.
-    lower_subtries: [Option<Box<SparseSubtrie>>; 256],
+    lower_subtries: [Option<Box<SparseSubtrie>>; NUM_LOWER_SUBTRIES],
     /// Set of prefixes (key paths) that have been marked as updated.
     /// This is used to track which parts of the trie need to be recalculated.
     prefix_set: PrefixSetMut,
@@ -42,7 +49,7 @@ impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
             upper_subtrie: Box::default(),
-            lower_subtries: [const { None }; 256],
+            lower_subtries: [const { None }; NUM_LOWER_SUBTRIES],
             prefix_set: PrefixSetMut::default(),
             updates: None,
         }
@@ -57,7 +64,7 @@ impl ParallelSparseTrie {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
                 if self.lower_subtries[idx].is_none() {
-                    let upper_path = path.slice(..2);
+                    let upper_path = path.slice(..UPPER_TRIE_MAX_DEPTH);
                     self.lower_subtries[idx] = Some(Box::new(SparseSubtrie::new(upper_path)));
                 }
 
@@ -101,8 +108,8 @@ impl ParallelSparseTrie {
             return subtrie.reveal_node(path, &node, masks);
         }
 
-        // If there is no subtrie for the path it means the path is 2 or less nibbles, and so
-        // belongs to the upper trie.
+        // If there is no subtrie for the path it means the path is UPPER_TRIE_MAX_DEPTH or less
+        // nibbles, and so belongs to the upper trie.
         self.upper_subtrie.reveal_node(path.clone(), &node, masks)?;
 
         // The previous upper_trie.reveal_node call will not have revealed any child nodes via
@@ -111,9 +118,9 @@ impl ParallelSparseTrie {
         // reveal_node_or_hash for each.
         match node {
             TrieNode::Branch(branch) => {
-                // If a branch is at the second level of the trie then it will be in the upper trie,
-                // but all of its children will be in the lower trie.
-                if path.len() == 2 {
+                // If a branch is at the cutoff level of the trie then it will be in the upper trie,
+                // but all of its children will be in a lower trie.
+                if path.len() == UPPER_TRIE_MAX_DEPTH {
                     let mut stack_ptr = branch.as_ref().first_child_index();
                     for idx in CHILD_INDEX_RANGE {
                         if branch.state_mask.is_bit_set(idx) {
@@ -130,7 +137,7 @@ impl ParallelSparseTrie {
             TrieNode::Extension(ext) => {
                 let mut child_path = path.clone();
                 child_path.extend_from_slice_unchecked(&ext.key);
-                if child_path.len() > 2 {
+                if child_path.len() > UPPER_TRIE_MAX_DEPTH {
                     self.lower_subtrie_for_path(&child_path)
                         .expect("child_path must have a lower subtrie")
                         .reveal_node_or_hash(child_path, &ext.child)?;
@@ -188,13 +195,14 @@ impl ParallelSparseTrie {
         todo!()
     }
 
-    /// Recalculates and updates the RLP hashes of nodes up to level 2 of the trie.
+    /// Recalculates and updates the RLP hashes of nodes up to level [`UPPER_TRIE_MAX_DEPTH`] of the
+    /// trie.
     ///
     /// The root node is considered to be at level 0. This method is useful for optimizing
     /// hash recalculations after localized changes to the trie structure.
     ///
     /// This function first identifies all nodes that have changed (based on the prefix set) below
-    /// level 2 of the trie, then recalculates their RLP representation.
+    /// level [`UPPER_TRIE_MAX_DEPTH`] of the trie, then recalculates their RLP representation.
     pub fn update_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
@@ -320,8 +328,9 @@ impl ParallelSparseTrie {
 pub struct SparseSubtrie {
     /// The root path of this subtrie.
     ///
-    /// This is the _full_ path to this subtrie, meaning it includes the first two nibbles that we
-    /// also use for indexing subtries in the [`ParallelSparseTrie`].
+    /// This is the _full_ path to this subtrie, meaning it includes the first
+    /// [`UPPER_TRIE_MAX_DEPTH`] nibbles that we also use for indexing subtries in the
+    /// [`ParallelSparseTrie`].
     path: Nibbles,
     /// The map from paths to sparse trie nodes within this subtrie.
     nodes: HashMap<Nibbles, SparseNode>,
@@ -578,7 +587,7 @@ impl SparseSubtrie {
 /// - Paths in the range `0x000..` belong to one of the lower subtries. The index of the lower
 ///   subtrie is determined by the path first nibbles of the path.
 ///
-/// There can be at most 256 lower subtries.
+/// There can be at most [`NUM_LOWER_SUBTRIES`] lower subtries.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SparseSubtrieType {
     /// Upper subtrie with paths in the range `0x..=0xff`
@@ -591,7 +600,7 @@ pub enum SparseSubtrieType {
 impl SparseSubtrieType {
     /// Returns the type of subtrie based on the given path.
     pub fn from_path(path: &Nibbles) -> Self {
-        if path.len() <= 2 {
+        if path.len() <= UPPER_TRIE_MAX_DEPTH {
             Self::Upper
         } else {
             Self::Lower(path_subtrie_index_unchecked(path))
@@ -627,7 +636,7 @@ pub struct SparseSubtrieBuffers {
 /// Changed subtrie.
 #[derive(Debug)]
 struct ChangedSubtrie {
-    /// Lower subtrie index in the range [0, 255].
+    /// Lower subtrie index in the range [0, [`NUM_LOWER_SUBTRIES`]).
     index: usize,
     /// Changed subtrie
     subtrie: Box<SparseSubtrie>,
@@ -636,11 +645,12 @@ struct ChangedSubtrie {
     prefix_set: PrefixSet,
 }
 
-/// Convert first two nibbles of the path into a lower subtrie index in the range [0, 255].
+/// Convert first [`UPPER_TRIE_MAX_DEPTH`] nibbles of the path into a lower subtrie index in the
+/// range [0, [`NUM_LOWER_SUBTRIES`]).
 ///
 /// # Panics
 ///
-/// If the path is shorter than two nibbles.
+/// If the path is shorter than [`UPPER_TRIE_MAX_DEPTH`] nibbles.
 fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
     (path[0] << 4 | path[1]) as usize
 }
