@@ -21,15 +21,15 @@ where
 {
     fn first(&mut self) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.first(),
-            Either::Right(r) => r.first(),
+            Self::Left(l) => l.first(),
+            Self::Right(r) => r.first(),
         }
     }
 
     fn seek_exact(&mut self, key: T::Key) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.seek_exact(key),
-            Either::Right(r) => r.seek_exact(key),
+            Self::Left(l) => l.seek_exact(key),
+            Self::Right(r) => r.seek_exact(key),
         }
     }
 
@@ -73,8 +73,7 @@ where
         Self: Sized,
     {
         match self {
-            Self::Left(_) => self.walk(start_key),
-            Self::Right(_) => self.walk(start_key),
+            Self::Left(_) | Self::Right(_) => self.walk(start_key),
         }
     }
 
@@ -86,8 +85,7 @@ where
         Self: Sized,
     {
         match self {
-            Self::Left(_) => self.walk_range(range),
-            Self::Right(_) => self.walk_range(range),
+            Self::Left(_) | Self::Right(_) => self.walk_range(range),
         }
     }
 
@@ -99,8 +97,7 @@ where
         Self: Sized,
     {
         match self {
-            Self::Left(_) => self.walk_back(start_key),
-            Self::Right(_) => self.walk_back(start_key),
+            Self::Left(_) | Self::Right(_) => self.walk_back(start_key),
         }
     }
 }
@@ -148,8 +145,7 @@ where
         Self: Sized,
     {
         match self {
-            Self::Left(_) => self.walk_dup(key, subkey),
-            Self::Right(_) => self.walk_dup(key, subkey),
+            Self::Left(_) | Self::Right(_) => self.walk_dup(key, subkey),
         }
     }
 }
@@ -286,20 +282,29 @@ where
     type DupCursorMut<T: DupSort> = Either<L::DupCursorMut<T>, R::DupCursorMut<T>>;
     type CursorMut<T: Table> = Either<L::CursorMut<T>, R::CursorMut<T>>;
 
-    fn put<T: Table>(&self, _key: T::Key, _value: T::Value) -> Result<(), DatabaseError> {
-        Ok(())
+    fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
+        match self {
+            Self::Left(l) => l.put::<T>(key, value),
+            Self::Right(r) => r.put::<T>(key, value),
+        }
     }
 
     fn delete<T: Table>(
         &self,
-        _key: T::Key,
-        _value: Option<T::Value>,
+        key: T::Key,
+        value: Option<T::Value>,
     ) -> Result<bool, DatabaseError> {
-        Ok(true)
+        match self {
+            Self::Left(l) => l.delete::<T>(key, value),
+            Self::Right(r) => r.delete::<T>(key, value),
+        }
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
-        Ok(())
+        match self {
+            Self::Left(l) => l.clear::<T>(),
+            Self::Right(r) => r.clear::<T>(),
+        }
     }
 
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
