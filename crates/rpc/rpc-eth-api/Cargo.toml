@@ -62,3 +62,8 @@ tracing.workspace = true
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
+op = [
+    "reth-evm/op",
+    "reth-primitives-traits/op",
+    "reth-rpc-types-compat/op",
+]
