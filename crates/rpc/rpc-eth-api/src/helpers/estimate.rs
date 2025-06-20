@@ -7,10 +7,10 @@ use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest,
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{Database, EvmEnvFor, TransactionEnv, TxEnvFor};
+use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, TransactionEnv, TxEnvFor};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
-    error::api::FromEvmHalt,
+    error::{api::FromEvmHalt, FromEvmError},
     revm_utils::{apply_state_overrides, caller_gas_allowance},
     EthApiError, RevertError, RpcInvalidTransactionError,
 };
@@ -81,28 +81,20 @@ pub trait EstimateCall: Call {
             apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
         }
 
-        // Optimize for simple transfer transactions, potentially reducing the gas estimate.
-        if tx_env.input().is_empty() {
+        // Check if this is a basic transfer (no input data to account with no code)
+        let is_basic_transfer = if tx_env.input().is_empty() {
             if let TxKind::Call(to) = tx_env.kind() {
                 if let Ok(code) = db.db.account_code(&to) {
-                    let no_code_callee = code.map(|code| code.is_empty()).unwrap_or(true);
-                    if no_code_callee {
-                        // If the tx is a simple transfer (call to an account with no code) we can
-                        // shortcircuit. But simply returning
-                        // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
-                        // field combos that bump the price up, so we try executing the function
-                        // with the minimum gas limit to make sure.
-                        let mut tx_env = tx_env.clone();
-                        tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
-                        if let Ok(res) = self.transact(&mut db, evm_env.clone(), tx_env) {
-                            if res.result.is_success() {
-                                return Ok(U256::from(MIN_TRANSACTION_GAS))
-                            }
-                        }
-                    }
+                    code.map(|code| code.is_empty()).unwrap_or(true)
+                } else {
+                    false
                 }
+            } else {
+                false
             }
-        }
+        } else {
+            false
+        };
 
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
@@ -116,10 +108,31 @@ pub trait EstimateCall: Call {
         // If the provided gas limit is less than computed cap, use that
         tx_env.set_gas_limit(tx_env.gas_limit().min(highest_gas_limit));
 
-        trace!(target: "rpc::eth::estimate", ?evm_env, ?tx_env, "Starting gas estimation");
+        // Create EVM instance once and reuse it throughout the entire estimation process
+        let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
+
+        // For basic transfers, try using minimum gas before running full binary search
+        if is_basic_transfer {
+            // If the tx is a simple transfer (call to an account with no code) we can
+            // shortcircuit. But simply returning
+            // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
+            // field combos that bump the price up, so we try executing the function
+            // with the minimum gas limit to make sure.
+            let mut min_tx_env = tx_env.clone();
+            min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
+
+            // Reuse the same EVM instance
+            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) {
+                if res.result.is_success() {
+                    return Ok(U256::from(MIN_TRANSACTION_GAS))
+                }
+            }
+        }
+
+        trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = tx_env.gas_limit(), is_basic_transfer, "Starting gas estimation");
 
         // Execute the transaction with the highest possible gas limit.
-        let mut res = match self.transact(&mut db, evm_env.clone(), tx_env.clone()) {
+        let mut res = match evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err) {
             // Handle the exceptional case where the transaction initialization uses too much
             // gas. If the gas price or gas limit was specified in the request,
             // retry the transaction with the block's gas limit to determine if
@@ -128,7 +141,27 @@ pub trait EstimateCall: Call {
                 if err.is_gas_too_high() &&
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
-                return Err(self.map_out_of_gas_err(block_env_gas_limit, evm_env, tx_env, &mut db))
+                let req_gas_limit = tx_env.gas_limit();
+                let mut retry_tx_env = tx_env.clone();
+                retry_tx_env.set_gas_limit(block_env_gas_limit);
+
+                let retry_res = evm.transact(retry_tx_env).map_err(Self::Error::from_evm_err)?;
+
+                return match retry_res.result {
+                    ExecutionResult::Success { .. } => {
+                        // transaction succeeded by manually increasing the gas limit to
+                        // highest, which means the caller lacks funds to pay for the tx
+                        Err(RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into_eth_err())
+                    }
+                    ExecutionResult::Revert { output, .. } => {
+                        // reverted again after bumping the limit
+                        Err(RpcInvalidTransactionError::Revert(RevertError::new(output))
+                            .into_eth_err())
+                    }
+                    ExecutionResult::Halt { reason, .. } => {
+                        Err(Self::Error::from_evm_halt(reason, req_gas_limit))
+                    }
+                };
             }
             Err(err) if err.is_gas_too_low() => {
                 // This failed because the configured gas cost of the tx was lower than what
@@ -155,7 +188,29 @@ pub trait EstimateCall: Call {
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
                 return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
-                    Err(self.map_out_of_gas_err(block_env_gas_limit, evm_env, tx_env, &mut db))
+                    let req_gas_limit = tx_env.gas_limit();
+                    let mut retry_tx_env = tx_env.clone();
+                    retry_tx_env.set_gas_limit(block_env_gas_limit);
+
+                    let retry_res =
+                        evm.transact(retry_tx_env).map_err(Self::Error::from_evm_err)?;
+
+                    match retry_res.result {
+                        ExecutionResult::Success { .. } => {
+                            // transaction succeeded by manually increasing the gas limit to
+                            // highest, which means the caller lacks funds to pay for the tx
+                            Err(RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit)
+                                .into_eth_err())
+                        }
+                        ExecutionResult::Revert { output, .. } => {
+                            // reverted again after bumping the limit
+                            Err(RpcInvalidTransactionError::Revert(RevertError::new(output))
+                                .into_eth_err())
+                        }
+                        ExecutionResult::Halt { reason, .. } => {
+                            Err(Self::Error::from_evm_halt(reason, req_gas_limit))
+                        }
+                    }
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
@@ -185,10 +240,13 @@ pub trait EstimateCall: Call {
         let optimistic_gas_limit = (gas_used + gas_refund + CALL_STIPEND_GAS) * 64 / 63;
         if optimistic_gas_limit < highest_gas_limit {
             // Set the transaction's gas limit to the calculated optimistic gas limit.
-            tx_env.set_gas_limit(optimistic_gas_limit);
+            let mut optimistic_tx_env = tx_env.clone();
+            optimistic_tx_env.set_gas_limit(optimistic_gas_limit);
+
             // Re-execute the transaction with the new gas limit and update the result and
             // environment.
-            res = self.transact(&mut db, evm_env.clone(), tx_env.clone())?;
+            res = evm.transact(optimistic_tx_env).map_err(Self::Error::from_evm_err)?;
+
             // Update the gas used based on the new result.
             gas_used = res.result.gas_used();
             // Update the gas limit estimates (highest and lowest) based on the execution result.
@@ -206,7 +264,7 @@ pub trait EstimateCall: Call {
             ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64,
         );
 
-        trace!(target: "rpc::eth::estimate", ?evm_env, ?tx_env, ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
+        trace!(target: "rpc::eth::estimate", ?highest_gas_limit, ?lowest_gas_limit, ?mid_gas_limit, "Starting binary search for gas");
 
         // Binary search narrows the range to find the minimum gas limit needed for the transaction
         // to succeed.
@@ -220,10 +278,11 @@ pub trait EstimateCall: Call {
                 break
             };
 
-            tx_env.set_gas_limit(mid_gas_limit);
+            let mut mid_tx_env = tx_env.clone();
+            mid_tx_env.set_gas_limit(mid_gas_limit);
 
             // Execute transaction and handle potential gas errors, adjusting limits accordingly.
-            match self.transact(&mut db, evm_env.clone(), tx_env.clone()) {
+            match evm.transact(mid_tx_env).map_err(Self::Error::from_evm_err) {
                 Err(err) if err.is_gas_too_high() => {
                     // Decrease the highest gas limit if gas is too high
                     highest_gas_limit = mid_gas_limit;
