@@ -280,7 +280,10 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             StateRoot::overlay_root_with_updates(provider.tx_ref(), hashed_state.clone())
                 .map_err(|err| Error::block_failed(block_number, err))?;
         if computed_state_root != block.state_root {
-            return Err(Error::block_failed(block_number, Error::Assertion("state root mismatch".to_string())))
+            return Err(Error::block_failed(
+                block_number,
+                Error::Assertion("state root mismatch".to_string()),
+            ))
         }
 
         // Commit the post state/state diff to the database
@@ -343,10 +346,8 @@ fn decode_blocks(
         let decoded = SealedBlock::<Block>::decode(&mut block.rlp.as_ref())
             .map_err(|err| Error::block_failed(block_number, err))?;
 
-        let recovered_block = decoded
-            .clone()
-            .try_recover()
-            .map_err(|err| Error::block_failed(block_number, err))?;
+        let recovered_block =
+            decoded.clone().try_recover().map_err(|err| Error::block_failed(block_number, err))?;
 
         blocks.push(recovered_block);
     }

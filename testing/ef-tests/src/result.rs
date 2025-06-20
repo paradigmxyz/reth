@@ -68,7 +68,10 @@ pub enum Error {
 
 impl Error {
     /// Create a new [`Error::BlockProcessingFailed`] error.
-    pub fn block_failed(block_number: u64, err: impl std::error::Error + Send + Sync + 'static) -> Self {
+    pub fn block_failed(
+        block_number: u64,
+        err: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
         Self::BlockProcessingFailed { block_number, err: Box::new(err) }
     }
 }
