@@ -652,6 +652,7 @@ struct ChangedSubtrie {
 ///
 /// If the path is shorter than [`UPPER_TRIE_MAX_DEPTH`] nibbles.
 fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
+    debug_assert_eq!(UPPER_TRIE_MAX_DEPTH, 2);
     (path[0] << 4 | path[1]) as usize
 }
 
