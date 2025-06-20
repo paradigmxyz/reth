@@ -1,13 +1,13 @@
 #![allow(missing_docs)]
 
 use alloy_primitives::{B256, U256};
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use proptest::{prelude::*, strategy::ValueTree};
 use rand::seq::IteratorRandom;
 use reth_trie_common::Nibbles;
 use reth_trie_sparse::SparseTrie;
 
-const LEAF_COUNTS: [usize; 3] = [100, 1_000, 5_000];
+const LEAF_COUNTS: [usize; 2] = [1_000, 5_000];
 
 fn update_leaf(c: &mut Criterion) {
     let mut group = c.benchmark_group("update_leaf");
@@ -15,15 +15,15 @@ fn update_leaf(c: &mut Criterion) {
     for leaf_count in LEAF_COUNTS {
         group.bench_function(BenchmarkId::from_parameter(leaf_count), |b| {
             let leaves = generate_leaves(leaf_count);
-            b.iter_with_setup(
-                || {
-                    // Start with an empty trie
-                    let mut trie = SparseTrie::revealed_empty();
-                    // Pre-populate with data
-                    for (path, value) in &leaves {
-                        trie.update_leaf(*path, value.clone()).unwrap();
-                    }
+            // Start with an empty trie
+            let mut trie = SparseTrie::revealed_empty();
+            // Pre-populate with data
+            for (path, value) in leaves.iter().cloned() {
+                trie.update_leaf(path, value).unwrap();
+            }
 
+            b.iter_batched(
+                || {
                     let new_leaves = leaves
                         .iter()
                         // Update 10% of existing leaves with new values
@@ -37,7 +37,7 @@ fn update_leaf(c: &mut Criterion) {
                         })
                         .collect::<Vec<_>>();
 
-                    (trie, new_leaves)
+                    (trie.clone(), new_leaves)
                 },
                 |(mut trie, new_leaves)| {
                     for (path, new_value) in new_leaves {
@@ -45,6 +45,7 @@ fn update_leaf(c: &mut Criterion) {
                     }
                     trie
                 },
+                BatchSize::LargeInput,
             );
         });
     }
@@ -56,22 +57,22 @@ fn remove_leaf(c: &mut Criterion) {
     for leaf_count in LEAF_COUNTS {
         group.bench_function(BenchmarkId::from_parameter(leaf_count), |b| {
             let leaves = generate_leaves(leaf_count);
-            b.iter_with_setup(
-                || {
-                    // Start with an empty trie
-                    let mut trie = SparseTrie::revealed_empty();
-                    // Pre-populate with data
-                    for (path, value) in &leaves {
-                        trie.update_leaf(*path, value.clone()).unwrap();
-                    }
+            // Start with an empty trie
+            let mut trie = SparseTrie::revealed_empty();
+            // Pre-populate with data
+            for (path, value) in leaves.iter().cloned() {
+                trie.update_leaf(path, value).unwrap();
+            }
 
+            b.iter_batched(
+                || {
                     let delete_leaves = leaves
                         .iter()
                         .map(|(path, _)| path)
                         // Remove 10% leaves
                         .choose_multiple(&mut rand::rng(), leaf_count / 10);
 
-                    (trie, delete_leaves)
+                    (trie.clone(), delete_leaves)
                 },
                 |(mut trie, delete_leaves)| {
                     for path in delete_leaves {
@@ -79,6 +80,7 @@ fn remove_leaf(c: &mut Criterion) {
                     }
                     trie
                 },
+                BatchSize::LargeInput,
             );
         });
     }

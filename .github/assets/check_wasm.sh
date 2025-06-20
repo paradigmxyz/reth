@@ -70,6 +70,7 @@ exclude_crates=(
   reth-transaction-pool # c-kzg
   reth-payload-util # reth-transaction-pool
   reth-trie-parallel # tokio
+  reth-trie-sparse-parallel # rayon
   reth-testing-utils
   reth-optimism-txpool # reth-transaction-pool
   reth-era-downloader # tokio

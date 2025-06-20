@@ -9423,6 +9423,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "revm",
+ "serde_json",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
@@ -10597,6 +10598,28 @@ dependencies = [
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
+ "smallvec",
+ "tracing",
+]
+
+[[package]]
+name = "reth-trie-sparse-parallel"
+version = "1.4.8"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie 0.9.0",
+ "arbitrary",
+ "assert_matches",
+ "itertools 0.14.0",
+ "proptest",
+ "proptest-arbitrary-interop",
+ "rand 0.8.5",
+ "rand 0.9.1",
+ "reth-execution-errors",
+ "reth-primitives-traits",
+ "reth-trie-common",
+ "reth-trie-sparse",
  "smallvec",
  "tracing",
 ]
