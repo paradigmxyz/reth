@@ -477,14 +477,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             // now we need to wipe the static file
             self.delete_jar(StaticFileSegment::Transactions, block_height)?;
 
-            // mark this as the new expired height
-            self.expired_history_height.store(block_height, std::sync::atomic::Ordering::Relaxed);
-
-            // Now we need to shift the index by the batch size and repeat the process.
-            // basically if the lowest static file block was 4499K we shift it by 1 batch size
-            self.static_files_min_block
-                .write()
-                .insert(StaticFileSegment::Transactions, block_height + self.blocks_per_file);
+            // // mark this as the new expired height
+            // self.expired_history_height.store(block_height,
+            // std::sync::atomic::Ordering::Relaxed);
+            //
+            // // Now we need to shift the index by the batch size and repeat the process.
+            // // basically if the lowest static file block was 4499K we shift it by 1 batch size
+            // self.static_files_min_block
+            //     .write()
+            //     .insert(StaticFileSegment::Transactions, block_height + self.blocks_per_file);
         }
     }
 
@@ -510,11 +511,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         jar.delete().map_err(ProviderError::other)?;
 
-        let mut segment_max_block = None;
-        if fixed_block_range.start() > 0 {
-            segment_max_block = Some(fixed_block_range.start() - 1)
-        };
-        self.update_index(segment, segment_max_block)?;
+        // let mut segment_max_block = None;
+        // if fixed_block_range.start() > 0 {
+        //     segment_max_block = Some(fixed_block_range.start() - 1)
+        // };
+        // self.update_index(segment, segment_max_block)?;
+        self.initialize_index()?;
 
         Ok(())
     }
