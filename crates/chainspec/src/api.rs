@@ -67,14 +67,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// Returns the final total difficulty if the Paris hardfork is known.
     fn final_paris_total_difficulty(&self) -> Option<U256>;
 
-    /// Calculate the EIP-1559 base fee for the next block from the given parent header.
-    ///
-    /// The `target_timestamp` should generally be the timestamp of the block being calculated for,
-    /// not the parent block timestamp.
-    ///
-    /// Caution: Implementers must only use `gas_used`, `gas_limit`, `base_fee_per_gas`, and
-    /// `timestamp` from the parent header. Some callers (like `fee_history`) pass minimal
-    /// headers that only populate these fields, with all other fields set to default values.
+    /// See [`AlloyBlockHeader::next_block_base_fee`].
     fn next_block_base_fee<H>(&self, parent: &H, target_timestamp: u64) -> u64
     where
         Self: Sized,
