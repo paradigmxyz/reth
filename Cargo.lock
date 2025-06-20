@@ -6070,9 +6070,9 @@ dependencies = [
 
 [[package]]
 name = "op-revm"
-version = "7.0.0"
+version = "7.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "599265b0373a4c7e43125f701f67eedad16d0f50013e4211989a394ddc061731"
+checksum = "2b97d2b54651fcd2955b454e86b2336c031e17925a127f4c44e2b63b2eeda923"
 dependencies = [
  "auto_impl",
  "once_cell",
@@ -10616,9 +10616,9 @@ dependencies = [
 
 [[package]]
 name = "revm"
-version = "26.0.0"
+version = "26.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bda5ae8b234d51143c74ff67e9ea6ecdbd5abd9e536d081bc981f7be438c8e5"
+checksum = "7b2a493c73054a0f6635bad6e840cdbef34838e6e6186974833c901dff7dd709"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10648,9 +10648,9 @@ dependencies = [
 
 [[package]]
 name = "revm-context"
-version = "7.0.0"
+version = "7.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c08fc9a545ac1fb8d925e6ec9224363ff44aa26cb4ded67f78cb124afc12d1b8"
+checksum = "7b97b69d05651509b809eb7215a6563dc64be76a941666c40aabe597ab544d38"
 dependencies = [
  "cfg-if",
  "derive-where",
@@ -10664,9 +10664,9 @@ dependencies = [
 
 [[package]]
 name = "revm-context-interface"
-version = "7.0.0"
+version = "7.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9acd7c86cf5059df796d4635f593cb031e09eddba6fbe5c643098565aff86b35"
+checksum = "9f8f4f06a1c43bf8e6148509aa06a6c4d28421541944842b9b11ea1a6e53468f"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10706,9 +10706,9 @@ dependencies = [
 
 [[package]]
 name = "revm-handler"
-version = "7.0.0"
+version = "7.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "371ab3f73e7acd4f9f4ea317d666c59e0b6f5ffdbfeddb155415a7240047f80c"
+checksum = "17b61f992beaa7a5fc3f5fcf79f1093624fa1557dc42d36baa42114c2d836b59"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10725,9 +10725,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspector"
-version = "7.0.0"
+version = "7.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edcbbadfde84a6fa9a400e872f2d4cb6cf6780bc370ac50140f14d0191c1752a"
+checksum = "d7e4400a109a2264f4bf290888ac6d02432b6d5d070492b9dcf134b0c7d51354"
 dependencies = [
  "auto_impl",
  "either",
@@ -10763,9 +10763,9 @@ dependencies = [
 
 [[package]]
 name = "revm-interpreter"
-version = "22.0.0"
+version = "22.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0670f7734bb4ff708338a85dada0b00842991715aea8918e3e43183395ca8b30"
+checksum = "a2481ef059708772cec0ce6bc4c84b796a40111612efb73b01adf1caed7ff9ac"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
