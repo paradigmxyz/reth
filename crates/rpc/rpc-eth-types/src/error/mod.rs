@@ -855,6 +855,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             }
             InvalidPoolTransactionError::OversizedData(_, _) => Self::OversizedData,
             InvalidPoolTransactionError::Underpriced => Self::Underpriced,
+            InvalidPoolTransactionError::Eip2681 => Self::Eip2681,
             InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
             InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
