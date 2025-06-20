@@ -450,24 +450,24 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "24.0.1", default-features = false }
-revm-bytecode = { version = "4.0.0", default-features = false }
-revm-database = { version = "4.0.0", default-features = false }
-revm-state = { version = "4.0.0", default-features = false }
-revm-primitives = { version = "19.0.0", default-features = false }
-revm-interpreter = { version = "20.0.0", default-features = false }
-revm-inspector = { version = "5.0.0", default-features = false }
-revm-context = { version = "5.0.0", default-features = false }
-revm-context-interface = { version = "5.0.0", default-features = false }
-revm-database-interface = { version = "4.0.0", default-features = false }
-op-revm = { version = "5.0.0", default-features = false }
-revm-inspectors = "0.24.0"
+revm = { version = "26.0.0", default-features = false }
+revm-bytecode = { version = "5.0.0", default-features = false }
+revm-database = { version = "6.0.0", default-features = false }
+revm-state = { version = "6.0.0", default-features = false }
+revm-primitives = { version = "20.0.0", default-features = false }
+revm-interpreter = { version = "22.0.0", default-features = false }
+revm-inspector = { version = "7.0.0", default-features = false }
+revm-context = { version = "7.0.0", default-features = false }
+revm-context-interface = { version = "7.0.0", default-features = false }
+revm-database-interface = { version = "6.0.0", default-features = false }
+op-revm = { version = "7.0.0", default-features = false }
+revm-inspectors = "0.25.0"
 
 # eth
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.2.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.11", default-features = false }
+alloy-evm = { version = "0.12", default-features = false }
 alloy-primitives = { version = "1.2.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.2.0"
@@ -505,7 +505,7 @@ alloy-transport-ipc = { version = "1.0.12", default-features = false }
 alloy-transport-ws = { version = "1.0.12", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.11", default-features = false }
+alloy-op-evm = { version = "0.12", default-features = false }
 alloy-op-hardforks = "0.2.2"
 op-alloy-rpc-types = { version = "0.18.6", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.18.6", default-features = false }
