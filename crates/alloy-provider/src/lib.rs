@@ -37,6 +37,7 @@ use reth_node_types::{BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxT
 use reth_primitives::{
     Account, Bytecode, RecoveredBlock, SealedBlock, SealedHeader, TransactionMeta,
 };
+use reth_primitives_traits::RpcBlockConversion;
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
     CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
@@ -345,6 +346,7 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    Node::Primitives: RpcBlockConversion,
 {
     type Block = BlockTy<Node>;
 
@@ -356,8 +358,31 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
+        let block_response = match id {
+            BlockHashOrNumber::Hash(hash) => self.block_on_async(async {
+                self.provider.get_block_by_hash(hash).full().await.map_err(ProviderError::other)
+            }),
+            BlockHashOrNumber::Number(num) => self.block_on_async(async {
+                self.provider
+                    .get_block_by_number(num.into())
+                    .full()
+                    .await
+                    .map_err(ProviderError::other)
+            }),
+        }?;
+
+        let Some(block_response) = block_response else {
+            // If the block was not found, return None
+            return Ok(None);
+        };
+
+        // Convert the network block response to RPC block via JSON
+        let json = serde_json::to_value(block_response).map_err(ProviderError::other)?;
+        let rpc_block: <Node::Primitives as RpcBlockConversion>::RpcBlock =
+            serde_json::from_value(json).map_err(ProviderError::other)?;
+
+        Ok(Some(<Node::Primitives as RpcBlockConversion>::rpc_to_primitive_block(rpc_block)))
     }
 
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
@@ -410,6 +435,7 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    Node::Primitives: RpcBlockConversion,
 {
     fn block_by_id(&self, _id: BlockId) -> ProviderResult<Option<Self::Block>> {
         Err(ProviderError::UnsupportedProvider)

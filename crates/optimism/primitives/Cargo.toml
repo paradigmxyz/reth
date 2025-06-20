@@ -22,6 +22,7 @@ alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-rlp.workspace = true
+alloy-rpc-types-eth = { workspace = true, optional = true }
 
 # op
 op-alloy-consensus.workspace = true
@@ -56,6 +57,7 @@ std = [
     "reth-codecs?/std",
     "alloy-consensus/std",
     "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
     "serde?/std",
     "bytes?/std",
     "alloy-rlp/std",
@@ -81,6 +83,7 @@ serde = [
     "reth-primitives-traits/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
+    "alloy-rpc-types-eth/serde",
     "bytes?/serde",
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
@@ -106,4 +109,5 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-eips/arbitrary",
+    "alloy-rpc-types-eth/arbitrary",
 ]

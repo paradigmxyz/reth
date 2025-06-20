@@ -30,11 +30,7 @@ mod builder;
 pub use builder::{add_ons::AddOns, *};
 
 mod launch;
-pub use launch::{
-    debug::{DebugNode, DebugNodeLauncher},
-    engine::EngineNodeLauncher,
-    *,
-};
+pub use launch::{debug::DebugNodeLauncher, engine::EngineNodeLauncher, *};
 
 mod handle;
 pub use handle::NodeHandle;

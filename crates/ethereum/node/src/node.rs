@@ -27,8 +27,7 @@ use reth_node_builder::{
         BasicEngineApiBuilder, EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder,
         EthApiBuilder, EthApiCtx, RethRpcAddOns, RpcAddOns, RpcHandle,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
-    PayloadTypes,
+    BuilderContext, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig, PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
@@ -321,14 +320,6 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         EthereumAddOns::default()
-    }
-}
-
-impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
-    type RpcBlock = alloy_rpc_types_eth::Block;
-
-    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
-        rpc_block.into_consensus().convert_transactions()
     }
 }
 

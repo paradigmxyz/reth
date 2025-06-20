@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 ## reth
 reth-chain-state.workspace = true
+reth-primitives-traits.workspace = true
 reth-chainspec.workspace = true
 reth-cli-util.workspace = true
 reth-config.workspace = true
@@ -102,6 +103,7 @@ test-utils = [
     "reth-payload-builder/test-utils",
     "reth-stages/test-utils",
     "reth-db-api/test-utils",
+    "reth-primitives-traits/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
 ]
@@ -110,4 +112,5 @@ op = [
     "reth-db-api/op",
     "reth-engine-local/op",
     "reth-evm/op",
+    "reth-primitives-traits/op",
 ]
