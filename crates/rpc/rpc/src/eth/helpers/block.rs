@@ -8,7 +8,7 @@ use reth_primitives_traits::{BlockBody, NodePrimitives};
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
-    EthApiTypes, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
+    RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 use reth_rpc_types_compat::TransactionCompat;
@@ -22,7 +22,7 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
-        TransactionCompat: TransactionCompat<Network = <Self as EthApiTypes>::NetworkTypes>,
+        TransactionCompat: TransactionCompat<Network = Self::NetworkTypes>,
         Provider: BlockReader<
             Transaction = reth_ethereum_primitives::TransactionSigned,
             Receipt = reth_ethereum_primitives::Receipt,

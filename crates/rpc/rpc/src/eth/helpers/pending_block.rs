@@ -9,7 +9,7 @@ use reth_primitives_traits::SealedHeader;
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
-    EthApiTypes, FromEvmError, RpcNodeCore,
+    FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
 use reth_rpc_types_compat::TransactionCompat;
@@ -24,14 +24,11 @@ impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: SpawnBlocking<
-            NetworkTypes: alloy_network::Network<
-                HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
-            > + RpcTypes<
-                Header = <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::HeaderResponse,
-                Transaction = <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::TransactionResponse,
+            NetworkTypes: RpcTypes<
+                Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
             Error: FromEvmError<Self::Evm>,
-            TransactionCompat: TransactionCompat<Network = <Self as EthApiTypes>::NetworkTypes>,
+            TransactionCompat: TransactionCompat<Network = Self::NetworkTypes>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<
                 Transaction = reth_ethereum_primitives::TransactionSigned,

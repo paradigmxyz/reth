@@ -10008,7 +10008,6 @@ version = "1.4.8"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
- "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-sol-types",
@@ -10082,6 +10081,7 @@ name = "reth-rpc-types-compat"
 version = "1.4.8"
 dependencies = [
  "alloy-consensus",
+ "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",

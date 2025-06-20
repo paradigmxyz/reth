@@ -20,6 +20,7 @@ use reth_rpc_eth_types::{
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
+use reth_rpc_types_compat::RpcTypes;
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderReceipt, TransactionsProvider,
@@ -416,10 +417,7 @@ struct EthFilterInner<Eth: EthApiTypes> {
 impl<Eth> EthFilterInner<Eth>
 where
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
-        + EthApiTypes<
-            NetworkTypes: alloy_network::Network + reth_rpc_eth_api::types::RpcTypes<
-                Transaction = <<Eth as EthApiTypes>::NetworkTypes as alloy_network::Network>::TransactionResponse
-            >>
+        + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
         + 'static,
 {
     /// Access the underlying provider.
@@ -697,9 +695,7 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(
-        &self,
-    ) -> FilterChanges<<TxCompat::Network as alloy_network::Network>::TransactionResponse> {
+    async fn drain(&self) -> FilterChanges<<TxCompat::Network as RpcTypes>::Transaction> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
@@ -725,16 +721,13 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 }
 
 #[async_trait]
-impl<T, TxCompat>
-    FullTransactionsFilter<<TxCompat::Network as alloy_network::Network>::TransactionResponse>
+impl<T, TxCompat> FullTransactionsFilter<<TxCompat::Network as RpcTypes>::Transaction>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
     TxCompat: TransactionCompat<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
 {
-    async fn drain(
-        &self,
-    ) -> FilterChanges<<TxCompat::Network as alloy_network::Network>::TransactionResponse> {
+    async fn drain(&self) -> FilterChanges<<TxCompat::Network as RpcTypes>::Transaction> {
         Self::drain(self).await
     }
 }

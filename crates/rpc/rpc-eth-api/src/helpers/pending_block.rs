@@ -38,14 +38,11 @@ use tracing::debug;
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadPendingBlock:
     EthApiTypes<
-        NetworkTypes: alloy_network::Network<
-            HeaderResponse = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
-        > + RpcTypes<
-            Header = <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::HeaderResponse,
-            Transaction = <<Self as EthApiTypes>::NetworkTypes as alloy_network::Network>::TransactionResponse,
+        NetworkTypes: RpcTypes<
+            Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
         Error: FromEvmError<Self::Evm>,
-        TransactionCompat: TransactionCompat<Network = <Self as EthApiTypes>::NetworkTypes>,
+        TransactionCompat: TransactionCompat<Network = Self::NetworkTypes>,
     > + RpcNodeCore<
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
