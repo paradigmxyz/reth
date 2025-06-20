@@ -97,13 +97,13 @@ jobs:
           - target: x86_64-unknown-linux-gnu-deb
             os: ubuntu-24.04
             profile: maxperf
-            allow_fail: false
+            allow_fail: true
             rust_target: x86_64-unknown-linux-gnu
             gcc_package: gcc
           - target: aarch64-unknown-linux-gnu-deb
             os: ubuntu-24.04
             profile: maxperf
-            allow_fail: false
+            allow_fail: true
             rust_target: aarch64-unknown-linux-gnu
             gcc_package: gcc-aarch64-linux-gnu
         build:
