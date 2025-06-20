@@ -59,6 +59,15 @@ where
 /// Threshold for deciding between cached and range mode processing
 const CACHED_MODE_BLOCK_THRESHOLD: u64 = 250;
 
+/// Threshold for bloom filter matches that triggers reduced caching
+const HIGH_BLOOM_MATCH_THRESHOLD: usize = 20;
+
+/// Threshold for bloom filter matches that triggers moderately reduced caching
+const MODERATE_BLOOM_MATCH_THRESHOLD: usize = 10;
+
+/// Minimum block count to apply bloom filter match adjustments
+const BLOOM_ADJUSTMENT_MIN_BLOCKS: u64 = 100;
+
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
@@ -897,30 +906,11 @@ impl<
         let block_count = to_block - from_block + 1;
         let distance_from_tip = chain_tip.saturating_sub(to_block);
 
-        // Count potential bloom filter matches to estimate cache pressure
-        let bloom_matches = sealed_headers
-            .iter()
-            .filter(|header| filter.matches_bloom(header.logs_bloom()))
-            .count();
+        // Determine if we should use cached mode based on range characteristics
+        let use_cached_mode =
+            Self::should_use_cached_mode(&filter, &sealed_headers, block_count, distance_from_tip);
 
-        // Adjust cached mode threshold based on potential cache pressure
-        // But only for larger ranges - small ranges should stay in CachedMode for selective caching
-        let adjusted_cached_threshold = if block_count > 100 && bloom_matches > 20 {
-            // If many blocks match bloom filter in a large range, be more conservative with caching
-            CACHED_MODE_BLOCK_THRESHOLD / 2
-        } else if block_count > 100 && bloom_matches > 10 {
-            // Moderate bloom matches in large range, slightly reduce threshold
-            (CACHED_MODE_BLOCK_THRESHOLD * 3) / 4
-        } else {
-            CACHED_MODE_BLOCK_THRESHOLD
-        };
-
-        // use cached mode for recent blocks (close to chain tip) and small ranges
-        // but be more conservative when many blocks might be cached
-        if block_count <= adjusted_cached_threshold &&
-            distance_from_tip <= adjusted_cached_threshold &&
-            !sealed_headers.is_empty()
-        {
+        if use_cached_mode && !sealed_headers.is_empty() {
             Self::Cached(CachedMode {
                 filter_inner,
                 filter,
@@ -934,6 +924,36 @@ impl<
                 next: VecDeque::new(),
                 max_range: max_headers_range as usize,
             })
+        }
+    }
+
+    /// Determines whether to use cached mode based on bloom filter matches and range size
+    fn should_use_cached_mode(
+        filter: &Filter,
+        headers: &[SealedHeader<<Eth::Provider as HeaderProvider>::Header>],
+        block_count: u64,
+        distance_from_tip: u64,
+    ) -> bool {
+        // Count potential bloom filter matches to estimate cache pressure
+        let bloom_matches = headers.iter().filter(|h| filter.matches_bloom(h.logs_bloom())).count();
+
+        // Calculate adjusted threshold based on bloom matches
+        let adjusted_threshold = Self::calculate_adjusted_threshold(block_count, bloom_matches);
+
+        block_count <= adjusted_threshold && distance_from_tip <= adjusted_threshold
+    }
+
+    /// Calculates the adjusted cache threshold based on bloom filter matches
+    const fn calculate_adjusted_threshold(block_count: u64, bloom_matches: usize) -> u64 {
+        // Only apply adjustments for larger ranges
+        if block_count <= BLOOM_ADJUSTMENT_MIN_BLOCKS {
+            return CACHED_MODE_BLOCK_THRESHOLD;
+        }
+
+        match bloom_matches {
+            n if n > HIGH_BLOOM_MATCH_THRESHOLD => CACHED_MODE_BLOCK_THRESHOLD / 2,
+            n if n > MODERATE_BLOOM_MATCH_THRESHOLD => (CACHED_MODE_BLOCK_THRESHOLD * 3) / 4,
+            _ => CACHED_MODE_BLOCK_THRESHOLD,
         }
     }
 
