@@ -6,7 +6,7 @@ use std::{
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
-use alloy_consensus::{BlockHeader, Header, Transaction, TxReceipt};
+use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TxGasAndReward;

@@ -266,10 +266,11 @@ pub fn validate_against_parent_eip1559_base_fee<
         {
             alloy_eips::eip1559::INITIAL_BASE_FEE
         } else {
+            let base_fee = parent.base_fee_per_gas().ok_or(ConsensusError::BaseFeeMissing)?;
             chain_spec.next_block_base_fee(
                 parent.gas_used(),
                 parent.gas_limit(),
-                parent.base_fee_per_gas().unwrap_or_default(),
+                base_fee,
                 header.timestamp(),
             )
         };
