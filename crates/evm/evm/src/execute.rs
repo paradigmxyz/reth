@@ -142,6 +142,40 @@ pub struct ExecuteOutput<R> {
 }
 
 /// Input for block building. Consumed by [`BlockAssembler`].
+///
+/// This struct contains all the data needed by the [`BlockAssembler`] to create
+/// a complete block after transaction execution.
+///
+/// # Fields Overview
+///
+/// - `evm_env`: The EVM configuration used during execution (spec ID, block env, etc.)
+/// - `execution_ctx`: Additional context like withdrawals and ommers
+/// - `parent`: The parent block header this block builds on
+/// - `transactions`: All transactions that were successfully executed
+/// - `output`: Execution results including receipts and gas used
+/// - `bundle_state`: Accumulated state changes from all transactions
+/// - `state_provider`: Access to the current state for additional lookups
+/// - `state_root`: The calculated state root after all changes
+///
+/// # Usage
+///
+/// This is typically created internally by [`BlockBuilder::finish`] after all
+/// transactions have been executed:
+///
+/// ```rust,ignore
+/// let input = BlockAssemblerInput {
+///     evm_env: builder.evm_env(),
+///     execution_ctx: builder.context(),
+///     parent: &parent_header,
+///     transactions: executed_transactions,
+///     output: &execution_result,
+///     bundle_state: &state_changes,
+///     state_provider: &state,
+///     state_root: calculated_root,
+/// };
+///
+/// let block = assembler.assemble_block(input)?;
+/// ```
 #[derive(derive_more::Debug)]
 #[non_exhaustive]
 pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
@@ -166,7 +200,48 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     pub state_root: B256,
 }
 
-/// A type that knows how to assemble a block.
+/// A type that knows how to assemble a block from execution results.
+///
+/// The [`BlockAssembler`] is the final step in block production. After transactions
+/// have been executed by the [`BlockExecutor`], the assembler takes all the execution
+/// outputs and creates a properly formatted block.
+///
+/// # Responsibilities
+///
+/// The assembler is responsible for:
+/// - Setting the correct block header fields (gas used, receipts root, logs bloom, etc.)
+/// - Including the executed transactions in the correct order
+/// - Setting the state root from the post-execution state
+/// - Applying any chain-specific rules or adjustments
+///
+/// # Example Flow
+///
+/// ```rust,ignore
+/// // 1. Execute transactions and get results
+/// let execution_result = block_executor.finish()?;
+///
+/// // 2. Calculate state root from changes
+/// let state_root = state_provider.state_root(&bundle_state)?;
+///
+/// // 3. Assemble the final block
+/// let block = assembler.assemble_block(BlockAssemblerInput {
+///     evm_env,           // Environment used during execution
+///     execution_ctx,     // Context like withdrawals, ommers
+///     parent,            // Parent block header
+///     transactions,      // Executed transactions
+///     output,            // Execution results (receipts, gas)
+///     bundle_state,      // All state changes
+///     state_provider,    // For additional lookups if needed
+///     state_root,        // Computed state root
+/// })?;
+/// ```
+///
+/// # Relationship with Block Building
+///
+/// The assembler works together with:
+/// - `NextBlockEnvAttributes`: Provides the configuration for the new block
+/// - [`BlockExecutor`]: Executes transactions and produces results
+/// - [`BlockBuilder`]: Orchestrates the entire process and calls the assembler
 #[auto_impl::auto_impl(&, Arc)]
 pub trait BlockAssembler<F: BlockExecutorFactory> {
     /// The block type produced by the assembler.
