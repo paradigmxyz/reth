@@ -17,6 +17,8 @@ use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
 use alloy_primitives::U256;
 use core::fmt::Debug;
+use reth_optimism_consensus::next_block_base_fee;
+
 use op_alloy_consensus::EIP1559ParamError;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
@@ -184,12 +186,7 @@ where
             prevrandao: Some(attributes.prev_randao),
             gas_limit: attributes.gas_limit,
             // calculate basefee based on parent block's gas usage
-            basefee: self.chain_spec().next_block_base_fee(
-                parent.gas_used(),
-                parent.gas_limit(),
-                parent.base_fee_per_gas().unwrap_or_default(),
-                attributes.timestamp,
-            ),
+            basefee: next_block_base_fee(self.chain_spec(), parent, attributes.timestamp)?,
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
