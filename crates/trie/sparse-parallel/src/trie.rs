@@ -20,10 +20,10 @@ use tracing::trace;
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
-const UPPER_TRIE_MAX_DEPTH: usize = 2;
+pub const UPPER_TRIE_MAX_DEPTH: usize = 2;
 
 /// Number of lower subtries which are managed by the [`ParallelSparseTrie`].
-const NUM_LOWER_SUBTRIES: usize = 1 << (UPPER_TRIE_MAX_DEPTH * 4);
+pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
