@@ -49,8 +49,6 @@ where
     }
 
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
-        // TODO expiry history
-
         let tx_range = match input.get_next_tx_num_range(provider)? {
             Some(range) => range,
             None => {

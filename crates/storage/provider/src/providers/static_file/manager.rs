@@ -52,7 +52,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, mpsc, Arc},
 };
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
@@ -467,6 +467,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             if block_height >= block {
                 return Ok(())
             }
+
+            debug!(
+                target: "provider::static_file",
+                ?block_height,
+                "Deleting transaction static file below block"
+            );
 
             // now we need to wipe the static file
             self.delete_jar(StaticFileSegment::Transactions, block_height)?;
@@ -1013,6 +1019,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// 1`.
     pub fn expired_history_height(&self) -> BlockNumber {
         self.expired_history_height.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Gets the lowest transaction static file block if it exists.
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_transaction_static_file_block(&self) -> Option<BlockNumber> {
+        self.get_lowest_static_file_block(StaticFileSegment::Transactions)
     }
 
     /// Gets the lowest static file block if it exists for a static file segment.

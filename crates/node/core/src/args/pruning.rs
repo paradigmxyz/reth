@@ -91,7 +91,7 @@ pub struct PruningArgs {
     // Bodies
     /// Prune bodies before the merge block.
     #[arg(long = "prune.bodies.pre-merge", value_name = "BLOCKS", conflicts_with_all = &["bodies_distance", "bodies_before"])]
-    pub bodies_pre_merge: Option<u64>,
+    pub bodies_pre_merge: bool,
     /// Prune bodies before the `head-N` block number. In other words, keep last N + 1
     /// blocks.
     #[arg(long = "prune.storagehistory.distance", value_name = "BLOCKS", conflicts_with_all = &["bodies_pre_merge", "bodies_before"])]
@@ -166,7 +166,7 @@ impl PruningArgs {
     where
         ChainSpec: EthereumHardforks,
     {
-        if self.bodies_pre_merge.is_some() {
+        if self.bodies_pre_merge {
             chain_spec
                 .ethereum_fork_activation(EthereumHardfork::Paris)
                 .block_number()
