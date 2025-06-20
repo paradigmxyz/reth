@@ -102,7 +102,7 @@ async fn test_fee_history() -> eyre::Result<()> {
             let expected_base_fee = chain_spec.next_block_base_fee(
                 prev_header.gas_used,
                 prev_header.gas_limit,
-                prev_header.base_fee_per_gas.unwrap_or_default(),
+                prev_header.base_fee_per_gas.unwrap(),
                 header.timestamp,
             );
 
