@@ -603,7 +603,7 @@ impl SparseSubtrie {
             let node = self
                 .nodes
                 .get_mut(&path)
-                .unwrap_or_else(|| panic!("node at path {:?} does not exist", path));
+                .unwrap_or_else(|| panic!("node at path {path:?} does not exist"));
             trace!(
                 target: "trie::parallel_sparse",
                 root = ?self.path,
