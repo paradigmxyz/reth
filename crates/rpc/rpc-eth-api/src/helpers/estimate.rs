@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest,
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, TransactionEnv, TxEnvFor};
+use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     error::{api::FromEvmHalt, FromEvmError},
@@ -82,19 +82,14 @@ pub trait EstimateCall: Call {
         }
 
         // Check if this is a basic transfer (no input data to account with no code)
-        let is_basic_transfer = if tx_env.input().is_empty() {
+        let mut is_basic_transfer = false;
+        if tx_env.input().is_empty() {
             if let TxKind::Call(to) = tx_env.kind() {
                 if let Ok(code) = db.db.account_code(&to) {
-                    code.map(|code| code.is_empty()).unwrap_or(true)
-                } else {
-                    false
+                    is_basic_transfer = code.map(|code| code.is_empty()).unwrap_or(true);
                 }
-            } else {
-                false
             }
-        } else {
-            false
-        };
+        }
 
         // Check funds of the sender (only useful to check if transaction gas price is more than 0).
         //
@@ -141,27 +136,7 @@ pub trait EstimateCall: Call {
                 if err.is_gas_too_high() &&
                     (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
-                let req_gas_limit = tx_env.gas_limit();
-                let mut retry_tx_env = tx_env.clone();
-                retry_tx_env.set_gas_limit(block_env_gas_limit);
-
-                let retry_res = evm.transact(retry_tx_env).map_err(Self::Error::from_evm_err)?;
-
-                return match retry_res.result {
-                    ExecutionResult::Success { .. } => {
-                        // transaction succeeded by manually increasing the gas limit to
-                        // highest, which means the caller lacks funds to pay for the tx
-                        Err(RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into_eth_err())
-                    }
-                    ExecutionResult::Revert { output, .. } => {
-                        // reverted again after bumping the limit
-                        Err(RpcInvalidTransactionError::Revert(RevertError::new(output))
-                            .into_eth_err())
-                    }
-                    ExecutionResult::Halt { reason, .. } => {
-                        Err(Self::Error::from_evm_halt(reason, req_gas_limit))
-                    }
-                };
+                return Self::map_out_of_gas_err(&mut evm, tx_env, block_env_gas_limit);
             }
             Err(err) if err.is_gas_too_low() => {
                 // This failed because the configured gas cost of the tx was lower than what
@@ -188,29 +163,7 @@ pub trait EstimateCall: Call {
                 // if price or limit was included in the request then we can execute the request
                 // again with the block's gas limit to check if revert is gas related or not
                 return if tx_request_gas_limit.is_some() || tx_request_gas_price.is_some() {
-                    let req_gas_limit = tx_env.gas_limit();
-                    let mut retry_tx_env = tx_env.clone();
-                    retry_tx_env.set_gas_limit(block_env_gas_limit);
-
-                    let retry_res =
-                        evm.transact(retry_tx_env).map_err(Self::Error::from_evm_err)?;
-
-                    match retry_res.result {
-                        ExecutionResult::Success { .. } => {
-                            // transaction succeeded by manually increasing the gas limit to
-                            // highest, which means the caller lacks funds to pay for the tx
-                            Err(RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit)
-                                .into_eth_err())
-                        }
-                        ExecutionResult::Revert { output, .. } => {
-                            // reverted again after bumping the limit
-                            Err(RpcInvalidTransactionError::Revert(RevertError::new(output))
-                                .into_eth_err())
-                        }
-                        ExecutionResult::Halt { reason, .. } => {
-                            Err(Self::Error::from_evm_halt(reason, req_gas_limit))
-                        }
-                    }
+                    Self::map_out_of_gas_err(&mut evm, tx_env, block_env_gas_limit)
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
@@ -337,34 +290,31 @@ pub trait EstimateCall: Call {
     /// or not
     #[inline]
     fn map_out_of_gas_err<DB>(
-        &self,
-        env_gas_limit: u64,
-        evm_env: EvmEnvFor<Self::Evm>,
+        evm: &mut EvmFor<Self::Evm, DB>,
         mut tx_env: TxEnvFor<Self::Evm>,
-        db: &mut DB,
-    ) -> Self::Error
+        higher_gas_limit: u64,
+    ) -> Result<U256, Self::Error>
     where
         DB: Database<Error = ProviderError>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
-        tx_env.set_gas_limit(env_gas_limit);
-        let res = match self.transact(db, evm_env, tx_env) {
-            Ok(res) => res,
-            Err(err) => return err,
-        };
-        match res.result {
+        tx_env.set_gas_limit(higher_gas_limit);
+
+        let retry_res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
+
+        match retry_res.result {
             ExecutionResult::Success { .. } => {
-                // transaction succeeded by manually increasing the gas limit to
-                // highest, which means the caller lacks funds to pay for the tx
-                RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into_eth_err()
+                // Transaction succeeded by manually increasing the gas limit,
+                // which means the caller lacks funds to pay for the tx
+                Err(RpcInvalidTransactionError::BasicOutOfGas(req_gas_limit).into_eth_err())
             }
             ExecutionResult::Revert { output, .. } => {
                 // reverted again after bumping the limit
-                RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err()
+                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
             }
             ExecutionResult::Halt { reason, .. } => {
-                Self::Error::from_evm_halt(reason, req_gas_limit)
+                Err(Self::Error::from_evm_halt(reason, req_gas_limit))
             }
         }
     }
