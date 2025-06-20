@@ -470,7 +470,7 @@ alloy-primitives = { version = "1.2.0", default-features = false, features = ["m
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.2.0"
 alloy-sol-types = { version = "1.2.0", default-features = false }
-alloy-trie = { version = "0.8.1", default-features = false }
+alloy-trie = { version = "0.9.0", default-features = false }
 
 alloy-hardforks = "0.2.2"
 
@@ -537,7 +537,7 @@ linked_hash_set = "0.1"
 lz4 = "1.28.1"
 modular-bitfield = "0.11.2"
 notify = { version = "8.0.0", default-features = false, features = ["macos_fsevent"] }
-nybbles = { version = "0.3.0", default-features = false }
+nybbles = { version = "0.4.0", default-features = false }
 once_cell = { version = "1.19", default-features = false, features = ["critical-section"] }
 parking_lot = "0.12"
 paste = "1.0"
@@ -704,8 +704,6 @@ walkdir = "2.3.3"
 vergen-git2 = "1.0.5"
 
 [patch.crates-io]
-nybbles = { git = "https://github.com/alloy-rs/nybbles", branch = "alexey/uint-repr" }
-alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "alexey/nybbles-uint" }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "200d54ce6" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "200d54ce6" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "200d54ce6" }

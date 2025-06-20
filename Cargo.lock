@@ -120,7 +120,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-serde",
- "alloy-trie",
+ "alloy-trie 0.8.1",
  "alloy-tx-macros",
  "arbitrary",
  "auto_impl",
@@ -285,7 +285,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-serde",
- "alloy-trie",
+ "alloy-trie 0.8.1",
  "serde",
 ]
 
@@ -896,7 +896,8 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.8.1"
-source = "git+https://github.com/alloy-rs/trie?branch=alexey%2Fnybbles-uint#158b47e702a03c4c5c1741c64648c7ad760828b2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "983d99aa81f586cef9dae38443245e585840fcf0fc58b09aee0b1f27aed1d500"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
@@ -904,7 +905,27 @@ dependencies = [
  "arrayvec",
  "derive_arbitrary",
  "derive_more",
- "nybbles",
+ "nybbles 0.3.4",
+ "proptest",
+ "proptest-derive",
+ "serde",
+ "smallvec",
+ "tracing",
+]
+
+[[package]]
+name = "alloy-trie"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bada1fc392a33665de0dc50d401a3701b62583c655e3522a323490a5da016962"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "arbitrary",
+ "arrayvec",
+ "derive_arbitrary",
+ "derive_more",
+ "nybbles 0.4.0",
  "proptest",
  "proptest-derive",
  "serde",
@@ -3156,7 +3177,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4848,7 +4869,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5897,7 +5918,22 @@ dependencies = [
 [[package]]
 name = "nybbles"
 version = "0.3.4"
-source = "git+https://github.com/alloy-rs/nybbles?branch=alexey%2Fuint-repr#5dabc6940e503a94fb8269ddf2891ba9e2e5adf8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8983bb634df7248924ee0c4c3a749609b5abcb082c28fffe3254b3eb3602b307"
+dependencies = [
+ "alloy-rlp",
+ "arbitrary",
+ "const-hex",
+ "proptest",
+ "serde",
+ "smallvec",
+]
+
+[[package]]
+name = "nybbles"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11d51b0175c49668a033fe7cc69080110d9833b291566cdf332905f3ad9c68a0"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -6748,7 +6784,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -7288,7 +7324,7 @@ dependencies = [
  "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-trie",
+ "alloy-trie 0.9.0",
  "auto_impl",
  "derive_more",
  "reth-ethereum-forks",
@@ -7425,7 +7461,7 @@ dependencies = [
  "alloy-eips",
  "alloy-genesis",
  "alloy-primitives",
- "alloy-trie",
+ "alloy-trie 0.9.0",
  "arbitrary",
  "bytes",
  "modular-bitfield",
@@ -8391,7 +8427,7 @@ dependencies = [
  "alloy-evm",
  "alloy-primitives",
  "alloy-rlp",
- "nybbles",
+ "nybbles 0.4.0",
  "reth-storage-errors",
  "thiserror 2.0.12",
 ]
@@ -9149,7 +9185,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-eips",
  "alloy-primitives",
- "alloy-trie",
+ "alloy-trie 0.9.0",
  "op-alloy-consensus",
  "reth-chainspec",
  "reth-consensus",
@@ -9547,7 +9583,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-eth",
- "alloy-trie",
+ "alloy-trie 0.9.0",
  "arbitrary",
  "auto_impl",
  "bincode 1.3.3",
@@ -10209,7 +10245,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
- "alloy-trie",
+ "alloy-trie 0.9.0",
  "itertools 0.14.0",
  "reth-chainspec",
  "reth-consensus",
@@ -10422,7 +10458,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rlp",
- "alloy-trie",
+ "alloy-trie 0.9.0",
  "auto_impl",
  "codspeed-criterion-compat",
  "itertools 0.14.0",
@@ -10456,7 +10492,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-eth",
  "alloy-serde",
- "alloy-trie",
+ "alloy-trie 0.9.0",
  "arbitrary",
  "bincode 1.3.3",
  "bytes",
@@ -10464,7 +10500,7 @@ dependencies = [
  "derive_more",
  "hash-db",
  "itertools 0.14.0",
- "nybbles",
+ "nybbles 0.4.0",
  "plain_hasher",
  "proptest",
  "proptest-arbitrary-interop",
@@ -10539,7 +10575,7 @@ version = "1.4.8"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "alloy-trie",
+ "alloy-trie 0.9.0",
  "arbitrary",
  "assert_matches",
  "auto_impl",
@@ -11001,7 +11037,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11014,7 +11050,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11072,7 +11108,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -11830,7 +11866,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
