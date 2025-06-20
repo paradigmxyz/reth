@@ -356,7 +356,7 @@ where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
     Evm: ConfigureEvm,
-    TxTy<N>: IntoRpcTx<<E as RpcTypes>::Transaction> + Clone + Debug,
+    TxTy<N>: IntoRpcTx<E::Transaction> + Clone + Debug,
     TransactionRequest: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Err: From<TransactionConversionError>
         + From<<TransactionRequest as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
@@ -366,10 +366,8 @@ where
         + Sync
         + Send
         + Into<jsonrpsee_types::ErrorObject<'static>>,
-    Map: for<'a> TxInfoMapper<
-            &'a TxTy<N>,
-            Out = <TxTy<N> as IntoRpcTx<<E as RpcTypes>::Transaction>>::TxInfo,
-        > + Clone
+    Map: for<'a> TxInfoMapper<&'a TxTy<N>, Out = <TxTy<N> as IntoRpcTx<E::Transaction>>::TxInfo>
+        + Clone
         + Debug
         + Unpin
         + Send
@@ -384,7 +382,7 @@ where
         &self,
         tx: Recovered<TxTy<N>>,
         tx_info: TransactionInfo,
-    ) -> Result<<E as RpcTypes>::Transaction, Self::Error> {
+    ) -> Result<E::Transaction, Self::Error> {
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 
