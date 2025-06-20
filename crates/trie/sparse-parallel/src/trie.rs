@@ -849,7 +849,7 @@ mod tests {
             let node = create_leaf_node(&[0x3, 0x4], 42);
             let masks = TrieMasks::none();
 
-            trie.reveal_node(path.clone(), node, masks).unwrap();
+            trie.reveal_node(path, node, masks).unwrap();
 
             assert_matches!(
                 trie.upper_subtrie.nodes.get(&path),
@@ -867,7 +867,7 @@ mod tests {
             let node = create_leaf_node(&[0x4, 0x5], 42);
             let masks = TrieMasks::none();
 
-            trie.reveal_node(path.clone(), node, masks).unwrap();
+            trie.reveal_node(path, node, masks).unwrap();
 
             // Check that the lower subtrie was created
             let idx = path_subtrie_index_unchecked(&path);
@@ -890,7 +890,7 @@ mod tests {
         let node = create_extension_node(&[0x2], child_hash);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
@@ -911,7 +911,7 @@ mod tests {
         let node = create_extension_node(&[0x3], child_hash);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         // Extension node should be in upper trie
         assert_matches!(
@@ -937,7 +937,7 @@ mod tests {
         let node = create_branch_node_with_children(&[0x0, 0x5], &child_hashes);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         // Branch node should be in upper trie
         assert_matches!(
@@ -968,7 +968,7 @@ mod tests {
         let node = create_branch_node_with_children(&[0x0, 0x7, 0xf], &child_hashes);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         // Branch node should be in upper trie
         assert_matches!(
