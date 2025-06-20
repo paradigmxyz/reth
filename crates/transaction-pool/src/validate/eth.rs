@@ -28,7 +28,7 @@ use reth_primitives_traits::{
     constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Block,
     GotExpected, SealedBlock,
 };
-use reth_storage_api::{StateProvider, StateProviderFactory};
+use reth_storage_api::{AccountInfoReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -76,7 +76,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.inner.validate_one(origin, transaction)
+        self.inner.validate_one_with_provider(origin, transaction, &mut None)
     }
 
     /// Validates a single transaction with the provided state provider.
@@ -89,34 +89,9 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn StateProvider>>,
+        state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one_with_provider(origin, transaction, state)
-    }
-
-    /// Validates all given transactions.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub fn validate_all(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        self.inner.validate_batch(transactions)
-    }
-
-    /// Validates all given transactions with origin.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub fn validate_all_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Tx> + Send,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        self.inner.validate_batch_with_origin(origin, transactions)
     }
 }
 
@@ -139,7 +114,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions)
+        self.inner.validate_batch(transactions)
     }
 
     async fn validate_transactions_with_origin(
@@ -147,7 +122,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all_with_origin(origin, transactions)
+        self.inner.validate_batch_with_origin(origin, transactions)
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -232,7 +207,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        maybe_state: &mut Option<Box<dyn StateProvider>>,
+        maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
@@ -241,7 +216,7 @@ where
                 if maybe_state.is_none() {
                     match self.client.latest() {
                         Ok(new_state) => {
-                            *maybe_state = Some(new_state);
+                            *maybe_state = Some(Box::new(new_state));
                         }
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
@@ -481,7 +456,7 @@ where
         state: P,
     ) -> TransactionValidationOutcome<Tx>
     where
-        P: StateProvider,
+        P: AccountInfoReader,
     {
         // Use provider to get account info
         let account = match state.basic_account(transaction.sender_ref()) {
@@ -633,16 +608,6 @@ where
         }
     }
 
-    /// Validates a single transaction.
-    fn validate_one(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        let mut provider = None;
-        self.validate_one_with_provider(origin, transaction, &mut provider)
-    }
-
     /// Validates all given transactions.
     fn validate_batch(
         &self,
@@ -691,7 +656,7 @@ where
         {
             self.fork_tracker
                 .max_blob_count
-                .store(blob_params.max_blob_count, std::sync::atomic::Ordering::Relaxed);
+                .store(blob_params.max_blobs_per_tx, std::sync::atomic::Ordering::Relaxed);
         }
 
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
@@ -781,7 +746,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             osaka: false,
 
             // max blob count is prague by default
-            max_blob_count: BlobParams::prague().max_blob_count,
+            max_blob_count: BlobParams::prague().max_blobs_per_tx,
         }
     }
 
@@ -905,7 +870,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             .chain_spec()
             .blob_params_at_timestamp(timestamp)
             .unwrap_or_else(BlobParams::cancun)
-            .max_blob_count;
+            .max_blobs_per_tx;
         self
     }
 
@@ -955,11 +920,10 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             ..
         } = self;
 
-        // TODO: use osaka max blob count once <https://github.com/alloy-rs/alloy/pull/2427> is released
         let max_blob_count = if prague {
-            BlobParams::prague().max_blob_count
+            BlobParams::prague().max_blobs_per_tx
         } else {
-            BlobParams::cancun().max_blob_count
+            BlobParams::cancun().max_blobs_per_tx
         };
 
         let fork_tracker = ForkTracker {
@@ -969,6 +933,9 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             osaka: AtomicBool::new(osaka),
             max_blob_count: AtomicU64::new(max_blob_count),
         };
+
+        // Ensure the kzg setup is loaded right away.
+        let _kzg_settings = kzg_settings.get();
 
         let inner = EthTransactionValidatorInner {
             client,
@@ -1045,7 +1012,7 @@ pub struct ForkTracker {
     pub prague: AtomicBool,
     /// Tracks if osaka is activated at the block's timestamp.
     pub osaka: AtomicBool,
-    /// Tracks max blob count at the block's timestamp.
+    /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
 }
 
@@ -1070,7 +1037,7 @@ impl ForkTracker {
         self.osaka.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Returns the max blob count.
+    /// Returns the max allowed blob count per transaction.
     pub fn max_blob_count(&self) -> u64 {
         self.max_blob_count.load(std::sync::atomic::Ordering::Relaxed)
     }

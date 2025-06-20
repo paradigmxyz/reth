@@ -29,9 +29,9 @@ use reth_primitives_traits::{
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DBProvider, DatabaseProviderFactory, HashedPostStateProvider,
-    NodePrimitivesProvider, StageCheckpointReader, StateCommitmentProvider, StateProofProvider,
-    StorageRootProvider,
+    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
+    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader,
+    StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -876,7 +876,13 @@ where
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
     }
+}
 
+impl<T, ChainSpec> BytecodeReader for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: Send + Sync,
+{
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         let lock = self.accounts.lock();
         Ok(lock.values().find_map(|account| {
