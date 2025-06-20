@@ -104,7 +104,6 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    // TODO: accept chainspec again so that we can access merge block if any
     pub fn prune_config<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneConfig>
     where
         ChainSpec: EthereumHardforks,
@@ -144,6 +143,9 @@ impl PruningArgs {
         }
         if let Some(mode) = self.account_history_prune_mode() {
             config.segments.account_history = Some(mode);
+        }
+        if let Some(mode) = self.bodies_prune_mode(chain_spec) {
+            config.segments.bodies_history = Some(mode);
         }
         if let Some(mode) = self.storage_history_prune_mode() {
             config.segments.storage_history = Some(mode);

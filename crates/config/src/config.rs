@@ -463,6 +463,7 @@ impl PruneConfig {
                     receipts,
                     account_history,
                     storage_history,
+                    bodies_history,
                     receipts_log_filter,
                 },
         } = other;
@@ -478,6 +479,7 @@ impl PruneConfig {
         self.segments.receipts = self.segments.receipts.or(receipts);
         self.segments.account_history = self.segments.account_history.or(account_history);
         self.segments.storage_history = self.segments.storage_history.or(storage_history);
+        self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
 
         if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {
             self.segments.receipts_log_filter = receipts_log_filter;
