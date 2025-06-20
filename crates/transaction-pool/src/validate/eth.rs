@@ -293,6 +293,15 @@ where
             }
         };
 
+        // Reject transactions with a nonce higher or equal to U64::max according to EIP-2681
+        let tx_nonce = transaction.nonce();
+        if tx_nonce >= u64::MAX {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::Eip2681.into(),
+            ))
+        }
+
         // Reject transactions over defined size to prevent DOS attacks
         let tx_input_len = transaction.input().len();
         if tx_input_len > self.max_tx_input_bytes {
