@@ -14,7 +14,7 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
-reth-storage-api = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-storage-api = { workspace = true, features = ["serde", "serde-bincode-compat"], optional = true }
 reth-evm.workspace = true
 
 # ethereum
@@ -24,10 +24,10 @@ alloy-consensus.workspace = true
 alloy-network.workspace = true
 
 # optimism
-op-alloy-consensus.workspace = true
-op-alloy-rpc-types.workspace = true
-reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
-op-revm.workspace = true
+op-alloy-consensus = { workspace = true, optional = true }
+op-alloy-rpc-types = { workspace = true, optional = true }
+reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"], optional = true }
+op-revm = { workspace = true, optional = true }
 
 # revm
 revm-context.workspace = true
@@ -38,3 +38,15 @@ jsonrpsee-types.workspace = true
 
 # error
 thiserror.workspace = true
+
+[features]
+default = []
+op = [
+	"dep:op-alloy-consensus",
+	"dep:op-alloy-rpc-types",
+	"dep:reth-optimism-primitives",
+	"dep:reth-storage-api",
+	"dep:op-revm",
+	"reth-evm/op",
+	"reth-primitives-traits/op"
+]
