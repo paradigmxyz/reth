@@ -293,12 +293,12 @@ where
             }
         };
 
-        // Reject transactions with a nonce higher or equal to U64::max according to EIP-2681
+        // Reject transactions with a nonce equal to U64::max according to EIP-2681
         let tx_nonce = transaction.nonce();
-        if tx_nonce >= u64::MAX {
+        if tx_nonce == u64::MAX {
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::Eip2681.into(),
+                InvalidPoolTransactionError::Eip2681,
             ))
         }
 

@@ -775,6 +775,9 @@ pub enum RpcPoolError {
     /// Custom pool error
     #[error(transparent)]
     PoolTransactionError(Box<dyn PoolTransactionError>),
+    /// EIP-2681 related error
+    #[error("nonce is not valid")]
+    Eip2681,
     /// EIP-4844 related error
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
@@ -809,6 +812,7 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
             RpcPoolError::OversizedData |
             RpcPoolError::ExceedsMaxInitCodeSize |
             RpcPoolError::PoolTransactionError(_) |
+            RpcPoolError::Eip2681 |
             RpcPoolError::Eip4844(_) |
             RpcPoolError::Eip7702(_) |
             RpcPoolError::AddressAlreadyReserved => {
