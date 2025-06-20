@@ -5,7 +5,6 @@ use alloy_rpc_types_eth::{
     state::{AccountOverride, StateOverride},
     BlockOverrides,
 };
-use reth_evm::TransactionEnv;
 use revm::{
     context::BlockEnv,
     database::{CacheDB, State},
@@ -27,10 +26,11 @@ pub use reth_rpc_types_compat::CallFees;
 ///
 /// Note: this takes the mut [Database] trait because the loaded sender can be reused for the
 /// following operation like `eth_call`.
-pub fn caller_gas_allowance<DB>(db: &mut DB, env: &impl TransactionEnv) -> EthResult<u64>
+pub fn caller_gas_allowance<DB, T>(db: &mut DB, env: &T) -> EthResult<u64>
 where
     DB: Database,
     EthApiError: From<<DB as Database>::Error>,
+    T: revm::context_interface::Transaction,
 {
     // Get the caller account.
     let caller = db.basic(env.caller())?;
