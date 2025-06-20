@@ -37,7 +37,7 @@ async fn test_session_established_with_highest_version() {
             NetworkEvent::ActivePeerSession { info, .. } => {
                 let SessionInfo { peer_id, status, .. } = info;
                 assert_eq!(handle1.peer_id(), &peer_id);
-                assert_eq!(status.version, EthVersion::Eth68);
+                assert_eq!(status.version, EthVersion::LATEST);
             }
             ev => {
                 panic!("unexpected event {ev:?}")
