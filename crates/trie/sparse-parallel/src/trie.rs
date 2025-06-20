@@ -6,6 +6,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::Decodable;
 use alloy_trie::TrieMask;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -214,15 +215,16 @@ impl ParallelSparseTrie {
         self.prefix_set = unchanged_prefix_set;
 
         // Update subtrie hashes in parallel
-        // TODO: call `update_hashes` on each subtrie in parallel
-        let (tx, rx) = mpsc::channel();
-        for subtrie in subtries {
-            tx.send((subtrie.index, subtrie.subtrie)).unwrap();
-        }
-        drop(tx);
+        let results = subtries
+            .into_par_iter()
+            .map(|ChangedSubtrie { index, subtrie, mut prefix_set }| {
+                let _ = subtrie.update_hashes(&mut prefix_set);
+                (index, subtrie)
+            })
+            .collect::<Vec<_>>();
 
         // Return updated subtries back to the trie
-        for (index, subtrie) in rx {
+        for (index, subtrie) in results {
             self.lower_subtries[index] = Some(subtrie);
         }
     }
