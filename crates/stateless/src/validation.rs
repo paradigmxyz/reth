@@ -1,7 +1,6 @@
 use crate::{trie::StatelessTrie, witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     boxed::Box,
-    collections::BTreeMap,
     fmt::Debug,
     string::{String, ToString},
     sync::Arc,
@@ -172,7 +171,14 @@ where
     let (mut trie, bytecode) = StatelessTrie::new(&witness, pre_state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
-    let db = WitnessDatabase::new(&trie, bytecode, ancestor_hashes);
+    //
+    // The first ancestor’s block number becomes the indexing base.
+    let db = WitnessDatabase::new(
+        &trie,
+        bytecode,
+        ancestor_hashes,
+        ancestor_headers.first().map_or(0, |h| h.number),
+    );
 
     // Execute the block
     let executor = evm_config.executor(db);
@@ -244,32 +250,41 @@ where
 /// Note: This function becomes obsolete if EIP-2935 is implemented.
 /// Note: The headers are assumed to be in ascending order.
 ///
-/// If both checks pass, it returns a [`BTreeMap`] mapping the block number of each
-/// ancestor header to its corresponding block hash.
+/// If both checks pass, it returns a [`Vec`] of block hashes ordered by block number.
 fn compute_ancestor_hashes(
     current_block: &RecoveredBlock<Block>,
     ancestor_headers: &[Header],
-) -> Result<BTreeMap<u64, B256>, StatelessValidationError> {
-    let mut ancestor_hashes = BTreeMap::new();
-
+) -> Result<Vec<B256>, StatelessValidationError> {
+    // Start from the header of the block being validated.
     let mut child_header = current_block.header();
 
-    // Next verify that headers supplied are contiguous
+    // Preallocate space for all ancestor hashes.
+    let mut hashes = Vec::with_capacity(ancestor_headers.len());
+
+    // Process headers in reverse order (from highest number to lowest).
     for parent_header in ancestor_headers.iter().rev() {
-        let parent_hash = child_header.parent_hash();
-        ancestor_hashes.insert(parent_header.number, parent_hash);
+        // Expected parent hash: what the child header claims as its parent.
+        let expected_hash = child_header.parent_hash();
 
-        if parent_hash != parent_header.hash_slow() {
-            return Err(StatelessValidationError::InvalidAncestorChain); // Blocks must be contiguous
+        // Check that the actual hash of the parent header matches what the child expects.
+        if expected_hash != parent_header.hash_slow() {
+            return Err(StatelessValidationError::InvalidAncestorChain);
         }
 
+        // Check that the block numbers are contiguous.
         if parent_header.number + 1 != child_header.number {
-            return Err(StatelessValidationError::InvalidAncestorChain); // Header number should be
-                                                                        // contiguous
+            return Err(StatelessValidationError::InvalidAncestorChain);
         }
 
-        child_header = parent_header
+        // All checks passed, record the parent hash (which belongs to parent.number).
+        hashes.push(expected_hash);
+
+        // Move one step back in the chain.
+        child_header = parent_header;
     }
 
-    Ok(ancestor_hashes)
+    // We collected hashes in reverse order; restore ascending order for later indexing.
+    hashes.reverse();
+
+    Ok(hashes)
 }
