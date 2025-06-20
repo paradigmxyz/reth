@@ -20,7 +20,6 @@ use reth_rpc_eth_types::{
     EthApiError, EthFilterConfig, EthStateCache, EthSubscriptionIdProvider,
 };
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
-use reth_rpc_types_compat::RpcTypes;
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
     ProviderReceipt, TransactionsProvider,
@@ -695,7 +694,7 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<<TxCompat::Network as RpcTypes>::Transaction> {
+    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
@@ -721,13 +720,13 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 }
 
 #[async_trait]
-impl<T, TxCompat> FullTransactionsFilter<<TxCompat::Network as RpcTypes>::Transaction>
+impl<T, TxCompat> FullTransactionsFilter<RpcTransaction<TxCompat::Network>>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
     TxCompat: TransactionCompat<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
 {
-    async fn drain(&self) -> FilterChanges<<TxCompat::Network as RpcTypes>::Transaction> {
+    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         Self::drain(self).await
     }
 }

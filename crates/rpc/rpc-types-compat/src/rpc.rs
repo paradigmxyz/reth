@@ -21,3 +21,6 @@ where
     type Receipt = T::ReceiptResponse;
     type Transaction = T::TransactionResponse;
 }
+
+/// Adapter for network specific transaction type.
+pub type RpcTransaction<T> = <T as RpcTypes>::Transaction;

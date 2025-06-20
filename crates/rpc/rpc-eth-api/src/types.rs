@@ -39,7 +39,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
 }
 
 /// Adapter for network specific transaction type.
-pub type RpcTransaction<T> = <T as RpcTypes>::Transaction;
+pub type RpcTransaction<T> = reth_rpc_types_compat::RpcTransaction<T>;
 
 /// Adapter for network specific block type.
 pub type RpcBlock<T> = Block<RpcTransaction<T>, RpcHeader<T>>;

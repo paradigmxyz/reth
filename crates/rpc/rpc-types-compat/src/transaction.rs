@@ -2,7 +2,7 @@
 
 use crate::{
     fees::{CallFees, CallFeesError},
-    RpcTypes,
+    RpcTransaction, RpcTypes,
 };
 use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
 use alloy_primitives::{Address, TxKind, U256};
@@ -40,7 +40,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     fn fill_pending(
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
-    ) -> Result<<Self::Network as RpcTypes>::Transaction, Self::Error> {
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error> {
         self.fill(tx, TransactionInfo::default())
     }
 
@@ -53,7 +53,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
         tx_inf: TransactionInfo,
-    ) -> Result<<Self::Network as RpcTypes>::Transaction, Self::Error>;
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error>;
 
     /// Builds a fake transaction from a transaction request for inclusion into block built in
     /// `eth_simulateV1`.
