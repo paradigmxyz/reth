@@ -40,11 +40,12 @@ import { HomePage, Sponsors } from "vocs/components";
             ```
 
             ```bash [Build a Node]
+            let payload_svc = BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false));
             ComponentsBuilder::default()
                 .node_types::<Node>()
                 .pool(OpPoolBuilder::default())
                 .executor(CustomExecutorBuilder::default())
-                .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
+                .payload(payload_svc)
                 .network(OpNetworkBuilder::new(false, false))
                 .consensus(OpConsensusBuilder::default())
             ```
@@ -138,6 +139,22 @@ import { HomePage, Sponsors } from "vocs/components";
 </div>
 <article className="vocs_Content max-w-5xl mx-auto">
 
-</article>
+## Built using Reth SDK
+
+Production chains and networks powered by Reth's modular architecture.
+
+<div className="flex justify-center">
+
+| Name                                                      | Description                                                | LoC  |
+| --------------------------------------------------------- | ---------------------------------------------------------- | ---- |
+| [Base Node](https://github.com/base/node-reth)            | Coinbase's L2 scaling solution node implementation         | ~200 |
+| [Bera Reth](https://github.com/berachain/bera-reth)       | Berachain's high-performance EVM node with custom features | ~300 |
+| [Gnosis Reth](https://github.com/gnosischain/reth_gnosis) | Gnosis Chain's xDai-compatible execution client            | ~400 |
+| [World Chain](https://github.com/worldcoin/world-chain)   | Worldcoin's identity-focused blockchain node               | ~250 |
+
+</div>
+
+## Supporters
 
 <Sponsors />
+</article>
