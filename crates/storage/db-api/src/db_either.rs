@@ -10,8 +10,8 @@ use crate::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_storage_errors::db::DatabaseError;
-use reth_trie_common::iter::Either;
 use std::ops::{Bound, RangeBounds};
+use tokio_util::either::Either;
 
 impl<T, L, R> DbCursorRO<T> for Either<L, R>
 where

@@ -7581,6 +7581,7 @@ dependencies = [
  "roaring",
  "serde",
  "test-fuzz",
+ "tokio-util",
 ]
 
 [[package]]
