@@ -1,7 +1,7 @@
 //! Contains `DbTx` and `DbTxMut` traits implementation for `Either`.
 
 use crate::{
-    common::{PairResult, ValueOnlyResult},
+    common::{IterPairResult, PairResult, ValueOnlyResult},
     cursor::{
         DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW, DupWalker, RangeWalker,
         ReverseWalker, Walker,
@@ -11,7 +11,7 @@ use crate::{
 };
 use reth_storage_errors::db::DatabaseError;
 use reth_trie_common::iter::Either;
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
 
 impl<T, L, R> DbCursorRO<T> for Either<L, R>
 where
@@ -73,7 +73,14 @@ where
         Self: Sized,
     {
         match self {
-            Self::Left(_) | Self::Right(_) => self.walk(start_key),
+            Self::Left(_) | Self::Right(_) => {
+                let start: IterPairResult<T> = match start_key {
+                    Some(key) => <Self as DbCursorRO<T>>::seek(self, key).transpose(),
+                    None => <Self as DbCursorRO<T>>::first(self).transpose(),
+                };
+
+                Ok(Walker::new(self, start))
+            }
         }
     }
 
@@ -85,7 +92,24 @@ where
         Self: Sized,
     {
         match self {
-            Self::Left(_) | Self::Right(_) => self.walk_range(range),
+            Self::Left(_) | Self::Right(_) => {
+                let start_key = match range.start_bound() {
+                    Bound::Included(key) | Bound::Excluded(key) => Some((*key).clone()),
+                    Bound::Unbounded => None,
+                };
+
+                let end_key = match range.end_bound() {
+                    Bound::Included(key) | Bound::Excluded(key) => Bound::Included((*key).clone()),
+                    Bound::Unbounded => Bound::Unbounded,
+                };
+
+                let start: IterPairResult<T> = match start_key {
+                    Some(key) => <Self as DbCursorRO<T>>::seek(self, key).transpose(),
+                    None => <Self as DbCursorRO<T>>::first(self).transpose(),
+                };
+
+                Ok(RangeWalker::new(self, start, end_key))
+            }
         }
     }
 
@@ -97,7 +121,13 @@ where
         Self: Sized,
     {
         match self {
-            Self::Left(_) | Self::Right(_) => self.walk_back(start_key),
+            Self::Left(_) | Self::Right(_) => {
+                let start: IterPairResult<T> = match start_key {
+                    Some(key) => <Self as DbCursorRO<T>>::seek(self, key).transpose(),
+                    None => <Self as DbCursorRO<T>>::last(self).transpose(),
+                };
+                Ok(ReverseWalker::new(self, start))
+            }
         }
     }
 }
@@ -138,14 +168,14 @@ where
 
     fn walk_dup(
         &mut self,
-        key: Option<T::Key>,
-        subkey: Option<T::SubKey>,
+        _key: Option<T::Key>,
+        _subkey: Option<T::SubKey>,
     ) -> Result<DupWalker<'_, T, Self>, DatabaseError>
     where
         Self: Sized,
     {
         match self {
-            Self::Left(_) | Self::Right(_) => self.walk_dup(key, subkey),
+            Self::Left(_) | Self::Right(_) => Ok(DupWalker { cursor: self, start: None }),
         }
     }
 }
