@@ -397,19 +397,6 @@ impl FeeHistoryEntry {
         }
     }
 
-    /// Calculate the base fee for the next block according to the EIP-1559 spec.
-    pub fn next_block_base_fee(&self, chain_spec: impl EthChainSpec) -> u64 {
-        let parent_header = Header {
-            gas_used: self.gas_used,
-            gas_limit: self.gas_limit,
-            base_fee_per_gas: Some(self.base_fee_per_gas),
-            timestamp: self.timestamp,
-            ..Default::default()
-        };
-
-        chain_spec.next_block_base_fee(&parent_header, self.timestamp)
-    }
-
     /// Returns the blob fee for the next block according to the EIP-4844 spec.
     ///
     /// Returns `None` if `excess_blob_gas` is None.

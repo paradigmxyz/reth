@@ -137,7 +137,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             block_gas_limit: latest.gas_limit(),
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number(),
-            pending_basefee: chain_spec.next_block_base_fee(latest.header(), latest.timestamp()),
+            pending_basefee: chain_spec.next_block_base_fee(
+                latest.gas_used(),
+                latest.gas_limit(),
+                latest.base_fee_per_gas().unwrap_or_default(),
+                latest.timestamp(),
+            ),
             pending_blob_fee: latest
                 .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp())),
         };
@@ -315,8 +320,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `new_tip+1`
-                let pending_block_base_fee =
-                    chain_spec.next_block_base_fee(new_tip.header(), new_tip.timestamp());
+                let pending_block_base_fee = chain_spec.next_block_base_fee(
+                    new_tip.gas_used(),
+                    new_tip.gas_limit(),
+                    new_tip.base_fee_per_gas().unwrap_or_default(),
+                    new_tip.timestamp(),
+                );
                 let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(new_tip.timestamp()),
                 );
@@ -417,8 +426,12 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `tip+1`
-                let pending_block_base_fee =
-                    chain_spec.next_block_base_fee(tip.header(), tip.timestamp());
+                let pending_block_base_fee = chain_spec.next_block_base_fee(
+                    tip.gas_used(),
+                    tip.gas_limit(),
+                    tip.base_fee_per_gas().unwrap_or_default(),
+                    tip.timestamp(),
+                );
                 let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(tip.timestamp()),
                 );

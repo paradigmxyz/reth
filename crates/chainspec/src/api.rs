@@ -2,13 +2,12 @@ use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
 use alloy_consensus::Header;
-use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
+use alloy_eips::{calc_next_block_base_fee, eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 use core::fmt::{Debug, Display};
 use reth_ethereum_forks::EthereumHardforks;
 use reth_network_peers::NodeRecord;
-use reth_primitives_traits::AlloyBlockHeader;
 
 /// Trait representing type configuring a chain spec.
 #[auto_impl::auto_impl(&, Arc)]
@@ -68,14 +67,19 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn final_paris_total_difficulty(&self) -> Option<U256>;
 
     /// See [`AlloyBlockHeader::next_block_base_fee`].
-    fn next_block_base_fee<H>(&self, parent: &H, target_timestamp: u64) -> u64
-    where
-        Self: Sized,
-        H: AlloyBlockHeader,
-    {
-        parent
-            .next_block_base_fee(self.base_fee_params_at_timestamp(target_timestamp))
-            .unwrap_or_default()
+    fn next_block_base_fee(
+        &self,
+        parent_gas_used: u64,
+        parent_gas_limit: u64,
+        parent_base_fee_per_gas: u64,
+        timestamp: u64,
+    ) -> u64 {
+        calc_next_block_base_fee(
+            parent_gas_used,
+            parent_gas_limit,
+            parent_base_fee_per_gas,
+            self.base_fee_params_at_timestamp(timestamp),
+        )
     }
 }
 
