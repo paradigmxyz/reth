@@ -66,7 +66,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// Returns the final total difficulty if the Paris hardfork is known.
     fn final_paris_total_difficulty(&self) -> Option<U256>;
 
-    /// See [`AlloyBlockHeader::next_block_base_fee`].
+    /// See [`calc_next_block_base_fee`].
     fn next_block_base_fee(
         &self,
         parent_gas_used: u64,
