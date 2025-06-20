@@ -481,6 +481,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             self.expired_history_height.store(block_height, std::sync::atomic::Ordering::Relaxed);
 
             // Now we need to shift the index by the batch size and repeat the process.
+            // basically if the lowest static file block was 4499K we shift it by 1 batch size
             self.static_files_min_block
                 .write()
                 .insert(StaticFileSegment::Transactions, block_height + self.blocks_per_file);
@@ -673,7 +674,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for (segment, ranges) in iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
             if let Some((first_block_range, _)) = ranges.first() {
-                min_block.insert(segment, first_block_range.start());
+                min_block.insert(segment, first_block_range.end());
             }
             if let Some((last_block_range, _)) = ranges.last() {
                 max_block.insert(segment, last_block_range.end());
@@ -1028,14 +1029,16 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.get_lowest_static_file_block(StaticFileSegment::Transactions)
     }
 
-    /// Gets the lowest static file block if it exists for a static file segment.
+    /// Gets the lowest static file's block height if it exists for a static file segment.
+    ///
+    /// For example if the static file has blocks 0-499, this will return 499..
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_lowest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
         self.static_files_min_block.read().get(&segment).copied()
     }
 
-    /// Gets the highest static file block if it exists for a static file segment.
+    /// Gets the highest static file's block height if it exists for a static file segment.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_highest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {

@@ -94,11 +94,11 @@ pub struct PruningArgs {
     pub bodies_pre_merge: bool,
     /// Prune bodies before the `head-N` block number. In other words, keep last N + 1
     /// blocks.
-    #[arg(long = "prune.storagehistory.distance", value_name = "BLOCKS", conflicts_with_all = &["bodies_pre_merge", "bodies_before"])]
+    #[arg(long = "prune.bodies.distance", value_name = "BLOCKS", conflicts_with_all = &["bodies_pre_merge", "bodies_before"])]
     pub bodies_distance: Option<u64>,
     /// Prune storage history before the specified block number. The specified block number is not
     /// pruned.
-    #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["bodies_distance", "bodies_pre_merge"])]
+    #[arg(long = "prune.bodies.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["bodies_distance", "bodies_pre_merge"])]
     pub bodies_before: Option<BlockNumber>,
 }
 
@@ -171,9 +171,9 @@ impl PruningArgs {
                 .ethereum_fork_activation(EthereumHardfork::Paris)
                 .block_number()
                 .map(|merge_block| PruneMode::Before(merge_block))
-        } else if let Some(distance) = self.sender_recovery_distance {
+        } else if let Some(distance) = self.bodies_distance {
             Some(PruneMode::Distance(distance))
-        } else if let Some(block_number) = self.sender_recovery_before {
+        } else if let Some(block_number) = self.bodies_before {
             Some(PruneMode::Before(block_number))
         } else {
             None
