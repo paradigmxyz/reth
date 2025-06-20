@@ -88,3 +88,7 @@ harness = false
 [[bench]]
 name = "rlp_node"
 harness = false
+
+[[bench]]
+name = "update"
+harness = false
