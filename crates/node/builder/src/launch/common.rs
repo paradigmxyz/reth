@@ -891,11 +891,11 @@ where
         Ok(None)
     }
 
-    /// Expire thes pre-merge transactions if the node is configured to do so and the chain has a
+    /// Expire the pre-merge transactions if the node is configured to do so and the chain has a
     /// merge block.
     ///
-    /// This will check if the node synced past the merge block and if the transaction static files
-    /// before the merge block still exist it will delete them.
+    /// If the node is configured to prune pre-merge transactions and it has synced past the merge
+    /// block, it will delete the pre-merge transaction static files if they still exist.
     pub fn expire_pre_merge_transactions(&self) -> eyre::Result<()>
     where
         T: FullNodeTypes<Provider: StaticFileProviderFactory>,
@@ -1142,7 +1142,10 @@ mod tests {
                     storage_history_full: false,
                     storage_history_distance: None,
                     storage_history_before: None,
+                    bodies_pre_merge: false,
+                    bodies_distance: None,
                     receipts_log_filter: None,
+                    bodies_before: None,
                 },
                 ..NodeConfig::test()
             };

@@ -1024,6 +1024,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Gets the lowest transaction static file block if it exists.
     ///
+    /// For example if the transactions static file has blocks 0-499, this will return 499..
+    ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_lowest_transaction_static_file_block(&self) -> Option<BlockNumber> {
         self.get_lowest_static_file_block(StaticFileSegment::Transactions)
