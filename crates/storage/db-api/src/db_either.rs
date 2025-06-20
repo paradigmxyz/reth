@@ -35,36 +35,36 @@ where
 
     fn seek(&mut self, key: T::Key) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.seek(key),
-            Either::Right(r) => r.seek(key),
+            Self::Left(l) => l.seek(key),
+            Self::Right(r) => r.seek(key),
         }
     }
 
     fn next(&mut self) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.next(),
-            Either::Right(r) => r.next(),
+            Self::Left(l) => l.next(),
+            Self::Right(r) => r.next(),
         }
     }
 
     fn prev(&mut self) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.prev(),
-            Either::Right(r) => r.prev(),
+            Self::Left(l) => l.prev(),
+            Self::Right(r) => r.prev(),
         }
     }
 
     fn last(&mut self) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.last(),
-            Either::Right(r) => r.last(),
+            Self::Left(l) => l.last(),
+            Self::Right(r) => r.last(),
         }
     }
 
     fn current(&mut self) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.current(),
-            Either::Right(r) => r.current(),
+            Self::Left(l) => l.current(),
+            Self::Right(r) => r.current(),
         }
     }
 
@@ -73,8 +73,8 @@ where
         Self: Sized,
     {
         match self {
-            Either::Left(_) => self.walk(start_key),
-            Either::Right(_) => self.walk(start_key),
+            Self::Left(_) => self.walk(start_key),
+            Self::Right(_) => self.walk(start_key),
         }
     }
 
@@ -86,8 +86,8 @@ where
         Self: Sized,
     {
         match self {
-            Either::Left(_) => self.walk_range(range),
-            Either::Right(_) => self.walk_range(range),
+            Self::Left(_) => self.walk_range(range),
+            Self::Right(_) => self.walk_range(range),
         }
     }
 
@@ -99,8 +99,8 @@ where
         Self: Sized,
     {
         match self {
-            Either::Left(_) => self.walk_back(start_key),
-            Either::Right(_) => self.walk_back(start_key),
+            Self::Left(_) => self.walk_back(start_key),
+            Self::Right(_) => self.walk_back(start_key),
         }
     }
 }
@@ -113,29 +113,29 @@ where
 {
     fn next_dup(&mut self) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.next_dup(),
-            Either::Right(r) => r.next_dup(),
+            Self::Left(l) => l.next_dup(),
+            Self::Right(r) => r.next_dup(),
         }
     }
 
     fn next_no_dup(&mut self) -> PairResult<T> {
         match self {
-            Either::Left(l) => l.next_no_dup(),
-            Either::Right(r) => r.next_no_dup(),
+            Self::Left(l) => l.next_no_dup(),
+            Self::Right(r) => r.next_no_dup(),
         }
     }
 
     fn next_dup_val(&mut self) -> ValueOnlyResult<T> {
         match self {
-            Either::Left(l) => l.next_dup_val(),
-            Either::Right(r) => r.next_dup_val(),
+            Self::Left(l) => l.next_dup_val(),
+            Self::Right(r) => r.next_dup_val(),
         }
     }
 
     fn seek_by_key_subkey(&mut self, key: T::Key, subkey: T::SubKey) -> ValueOnlyResult<T> {
         match self {
-            Either::Left(l) => l.seek_by_key_subkey(key, subkey),
-            Either::Right(r) => r.seek_by_key_subkey(key, subkey),
+            Self::Left(l) => l.seek_by_key_subkey(key, subkey),
+            Self::Right(r) => r.seek_by_key_subkey(key, subkey),
         }
     }
 
@@ -148,8 +148,8 @@ where
         Self: Sized,
     {
         match self {
-            Either::Left(_) => self.walk_dup(key, subkey),
-            Either::Right(_) => self.walk_dup(key, subkey),
+            Self::Left(_) => self.walk_dup(key, subkey),
+            Self::Right(_) => self.walk_dup(key, subkey),
         }
     }
 }
@@ -162,29 +162,29 @@ where
 {
     fn upsert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         match self {
-            Either::Left(l) => l.upsert(key, value),
-            Either::Right(r) => r.upsert(key, value),
+            Self::Left(l) => l.upsert(key, value),
+            Self::Right(r) => r.upsert(key, value),
         }
     }
 
     fn insert(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         match self {
-            Either::Left(l) => l.insert(key, value),
-            Either::Right(r) => r.insert(key, value),
+            Self::Left(l) => l.insert(key, value),
+            Self::Right(r) => r.insert(key, value),
         }
     }
 
     fn append(&mut self, key: T::Key, value: &T::Value) -> Result<(), DatabaseError> {
         match self {
-            Either::Left(l) => l.append(key, value),
-            Either::Right(r) => r.append(key, value),
+            Self::Left(l) => l.append(key, value),
+            Self::Right(r) => r.append(key, value),
         }
     }
 
     fn delete_current(&mut self) -> Result<(), DatabaseError> {
         match self {
-            Either::Left(l) => l.delete_current(),
-            Either::Right(r) => r.delete_current(),
+            Self::Left(l) => l.delete_current(),
+            Self::Right(r) => r.delete_current(),
         }
     }
 }
@@ -197,15 +197,15 @@ where
 {
     fn append_dup(&mut self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
         match self {
-            Either::Left(l) => l.append_dup(key, value),
-            Either::Right(r) => r.append_dup(key, value),
+            Self::Left(l) => l.append_dup(key, value),
+            Self::Right(r) => r.append_dup(key, value),
         }
     }
 
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
         match self {
-            Either::Left(l) => l.delete_current_duplicates(),
-            Either::Right(r) => r.delete_current_duplicates(),
+            Self::Left(l) => l.delete_current_duplicates(),
+            Self::Right(r) => r.delete_current_duplicates(),
         }
     }
 }
@@ -220,8 +220,8 @@ where
 
     fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError> {
         match self {
-            Either::Left(l) => l.get::<T>(key),
-            Either::Right(r) => r.get::<T>(key),
+            Self::Left(l) => l.get::<T>(key),
+            Self::Right(r) => r.get::<T>(key),
         }
     }
 
@@ -230,50 +230,50 @@ where
         key: &<T::Key as Encode>::Encoded,
     ) -> Result<Option<T::Value>, DatabaseError> {
         match self {
-            Either::Left(l) => l.get_by_encoded_key::<T>(key),
-            Either::Right(r) => r.get_by_encoded_key::<T>(key),
+            Self::Left(l) => l.get_by_encoded_key::<T>(key),
+            Self::Right(r) => r.get_by_encoded_key::<T>(key),
         }
     }
 
     fn commit(self) -> Result<bool, DatabaseError> {
         match self {
-            Either::Left(l) => l.commit(),
-            Either::Right(r) => r.commit(),
+            Self::Left(l) => l.commit(),
+            Self::Right(r) => r.commit(),
         }
     }
 
     fn abort(self) {
         match self {
-            Either::Left(l) => l.abort(),
-            Either::Right(r) => r.abort(),
+            Self::Left(l) => l.abort(),
+            Self::Right(r) => r.abort(),
         }
     }
 
     fn cursor_read<T: Table>(&self) -> Result<Self::Cursor<T>, DatabaseError> {
         match self {
-            Either::Left(l) => l.cursor_read().map(Either::Left),
-            Either::Right(r) => r.cursor_read().map(Either::Right),
+            Self::Left(l) => l.cursor_read().map(Either::Left),
+            Self::Right(r) => r.cursor_read().map(Either::Right),
         }
     }
 
     fn cursor_dup_read<T: DupSort>(&self) -> Result<Self::DupCursor<T>, DatabaseError> {
         match self {
-            Either::Left(l) => l.cursor_dup_read().map(Either::Left),
-            Either::Right(r) => r.cursor_dup_read().map(Either::Right),
+            Self::Left(l) => l.cursor_dup_read().map(Either::Left),
+            Self::Right(r) => r.cursor_dup_read().map(Either::Right),
         }
     }
 
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
         match self {
-            Either::Left(l) => l.entries::<T>(),
-            Either::Right(r) => r.entries::<T>(),
+            Self::Left(l) => l.entries::<T>(),
+            Self::Right(r) => r.entries::<T>(),
         }
     }
 
     fn disable_long_read_transaction_safety(&mut self) {
         match self {
-            Either::Left(l) => l.disable_long_read_transaction_safety(),
-            Either::Right(r) => r.disable_long_read_transaction_safety(),
+            Self::Left(l) => l.disable_long_read_transaction_safety(),
+            Self::Right(r) => r.disable_long_read_transaction_safety(),
         }
     }
 }
@@ -304,15 +304,15 @@ where
 
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
         match self {
-            Either::Left(l) => l.cursor_write().map(Either::Left),
-            Either::Right(r) => r.cursor_write().map(Either::Right),
+            Self::Left(l) => l.cursor_write().map(Either::Left),
+            Self::Right(r) => r.cursor_write().map(Either::Right),
         }
     }
 
     fn cursor_dup_write<T: DupSort>(&self) -> Result<Self::DupCursorMut<T>, DatabaseError> {
         match self {
-            Either::Left(l) => l.cursor_dup_write().map(Either::Left),
-            Either::Right(r) => r.cursor_dup_write().map(Either::Right),
+            Self::Left(l) => l.cursor_dup_write().map(Either::Left),
+            Self::Right(r) => r.cursor_dup_write().map(Either::Right),
         }
     }
 }
