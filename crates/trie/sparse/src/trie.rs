@@ -2051,6 +2051,17 @@ impl SparseNode {
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
     }
+
+    /// Returns the hash of the node if it exists.
+    pub const fn hash(&self) -> Option<B256> {
+        match self {
+            Self::Empty => None,
+            Self::Hash(hash) => Some(*hash),
+            Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
+                *hash
+            }
+        }
+    }
 }
 
 /// A helper struct used to store information about a node that has been removed

@@ -378,6 +378,8 @@ impl SparseSubtrie {
         node: &TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
+        debug_assert!(path.starts_with(&self.path));
+
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(())
@@ -598,7 +600,10 @@ impl SparseSubtrie {
         'main: while let Some(RlpNodePathStackItem { level, path, mut is_in_prefix_set }) =
             self.buffers.path_stack.pop()
         {
-            let node = self.nodes.get_mut(&path).unwrap();
+            let node = self
+                .nodes
+                .get_mut(&path)
+                .unwrap_or_else(|| panic!("node at path {:?} does not exist", path));
             trace!(
                 target: "trie::parallel_sparse",
                 root = ?self.path,
@@ -980,18 +985,33 @@ mod tests {
         path_subtrie_index_unchecked, ParallelSparseTrie, SparseSubtrie, SparseSubtrieType,
     };
     use crate::trie::ChangedSubtrie;
-    use alloy_primitives::B256;
+    use alloy_primitives::{
+        map::{B256Set, HashMap},
+        B256,
+    };
     use alloy_rlp::Encodable;
     use alloy_trie::Nibbles;
     use assert_matches::assert_matches;
     use reth_primitives_traits::Account;
+    use reth_trie::{
+        hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
+        node_iter::{TrieElement, TrieNodeIter},
+        trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor},
+        walker::TrieWalker,
+    };
     use reth_trie_common::{
-        prefix_set::PrefixSetMut, BranchNode, ExtensionNode, LeafNode, RlpNode, TrieMask, TrieNode,
-        EMPTY_ROOT_HASH,
+        prefix_set::PrefixSetMut,
+        proof::{ProofNodes, ProofRetainer},
+        updates::TrieUpdates,
+        BranchNode, ExtensionNode, HashBuilder, HashedPostState, LeafNode, RlpNode, TrieMask,
+        TrieNode, EMPTY_ROOT_HASH,
     };
     use reth_trie_sparse::{SparseNode, TrieMasks};
 
-    // Test helpers
+    fn create_account(nonce: u64) -> Account {
+        Account { nonce, ..Default::default() }
+    }
+
     fn encode_account_value(nonce: u64) -> Vec<u8> {
         let account = Account { nonce, ..Default::default() };
         let trie_account = account.into_trie_account(EMPTY_ROOT_HASH);
@@ -1001,32 +1021,102 @@ mod tests {
     }
 
     fn create_leaf_node(key: &[u8], value_nonce: u64) -> TrieNode {
-        TrieNode::Leaf(LeafNode::new(
-            Nibbles::from_nibbles_unchecked(key),
-            encode_account_value(value_nonce),
-        ))
+        TrieNode::Leaf(LeafNode::new(Nibbles::from_nibbles(key), encode_account_value(value_nonce)))
     }
 
     fn create_extension_node(key: &[u8], child_hash: B256) -> TrieNode {
         TrieNode::Extension(ExtensionNode::new(
-            Nibbles::from_nibbles_unchecked(key),
+            Nibbles::from_nibbles(key),
             RlpNode::word_rlp(&child_hash),
         ))
     }
 
     fn create_branch_node_with_children(
         children_indices: &[u8],
-        child_hashes: &[B256],
+        child_hashes: impl IntoIterator<Item = RlpNode>,
     ) -> TrieNode {
         let mut stack = Vec::new();
-        let mut state_mask = 0u16;
+        let mut state_mask = TrieMask::default();
 
-        for (&idx, &hash) in children_indices.iter().zip(child_hashes.iter()) {
-            state_mask |= 1 << idx;
-            stack.push(RlpNode::word_rlp(&hash));
+        for (&idx, hash) in children_indices.iter().zip(child_hashes.into_iter()) {
+            state_mask.set_bit(idx);
+            stack.push(hash);
         }
 
-        TrieNode::Branch(BranchNode::new(stack, TrieMask::new(state_mask)))
+        TrieNode::Branch(BranchNode::new(stack, state_mask))
+    }
+
+    /// Calculate the state root by feeding the provided state to the hash builder and retaining the
+    /// proofs for the provided targets.
+    ///
+    /// Returns the state root and the retained proof nodes.
+    fn run_hash_builder(
+        state: impl IntoIterator<Item = (Nibbles, Account)> + Clone,
+        trie_cursor: impl TrieCursor,
+        destroyed_accounts: B256Set,
+        proof_targets: impl IntoIterator<Item = Nibbles>,
+    ) -> (B256, TrieUpdates, ProofNodes, HashMap<Nibbles, TrieMask>, HashMap<Nibbles, TrieMask>)
+    {
+        let mut account_rlp = Vec::new();
+
+        let mut hash_builder = HashBuilder::default()
+            .with_updates(true)
+            .with_proof_retainer(ProofRetainer::from_iter(proof_targets));
+
+        let mut prefix_set = PrefixSetMut::default();
+        prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));
+        prefix_set.extend_keys(destroyed_accounts.iter().map(Nibbles::unpack));
+        let walker =
+            TrieWalker::state_trie(trie_cursor, prefix_set.freeze()).with_deletions_retained(true);
+        let hashed_post_state = HashedPostState::default()
+            .with_accounts(state.into_iter().map(|(nibbles, account)| {
+                (nibbles.pack().into_inner().unwrap().into(), Some(account))
+            }))
+            .into_sorted();
+        let mut node_iter = TrieNodeIter::state_trie(
+            walker,
+            HashedPostStateAccountCursor::new(
+                NoopHashedAccountCursor::default(),
+                hashed_post_state.accounts(),
+            ),
+        );
+
+        while let Some(node) = node_iter.try_next().unwrap() {
+            match node {
+                TrieElement::Branch(branch) => {
+                    hash_builder.add_branch(branch.key, branch.value, branch.children_are_in_trie);
+                }
+                TrieElement::Leaf(key, account) => {
+                    let account = account.into_trie_account(EMPTY_ROOT_HASH);
+                    account.encode(&mut account_rlp);
+
+                    hash_builder.add_leaf(Nibbles::unpack(key), &account_rlp);
+                    account_rlp.clear();
+                }
+            }
+        }
+        let root = hash_builder.root();
+        let proof_nodes = hash_builder.take_proof_nodes();
+        let branch_node_hash_masks = hash_builder
+            .updated_branch_nodes
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|(path, node)| (path.clone(), node.hash_mask))
+            .collect();
+        let branch_node_tree_masks = hash_builder
+            .updated_branch_nodes
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|(path, node)| (path.clone(), node.tree_mask))
+            .collect();
+
+        let mut trie_updates = TrieUpdates::default();
+        let removed_keys = node_iter.walker.take_removed_keys();
+        trie_updates.finalize(hash_builder, removed_keys, destroyed_accounts);
+
+        (root, trie_updates, proof_nodes, branch_node_hash_masks, branch_node_tree_masks)
     }
 
     #[test]
@@ -1056,14 +1146,14 @@ mod tests {
         trie.lower_subtries[subtrie_3_index] = Some(subtrie_3);
 
         let unchanged_prefix_set = PrefixSetMut::from([
-            Nibbles::from_nibbles_unchecked([0x0]),
-            Nibbles::from_nibbles_unchecked([0x2, 0x0, 0x0]),
+            Nibbles::from_nibbles([0x0]),
+            Nibbles::from_nibbles([0x2, 0x0, 0x0]),
         ]);
         // Create a prefix set with the keys that match only the second subtrie
         let mut prefix_set = PrefixSetMut::from([
             // Match second subtrie
-            Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x0]),
-            Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x1, 0x0]),
+            Nibbles::from_nibbles([0x1, 0x0, 0x0]),
+            Nibbles::from_nibbles([0x1, 0x0, 0x1, 0x0]),
         ]);
         prefix_set.extend(unchanged_prefix_set);
         let mut prefix_set = prefix_set.freeze();
@@ -1081,8 +1171,8 @@ mod tests {
                 subtrie_2_index,
                 subtrie_2,
                 vec![
-                    Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x0]),
-                    Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x1, 0x0])
+                    Nibbles::from_nibbles([0x1, 0x0, 0x0]),
+                    Nibbles::from_nibbles([0x1, 0x0, 0x1, 0x0])
                 ]
             )]
         );
@@ -1133,7 +1223,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_subtrie_type() {
+    fn test_sparse_subtrie_type() {
         assert_eq!(
             SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 0])),
             SparseSubtrieType::Upper
@@ -1169,7 +1259,7 @@ mod tests {
     }
 
     #[test]
-    fn reveal_node_leaves() {
+    fn test_reveal_node_leaves() {
         let mut trie = ParallelSparseTrie::default();
 
         // Reveal leaf in the upper trie
@@ -1212,7 +1302,7 @@ mod tests {
     }
 
     #[test]
-    fn reveal_node_extension_all_upper() {
+    fn test_reveal_node_extension_all_upper() {
         let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1]);
         let child_hash = B256::repeat_byte(0xab);
@@ -1233,7 +1323,7 @@ mod tests {
     }
 
     #[test]
-    fn reveal_node_extension_cross_level() {
+    fn test_reveal_node_extension_cross_level() {
         let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2]);
         let child_hash = B256::repeat_byte(0xcd);
@@ -1259,11 +1349,14 @@ mod tests {
     }
 
     #[test]
-    fn reveal_node_branch_all_upper() {
+    fn test_reveal_node_branch_all_upper() {
         let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1]);
-        let child_hashes = [B256::repeat_byte(0x11), B256::repeat_byte(0x22)];
-        let node = create_branch_node_with_children(&[0x0, 0x5], &child_hashes);
+        let child_hashes = [
+            RlpNode::word_rlp(&B256::repeat_byte(0x11)),
+            RlpNode::word_rlp(&B256::repeat_byte(0x22)),
+        ];
+        let node = create_branch_node_with_children(&[0x0, 0x5], child_hashes.clone());
         let masks = TrieMasks::none();
 
         trie.reveal_node(path.clone(), node, masks).unwrap();
@@ -1280,21 +1373,24 @@ mod tests {
         let child_path_5 = Nibbles::from_nibbles([0x1, 0x5]);
         assert_eq!(
             trie.upper_subtrie.nodes.get(&child_path_0),
-            Some(&SparseNode::Hash(child_hashes[0]))
+            Some(&SparseNode::Hash(child_hashes[0].as_hash().unwrap()))
         );
         assert_eq!(
             trie.upper_subtrie.nodes.get(&child_path_5),
-            Some(&SparseNode::Hash(child_hashes[1]))
+            Some(&SparseNode::Hash(child_hashes[1].as_hash().unwrap()))
         );
     }
 
     #[test]
-    fn reveal_node_branch_cross_level() {
+    fn test_reveal_node_branch_cross_level() {
         let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2]); // Exactly 2 nibbles - boundary case
-        let child_hashes =
-            [B256::repeat_byte(0x33), B256::repeat_byte(0x44), B256::repeat_byte(0x55)];
-        let node = create_branch_node_with_children(&[0x0, 0x7, 0xf], &child_hashes);
+        let child_hashes = [
+            RlpNode::word_rlp(&B256::repeat_byte(0x33)),
+            RlpNode::word_rlp(&B256::repeat_byte(0x44)),
+            RlpNode::word_rlp(&B256::repeat_byte(0x55)),
+        ];
+        let node = create_branch_node_with_children(&[0x0, 0x7, 0xf], child_hashes.clone());
         let masks = TrieMasks::none();
 
         trie.reveal_node(path.clone(), node, masks).unwrap();
@@ -1318,7 +1414,7 @@ mod tests {
             let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
             assert_eq!(
                 lower_subtrie.nodes.get(child_path),
-                Some(&SparseNode::Hash(child_hashes[i])),
+                Some(&SparseNode::Hash(child_hashes[i].as_hash().unwrap())),
             );
         }
     }
@@ -1340,14 +1436,14 @@ mod tests {
         trie.lower_subtries[subtrie_3_index] = Some(subtrie_3);
 
         let unchanged_prefix_set = PrefixSetMut::from([
-            Nibbles::from_nibbles_unchecked([0x0]),
-            Nibbles::from_nibbles_unchecked([0x2, 0x0, 0x0]),
+            Nibbles::from_nibbles([0x0]),
+            Nibbles::from_nibbles([0x2, 0x0, 0x0]),
         ]);
         // Create a prefix set with the keys that match only the second subtrie
         let mut prefix_set = PrefixSetMut::from([
             // Match second subtrie
-            Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x0]),
-            Nibbles::from_nibbles_unchecked([0x1, 0x0, 0x1, 0x0]),
+            Nibbles::from_nibbles([0x1, 0x0, 0x0]),
+            Nibbles::from_nibbles([0x1, 0x0, 0x1, 0x0]),
         ]);
         prefix_set.extend(unchanged_prefix_set.clone());
         trie.prefix_set = prefix_set;
@@ -1361,5 +1457,104 @@ mod tests {
         assert!(trie.lower_subtries[subtrie_1_index].is_some());
         assert!(trie.lower_subtries[subtrie_2_index].is_some());
         assert!(trie.lower_subtries[subtrie_3_index].is_some());
+    }
+
+    #[test]
+    fn test_subtrie_update_hashes() {
+        let mut subtrie = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+
+        // Create leaf nodes with paths 0x000...0, 0x00010...0, 0x0010...0
+        let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
+        let leaf_1_path = leaf_1_full_path.slice(..4);
+        let leaf_1_key = leaf_1_full_path.slice(4..);
+        let leaf_2_full_path = Nibbles::from_nibbles([vec![0, 0, 0, 1], vec![0; 60]].concat());
+        let leaf_2_path = leaf_2_full_path.slice(..4);
+        let leaf_2_key = leaf_2_full_path.slice(4..);
+        let leaf_3_full_path = Nibbles::from_nibbles([vec![0, 0, 1], vec![0; 61]].concat());
+        let leaf_3_path = leaf_3_full_path.slice(..3);
+        let leaf_3_key = leaf_3_full_path.slice(3..);
+
+        let account_1 = create_account(1);
+        let account_2 = create_account(2);
+        let account_3 = create_account(3);
+        let leaf_1 = create_leaf_node(leaf_1_key.as_slice(), account_1.nonce);
+        let leaf_2 = create_leaf_node(leaf_2_key.as_slice(), account_2.nonce);
+        let leaf_3 = create_leaf_node(leaf_3_key.as_slice(), account_3.nonce);
+
+        // Create branch nodes
+        let branch_1_path = Nibbles::from_nibbles([0, 0, 0]);
+        let branch_1 = create_branch_node_with_children(
+            &[0, 1],
+            vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1)),
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2)),
+            ],
+        );
+        let branch_2_path = Nibbles::from_nibbles([0, 0]);
+        let branch_2 = create_branch_node_with_children(
+            &[0, 1],
+            vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&branch_1)),
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_3)),
+            ],
+        );
+
+        // Reveal branch and leaf nodes
+        subtrie.reveal_node(branch_2_path.clone(), &branch_2, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(branch_1_path.clone(), &branch_1, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_1_path.clone(), &leaf_1, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_2_path.clone(), &leaf_2, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_3_path.clone(), &leaf_3, TrieMasks::none()).unwrap();
+
+        // Run hash builder for two leaf nodes
+        let (_, _, proof_nodes, _, _) = run_hash_builder(
+            [
+                (leaf_1_full_path.clone(), account_1),
+                (leaf_2_full_path.clone(), account_2),
+                (leaf_3_full_path.clone(), account_3),
+            ],
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            [
+                branch_1_path.clone(),
+                branch_2_path.clone(),
+                leaf_1_full_path.clone(),
+                leaf_2_full_path.clone(),
+                leaf_3_full_path.clone(),
+            ],
+        );
+
+        // Update hashes for the subtrie
+        subtrie.update_hashes(
+            &mut PrefixSetMut::from([leaf_1_full_path, leaf_2_full_path, leaf_3_full_path])
+                .freeze(),
+        );
+
+        // Compare hashes between hash builder and subtrie
+
+        let hash_builder_branch_1_hash =
+            RlpNode::from_rlp(proof_nodes.get(&branch_1_path).unwrap().as_ref()).as_hash().unwrap();
+        let subtrie_branch_1_hash = subtrie.nodes.get(&branch_1_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_branch_1_hash, subtrie_branch_1_hash);
+
+        let hash_builder_branch_2_hash =
+            RlpNode::from_rlp(proof_nodes.get(&branch_2_path).unwrap().as_ref()).as_hash().unwrap();
+        let subtrie_branch_2_hash = subtrie.nodes.get(&branch_2_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_branch_2_hash, subtrie_branch_2_hash);
+
+        let subtrie_leaf_1_hash = subtrie.nodes.get(&leaf_1_path).unwrap().hash().unwrap();
+        let hash_builder_leaf_1_hash =
+            RlpNode::from_rlp(proof_nodes.get(&leaf_1_path).unwrap().as_ref()).as_hash().unwrap();
+        assert_eq!(hash_builder_leaf_1_hash, subtrie_leaf_1_hash);
+
+        let hash_builder_leaf_2_hash =
+            RlpNode::from_rlp(proof_nodes.get(&leaf_2_path).unwrap().as_ref()).as_hash().unwrap();
+        let subtrie_leaf_2_hash = subtrie.nodes.get(&leaf_2_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_leaf_2_hash, subtrie_leaf_2_hash);
+
+        let hash_builder_leaf_3_hash =
+            RlpNode::from_rlp(proof_nodes.get(&leaf_3_path).unwrap().as_ref()).as_hash().unwrap();
+        let subtrie_leaf_3_hash = subtrie.nodes.get(&leaf_3_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_leaf_3_hash, subtrie_leaf_3_hash);
     }
 }
