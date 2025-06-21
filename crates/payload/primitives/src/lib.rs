@@ -1,9 +1,9 @@
 //! Abstractions for working with execution payloads.
 //!
-//! This crate provides a framework for execution payloads - the fundamental building
-//! blocks containing transaction data in blockchain systems. While these types support
-//! the Engine API, they are general abstractions useful for block building, validation,
-//! and chain management.
+//! This crate provides types and traits for execution payloads - the fundamental
+//! building blocks containing transaction data in blockchain systems. These abstractions
+//! support payload construction, validation, and processing across different protocol
+//! versions and configurations.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -37,7 +37,7 @@ pub use payload::{ExecutionPayload, PayloadOrAttributes};
 
 /// Core trait that defines the associated types for working with execution payloads.
 ///
-/// Establishes a type system for payload operations, enabling generic implementations
+/// Establishes the types required for payload operations, enabling generic implementations
 /// across different blockchain configurations.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
     /// The format for execution payload data that can be processed and validated.
