@@ -897,7 +897,7 @@ mod tests {
         let sender = Address::from([0x01; 20]);
 
         let signed_tx = alloy_consensus::TxEnvelope::Legacy(
-            alloy_consensus::Signed::new_unchecked(tx.clone(), signature, B256::ZERO),
+            alloy_consensus::Signed::new_unchecked(tx, signature, B256::ZERO),
         );
 
         let recovered_tx = Recovered::new_unchecked(signed_tx, sender);
