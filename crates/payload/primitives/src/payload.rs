@@ -75,7 +75,7 @@ impl ExecutionPayload for ExecutionData {
 /// A unified type for handling both execution payloads and payload attributes.
 ///
 /// Enables generic validation and processing logic for both complete payloads
-/// and build attributes, useful for version-specific validation.
+/// and payload attributes, useful for version-specific validation.
 #[derive(Debug)]
 pub enum PayloadOrAttributes<'a, Payload, Attributes> {
     /// A complete execution payload containing block data

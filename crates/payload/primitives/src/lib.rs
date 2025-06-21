@@ -50,8 +50,8 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 
     /// Attributes that specify how a payload should be constructed.
     ///
-    /// These attributes typically come from external sources (e.g., consensus layer)
-    /// and contain parameters like timestamp, fee recipient, and randomness.
+    /// These attributes typically come from external sources (e.g., consensus layer over RPC such
+    /// as the Engine API) and contain parameters like timestamp, fee recipient, and randomness.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
     /// Extended attributes used internally during payload building.
