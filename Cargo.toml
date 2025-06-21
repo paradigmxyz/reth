@@ -529,6 +529,7 @@ dashmap = "6.0"
 derive_more = { version = "2", default-features = false, features = ["full"] }
 dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
+either = { version = "1.15", default-features = false }
 eyre = "0.6"
 fdlimit = "0.3.0"
 generic-array = "0.14"

@@ -9,9 +9,9 @@ use crate::{
     table::{DupSort, Encode, Table},
     transaction::{DbTx, DbTxMut},
 };
+pub use either::Either;
 use reth_storage_errors::db::DatabaseError;
 use std::ops::{Bound, RangeBounds};
-use tokio_util::either::Either;
 
 impl<T, L, R> DbCursorRO<T> for Either<L, R>
 where

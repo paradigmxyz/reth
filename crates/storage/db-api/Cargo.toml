@@ -42,7 +42,7 @@ metrics.workspace = true
 # misc
 derive_more.workspace = true
 bytes.workspace = true
-tokio-util.workspace = true
+either.workspace = true
 
 # arbitrary utils
 arbitrary = { workspace = true, features = ["derive"], optional = true }

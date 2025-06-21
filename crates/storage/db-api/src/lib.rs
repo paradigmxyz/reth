@@ -95,4 +95,4 @@ pub use database::Database;
 mod unwind;
 pub use unwind::DbTxUnwindExt;
 
-pub mod db_either;
+pub mod either;
