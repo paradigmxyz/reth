@@ -11,7 +11,7 @@ use std::{
     fmt::{self},
 };
 
-pub use reth_rpc_types_compat::RpcTypes;
+pub use reth_rpc_types_compat::{RpcTransaction, RpcTypes};
 
 /// Network specific `eth` API types.
 ///
@@ -37,9 +37,6 @@ pub trait EthApiTypes: Send + Sync + Clone {
     /// Returns reference to transaction response builder.
     fn tx_resp_builder(&self) -> &Self::TransactionCompat;
 }
-
-/// Adapter for network specific transaction type.
-pub type RpcTransaction<T> = reth_rpc_types_compat::RpcTransaction<T>;
 
 /// Adapter for network specific block type.
 pub type RpcBlock<T> = Block<RpcTransaction<T>, RpcHeader<T>>;
