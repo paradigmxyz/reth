@@ -9,6 +9,7 @@ use crate::{
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use op_alloy_rpc_types_engine::{OpExecutionData, OpPayloadAttributes};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
+use reth_engine_local::{LocalPayloadAttributesAddOn, LocalPayloadAttributesBuilder};
 use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor};
 use reth_network::{
     types::BasicNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
@@ -29,7 +30,7 @@ use reth_node_builder::{
         EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder,
         RethRpcAddOns, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
+    BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadAttributesBuilder,
 };
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
@@ -498,6 +499,30 @@ where
 
     async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         EV::default().build(ctx).await
+    }
+}
+
+impl<N, NetworkT, EV, EB> LocalPayloadAttributesAddOn<N>
+    for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
+where
+    N: FullNodeComponents<
+        Types: NodeTypes<
+            ChainSpec: OpHardforks,
+            Primitives = OpPrimitives,
+            Payload: EngineTypes<ExecutionData = OpExecutionData>,
+        >,
+    >,
+    OpEthApiBuilder<NetworkT>: EthApiBuilder<N> + 'static,
+    EV: EngineValidatorBuilder<N> + Default + 'static,
+    EB: EngineApiBuilder<N> + 'static,
+{
+    type PayloadAttributes = OpPayloadAttributes;
+
+    fn local_payload_attributes_builder(
+        &self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<impl PayloadAttributesBuilder<Self::PayloadAttributes>> {
+        Ok(LocalPayloadAttributesBuilder::new(ctx.node.provider().chain_spec()))
     }
 }
 

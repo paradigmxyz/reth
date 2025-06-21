@@ -13,6 +13,7 @@ exclude.workspace = true
 reth-chainspec.workspace = true
 reth-engine-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
+reth-node-api.workspace = true
 reth-payload-builder.workspace = true
 reth-payload-primitives.workspace = true
 reth-provider.workspace = true

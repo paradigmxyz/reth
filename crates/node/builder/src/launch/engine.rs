@@ -12,7 +12,7 @@ use alloy_consensus::BlockHeader;
 use futures::{future::Either, stream, stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_engine_local::{LocalMiner, LocalPayloadAttributesBuilder};
+use reth_engine_local::{LocalMiner, LocalPayloadAttributesAddOn};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -24,7 +24,7 @@ use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributesBuilder, PayloadTypes,
+    PayloadTypes,
 };
 use reth_node_core::{
     args::DefaultEraHost,
@@ -78,10 +78,11 @@ where
     >,
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
-        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-    LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
-        <<Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-    >,
+        + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
+        + LocalPayloadAttributesAddOn<
+            NodeAdapter<T, CB::Components>,
+            PayloadAttributes = <<Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
+        >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -252,11 +253,13 @@ where
         );
 
         if ctx.is_dev() {
+            let local_payload_builder = add_ons.local_payload_attributes_builder(&add_ons_ctx)?;
+
             ctx.task_executor().spawn_critical(
                 "local engine",
                 LocalMiner::new(
                     ctx.blockchain_db().clone(),
-                    LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
+                    local_payload_builder,
                     beacon_engine_handle.clone(),
                     ctx.dev_mining_mode(ctx.components().pool()),
                     ctx.components().payload_builder_handle().clone(),
