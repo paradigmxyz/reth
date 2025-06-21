@@ -218,6 +218,7 @@ where
             parent.gas_used,
             parent.gas_limit,
             parent.base_fee_per_gas.unwrap_or_default(),
+            parent.timestamp,
             attributes.timestamp,
         );
         let mut gas_limit = attributes.gas_limit;

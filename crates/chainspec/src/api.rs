@@ -72,13 +72,14 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
         parent_gas_used: u64,
         parent_gas_limit: u64,
         parent_base_fee_per_gas: u64,
-        timestamp: u64,
+        _parent_timestamp: u64,
+        target_timestamp: u64,
     ) -> u64 {
         calc_next_block_base_fee(
             parent_gas_used,
             parent_gas_limit,
             parent_base_fee_per_gas,
-            self.base_fee_params_at_timestamp(timestamp),
+            self.base_fee_params_at_timestamp(target_timestamp),
         )
     }
 }

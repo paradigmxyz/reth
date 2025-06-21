@@ -103,6 +103,7 @@ async fn test_fee_history() -> eyre::Result<()> {
                 prev_header.gas_used,
                 prev_header.gas_limit,
                 prev_header.base_fee_per_gas.unwrap(),
+                prev_header.timestamp,
                 header.timestamp,
             );
 

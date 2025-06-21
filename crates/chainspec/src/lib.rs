@@ -176,6 +176,7 @@ mod tests {
             parent.gas_used,
             parent.gas_limit,
             parent.base_fee_per_gas.unwrap_or_default(),
+            parent.timestamp,
             next_timestamp,
         );
         assert_eq!(expected, got, "Base fee calculation does not match expected value");

@@ -273,6 +273,7 @@ pub fn validate_against_parent_eip1559_base_fee<
                 parent.gas_used(),
                 parent.gas_limit(),
                 base_fee,
+                parent.timestamp(),
                 header.timestamp(),
             )
         };

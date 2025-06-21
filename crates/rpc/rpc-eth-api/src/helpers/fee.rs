@@ -158,6 +158,7 @@ pub trait EthFees: LoadFee {
                     last_entry.gas_limit,
                     last_entry.base_fee_per_gas,
                     last_entry.timestamp,
+                    last_entry.timestamp,
                 ) as u128);
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
@@ -216,6 +217,7 @@ pub trait EthFees: LoadFee {
                         last_header.gas_used(),
                         last_header.gas_limit(),
                         last_header.base_fee_per_gas().unwrap_or_default(),
+                        last_header.timestamp(),
                         last_header.timestamp(),
                     ) as u128,
                 );

@@ -142,6 +142,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 latest.gas_limit(),
                 latest.base_fee_per_gas().unwrap_or_default(),
                 latest.timestamp(),
+                latest.timestamp(),
             ),
             pending_blob_fee: latest
                 .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp())),
@@ -325,6 +326,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     new_tip.gas_limit(),
                     new_tip.base_fee_per_gas().unwrap_or_default(),
                     new_tip.timestamp(),
+                    new_tip.timestamp(),
                 );
                 let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(new_tip.timestamp()),
@@ -430,6 +432,7 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                     tip.gas_used(),
                     tip.gas_limit(),
                     tip.base_fee_per_gas().unwrap_or_default(),
+                    tip.timestamp(),
                     tip.timestamp(),
                 );
                 let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(

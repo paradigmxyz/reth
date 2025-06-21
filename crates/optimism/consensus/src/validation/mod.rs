@@ -204,6 +204,7 @@ pub fn next_block_base_fee(
             parent.gas_used(),
             parent.gas_limit(),
             parent.base_fee_per_gas().unwrap_or_default(),
+            parent.timestamp(),
             timestamp,
         ))
     }
@@ -262,6 +263,7 @@ mod tests {
                 parent.gas_used,
                 parent.gas_limit,
                 parent.base_fee_per_gas.unwrap_or_default(),
+                parent.timestamp,
                 0,
             )
         );
@@ -285,6 +287,7 @@ mod tests {
                 parent.gas_used,
                 parent.gas_limit,
                 parent.base_fee_per_gas.unwrap_or_default(),
+                parent.timestamp,
                 0,
             )
         );

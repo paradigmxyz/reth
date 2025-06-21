@@ -588,6 +588,7 @@ mod tests {
             last_header.gas_limit,
             last_header.base_fee_per_gas.unwrap_or_default(),
             last_header.timestamp,
+            last_header.timestamp,
         ) as u128);
 
         let eth_api = build_test_eth_api(mock_provider);

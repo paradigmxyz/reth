@@ -739,6 +739,7 @@ mod tests {
             genesis.gas_limit,
             genesis.base_fee_per_gas.unwrap_or_default(),
             genesis.timestamp,
+            genesis.timestamp,
         );
         // <https://base.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
@@ -756,6 +757,7 @@ mod tests {
             genesis.gas_limit,
             genesis.base_fee_per_gas.unwrap_or_default(),
             genesis.timestamp,
+            genesis.timestamp,
         );
         // <https://base-sepolia.blockscout.com/block/1>
         assert_eq!(base_fee, 980000000);
@@ -772,6 +774,7 @@ mod tests {
             genesis.gas_used,
             genesis.gas_limit,
             genesis.base_fee_per_gas.unwrap_or_default(),
+            genesis.timestamp,
             genesis.timestamp,
         );
         // <https://optimism-sepolia.blockscout.com/block/1>
