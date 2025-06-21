@@ -5,9 +5,10 @@ mod history;
 const fn main() {}
 
 use alloy_primitives::bytes::Bytes;
-use futures_util::{Stream, TryStreamExt};
+use futures_util::{stream, Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl};
 use reth_era_downloader::HttpClient;
+use tokio_util::either::Either;
 
 // Url where the ERA1 files are hosted
 const ITHACA_ERA_INDEX_URL: &str = "https://era.ithaca.xyz/era1/index.html";
@@ -28,18 +29,19 @@ impl HttpClient for ClientWithFakeIndex {
         &self,
         url: U,
     ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin> {
-        let url = url.into_url().unwrap();
+        let url = url.into_url()?;
 
         match url.to_string().as_str() {
-            ITHACA_ERA_INDEX_URL => Ok(Box::new(futures::stream::once(Box::pin(async move {
-                Ok(bytes::Bytes::from_static(GENESIS_ITHACA_INDEX_RESPONSE))
-            })))
-                as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>),
+            ITHACA_ERA_INDEX_URL => {
+                // Create a static stream without boxing
+                let stream =
+                    stream::iter(vec![Ok(Bytes::from_static(GENESIS_ITHACA_INDEX_RESPONSE))]);
+                Ok(Either::Left(stream))
+            }
             _ => {
                 let response = Client::get(&self.0, url).send().await?;
-
-                Ok(Box::new(response.bytes_stream().map_err(|e| eyre::Error::new(e)))
-                    as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+                let stream = response.bytes_stream().map_err(|e| eyre::Error::new(e));
+                Ok(Either::Right(stream))
             }
         }
     }
