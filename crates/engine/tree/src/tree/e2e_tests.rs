@@ -241,3 +241,31 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected_e2e() -> Resu
 
     Ok(())
 }
+
+/// Test that verifies forkchoice updates can extend the canonical chain progressively.
+///
+/// This test creates a longer chain of blocks, then uses forkchoice updates to make
+/// different parts of the chain canonical in sequence, verifying that FCU properly
+/// advances the canonical head when all blocks are already available.
+#[tokio::test]
+async fn test_engine_tree_fcu_extends_canon_chain_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        // create and make canonical a base chain with 1 block
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::new())
+        // extend the chain with 10 more blocks (total 11 blocks: 0-10)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
+        // capture block 6 as our intermediate target (from 0-indexed, this is block 6)
+        .with_action(CaptureBlock::new("target_block"))
+        // make the intermediate target canonical via FCU
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("target_block"))
+        // now make the chain tip canonical via FCU
+        .with_action(MakeCanonical::new());
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
