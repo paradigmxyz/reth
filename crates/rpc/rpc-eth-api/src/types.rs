@@ -59,7 +59,6 @@ where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
-            NetworkTypes: RpcTypes,
             TransactionCompat: TransactionCompat<
                 Primitives = <Self as RpcNodeCore>::Primitives,
                 Network = Self::NetworkTypes,
@@ -76,7 +75,6 @@ impl<T> FullEthApiTypes for T where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
-            NetworkTypes: RpcTypes,
             TransactionCompat: TransactionCompat<
                 Primitives = <Self as RpcNodeCore>::Primitives,
                 Network = Self::NetworkTypes,
