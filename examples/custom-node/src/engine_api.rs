@@ -15,7 +15,7 @@ use reth_ethereum::node::api::{
     NodeTypes,
 };
 use reth_node_builder::rpc::EngineApiBuilder;
-use reth_op::node::node::OpStorage;
+use reth_op::node::OpStorage;
 use reth_payload_builder::PayloadStore;
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApiError;
@@ -27,15 +27,20 @@ pub struct CustomExecutionPayloadInput {}
 #[derive(Clone, serde::Serialize)]
 pub struct CustomExecutionPayloadEnvelope {
     execution_payload: ExecutionPayloadV3,
+    extension: u64,
 }
 
 impl From<CustomBuiltPayload> for CustomExecutionPayloadEnvelope {
     fn from(value: CustomBuiltPayload) -> Self {
         let sealed_block = value.0.into_sealed_block();
         let hash = sealed_block.hash();
+        let extension = sealed_block.header().extension;
         let block = sealed_block.into_block();
 
-        Self { execution_payload: ExecutionPayloadV3::from_block_unchecked(hash, &block.clone()) }
+        Self {
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(hash, &block.clone()),
+            extension,
+        }
     }
 }
 

@@ -111,7 +111,7 @@ impl UnifiedStatus {
 
     /// Convert this `UnifiedStatus` into the appropriate `StatusMessage` variant based on version.
     pub fn into_message(self) -> StatusMessage {
-        if self.version == EthVersion::Eth69 {
+        if self.version >= EthVersion::Eth69 {
             StatusMessage::Eth69(self.into_eth69())
         } else {
             StatusMessage::Legacy(self.into_legacy())

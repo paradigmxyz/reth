@@ -1,5 +1,5 @@
 //! The implementation of the [`PayloadAttributesBuilder`] for the
-//! [`LocalEngineService`](super::service::LocalEngineService).
+//! [`LocalMiner`](super::LocalMiner).
 
 use alloy_primitives::{Address, B256};
 use reth_chainspec::EthereumHardforks;

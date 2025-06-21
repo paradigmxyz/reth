@@ -1,6 +1,7 @@
 //! Command that initializes the node from a genesis file.
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use alloy_consensus::Header;
 use alloy_primitives::{B256, U256};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -102,6 +103,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
                     &provider_rw,
                     SealedHeader::new(header, header_hash),
                     total_difficulty,
+                    |number| Header { number, ..Default::default() },
                 )?;
 
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they

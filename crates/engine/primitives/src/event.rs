@@ -3,6 +3,7 @@
 use crate::ForkchoiceStatus;
 use alloc::boxed::Box;
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::ForkchoiceState;
 use core::{
@@ -20,6 +21,8 @@ pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.
     ForkBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
+    /// A new block was received from the consensus engine
+    BlockReceived(BlockNumHash),
     /// A block was added to the canonical chain, and the elapsed time validating the block
     CanonicalBlockAdded(ExecutedBlockWithTrieUpdates<N>, Duration),
     /// A canonical chain was committed, and the elapsed time committing the data
@@ -68,6 +71,9 @@ where
             }
             Self::LiveSyncProgress(progress) => {
                 write!(f, "LiveSyncProgress({progress:?})")
+            }
+            Self::BlockReceived(num_hash) => {
+                write!(f, "BlockReceived({num_hash:?})")
             }
         }
     }

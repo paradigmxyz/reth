@@ -1,6 +1,9 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{setup_engine, testsuite::Environment, NodeBuilderHelper, PayloadAttributesBuilder};
+use crate::{
+    setup_engine_with_connection, testsuite::Environment, NodeBuilderHelper,
+    PayloadAttributesBuilder,
+};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
@@ -9,7 +12,7 @@ use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
-use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes};
+use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_rpc_api::clients::EthApiClient;
@@ -34,6 +37,8 @@ pub struct Setup<I> {
     pub state: Option<EvmState>,
     /// Network configuration
     pub network: NetworkSetup,
+    /// Engine tree configuration
+    pub tree_config: TreeConfig,
     /// Shutdown channel to stop nodes when setup is dropped
     shutdown_tx: Option<mpsc::Sender<()>>,
     /// Is this setup in dev mode
@@ -50,6 +55,7 @@ impl<I> Default for Setup<I> {
             blocks: Vec::new(),
             state: None,
             network: NetworkSetup::default(),
+            tree_config: TreeConfig::default(),
             shutdown_tx: None,
             is_dev: true,
             _phantom: Default::default(),
@@ -117,6 +123,12 @@ where
         self
     }
 
+    /// Set the engine tree configuration
+    pub const fn with_tree_config(mut self, tree_config: TreeConfig) -> Self {
+        self.tree_config = tree_config;
+        self
+    }
+
     /// Apply the setup to the environment
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
@@ -148,11 +160,13 @@ where
             )
         };
 
-        let result = setup_engine::<N>(
+        let result = setup_engine_with_connection::<N>(
             node_count,
             Arc::<N::ChainSpec>::new((*chain_spec).clone().into()),
             is_dev,
+            self.tree_config.clone(),
             attributes_generator,
+            self.network.connect_nodes,
         )
         .await;
 
@@ -224,32 +238,47 @@ where
 
         env.node_clients = node_clients;
 
-        // Initialize the environment with genesis block information
-        let first_client = &env.node_clients[0];
-        let genesis_block =
-            EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
-                &first_client.rpc,
-                BlockNumberOrTag::Number(0),
-                false,
-            )
-            .await?
-            .ok_or_else(|| eyre!("Genesis block not found"))?;
+        // Initialize per-node states for all nodes
+        env.initialize_node_states(node_count);
 
-        env.latest_block_info = Some(crate::testsuite::LatestBlockInfo {
-            hash: genesis_block.header.hash,
-            number: genesis_block.header.number,
-        });
+        // Initialize each node's state with genesis block information
+        let genesis_block_info = {
+            let first_client = &env.node_clients[0];
+            let genesis_block =
+                EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
+                    &first_client.rpc,
+                    BlockNumberOrTag::Number(0),
+                    false,
+                )
+                .await?
+                .ok_or_else(|| eyre!("Genesis block not found"))?;
 
-        env.latest_header_time = genesis_block.header.timestamp;
-        env.latest_fork_choice_state = ForkchoiceState {
-            head_block_hash: genesis_block.header.hash,
-            safe_block_hash: genesis_block.header.hash,
-            finalized_block_hash: genesis_block.header.hash,
+            crate::testsuite::BlockInfo {
+                hash: genesis_block.header.hash,
+                number: genesis_block.header.number,
+                timestamp: genesis_block.header.timestamp,
+            }
         };
 
+        // Initialize all node states with the same genesis block
+        for (node_idx, node_state) in env.node_states.iter_mut().enumerate() {
+            node_state.current_block_info = Some(genesis_block_info);
+            node_state.latest_header_time = genesis_block_info.timestamp;
+            node_state.latest_fork_choice_state = ForkchoiceState {
+                head_block_hash: genesis_block_info.hash,
+                safe_block_hash: genesis_block_info.hash,
+                finalized_block_hash: genesis_block_info.hash,
+            };
+
+            debug!(
+                "Node {} initialized with genesis block {} (hash: {})",
+                node_idx, genesis_block_info.number, genesis_block_info.hash
+            );
+        }
+
         debug!(
-            "Environment initialized with genesis block {} (hash: {})",
-            genesis_block.header.number, genesis_block.header.hash
+            "Environment initialized with {} nodes, all starting from genesis block {} (hash: {})",
+            node_count, genesis_block_info.number, genesis_block_info.hash
         );
 
         // TODO: For each block in self.blocks, replay it on the node
@@ -267,16 +296,23 @@ pub struct Genesis {}
 pub struct NetworkSetup {
     /// Number of nodes to create
     pub node_count: usize,
+    /// Whether nodes should be connected to each other
+    pub connect_nodes: bool,
 }
 
 impl NetworkSetup {
     /// Create a new network setup with a single node
     pub const fn single_node() -> Self {
-        Self { node_count: 1 }
+        Self { node_count: 1, connect_nodes: true }
     }
 
-    /// Create a new network setup with multiple nodes
+    /// Create a new network setup with multiple nodes (connected)
     pub const fn multi_node(count: usize) -> Self {
-        Self { node_count: count }
+        Self { node_count: count, connect_nodes: true }
+    }
+
+    /// Create a new network setup with multiple nodes (disconnected)
+    pub const fn multi_node_unconnected(count: usize) -> Self {
+        Self { node_count: count, connect_nodes: false }
     }
 }
