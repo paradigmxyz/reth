@@ -24,22 +24,20 @@ impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig>
 where
     Self: SpawnBlocking<
-            NetworkTypes: RpcTypes<Header = alloy_rpc_types_eth::Header>,
+            NetworkTypes: RpcTypes<
+                Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
+            >,
             Error: FromEvmError<Self::Evm>,
         > + RpcNodeCore<
-            Provider: BlockReaderIdExt<
-                Transaction = reth_ethereum_primitives::TransactionSigned,
-                Block = reth_ethereum_primitives::Block,
-                Receipt = reth_ethereum_primitives::Receipt,
-                Header = alloy_consensus::Header,
-            > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+            Provider: BlockReaderIdExt<Receipt = Provider::Receipt, Block = Provider::Block>
+                          + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                           + StateProviderFactory,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
             Evm: ConfigureEvm<
                 Primitives = <Self as RpcNodeCore>::Primitives,
-                NextBlockEnvCtx = NextBlockEnvAttributes,
+                NextBlockEnvCtx: From<NextBlockEnvAttributes>,
             >,
             Primitives: NodePrimitives<
                 BlockHeader = ProviderHeader<Self::Provider>,
@@ -48,10 +46,7 @@ where
                 Block = ProviderBlock<Self::Provider>,
             >,
         >,
-    Provider: BlockReader<
-        Block = reth_ethereum_primitives::Block,
-        Receipt = reth_ethereum_primitives::Receipt,
-    >,
+    Provider: BlockReader,
 {
     #[inline]
     fn pending_block(
@@ -73,6 +68,7 @@ where
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
-        })
+        }
+        .into())
     }
 }
