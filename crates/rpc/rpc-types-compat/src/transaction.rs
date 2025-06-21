@@ -22,10 +22,11 @@ use thiserror::Error;
 
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
-    /// The lower layer consensus types to convert from.
+    /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
-    /// RPC transaction response type.
+    /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
+    /// types of [`Self::Primitives`].
     type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
 
     /// A set of variables for executing a transaction.
