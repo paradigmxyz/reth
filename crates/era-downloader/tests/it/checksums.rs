@@ -23,16 +23,24 @@ async fn test_invalid_checksum_returns_error(url: &str) {
     );
 
     let actual_err = stream.next().await.unwrap().unwrap_err().to_string();
-    let expected_err = "Checksum mismatch, \
+    let expected_err = format!(
+        "Checksum mismatch, \
 got: 87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7, \
-expected: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+expected: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+for mainnet-00000-5ec1ffb8.era1 at {}/mainnet-00000-5ec1ffb8.era1",
+        folder.display()
+    );
 
     assert_eq!(actual_err, expected_err);
 
     let actual_err = stream.next().await.unwrap().unwrap_err().to_string();
-    let expected_err = "Checksum mismatch, \
+    let expected_err = format!(
+        "Checksum mismatch, \
 got: 0263829989b6fd954f72baaf2fc64bc2e2f01d692d4de72986ea808f6e99813f, \
-expected: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+expected: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+for mainnet-00001-a5364e9a.era1 at {}/mainnet-00001-a5364e9a.era1",
+        folder.display()
+    );
 
     assert_eq!(actual_err, expected_err);
 }
