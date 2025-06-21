@@ -8,40 +8,34 @@ use alloy_primitives::bytes::Bytes;
 use futures_util::{Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl};
 use reth_era_downloader::HttpClient;
-use std::future::Future;
 
 /// An HTTP client that fakes the file list to always show one known file
 ///
 /// but passes all other calls including actual downloads to a real HTTP client
-/// 
-/// In that way, only one file is used but downloads are still performed from the normal source.
+///
+/// In that way, only one file is used but downloads are still performed from the original source.
 #[derive(Debug, Clone)]
 struct ClientWithFakeIndex(Client);
 
 impl HttpClient for ClientWithFakeIndex {
-    fn get<U: IntoUrl + Send + Sync>(
+    async fn get<U: IntoUrl + Send + Sync>(
         &self,
         url: U,
-    ) -> impl Future<
-        Output = eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>,
-    > + Send
-           + Sync {
+    ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin> {
         let url = url.into_url().unwrap();
 
-        async move {
-            match url.to_string().as_str() {
-                "https://era.ithaca.xyz/era1/index.html" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from_static(b"<a href=\"https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1\">mainnet-00000-5ec1ffb8.era1</a>"))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                _ => {
-                    let response = Client::get(&self.0, url).send().await?;
+        match url.to_string().as_str() {
+            "https://era.ithaca.xyz/era1/index.html" => {
+                Ok(Box::new(futures::stream::once(Box::pin(async move {
+                    Ok(bytes::Bytes::from_static(b"<a href=\"https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1\">mainnet-00000-5ec1ffb8.era1</a>"))
+                })))
+                    as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
+            }
+            _ => {
+                let response = Client::get(&self.0, url).send().await?;
 
-                    Ok(Box::new(response.bytes_stream().map_err(|e| eyre::Error::new(e)))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
+                Ok(Box::new(response.bytes_stream().map_err(|e| eyre::Error::new(e)))
+                    as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
             }
         }
     }
