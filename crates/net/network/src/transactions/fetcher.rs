@@ -34,6 +34,7 @@ use crate::{
     cache::{LruCache, LruMap},
     duration_metered_exec,
     metrics::TransactionFetcherMetrics,
+    NetworkHandle,
 };
 use alloy_consensus::transaction::PooledTransaction;
 use alloy_primitives::TxHash;
@@ -45,7 +46,7 @@ use reth_eth_wire::{
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
-use reth_network_api::PeerRequest;
+use reth_network_api::{PeerRequest, Peers, ReputationChangeKind};
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
 use reth_primitives_traits::SignedTransaction;
@@ -66,6 +67,8 @@ use tracing::trace;
 #[derive(Debug)]
 #[pin_project]
 pub struct TransactionFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
+    /// Network access.
+    network: Option<NetworkHandle<N>>,
     /// All peers with to which a [`GetPooledTransactions`] request is inflight.
     pub active_peers: LruMap<PeerId, u8, ByLength>,
     /// All currently active [`GetPooledTransactions`] requests.
@@ -94,6 +97,20 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         self.active_peers.remove(peer_id);
     }
 
+    /// Reports peer for sending bad transactions.
+    fn report_peer_bad_transactions(&self, peer_id: PeerId) {
+        self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+        self.metrics.reported_bad_transactions.increment(1);
+    }
+
+    /// Updates the reputation of peer.
+    fn report_peer(&self, peer_id: PeerId, kind: ReputationChangeKind) {
+        trace!(target: "net::tx", ?peer_id, ?kind, "reporting reputation change");
+        if let Some(network_handle) = &self.network {
+            network_handle.reputation_change(peer_id, kind);
+        }
+    }
+
     /// Updates metrics.
     #[inline]
     pub fn update_metrics(&self) {
@@ -120,7 +137,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     }
 
     /// Sets up transaction fetcher with config
-    pub fn with_transaction_fetcher_config(config: &TransactionFetcherConfig) -> Self {
+    pub fn with_transaction_fetcher_config(
+        config: &TransactionFetcherConfig,
+        network: NetworkHandle<N>,
+    ) -> Self {
         let TransactionFetcherConfig {
             max_inflight_requests,
             max_capacity_cache_txns_pending_fetch,
@@ -140,6 +160,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
             ),
             info,
             metrics,
+            network: Some(network),
             ..Default::default()
         }
     }
@@ -216,7 +237,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             if idle_peer.is_some() {
                 hashes_to_request.insert(hash);
-                break idle_peer.copied()
+                break idle_peer.copied();
             }
 
             if let Some(ref mut bud) = budget {
@@ -275,7 +296,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             // tx is really big, pack request with single tx
             if size >= self.info.soft_limit_byte_size_pooled_transactions_response_on_pack_request {
-                return hashes_from_announcement_iter.collect()
+                return hashes_from_announcement_iter.collect();
             }
             acc_size_response = size;
         }
@@ -655,7 +676,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     self.metrics.egress_peer_channel_full.increment(1);
                     Some(new_announced_hashes)
                 }
-            }
+            };
         }
 
         *inflight_count += 1;
@@ -882,6 +903,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
                 }
+                let mut has_bad_transactions = false;
                 if verification_outcome == VerificationOutcome::ReportPeer {
                     // todo: report peer for sending hashes that weren't requested
                     trace!(target: "net::tx",
@@ -890,6 +912,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         verified_payload_len=verified_payload.len(),
                         "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
                     );
+                    has_bad_transactions = true;
                 }
                 // peer has only sent hashes that we didn't request
                 if verified_payload.is_empty() {
@@ -915,6 +938,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                     valid_payload_len=valid_payload.len(),
                     "received `PooledTransactions` response from peer with duplicate entries, filtered them out"
                     );
+                    has_bad_transactions = true;
                 }
                 // valid payload will have at least one transaction at this point. even if the tx
                 // size/type announced by the peer is different to the actual tx size/type, pass on
@@ -943,6 +967,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                         fetched_len=fetched.len(),
                         "peer failed to serve hashes it announced"
                     );
+                    has_bad_transactions = true;
                 }
 
                 //
@@ -951,6 +976,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
 
                 let transactions = valid_payload.into_data().into_values().collect();
+
+                if has_bad_transactions {
+                    self.report_peer_bad_transactions(peer_id);
+                }
 
                 FetchEvent::TransactionsFetched { peer_id, transactions }
             }
@@ -997,6 +1026,7 @@ impl<T: NetworkPrimitives> Default for TransactionFetcher<T> {
             ),
             info: TransactionFetcherInfo::default(),
             metrics: Default::default(),
+            network: None,
         }
     }
 }
