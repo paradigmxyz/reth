@@ -2,7 +2,6 @@
 
 use crate::{service::PayloadServiceCommand, PayloadBuilderHandle};
 use futures_util::{ready, StreamExt};
-use reth_ethereum_engine_primitives::EthPayloadTypes;
 use reth_payload_primitives::{PayloadBuilderAttributes, PayloadTypes};
 use std::{
     future::Future,
@@ -14,7 +13,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// A service task that does not build any payloads.
 #[derive(Debug)]
-pub struct NoopPayloadBuilderService<T: PayloadTypes = EthPayloadTypes> {
+pub struct NoopPayloadBuilderService<T: PayloadTypes> {
     /// Receiver half of the command channel.
     command_rx: UnboundedReceiverStream<PayloadServiceCommand<T>>,
 }
@@ -59,7 +58,7 @@ where
     }
 }
 
-impl Default for NoopPayloadBuilderService {
+impl<T: PayloadTypes> Default for NoopPayloadBuilderService<T> {
     fn default() -> Self {
         let (service, _) = Self::new();
         service
