@@ -22,6 +22,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 alloy-network.workspace = true
+alloy-json-rpc.workspace = true
 
 # optimism
 op-alloy-consensus = { workspace = true, optional = true }
@@ -33,7 +34,6 @@ op-revm = { workspace = true, optional = true }
 revm-context.workspace = true
 
 # io
-serde.workspace = true
 jsonrpsee-types.workspace = true
 
 # error

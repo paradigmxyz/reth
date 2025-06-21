@@ -10082,6 +10082,7 @@ name = "reth-rpc-types-compat"
 version = "1.4.8"
 dependencies = [
  "alloy-consensus",
+ "alloy-json-rpc",
  "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-eth",
@@ -10094,7 +10095,6 @@ dependencies = [
  "reth-primitives-traits",
  "reth-storage-api",
  "revm-context",
- "serde",
  "thiserror 2.0.12",
 ]
 

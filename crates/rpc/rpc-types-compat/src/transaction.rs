@@ -1,8 +1,10 @@
 //! Compatibility functions for rpc `Transaction` type.
 
-use crate::fees::{CallFees, CallFeesError};
+use crate::{
+    fees::{CallFees, CallFeesError},
+    RpcTransaction, RpcTypes,
+};
 use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
-use alloy_network::Network;
 use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
     request::{TransactionInputError, TransactionRequest},
@@ -15,17 +17,17 @@ use reth_evm::{
 };
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
-    /// The lower layer consensus types to convert from.
+    /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
-    /// RPC transaction response type.
-    type Transaction: Serialize + for<'de> Deserialize<'de> + Send + Sync + Unpin + Clone + Debug;
+    /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
+    /// types of [`Self::Primitives`].
+    type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
 
     /// A set of variables for executing a transaction.
     type TxEnv;
@@ -39,7 +41,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     fn fill_pending(
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
-    ) -> Result<Self::Transaction, Self::Error> {
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error> {
         self.fill(tx, TransactionInfo::default())
     }
 
@@ -52,7 +54,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
         tx_inf: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error>;
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error>;
 
     /// Builds a fake transaction from a transaction request for inclusion into block built in
     /// `eth_simulateV1`.
@@ -353,9 +355,9 @@ impl<N, E, Evm, Err> Default for RpcConverter<N, E, Evm, Err> {
 impl<N, E, Evm, Err, Map> TransactionCompat for RpcConverter<N, E, Evm, Err, Map>
 where
     N: NodePrimitives,
-    E: Network + Unpin,
+    E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
     Evm: ConfigureEvm,
-    TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + Clone + Debug,
+    TxTy<N>: IntoRpcTx<E::Transaction> + Clone + Debug,
     TransactionRequest: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Err: From<TransactionConversionError>
         + From<<TransactionRequest as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
@@ -365,17 +367,15 @@ where
         + Sync
         + Send
         + Into<jsonrpsee_types::ErrorObject<'static>>,
-    Map: for<'a> TxInfoMapper<
-            &'a TxTy<N>,
-            Out = <TxTy<N> as IntoRpcTx<<E as Network>::TransactionResponse>>::TxInfo,
-        > + Clone
+    Map: for<'a> TxInfoMapper<&'a TxTy<N>, Out = <TxTy<N> as IntoRpcTx<E::Transaction>>::TxInfo>
+        + Clone
         + Debug
         + Unpin
         + Send
         + Sync,
 {
     type Primitives = N;
-    type Transaction = <E as Network>::TransactionResponse;
+    type Network = E;
     type TxEnv = TxEnvFor<Evm>;
     type Error = Err;
 
@@ -383,7 +383,7 @@ where
         &self,
         tx: Recovered<TxTy<N>>,
         tx_info: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error> {
+    ) -> Result<E::Transaction, Self::Error> {
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 
