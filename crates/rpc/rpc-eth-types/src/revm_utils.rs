@@ -103,7 +103,7 @@ pub fn apply_block_overrides(
         env.difficulty = difficulty;
     }
     if let Some(time) = time {
-        env.timestamp = time;
+        env.timestamp = U256::from(time);
     }
     if let Some(gas_limit) = gas_limit {
         env.gas_limit = gas_limit;
@@ -159,8 +159,12 @@ where
     }
 
     // Create a new account marked as touched
-    let mut acc =
-        revm::state::Account { info, status: AccountStatus::Touched, storage: HashMap::default() };
+    let mut acc = revm::state::Account {
+        info,
+        status: AccountStatus::Touched,
+        storage: HashMap::default(),
+        transaction_id: 0,
+    };
 
     let storage_diff = match (account_override.state, account_override.state_diff) {
         (Some(_), Some(_)) => return Err(EthApiError::BothStateAndStateDiffInOverride(account)),
@@ -193,6 +197,7 @@ where
                     original_value: (!value).into(),
                     present_value: value.into(),
                     is_cold: false,
+                    transaction_id: 0,
                 },
             );
         }

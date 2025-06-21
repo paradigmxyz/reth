@@ -595,10 +595,13 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
 impl From<InvalidTransaction> for RpcInvalidTransactionError {
     fn from(err: InvalidTransaction) -> Self {
         match err {
-            InvalidTransaction::InvalidChainId => Self::InvalidChainId,
+            InvalidTransaction::InvalidChainId | InvalidTransaction::MissingChainId => {
+                Self::InvalidChainId
+            }
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
             InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock => {
+            InvalidTransaction::CallerGasLimitMoreThanBlock |
+            InvalidTransaction::TxGasLimitGreaterThanCap { .. } => {
                 // tx.gas > block.gas_limit
                 Self::GasTooHigh
             }
@@ -632,7 +635,6 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             InvalidTransaction::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
-            InvalidTransaction::EofCreateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {
                 Self::AuthorizationListNotSupported
             }
