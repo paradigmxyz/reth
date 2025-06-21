@@ -130,6 +130,9 @@ where
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
+        // Try to expire pre-merge transaction history if configured
+        ctx.expire_pre_merge_transactions()?;
+
         // spawn exexs
         let exex_manager_handle = ExExLauncher::new(
             ctx.head(),

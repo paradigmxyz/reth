@@ -64,6 +64,7 @@ where
             receipts,
             account_history,
             storage_history,
+            bodies_history: _,
             receipts_log_filter,
         } = prune_modes;
 
