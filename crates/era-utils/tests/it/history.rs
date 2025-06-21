@@ -1,4 +1,4 @@
-use crate::ClientWithFakeIndex;
+use crate::{ClientWithFakeIndex, ITHACA_ERA_INDEX_URL};
 use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
@@ -10,7 +10,7 @@ use tempfile::tempdir;
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_history_imports_from_fresh_state_successfully() {
     // URL where the ERA1 files are hosted
-    let url = Url::from_str("https://era.ithaca.xyz/era1/index.html").unwrap();
+    let url = Url::from_str(ITHACA_ERA_INDEX_URL).unwrap();
 
     // Directory where the ERA1 files will be downloaded to
     let folder = tempdir().unwrap();

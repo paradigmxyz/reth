@@ -9,6 +9,12 @@ use futures_util::{Stream, TryStreamExt};
 use reqwest::{Client, IntoUrl};
 use reth_era_downloader::HttpClient;
 
+// Url where the ERA1 files are hosted
+const ITHACA_ERA_INDEX_URL: &str = "https://era.ithaca.xyz/era1/index.html";
+
+// The response containing one file that the fake client will return when the index Url is requested
+const GENESIS_ITHACA_INDEX_RESPONSE: &[u8] = b"<a href=\"https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1\">mainnet-00000-5ec1ffb8.era1</a>";
+
 /// An HTTP client that fakes the file list to always show one known file
 ///
 /// but passes all other calls including actual downloads to a real HTTP client
@@ -25,12 +31,10 @@ impl HttpClient for ClientWithFakeIndex {
         let url = url.into_url().unwrap();
 
         match url.to_string().as_str() {
-            "https://era.ithaca.xyz/era1/index.html" => {
-                Ok(Box::new(futures::stream::once(Box::pin(async move {
-                    Ok(bytes::Bytes::from_static(b"<a href=\"https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1\">mainnet-00000-5ec1ffb8.era1</a>"))
-                })))
-                    as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-            }
+            ITHACA_ERA_INDEX_URL => Ok(Box::new(futures::stream::once(Box::pin(async move {
+                Ok(bytes::Bytes::from_static(GENESIS_ITHACA_INDEX_RESPONSE))
+            })))
+                as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>),
             _ => {
                 let response = Client::get(&self.0, url).send().await?;
 
