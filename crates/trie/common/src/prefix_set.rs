@@ -222,6 +222,11 @@ impl PrefixSet {
         self.keys.iter()
     }
 
+    /// Returns true if every entry should be considered changed.
+    pub const fn all(&self) -> bool {
+        self.all
+    }
+
     /// Returns the number of elements in the set.
     pub fn len(&self) -> usize {
         self.keys.len()

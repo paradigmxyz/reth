@@ -41,8 +41,9 @@ use revm::{
 
 mod config;
 use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7840::BlobParams};
+use alloy_evm::eth::spec::EthExecutorSpec;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
-use reth_ethereum_forks::EthereumHardfork;
+use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 
 /// Helper type with backwards compatible methods to obtain Ethereum executor
 /// providers.
@@ -67,11 +68,11 @@ pub use test_utils::*;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
-pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
+pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
     /// Inner [`EthBlockExecutorFactory`].
-    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmFactory>,
+    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<C>, EvmFactory>,
     /// Ethereum block assembler.
-    pub block_assembler: EthBlockAssembler<ChainSpec>,
+    pub block_assembler: EthBlockAssembler<C>,
 }
 
 impl EthEvmConfig {
@@ -91,7 +92,7 @@ impl EthEvmConfig {
     }
 }
 
-impl<EvmFactory> EthEvmConfig<EvmFactory> {
+impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
@@ -116,8 +117,9 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     }
 }
 
-impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
+impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
+    ChainSpec: EthExecutorSpec + EthChainSpec + Hardforks + 'static,
     EvmF: EvmFactory<
             Tx: TransactionEnv
                     + FromRecoveredTx<TransactionSigned>

@@ -20,7 +20,7 @@ use reth_engine_tree::{
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{NetworkSyncUpdater, SyncState};
+use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
@@ -33,7 +33,10 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_provider::{
+    providers::{BlockchainProvider, NodeTypesForProvider},
+    BlockNumReader,
+};
 use reth_stages::stages::EraImportSource;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -138,10 +141,14 @@ where
         .await?;
 
         // create pipeline
-        let network_client = ctx.components().network().fetch_client().await?;
+        let network_handle = ctx.components().network().clone();
+        let network_client = network_handle.fetch_client().await?;
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         let node_config = ctx.node_config();
+
+        // We always assume that node is syncing after a restart
+        network_handle.update_sync_state(SyncState::Syncing);
 
         let max_block = ctx.max_block(network_client.clone()).await?;
 
@@ -289,7 +296,6 @@ where
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
-        let network_handle = ctx.components().network().clone();
         let mut built_payloads = ctx
             .components()
             .payload_builder_handle()
@@ -298,7 +304,9 @@ where
             .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
             .into_built_payload_stream()
             .fuse();
+
         let chainspec = ctx.chain_spec();
+        let provider = ctx.blockchain_db().clone();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
@@ -329,8 +337,6 @@ where
                                     debug!(target: "reth::cli", "Terminating after initial backfill");
                                     break
                                 }
-
-                                network_handle.update_sync_state(SyncState::Idle);
                             }
                             ChainEvent::BackfillSyncStarted => {
                                 network_handle.update_sync_state(SyncState::Syncing);
@@ -342,7 +348,9 @@ where
                             }
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
-                                    let head_block = Head {
+                                    // Once we're progressing via live sync, we can consider the node is not syncing anymore
+                                    network_handle.update_sync_state(SyncState::Idle);
+                                                                        let head_block = Head {
                                         number: head.number(),
                                         hash: head.hash(),
                                         difficulty: head.difficulty(),
@@ -350,6 +358,13 @@ where
                                         total_difficulty: chainspec.final_paris_total_difficulty().filter(|_| chainspec.is_paris_active_at_block(head.number())).unwrap_or_default(),
                                     };
                                     network_handle.update_status(head_block);
+
+                                    let updated = BlockRangeUpdate {
+                                        earliest: provider.earliest_block_number().unwrap_or_default(),
+                                        latest:head.number(),
+                                        latest_hash:head.hash()
+                                    };
+                                    network_handle.update_block_range(updated);
                                 }
                                 event_sender.notify(ev);
                             }

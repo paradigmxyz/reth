@@ -242,6 +242,40 @@ impl<N: NetworkPrimitives> TransactionsHandle<N> {
 ///
 /// It can be configured with different policies for transaction propagation and announcement
 /// filtering. See [`NetworkPolicies`] and [`TransactionPolicies`] for more details.
+///
+/// ## Network Transaction Processing
+///
+/// ### Message Types
+///
+/// - **`Transactions`**: Full transaction broadcasts (rejects blob transactions)
+/// - **`NewPooledTransactionHashes`**: Hash announcements
+///
+/// ### Peer Tracking
+///
+/// - Maintains per-peer transaction cache (default: 10,240 entries)
+/// - Prevents duplicate imports and enables efficient propagation
+///
+/// ### Bad Transaction Handling
+///
+/// Caches and rejects transactions with consensus violations (gas, signature, chain ID).
+/// Penalizes peers sending invalid transactions.
+///
+/// ### Import Management
+///
+/// Limits concurrent pool imports and backs off when approaching capacity.
+///
+/// ### Transaction Fetching
+///
+/// For announced transactions: filters known → queues unknown → fetches → imports
+///
+/// ### Propagation Rules
+///
+/// Based on: origin (Local/External/Private), peer capabilities, and network state.
+/// Disabled during initial sync.
+///
+/// ### Security
+///
+/// Rate limiting via reputation, bad transaction isolation, peer scoring.
 #[derive(Debug)]
 #[must_use = "Manager does nothing unless polled."]
 pub struct TransactionsManager<
@@ -1132,7 +1166,8 @@ where
             }
             TransactionsCommand::PropagateTransactions(txs) => self.propagate_all(txs),
             TransactionsCommand::BroadcastTransactions(txs) => {
-                self.propagate_transactions(txs, PropagationMode::Forced);
+                let propagated = self.propagate_transactions(txs, PropagationMode::Forced);
+                self.pool.on_propagated(propagated);
             }
             TransactionsCommand::GetTransactionHashes { peers, tx } => {
                 let mut res = HashMap::with_capacity(peers.len());
@@ -1323,91 +1358,89 @@ where
         // tracks the quality of the given transactions
         let mut has_bad_transactions = false;
 
-        // 2. filter out transactions that are invalid or already pending import
-        if let Some(peer) = self.peers.get_mut(&peer_id) {
-            // pre-size to avoid reallocations
-            let mut new_txs = Vec::with_capacity(transactions.len());
-            for tx in transactions {
-                // recover transaction
-                let tx = match tx.try_into_recovered() {
-                    Ok(tx) => tx,
-                    Err(badtx) => {
+        // 2. filter out transactions that are invalid or already pending import pre-size to avoid
+        //    reallocations
+        let mut new_txs = Vec::with_capacity(transactions.len());
+        for tx in transactions {
+            // recover transaction
+            let tx = match tx.try_into_recovered() {
+                Ok(tx) => tx,
+                Err(badtx) => {
+                    trace!(target: "net::tx",
+                        peer_id=format!("{peer_id:#}"),
+                        hash=%badtx.tx_hash(),
+                        client_version=%peer.client_version,
+                        "failed ecrecovery for transaction"
+                    );
+                    has_bad_transactions = true;
+                    continue
+                }
+            };
+
+            match self.transactions_by_peers.entry(*tx.tx_hash()) {
+                Entry::Occupied(mut entry) => {
+                    // transaction was already inserted
+                    entry.get_mut().insert(peer_id);
+                }
+                Entry::Vacant(entry) => {
+                    if self.bad_imports.contains(tx.tx_hash()) {
                         trace!(target: "net::tx",
                             peer_id=format!("{peer_id:#}"),
-                            hash=%badtx.tx_hash(),
+                            hash=%tx.tx_hash(),
                             client_version=%peer.client_version,
-                            "failed ecrecovery for transaction"
+                            "received a known bad transaction from peer"
                         );
                         has_bad_transactions = true;
-                        continue
-                    }
-                };
+                    } else {
+                        // this is a new transaction that should be imported into the pool
 
-                match self.transactions_by_peers.entry(*tx.tx_hash()) {
-                    Entry::Occupied(mut entry) => {
-                        // transaction was already inserted
-                        entry.get_mut().insert(peer_id);
-                    }
-                    Entry::Vacant(entry) => {
-                        if self.bad_imports.contains(tx.tx_hash()) {
-                            trace!(target: "net::tx",
-                                peer_id=format!("{peer_id:#}"),
-                                hash=%tx.tx_hash(),
-                                client_version=%peer.client_version,
-                                "received a known bad transaction from peer"
-                            );
-                            has_bad_transactions = true;
-                        } else {
-                            // this is a new transaction that should be imported into the pool
+                        let pool_transaction = Pool::Transaction::from_pooled(tx);
+                        new_txs.push(pool_transaction);
 
-                            let pool_transaction = Pool::Transaction::from_pooled(tx);
-                            new_txs.push(pool_transaction);
-
-                            entry.insert(HashSet::from([peer_id]));
-                        }
+                        entry.insert(HashSet::from([peer_id]));
                     }
                 }
             }
-            new_txs.shrink_to_fit();
+        }
+        new_txs.shrink_to_fit();
 
-            // 3. import new transactions as a batch to minimize lock contention on the underlying
-            // pool
-            if !new_txs.is_empty() {
-                let pool = self.pool.clone();
+        // 3. import new transactions as a batch to minimize lock contention on the underlying
+        // pool
+        if !new_txs.is_empty() {
+            let pool = self.pool.clone();
+            // update metrics
+            let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
+            metric_pending_pool_imports.increment(new_txs.len() as f64);
+
+            // update self-monitoring info
+            self.pending_pool_imports_info
+                .pending_pool_imports
+                .fetch_add(new_txs.len(), Ordering::Relaxed);
+            let tx_manager_info_pending_pool_imports =
+                self.pending_pool_imports_info.pending_pool_imports.clone();
+
+            trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
+            let import = Box::pin(async move {
+                let added = new_txs.len();
+                let res = pool.add_external_transactions(new_txs).await;
+
                 // update metrics
-                let metric_pending_pool_imports = self.metrics.pending_pool_imports.clone();
-                metric_pending_pool_imports.increment(new_txs.len() as f64);
-
+                metric_pending_pool_imports.decrement(added as f64);
                 // update self-monitoring info
-                self.pending_pool_imports_info
-                    .pending_pool_imports
-                    .fetch_add(new_txs.len(), Ordering::Relaxed);
-                let tx_manager_info_pending_pool_imports =
-                    self.pending_pool_imports_info.pending_pool_imports.clone();
+                tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
 
-                trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
-                let import = Box::pin(async move {
-                    let added = new_txs.len();
-                    let res = pool.add_external_transactions(new_txs).await;
+                res
+            });
 
-                    // update metrics
-                    metric_pending_pool_imports.decrement(added as f64);
-                    // update self-monitoring info
-                    tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
+            self.pool_imports.push(import);
+        }
 
-                    res
-                });
-
-                self.pool_imports.push(import);
-            }
-
-            if num_already_seen_by_peer > 0 {
-                self.metrics.messages_with_transactions_already_seen_by_peer.increment(1);
-                self.metrics
-                    .occurrences_of_transaction_already_seen_by_peer
-                    .increment(num_already_seen_by_peer);
-                trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
-            }
+        if num_already_seen_by_peer > 0 {
+            self.metrics.messages_with_transactions_already_seen_by_peer.increment(1);
+            self.metrics
+                .occurrences_of_transaction_already_seen_by_peer
+                .increment(num_already_seen_by_peer);
+            trace!(target: "net::tx", num_txs=%num_already_seen_by_peer, ?peer_id, client=?peer.client_version, "Peer sent already seen transactions");
         }
 
         if has_bad_transactions {

@@ -1250,7 +1250,7 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
             BlockNumberOrTag::Safe => {
                 self.canonical_in_memory_state.get_safe_header().map(|h| h.unseal())
             }
-            BlockNumberOrTag::Earliest => self.header_by_number(0)?,
+            BlockNumberOrTag::Earliest => self.header_by_number(self.earliest_block_number()?)?,
             BlockNumberOrTag::Pending => self.canonical_in_memory_state.pending_header(),
 
             BlockNumberOrTag::Number(num) => self.header_by_number(num)?,
@@ -1270,7 +1270,7 @@ impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
             }
             BlockNumberOrTag::Safe => Ok(self.canonical_in_memory_state.get_safe_header()),
             BlockNumberOrTag::Earliest => self
-                .header_by_number(0)?
+                .header_by_number(self.earliest_block_number()?)?
                 .map_or_else(|| Ok(None), |h| Ok(Some(SealedHeader::seal_slow(h)))),
             BlockNumberOrTag::Pending => Ok(self.canonical_in_memory_state.pending_sealed_header()),
             BlockNumberOrTag::Number(num) => self
