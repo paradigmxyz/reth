@@ -10,9 +10,11 @@ use reqwest::{Client, IntoUrl};
 use reth_era_downloader::HttpClient;
 use std::future::Future;
 
-/// An HTTP client pre-programmed with canned answer to index.
+/// An HTTP client that fakes the file list to always show one known file
 ///
-/// Passes any other calls to a real HTTP client!
+/// but passes all other calls including actual downloads to a real HTTP client
+/// 
+/// In that way, only one file is used but downloads are still performed from the normal source.
 #[derive(Debug, Clone)]
 struct ClientWithFakeIndex(Client);
 
