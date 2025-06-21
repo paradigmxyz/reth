@@ -11,13 +11,16 @@ exclude.workspace = true
 
 [dependencies]
 # alloy
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # reth
 reth-db-api.workspace = true
 reth-era.workspace = true
 reth-era-downloader.workspace = true
 reth-etl.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-provider.workspace = true
 reth-stages-types.workspace = true
