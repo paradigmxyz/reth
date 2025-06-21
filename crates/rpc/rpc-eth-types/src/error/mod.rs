@@ -853,7 +853,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Underpriced => Self::Underpriced,
             InvalidPoolTransactionError::Eip2681 => {
                 Self::Invalid(RpcInvalidTransactionError::NonceMaxValue)
-            },
+            }
             InvalidPoolTransactionError::Other(err) => Self::PoolTransactionError(err),
             InvalidPoolTransactionError::Eip4844(err) => Self::Eip4844(err),
             InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
