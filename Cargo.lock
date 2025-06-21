@@ -8058,6 +8058,7 @@ dependencies = [
  "reth-storage-api",
  "tempfile",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
