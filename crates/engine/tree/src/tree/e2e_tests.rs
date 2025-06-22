@@ -5,8 +5,9 @@ use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
     actions::{
-        CaptureBlock, CreateFork, ExpectFcuStatus, MakeCanonical, ProduceBlocks,
-        ProduceInvalidBlocks, ReorgTo, ValidateCanonicalTag,
+        CaptureBlock, CompareNodeChainTips, CreateFork, ExpectFcuStatus, MakeCanonical,
+        ProduceBlocks, ProduceBlocksLocally, ProduceInvalidBlocks, ReorgTo, SelectActiveNode,
+        SendNewPayloads, UpdateBlockInfo, ValidateCanonicalTag,
     },
     setup::{NetworkSetup, Setup},
     TestBuilder,
@@ -146,6 +147,123 @@ async fn test_engine_tree_valid_and_invalid_forks_with_older_canonical_head_e2e(
         .with_action(ProduceInvalidBlocks::<EthEngineTypes>::with_invalid_at(3, 2))
         // chain B remains the canonical chain
         .with_action(ValidateCanonicalTag::new("chain_b_tip"));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Test that verifies engine tree behavior when handling invalid blocks.
+/// This test demonstrates that invalid blocks are correctly rejected and that
+/// attempts to build on top of them fail appropriately.
+#[tokio::test]
+async fn test_engine_tree_reorg_with_missing_ancestor_expecting_valid_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        // build main chain (blocks 1-6)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(6))
+        .with_action(MakeCanonical::new())
+        .with_action(CaptureBlock::new("main_chain_tip"))
+        // create a valid fork first
+        .with_action(CreateFork::<EthEngineTypes>::new_from_tag("main_chain_tip", 5))
+        .with_action(CaptureBlock::new("valid_fork_tip"))
+        // FCU to the valid fork should work
+        .with_action(ExpectFcuStatus::valid("valid_fork_tip"));
+
+    test.run::<EthereumNode>().await?;
+
+    // attempting to build invalid chains fails properly
+    let invalid_test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(3))
+        .with_action(MakeCanonical::new())
+        // This should fail when trying to build subsequent blocks on the invalid block
+        .with_action(ProduceInvalidBlocks::<EthEngineTypes>::with_invalid_at(2, 0));
+
+    assert!(invalid_test.run::<EthereumNode>().await.is_err());
+
+    Ok(())
+}
+
+/// Test that verifies buffered blocks are eventually connected when sent in reverse order.
+#[tokio::test]
+async fn test_engine_tree_buffered_blocks_are_eventually_connected_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(
+            Setup::default()
+                .with_chain_spec(Arc::new(
+                    ChainSpecBuilder::default()
+                        .chain(MAINNET.chain)
+                        .genesis(
+                            serde_json::from_str(include_str!(
+                                "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
+                            ))
+                            .unwrap(),
+                        )
+                        .cancun_activated()
+                        .build(),
+                ))
+                .with_network(NetworkSetup::multi_node_unconnected(2)) // Need 2 disconnected nodes
+                .with_tree_config(
+                    TreeConfig::default()
+                        .with_legacy_state_root(false)
+                        .with_has_enough_parallelism(true),
+                ),
+        )
+        // node 0 produces blocks 1 and 2 locally without broadcasting
+        .with_action(SelectActiveNode::new(0))
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(2))
+        // make the blocks canonical on node 0 so they're available via RPC
+        .with_action(MakeCanonical::with_active_node())
+        // send blocks in reverse order (2, then 1) from node 0 to node 1
+        .with_action(
+            SendNewPayloads::<EthEngineTypes>::new()
+                .with_target_node(1)
+                .with_source_node(0)
+                .with_start_block(1)
+                .with_total_blocks(2)
+                .in_reverse_order(),
+        )
+        // update node 1's view to recognize the new blocks
+        .with_action(SelectActiveNode::new(1))
+        // get the latest block from node 1's RPC and update environment
+        .with_action(UpdateBlockInfo::default())
+        // make block 2 canonical on node 1 with a forkchoice update
+        .with_action(MakeCanonical::with_active_node())
+        // verify both nodes eventually have the same chain tip
+        .with_action(CompareNodeChainTips::expect_same(0, 1));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Test that verifies forkchoice updates can extend the canonical chain progressively.
+///
+/// This test creates a longer chain of blocks, then uses forkchoice updates to make
+/// different parts of the chain canonical in sequence, verifying that FCU properly
+/// advances the canonical head when all blocks are already available.
+#[tokio::test]
+async fn test_engine_tree_fcu_extends_canon_chain_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        // create and make canonical a base chain with 1 block
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::new())
+        // extend the chain with 10 more blocks (total 11 blocks: 0-10)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
+        // capture block 6 as our intermediate target (from 0-indexed, this is block 6)
+        .with_action(CaptureBlock::new("target_block"))
+        // make the intermediate target canonical via FCU
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("target_block"))
+        // now make the chain tip canonical via FCU
+        .with_action(MakeCanonical::new());
 
     test.run::<EthereumNode>().await?;
 

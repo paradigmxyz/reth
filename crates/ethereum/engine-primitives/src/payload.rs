@@ -404,7 +404,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
 /// Generates the payload id for the configured payload from the [`PayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
+pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());

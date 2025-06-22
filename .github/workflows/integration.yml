@@ -8,8 +8,8 @@ on:
   push:
     branches: [main]
   schedule:
-  # Run once a day at 3:00 UTC
-  - cron: '0 3 * * *'
+    # Run once a day at 3:00 UTC
+    - cron: "0 3 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -66,17 +66,17 @@ jobs:
         with:
           jobs: ${{ toJSON(needs) }}
 
-  era-files: 
+  era-files:
     name: era1 file integration tests once a day
     if: github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: rui314/setup-mold@v1
-    - uses: dtolnay/rust-toolchain@stable
-    - uses: taiki-e/install-action@nextest
-    - uses: Swatinem/rust-cache@v2
-      with:
-        cache-on-failure: true
-    - name: run era1 files integration tests
-      run: cargo nextest run --package reth-era --test it -- --ignored
+      - uses: actions/checkout@v4
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: run era1 files integration tests
+        run: cargo nextest run --package reth-era --test it -- --ignored

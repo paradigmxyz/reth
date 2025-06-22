@@ -86,8 +86,6 @@ pub trait EthFees: LoadFee {
             if newest_block.is_pending() {
                 // cap the target block since we don't have fee history for the pending block
                 newest_block = BlockNumberOrTag::Latest;
-                // account for missing pending block
-                block_count = block_count.saturating_sub(1);
             }
 
             let end_block = self

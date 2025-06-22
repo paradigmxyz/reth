@@ -136,7 +136,7 @@ impl StageConfig {
     /// `ExecutionStage`
     pub fn execution_external_clean_threshold(&self) -> u64 {
         self.merkle
-            .clean_threshold
+            .incremental_threshold
             .max(self.account_hashing.clean_threshold)
             .max(self.storage_hashing.clean_threshold)
     }
@@ -342,14 +342,22 @@ impl Default for HashingConfig {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct MerkleConfig {
+    /// The number of blocks we will run the incremental root method for when we are catching up on
+    /// the merkle stage for a large number of blocks.
+    ///
+    /// When we are catching up for a large number of blocks, we can only run the incremental root
+    /// for a limited number of blocks, otherwise the incremental root method may cause the node to
+    /// OOM. This number determines how many blocks in a row we will run the incremental root
+    /// method for.
+    pub incremental_threshold: u64,
     /// The threshold (in number of blocks) for switching from incremental trie building of changes
     /// to whole rebuild.
-    pub clean_threshold: u64,
+    pub rebuild_threshold: u64,
 }
 
 impl Default for MerkleConfig {
     fn default() -> Self {
-        Self { clean_threshold: 5_000 }
+        Self { incremental_threshold: 7_000, rebuild_threshold: 100_000 }
     }
 }
 
