@@ -14,26 +14,26 @@ workspace = true
 [dependencies]
 # reth
 reth-primitives-traits.workspace = true
-reth-storage-api = { workspace = true, features = ["serde", "serde-bincode-compat"], optional = true }
+reth-storage-api = { workspace = true, optional = true }
 reth-evm.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
-alloy-rpc-types-eth = { workspace = true, default-features = false, features = ["serde"] }
+alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
 alloy-consensus.workspace = true
 alloy-network.workspace = true
+alloy-json-rpc.workspace = true
 
 # optimism
 op-alloy-consensus = { workspace = true, optional = true }
 op-alloy-rpc-types = { workspace = true, optional = true }
-reth-optimism-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"], optional = true }
+reth-optimism-primitives = { workspace = true, optional = true }
 op-revm = { workspace = true, optional = true }
 
 # revm
 revm-context.workspace = true
 
 # io
-serde.workspace = true
 jsonrpsee-types.workspace = true
 
 # error
