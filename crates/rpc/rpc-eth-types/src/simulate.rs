@@ -189,7 +189,7 @@ where
 pub fn build_simulated_block<T, B, Halt: Clone>(
     block: RecoveredBlock<B>,
     results: Vec<ExecutionResult<Halt>>,
-    full_transactions: bool,
+    txs_kind: BlockTransactionsKind,
     tx_resp_builder: &T,
 ) -> Result<SimulatedBlock<Block<RpcTransaction<T::Network>, Header<B::Header>>>, T::Error>
 where
@@ -255,9 +255,6 @@ where
 
         calls.push(call);
     }
-
-    let txs_kind =
-        if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
     let block = block.into_rpc_block(txs_kind, |tx, tx_info| tx_resp_builder.fill(tx, tx_info))?;
     Ok(SimulatedBlock { inner: block, calls })
