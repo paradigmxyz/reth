@@ -57,9 +57,18 @@ impl Default for ParallelSparseTrie {
 }
 
 impl ParallelSparseTrie {
+    /// Returns ref to the lower `SparseSubtrie` for the given path, or None if the lower
+    /// `SparseSubtrie` hasn't been initialized yet or the path belongs to the upper trie.
+    fn lower_subtrie_for_path(&self, path: &Nibbles) -> Option<&SparseSubtrie> {
+        match SparseSubtrieType::from_path(path) {
+            SparseSubtrieType::Upper => None,
+            SparseSubtrieType::Lower(idx) => self.lower_subtries[idx].as_ref().map(|v| v.as_ref()),
+        }
+    }
+
     /// Returns mutable ref to the lower `SparseSubtrie` for the given path, or None if the path
     /// belongs to the upper trie.
-    fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
+    fn lower_subtrie_for_path_mut(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
@@ -103,8 +112,7 @@ impl ParallelSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
-        // TODO parallelize
-        if let Some(subtrie) = self.lower_subtrie_for_path(&path) {
+        if let Some(subtrie) = self.lower_subtrie_for_path_mut(&path) {
             return subtrie.reveal_node(path, &node, masks);
         }
 
@@ -126,7 +134,7 @@ impl ParallelSparseTrie {
                         if branch.state_mask.is_bit_set(idx) {
                             let mut child_path = path.clone();
                             child_path.push_unchecked(idx);
-                            self.lower_subtrie_for_path(&child_path)
+                            self.lower_subtrie_for_path_mut(&child_path)
                                 .expect("child_path must have a lower subtrie")
                                 .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
                             stack_ptr += 1;
@@ -138,7 +146,7 @@ impl ParallelSparseTrie {
                 let mut child_path = path.clone();
                 child_path.extend_from_slice_unchecked(&ext.key);
                 if child_path.len() > UPPER_TRIE_MAX_DEPTH {
-                    self.lower_subtrie_for_path(&child_path)
+                    self.lower_subtrie_for_path_mut(&child_path)
                         .expect("child_path must have a lower subtrie")
                         .reveal_node_or_hash(child_path, &ext.child)?;
                 }
@@ -320,6 +328,34 @@ impl ParallelSparseTrie {
 
         (changed_subtries, unchanged_prefix_set)
     }
+
+    /// Traverses the trie looking for the leaf node with the given full key.
+    ///
+    /// # Returns
+    ///
+    /// Both the leaf node and the path to it in the trie, or None if there is not a leaf with the
+    /// given key in the trie, or an error if a node along the traversal path is not revealed.
+    ///
+    /// ## Invariants
+    ///
+    /// - Returned node will be a [`SparseNode::Leaf`]
+    /// - Returned path concatenated with the leaf's key will be equal to the given key.
+    pub fn get_leaf(&self, key: &Nibbles) -> SparseTrieResult<Option<(Nibbles, &'_ SparseNode)>> {
+        let path = match self.upper_subtrie.find_leaf(Nibbles::new(), key)? {
+            FindLeafOutcome::FoundAt(res) => return Ok(Some(res)),
+            FindLeafOutcome::NotFound => return Ok(None),
+            FindLeafOutcome::ContinueFrom(path) => path,
+        };
+
+        match self
+            .lower_subtrie_for_path(&path)
+            .expect("upper trie in inconsistent state, missing node")
+            .find_leaf(path, key)?
+        {
+            FindLeafOutcome::FoundAt(res) => Ok(Some(res)),
+            FindLeafOutcome::NotFound | FindLeafOutcome::ContinueFrom(_) => Ok(None),
+        }
+    }
 }
 
 /// This is a subtrie of the [`ParallelSparseTrie`] that contains a map from path to sparse trie
@@ -345,6 +381,14 @@ pub struct SparseSubtrie {
     updates: Option<SparseTrieUpdates>,
     /// Reusable buffers for [`SparseSubtrie::update_hashes`].
     buffers: SparseSubtrieBuffers,
+}
+
+/// Returned by the `find_leaf` method to indicate the found leaf, or possibly to indicate that
+/// traversal needs to continue from a lower subtrie.
+enum FindLeafOutcome<'a> {
+    FoundAt((Nibbles, &'a SparseNode)),
+    ContinueFrom(Nibbles),
+    NotFound,
 }
 
 impl SparseSubtrie {
@@ -578,6 +622,60 @@ impl SparseSubtrie {
     fn take_updates(&mut self) -> SparseTrieUpdates {
         self.updates.take().unwrap_or_default()
     }
+
+    /// Traverses the subtrie to find the leaf with the given full key, starting traversal from the
+    /// given path.
+    ///
+    /// Returns `Ok(outcome)`, or an error if any node along the traversal path is not revealed.
+    fn find_leaf(&self, start: Nibbles, key: &Nibbles) -> SparseTrieResult<FindLeafOutcome<'_>> {
+        let mut curr = start;
+
+        loop {
+            let curr_node = match self.nodes.get(&curr) {
+                Some(n) => n,
+                None => return Ok(FindLeafOutcome::ContinueFrom(curr)),
+            };
+
+            match curr_node {
+                SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
+                SparseNode::Hash(hash) => {
+                    return Err(
+                        SparseTrieErrorKind::BlindedNode { path: curr.clone(), hash: *hash }.into()
+                    )
+                }
+                SparseNode::Leaf { key: leaf_key, .. } => {
+                    let mut found_key = curr.clone();
+                    found_key.extend_from_slice_unchecked(leaf_key);
+
+                    if &found_key == key {
+                        return Ok(FindLeafOutcome::FoundAt((curr, curr_node)))
+                    }
+                    return Ok(FindLeafOutcome::NotFound)
+                }
+                SparseNode::Extension { key: ext_key, .. } => {
+                    if key.len() == curr.len() {
+                        return Ok(FindLeafOutcome::NotFound)
+                    }
+
+                    curr.extend_from_slice_unchecked(ext_key);
+                    if !key.has_prefix(&curr) {
+                        return Ok(FindLeafOutcome::NotFound)
+                    }
+                }
+                SparseNode::Branch { state_mask, .. } => {
+                    if key.len() == curr.len() {
+                        return Ok(FindLeafOutcome::NotFound)
+                    }
+
+                    let nibble = key[curr.len()..][0];
+                    if !state_mask.is_bit_set(nibble) {
+                        return Ok(FindLeafOutcome::NotFound)
+                    }
+                    curr.push_unchecked(nibble);
+                }
+            };
+        }
+    }
 }
 
 /// Sparse Subtrie Type.
@@ -709,6 +807,20 @@ mod tests {
         }
 
         TrieNode::Branch(BranchNode::new(stack, TrieMask::new(state_mask)))
+    }
+
+    /// Returns a `ParallelSparseTrie` pre-loaded with the given nodes. The `ParallelSparseTrie`
+    /// will not be fully-formed, in that the corresponding `values` `HashMap`s will not be set in
+    /// the subtries.
+    fn new_from_nodes<I: Iterator<Item = (Nibbles, SparseNode)>>(nodes: I) -> ParallelSparseTrie {
+        let mut trie = ParallelSparseTrie::default();
+        for (path, node) in nodes {
+            match trie.lower_subtrie_for_path_mut(&path) {
+                None => trie.upper_subtrie.nodes.insert(path, node),
+                Some(lower_trie) => lower_trie.nodes.insert(path, node),
+            };
+        }
+        trie
     }
 
     #[test]
@@ -1043,5 +1155,91 @@ mod tests {
         assert!(trie.lower_subtries[subtrie_1_index].is_some());
         assert!(trie.lower_subtries[subtrie_2_index].is_some());
         assert!(trie.lower_subtries[subtrie_3_index].is_some());
+    }
+
+    #[test]
+    fn test_get_leaf() {
+        let leaf_11 = SparseNode::new_leaf(Nibbles::from_nibbles([0x1]));
+        let leaf_2222 = SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x2]));
+        let leaf_3333 = SparseNode::new_leaf(Nibbles::default());
+        let leaf_444 = SparseNode::new_leaf(Nibbles::default());
+        let leaf_4455 = SparseNode::new_leaf(Nibbles::from_nibbles([0x5]));
+
+        let trie = new_from_nodes(
+            [
+                (Nibbles::from_nibbles([]), SparseNode::new_branch(0b0000000000011110.into())),
+                (Nibbles::from_nibbles([0x1]), leaf_11.clone()),
+                (Nibbles::from_nibbles([0x2]), SparseNode::new_ext(Nibbles::from_nibbles([0x2]))),
+                (Nibbles::from_nibbles([0x2, 0x2]), leaf_2222.clone()),
+                (
+                    Nibbles::from_nibbles([0x3]),
+                    SparseNode::new_ext(Nibbles::from_nibbles([0x3, 0x3])),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3, 0x3, 0x3]),
+                    SparseNode::new_branch(0b0000000001001.into()),
+                ),
+                (
+                    Nibbles::from_nibbles([0x3, 0x3, 0x3, 0x0]),
+                    SparseNode::new_leaf(Nibbles::default()),
+                ),
+                (Nibbles::from_nibbles([0x3, 0x3, 0x3, 0x3]), leaf_3333.clone()),
+                (Nibbles::from_nibbles([0x4]), SparseNode::new_branch(0b000000000010001.into())),
+                (Nibbles::from_nibbles([0x4, 0x0]), SparseNode::new_leaf(Nibbles::default())),
+                (
+                    Nibbles::from_nibbles([0x4, 0x4]),
+                    SparseNode::new_branch(0b000000000110000.into()),
+                ),
+                (Nibbles::from_nibbles([0x4, 0x4, 0x4]), leaf_444.clone()),
+                (Nibbles::from_nibbles([0x4, 0x4, 0x5]), leaf_4455.clone()),
+            ]
+            .into_iter(),
+        );
+
+        // Traversing to and around the leaf at 0x1 with shortkey 0x1
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x0])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x1])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x1, 0x0])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x1, 0x1, 0x1])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x1, 0x2])).unwrap().is_none());
+        assert_eq!(
+            trie.get_leaf(&Nibbles::from_nibbles([0x1, 0x1])).unwrap(),
+            Some((Nibbles::from_nibbles([0x1]), &leaf_11))
+        );
+
+        // Traversing to and around the leaf at 0x22 with shortkey 0x22
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x2])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x2, 0x2])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x2, 0x2, 0x2])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x2, 0x2, 0x2, 0x1])).unwrap().is_none());
+        assert_eq!(
+            trie.get_leaf(&Nibbles::from_nibbles([0x2, 0x2, 0x2, 0x2])).unwrap(),
+            Some((Nibbles::from_nibbles([0x2, 0x2]), &leaf_2222))
+        );
+
+        // Traversing across the upper/lower boundary via an extension, to the leaf at 0x333333
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x3])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x3, 0x3])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x3, 0x3, 0x3])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x3, 0x3, 0x3, 0x1])).unwrap().is_none());
+        assert_eq!(
+            trie.get_leaf(&Nibbles::from_nibbles([0x3, 0x3, 0x3, 0x3])).unwrap(),
+            Some((Nibbles::from_nibbles([0x3, 0x3, 0x3, 0x3]), &leaf_3333))
+        );
+
+        // Traversing across the upper/lower boundary via branch nodes, to the leaves at 0x444 and
+        // 0x4455.
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x4])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x4, 0x4])).unwrap().is_none());
+        assert_eq!(
+            trie.get_leaf(&Nibbles::from_nibbles([0x4, 0x4, 0x4])).unwrap(),
+            Some((Nibbles::from_nibbles([0x4, 0x4, 0x4]), &leaf_444))
+        );
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x4, 0x4, 0x5])).unwrap().is_none());
+        assert!(trie.get_leaf(&Nibbles::from_nibbles([0x4, 0x4, 0x5, 0x0])).unwrap().is_none());
+        assert_eq!(
+            trie.get_leaf(&Nibbles::from_nibbles([0x4, 0x4, 0x5, 0x5])).unwrap(),
+            Some((Nibbles::from_nibbles([0x4, 0x4, 0x5]), &leaf_4455))
+        );
     }
 }
