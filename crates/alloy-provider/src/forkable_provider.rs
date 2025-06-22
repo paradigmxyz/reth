@@ -1,7 +1,10 @@
-use crate::forkdb::ForkDb;
 use reth_primitives::EthPrimitives;
 use reth_provider::providers::{BlockchainProvider, ProviderNodeTypes};
 use std::sync::{Arc, RwLock};
+
+/// Database to support `ForkableBlockchainProvider`
+#[derive(Debug)]
+pub struct ForkDb {}
 
 #[derive(Debug)]
 /// A blockchain provider that supports forking functionality.

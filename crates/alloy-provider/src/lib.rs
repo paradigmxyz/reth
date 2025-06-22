@@ -19,7 +19,6 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
-#![allow(missing_docs)]
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
@@ -62,14 +61,7 @@ use std::{
 use tokio::{runtime::Handle, sync::broadcast};
 use tracing::trace;
 
-pub mod database_error;
 pub mod forkable_provider;
-pub mod forkdb;
-pub use database_error::DatabaseError;
-pub mod backend;
-pub mod cache;
-pub mod database;
-pub mod state_snapshots;
 
 /// Configuration for `AlloyRethProvider`
 #[derive(Debug, Clone, Default)]

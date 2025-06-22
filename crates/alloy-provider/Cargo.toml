@@ -36,16 +36,9 @@ alloy-eips.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
-thiserror.workspace = true
-futures.workspace = true
 
 # other
 tracing.workspace = true
-eyre.workspace = true
-serde.workspace = true
-url.workspace = true
-parking_lot.workspace = true
-serde_json.workspace = true
 
 # revm
 revm.workspace = true
