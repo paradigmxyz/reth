@@ -4,6 +4,7 @@ use reth_db_common::init::init_genesis;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
 use reth_era_utils::{export, import, ExportConfig};
 use reth_etl::Collector;
+use reth_fs_util as fs;
 use reth_provider::{test_utils::create_test_provider_factory, BlockNumReader, BlockReader};
 use std::str::FromStr;
 use tempfile::tempdir;
@@ -93,7 +94,7 @@ async fn test_roundtrip_export_after_import() {
     for (i, file_path) in exported_files.iter().enumerate() {
         assert!(file_path.exists(), "File {} should exist", i + 1);
 
-        let file_size = std::fs::metadata(file_path).unwrap().len();
+        let file_size = fs::metadata(file_path).unwrap().len();
         assert!(file_size > 0, "File {} should not be empty", i + 1);
         assert!(
             file_size > 500,
