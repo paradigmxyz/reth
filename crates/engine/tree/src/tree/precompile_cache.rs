@@ -123,7 +123,7 @@ where
     /// The precompile.
     precompile: DynPrecompile,
     /// Cache metrics.
-    metrics: CachedPrecompileMetrics,
+    metrics: Option<CachedPrecompileMetrics>,
     /// Spec id associated to the EVM from which this cached precompile was created.
     spec_id: S,
 }
@@ -133,30 +133,48 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// `CachedPrecompile` constructor.
-    pub(crate) fn new(precompile: DynPrecompile, cache: PrecompileCache<S>, spec_id: S) -> Self {
-        Self { precompile, cache, spec_id, metrics: Default::default() }
+    pub(crate) const fn new(
+        precompile: DynPrecompile,
+        cache: PrecompileCache<S>,
+        spec_id: S,
+        metrics: Option<CachedPrecompileMetrics>,
+    ) -> Self {
+        Self { precompile, cache, spec_id, metrics }
     }
 
     pub(crate) fn wrap(
         precompile: DynPrecompile,
         cache: PrecompileCache<S>,
         spec_id: S,
+        metrics: Option<CachedPrecompileMetrics>,
     ) -> DynPrecompile {
-        let wrapped = Self::new(precompile, cache, spec_id);
+        let wrapped = Self::new(precompile, cache, spec_id, metrics);
         move |data: &[u8], gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
             .into()
     }
 
     fn increment_by_one_precompile_cache_hits(&self) {
-        self.metrics.precompile_cache_hits.increment(1);
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_hits.increment(1);
+        }
     }
 
     fn increment_by_one_precompile_cache_misses(&self) {
-        self.metrics.precompile_cache_misses.increment(1);
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_misses.increment(1);
+        }
+    }
+
+    fn set_precompile_cache_size_metric(&self, to: f64) {
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_cache_size.set(to);
+        }
     }
 
     fn increment_by_one_precompile_errors(&self) {
-        self.metrics.precompile_errors.increment(1);
+        if let Some(metrics) = &self.metrics {
+            metrics.precompile_errors.increment(1);
+        }
     }
 }
 
@@ -180,7 +198,7 @@ where
             Ok(output) => {
                 let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(data));
                 let size = self.cache.insert(key, CacheEntry(output.clone()));
-                self.metrics.precompile_cache_size.set(size as f64);
+                self.set_precompile_cache_size_metric(size as f64);
                 self.increment_by_one_precompile_cache_misses();
             }
             _ => {
@@ -241,7 +259,7 @@ mod tests {
         .into();
 
         let cache =
-            CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE);
+            CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE, None);
 
         let output = PrecompileOutput {
             gas_used: 50,
@@ -298,11 +316,13 @@ mod tests {
             precompile1,
             cache_map.cache_for_address(address1),
             SpecId::PRAGUE,
+            None,
         );
         let wrapped_precompile2 = CachedPrecompile::wrap(
             precompile2,
             cache_map.cache_for_address(address2),
             SpecId::PRAGUE,
+            None,
         );
 
         // first invocation of precompile1 (cache miss)

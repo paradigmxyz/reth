@@ -599,7 +599,17 @@ where
 
 /// Action that broadcasts the next new payload
 #[derive(Debug, Default)]
-pub struct BroadcastNextNewPayload {}
+pub struct BroadcastNextNewPayload {
+    /// If true, only send to the active node. If false, broadcast to all nodes.
+    active_node_only: bool,
+}
+
+impl BroadcastNextNewPayload {
+    /// Create a new `BroadcastNextNewPayload` action that only sends to the active node
+    pub const fn with_active_node() -> Self {
+        Self { active_node_only: true }
+    }
+}
 
 impl<Engine> Action<Engine> for BroadcastNextNewPayload
 where
@@ -630,14 +640,11 @@ where
             let execution_payload_envelope: ExecutionPayloadEnvelopeV3 = payload_envelope.into();
             let execution_payload = execution_payload_envelope.execution_payload;
 
-            // Loop through all clients and broadcast the next new payload
-            let mut broadcast_results = Vec::new();
-            let mut first_valid_seen = false;
+            if self.active_node_only {
+                // Send only to the active node
+                let active_idx = env.active_node_idx;
+                let engine = env.node_clients[active_idx].engine.http_client();
 
-            for (idx, client) in env.node_clients.iter().enumerate() {
-                let engine = client.engine.http_client();
-
-                // Broadcast the execution payload
                 let result = EngineApiClient::<Engine>::new_payload_v3(
                     &engine,
                     execution_payload.clone(),
@@ -646,35 +653,70 @@ where
                 )
                 .await?;
 
-                broadcast_results.push((idx, result.status.clone()));
-                debug!("Node {}: new_payload broadcast status: {:?}", idx, result.status);
+                debug!("Active node {}: new_payload status: {:?}", active_idx, result.status);
 
-                // Check if this node accepted the payload
-                if result.status == PayloadStatusEnum::Valid && !first_valid_seen {
-                    first_valid_seen = true;
-                } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
-                    debug!(
-                        "Node {}: Invalid payload status returned from broadcast: {:?}",
-                        idx, validation_error
-                    );
+                // Validate the response
+                match result.status {
+                    PayloadStatusEnum::Valid => {
+                        env.active_node_state_mut()?.latest_payload_executed =
+                            Some(next_new_payload);
+                        Ok(())
+                    }
+                    other => Err(eyre::eyre!(
+                        "Active node {}: Unexpected payload status: {:?}",
+                        active_idx,
+                        other
+                    )),
                 }
+            } else {
+                // Loop through all clients and broadcast the next new payload
+                let mut broadcast_results = Vec::new();
+                let mut first_valid_seen = false;
+
+                for (idx, client) in env.node_clients.iter().enumerate() {
+                    let engine = client.engine.http_client();
+
+                    // Broadcast the execution payload
+                    let result = EngineApiClient::<Engine>::new_payload_v3(
+                        &engine,
+                        execution_payload.clone(),
+                        vec![],
+                        parent_beacon_block_root,
+                    )
+                    .await?;
+
+                    broadcast_results.push((idx, result.status.clone()));
+                    debug!("Node {}: new_payload broadcast status: {:?}", idx, result.status);
+
+                    // Check if this node accepted the payload
+                    if result.status == PayloadStatusEnum::Valid && !first_valid_seen {
+                        first_valid_seen = true;
+                    } else if let PayloadStatusEnum::Invalid { validation_error } = result.status {
+                        debug!(
+                            "Node {}: Invalid payload status returned from broadcast: {:?}",
+                            idx, validation_error
+                        );
+                    }
+                }
+
+                // Update the executed payload state after broadcasting to all nodes
+                if first_valid_seen {
+                    env.active_node_state_mut()?.latest_payload_executed = Some(next_new_payload);
+                }
+
+                // Check if at least one node accepted the payload
+                let any_valid =
+                    broadcast_results.iter().any(|(_, status)| *status == PayloadStatusEnum::Valid);
+                if !any_valid {
+                    return Err(eyre::eyre!(
+                        "Failed to successfully broadcast payload to any client"
+                    ));
+                }
+
+                debug!("Broadcast complete. Results: {:?}", broadcast_results);
+
+                Ok(())
             }
-
-            // Update the executed payload state after broadcasting to all nodes
-            if first_valid_seen {
-                env.active_node_state_mut()?.latest_payload_executed = Some(next_new_payload);
-            }
-
-            // Check if at least one node accepted the payload
-            let any_valid =
-                broadcast_results.iter().any(|(_, status)| *status == PayloadStatusEnum::Valid);
-            if !any_valid {
-                return Err(eyre::eyre!("Failed to successfully broadcast payload to any client"));
-            }
-
-            debug!("Broadcast complete. Results: {:?}", broadcast_results);
-
-            Ok(())
         })
     }
 }
@@ -868,6 +910,60 @@ where
             expect_valid.execute(env).await?;
 
             debug!("Successfully validated that '{}' remains canonical", self.tag);
+            Ok(())
+        })
+    }
+}
+
+/// Action that produces blocks locally without broadcasting to other nodes
+/// This sends the payload only to the active node to ensure it's available locally
+#[derive(Debug)]
+pub struct ProduceBlocksLocally<Engine> {
+    /// Number of blocks to produce
+    pub num_blocks: u64,
+    /// Tracks engine type
+    _phantom: PhantomData<Engine>,
+}
+
+impl<Engine> ProduceBlocksLocally<Engine> {
+    /// Create a new `ProduceBlocksLocally` action
+    pub fn new(num_blocks: u64) -> Self {
+        Self { num_blocks, _phantom: Default::default() }
+    }
+}
+
+impl<Engine> Default for ProduceBlocksLocally<Engine> {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+impl<Engine> Action<Engine> for ProduceBlocksLocally<Engine>
+where
+    Engine: EngineTypes + PayloadTypes,
+    Engine::PayloadAttributes: From<PayloadAttributes> + Clone,
+    Engine::ExecutionPayloadEnvelopeV3: Into<ExecutionPayloadEnvelopeV3>,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            // Remember the active node to ensure all blocks are produced on the same node
+            let producer_idx = env.active_node_idx;
+
+            for _ in 0..self.num_blocks {
+                // Ensure we always use the same producer
+                env.last_producer_idx = Some(producer_idx);
+
+                // create a sequence that produces blocks and sends only to active node
+                let mut sequence = Sequence::new(vec![
+                    // Skip PickNextBlockProducer to maintain the same producer
+                    Box::new(GeneratePayloadAttributes::default()),
+                    Box::new(GenerateNextPayload::default()),
+                    // Send payload only to the active node to make it available
+                    Box::new(BroadcastNextNewPayload::with_active_node()),
+                    Box::new(UpdateBlockInfoToLatestPayload::default()),
+                ]);
+                sequence.execute(env).await?;
+            }
             Ok(())
         })
     }

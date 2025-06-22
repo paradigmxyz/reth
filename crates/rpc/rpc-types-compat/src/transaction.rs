@@ -1,41 +1,33 @@
 //! Compatibility functions for rpc `Transaction` type.
 
-use crate::fees::{CallFees, CallFeesError};
-use alloy_consensus::{
-    error::ValueError, transaction::Recovered, EthereumTxEnvelope, SignableTransaction, TxEip4844,
+use crate::{
+    fees::{CallFees, CallFeesError},
+    RpcTransaction, RpcTypes,
 };
-use alloy_network::Network;
-use alloy_primitives::{Address, Bytes, Signature, TxKind, U256};
+use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
+use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
     request::{TransactionInputError, TransactionRequest},
     Transaction, TransactionInfo,
 };
 use core::error;
-use op_alloy_consensus::{
-    transaction::{OpDepositInfo, OpTransactionInfo},
-    OpTxEnvelope,
-};
-use op_alloy_rpc_types::OpTransactionRequest;
-use op_revm::OpTransaction;
 use reth_evm::{
     revm::context_interface::{either::Either, Block},
     ConfigureEvm, TxEnvFor,
 };
-use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{NodePrimitives, TxTy};
-use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Builds RPC transaction w.r.t. network.
 pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
-    /// The lower layer consensus types to convert from.
+    /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
-    /// RPC transaction response type.
-    type Transaction: Serialize + for<'de> Deserialize<'de> + Send + Sync + Unpin + Clone + Debug;
+    /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
+    /// types of [`Self::Primitives`].
+    type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
 
     /// A set of variables for executing a transaction.
     type TxEnv;
@@ -49,7 +41,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     fn fill_pending(
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
-    ) -> Result<Self::Transaction, Self::Error> {
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error> {
         self.fill(tx, TransactionInfo::default())
     }
 
@@ -62,7 +54,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
         tx_inf: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error>;
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error>;
 
     /// Builds a fake transaction from a transaction request for inclusion into block built in
     /// `eth_simulateV1`.
@@ -182,55 +174,9 @@ impl<T> TxInfoMapper<&T> for () {
     }
 }
 
-/// Creates [`OpTransactionInfo`] by adding [`OpDepositInfo`] to [`TransactionInfo`] if `tx` is a
-/// deposit.
-pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
-    provider: &T,
-    tx: &OpTxEnvelope,
-    tx_info: TransactionInfo,
-) -> Result<OpTransactionInfo, ProviderError> {
-    let deposit_meta = if tx.is_deposit() {
-        provider.receipt_by_hash(tx.tx_hash())?.and_then(|receipt| {
-            receipt.as_deposit_receipt().map(|receipt| OpDepositInfo {
-                deposit_receipt_version: receipt.deposit_receipt_version,
-                deposit_nonce: receipt.deposit_nonce,
-            })
-        })
-    } else {
-        None
-    }
-    .unwrap_or_default();
-
-    Ok(OpTransactionInfo::new(tx_info, deposit_meta))
-}
-
-impl<T: op_alloy_consensus::OpTransaction + alloy_consensus::Transaction> FromConsensusTx<T>
-    for op_alloy_rpc_types::Transaction<T>
-{
-    type TxInfo = OpTransactionInfo;
-
-    fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
-        Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
-    }
-}
-
 impl TryIntoSimTx<EthereumTxEnvelope<TxEip4844>> for TransactionRequest {
     fn try_into_sim_tx(self) -> Result<EthereumTxEnvelope<TxEip4844>, ValueError<Self>> {
         Self::build_typed_simulate_transaction(self)
-    }
-}
-
-impl TryIntoSimTx<OpTxEnvelope> for TransactionRequest {
-    fn try_into_sim_tx(self) -> Result<OpTxEnvelope, ValueError<Self>> {
-        let request: OpTransactionRequest = self.into();
-        let tx = request.build_typed_tx().map_err(|request| {
-            ValueError::new(request.as_ref().clone(), "Required fields missing")
-        })?;
-
-        // Create an empty signature for the transaction.
-        let signature = Signature::new(Default::default(), Default::default(), false);
-
-        Ok(tx.into_signed(signature).into())
     }
 }
 
@@ -261,21 +207,6 @@ pub enum EthTxEnvError {
     Input(#[from] TransactionInputError),
 }
 
-impl TryIntoTxEnv<OpTransaction<TxEnv>> for TransactionRequest {
-    type Err = EthTxEnvError;
-
-    fn try_into_tx_env<Spec>(
-        self,
-        cfg_env: &CfgEnv<Spec>,
-        block_env: &BlockEnv,
-    ) -> Result<OpTransaction<TxEnv>, Self::Err> {
-        Ok(OpTransaction {
-            base: self.try_into_tx_env(cfg_env, block_env)?,
-            enveloped_tx: Some(Bytes::new()),
-            deposit: Default::default(),
-        })
-    }
-}
 impl TryIntoTxEnv<TxEnv> for TransactionRequest {
     type Err = EthTxEnvError;
 
@@ -424,9 +355,9 @@ impl<N, E, Evm, Err> Default for RpcConverter<N, E, Evm, Err> {
 impl<N, E, Evm, Err, Map> TransactionCompat for RpcConverter<N, E, Evm, Err, Map>
 where
     N: NodePrimitives,
-    E: Network + Unpin,
+    E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
     Evm: ConfigureEvm,
-    TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + Clone + Debug,
+    TxTy<N>: IntoRpcTx<E::Transaction> + Clone + Debug,
     TransactionRequest: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Err: From<TransactionConversionError>
         + From<<TransactionRequest as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
@@ -436,17 +367,15 @@ where
         + Sync
         + Send
         + Into<jsonrpsee_types::ErrorObject<'static>>,
-    Map: for<'a> TxInfoMapper<
-            &'a TxTy<N>,
-            Out = <TxTy<N> as IntoRpcTx<<E as Network>::TransactionResponse>>::TxInfo,
-        > + Clone
+    Map: for<'a> TxInfoMapper<&'a TxTy<N>, Out = <TxTy<N> as IntoRpcTx<E::Transaction>>::TxInfo>
+        + Clone
         + Debug
         + Unpin
         + Send
         + Sync,
 {
     type Primitives = N;
-    type Transaction = <E as Network>::TransactionResponse;
+    type Network = E;
     type TxEnv = TxEnvFor<Evm>;
     type Error = Err;
 
@@ -454,7 +383,7 @@ where
         &self,
         tx: Recovered<TxTy<N>>,
         tx_info: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error> {
+    ) -> Result<E::Transaction, Self::Error> {
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 
@@ -475,5 +404,83 @@ where
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error> {
         Ok(request.try_into_tx_env(cfg_env, block_env)?)
+    }
+}
+
+/// Optimism specific RPC transaction compatibility implementations.
+#[cfg(feature = "op")]
+pub mod op {
+    use super::*;
+    use alloy_consensus::SignableTransaction;
+    use alloy_primitives::{Address, Bytes, Signature};
+    use op_alloy_consensus::{
+        transaction::{OpDepositInfo, OpTransactionInfo},
+        OpTxEnvelope,
+    };
+    use op_alloy_rpc_types::OpTransactionRequest;
+    use op_revm::OpTransaction;
+    use reth_optimism_primitives::DepositReceipt;
+    use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+
+    /// Creates [`OpTransactionInfo`] by adding [`OpDepositInfo`] to [`TransactionInfo`] if `tx` is
+    /// a deposit.
+    pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
+        provider: &T,
+        tx: &OpTxEnvelope,
+        tx_info: TransactionInfo,
+    ) -> Result<OpTransactionInfo, ProviderError> {
+        let deposit_meta = if tx.is_deposit() {
+            provider.receipt_by_hash(tx.tx_hash())?.and_then(|receipt| {
+                receipt.as_deposit_receipt().map(|receipt| OpDepositInfo {
+                    deposit_receipt_version: receipt.deposit_receipt_version,
+                    deposit_nonce: receipt.deposit_nonce,
+                })
+            })
+        } else {
+            None
+        }
+        .unwrap_or_default();
+
+        Ok(OpTransactionInfo::new(tx_info, deposit_meta))
+    }
+
+    impl<T: op_alloy_consensus::OpTransaction + alloy_consensus::Transaction> FromConsensusTx<T>
+        for op_alloy_rpc_types::Transaction<T>
+    {
+        type TxInfo = OpTransactionInfo;
+
+        fn from_consensus_tx(tx: T, signer: Address, tx_info: Self::TxInfo) -> Self {
+            Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
+        }
+    }
+
+    impl TryIntoSimTx<OpTxEnvelope> for TransactionRequest {
+        fn try_into_sim_tx(self) -> Result<OpTxEnvelope, ValueError<Self>> {
+            let request: OpTransactionRequest = self.into();
+            let tx = request.build_typed_tx().map_err(|request| {
+                ValueError::new(request.as_ref().clone(), "Required fields missing")
+            })?;
+
+            // Create an empty signature for the transaction.
+            let signature = Signature::new(Default::default(), Default::default(), false);
+
+            Ok(tx.into_signed(signature).into())
+        }
+    }
+
+    impl TryIntoTxEnv<OpTransaction<TxEnv>> for TransactionRequest {
+        type Err = EthTxEnvError;
+
+        fn try_into_tx_env<Spec>(
+            self,
+            cfg_env: &CfgEnv<Spec>,
+            block_env: &BlockEnv,
+        ) -> Result<OpTransaction<TxEnv>, Self::Err> {
+            Ok(OpTransaction {
+                base: self.try_into_tx_env(cfg_env, block_env)?,
+                enveloped_tx: Some(Bytes::new()),
+                deposit: Default::default(),
+            })
+        }
     }
 }
