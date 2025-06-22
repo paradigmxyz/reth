@@ -415,7 +415,9 @@ struct EthFilterInner<Eth: EthApiTypes> {
 
 impl<Eth> EthFilterInner<Eth>
 where
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
+        + 'static,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -692,7 +694,7 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
+    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
@@ -718,13 +720,13 @@ trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
 }
 
 #[async_trait]
-impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
+impl<T, TxCompat> FullTransactionsFilter<RpcTransaction<TxCompat::Network>>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
     TxCompat: TransactionCompat<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
 {
-    async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
+    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         Self::drain(self).await
     }
 }
