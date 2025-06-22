@@ -172,13 +172,7 @@ mod tests {
             .next_block_base_fee(spec.base_fee_params_at_timestamp(next_timestamp))
             .unwrap_or_default();
 
-        let got = spec.next_block_base_fee(
-            parent.gas_used,
-            parent.gas_limit,
-            parent.base_fee_per_gas.unwrap_or_default(),
-            parent.timestamp,
-            next_timestamp,
-        );
+        let got = spec.next_block_base_fee(&parent, next_timestamp).unwrap_or_default();
         assert_eq!(expected, got, "Base fee calculation does not match expected value");
     }
 }

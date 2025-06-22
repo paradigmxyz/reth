@@ -200,13 +200,7 @@ pub fn next_block_base_fee(
     if chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
         Ok(decode_holocene_base_fee(chain_spec, parent, timestamp)?)
     } else {
-        Ok(chain_spec.next_block_base_fee(
-            parent.gas_used(),
-            parent.gas_limit(),
-            parent.base_fee_per_gas().unwrap_or_default(),
-            parent.timestamp(),
-            timestamp,
-        ))
+        Ok(chain_spec.next_block_base_fee(&parent, timestamp).unwrap_or_default())
     }
 }
 
@@ -259,13 +253,7 @@ mod tests {
         let base_fee = next_block_base_fee(&op_chain_spec, &parent, 0);
         assert_eq!(
             base_fee.unwrap(),
-            op_chain_spec.next_block_base_fee(
-                parent.gas_used,
-                parent.gas_limit,
-                parent.base_fee_per_gas.unwrap_or_default(),
-                parent.timestamp,
-                0,
-            )
+            op_chain_spec.next_block_base_fee(&parent, 0).unwrap_or_default()
         );
     }
 
@@ -283,13 +271,7 @@ mod tests {
         let base_fee = next_block_base_fee(&op_chain_spec, &parent, 1800000005);
         assert_eq!(
             base_fee.unwrap(),
-            op_chain_spec.next_block_base_fee(
-                parent.gas_used,
-                parent.gas_limit,
-                parent.base_fee_per_gas.unwrap_or_default(),
-                parent.timestamp,
-                0,
-            )
+            op_chain_spec.next_block_base_fee(&parent, 0).unwrap_or_default()
         );
     }
 

@@ -153,13 +153,17 @@ pub trait EthFees: LoadFee {
 
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
-                base_fee_per_gas.push(self.provider().chain_spec().next_block_base_fee(
-                    last_entry.gas_used,
-                    last_entry.gas_limit,
-                    last_entry.base_fee_per_gas,
-                    last_entry.timestamp,
-                    last_entry.timestamp,
-                ) as u128);
+                let last_header = self
+                    .provider()
+                    .header(&last_entry.header_hash)
+                    .map_err(Self::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(last_entry.header_hash.into()))?;
+                base_fee_per_gas.push(
+                    self.provider()
+                        .chain_spec()
+                        .next_block_base_fee(&last_header, last_entry.timestamp)
+                        .unwrap_or_default() as u128,
+                );
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
             } else {
@@ -213,13 +217,9 @@ pub trait EthFees: LoadFee {
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
                 base_fee_per_gas.push(
-                    chain_spec.next_block_base_fee(
-                        last_header.gas_used(),
-                        last_header.gas_limit(),
-                        last_header.base_fee_per_gas().unwrap_or_default(),
-                        last_header.timestamp(),
-                        last_header.timestamp(),
-                    ) as u128,
+                    chain_spec
+                        .next_block_base_fee(last_header.header(), last_header.timestamp())
+                        .unwrap_or_default() as u128,
                 );
                 // Same goes for the `base_fee_per_blob_gas`:
                 // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
