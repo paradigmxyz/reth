@@ -100,42 +100,50 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
 
-                let mut block_state_calls = block_state_calls;
+                let mut block_iter = block_state_calls.into_iter().peekable();
+                let mut previous_block_number: Option<U256> = None;
 
-                // Reversed, to emulate popping from the front
-                block_state_calls.reverse();
-
-                let mut previous_block_number = None;
-                while let Some(block) = block_state_calls.pop() {
-                    if let Some(previous_block_number) = previous_block_number {
-                        let next_block = block_state_calls.last();
-                        if let Some(next_block_number) = next_block
+                while block_iter.peek().is_some() {
+                    let block = if let Some(prev_num) = previous_block_number {
+                        // Peek at the next block's number
+                        if let Some(next_block_number) = block_iter
+                            .peek()
                             .and_then(|b| b.block_overrides.as_ref())
-                            .and_then(|block| block.number)
+                            .and_then(|bo| bo.number)
                         {
                             // Ensure only-increasing block number
-                            if previous_block_number >= next_block_number {
+                            if prev_num >= next_block_number {
                                 return Err(EthApiError::InvalidParams(format!(
-                                    "Block number must be strictly increasing. Attempted to simulate from {previous_block_number} to {next_block_number}",
+                                    "Block number must be strictly increasing. Attempted to simulate from {prev_num} to {next_block_number}",
                                 ))
                                 .into())
                             }
 
-                            // Fill in the gaps if present
-                            let gap_block_number = previous_block_number + U256::ONE;
-                            if next_block_number > gap_block_number {
-                                block_state_calls.push(SimBlock::default().with_block_overrides(
+                            // Check if there's a gap
+                            let expected_next = prev_num + U256::ONE;
+                            if next_block_number > expected_next {
+                                // Create a gap block
+                                SimBlock::default().with_block_overrides(
                                     BlockOverrides {
-                                        number: Some(gap_block_number),
+                                        number: Some(expected_next),
                                         ..Default::default()
                                     },
-                                ))
+                                )
+                            } else {
+                                // No gap, consume the next block
+                                block_iter.next().unwrap()
                             }
+                        } else {
+                            // Next block has no number, just consume it
+                            block_iter.next().unwrap()
                         }
-                    }
-                    if let Some(block_number) =
-                        block.block_overrides.as_ref().and_then(|block| block.number)
-                    {
+                    } else {
+                        // First block, just consume it
+                        block_iter.next().unwrap()
+                    };
+
+                    // Update previous block number for next iteration
+                    if let Some(block_number) = block.block_overrides.as_ref().and_then(|b| b.number) {
                         previous_block_number = Some(block_number);
                     }
 
