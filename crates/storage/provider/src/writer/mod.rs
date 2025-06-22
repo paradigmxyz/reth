@@ -813,7 +813,7 @@ mod tests {
         state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
-                status: AccountStatus::Touched | AccountStatus::SelfDestructed,
+                status: AccountStatus::Touched,
                 info: account_info,
                 // 0x00 => 0 => 9
                 storage: HashMap::from_iter([(
