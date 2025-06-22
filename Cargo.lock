@@ -7170,6 +7170,9 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
+ "eyre",
+ "futures",
+ "parking_lot",
  "reth-chainspec",
  "reth-db-api",
  "reth-errors",
@@ -7183,8 +7186,12 @@ dependencies = [
  "reth-trie",
  "revm",
  "revm-primitives",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.12",
  "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
