@@ -4,8 +4,8 @@ use reth_fs_util as fs;
 use reth_provider::{test_utils::create_test_provider_factory, BlockReader};
 use tempfile::tempdir;
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn test_export_with_genesis_only() {
+#[test]
+fn test_export_with_genesis_only() {
     let provider_factory = create_test_provider_factory();
     init_genesis(&provider_factory).unwrap();
     let provider = provider_factory.provider().unwrap();
