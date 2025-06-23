@@ -13,5 +13,4 @@ reth-tracing = { path = "../../crates/tracing" }
 reth-node-api = { path = "../../crates/node/api" }
 
 [patch.crates-io]
-nybbles = { git = "https://github.com/alloy-rs/nybbles", branch = "alexey/uint-repr" }
-alloy-trie = { git = "https://github.com/alloy-rs/trie", branch = "alexey/nybbles-uint" }
+alloy-trie = { git = "https://github.com/alloy-rs/trie", rev = "a84ddb499929fe2483b650ca2508860f74fdc2b2" }
