@@ -3,8 +3,8 @@ import { sidebar } from './sidebar'
 
 export default defineConfig({
   title: 'Reth',
-  logoUrl: '/reth/reth-prod.png',
-  iconUrl: '/reth/reth-prod.png',
+  logoUrl: '/reth/logo.png',
+  iconUrl: '/reth/logo.png',
   ogImageUrl: '/reth/reth-prod.png',
   sidebar,
   basePath: '/reth',
