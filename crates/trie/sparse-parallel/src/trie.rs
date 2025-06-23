@@ -1,3 +1,5 @@
+use std::sync::mpsc;
+
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
@@ -210,11 +212,19 @@ impl ParallelSparseTrie {
         // Update the prefix set with the keys that didn't have matching subtries
         self.prefix_set = unchanged_prefix_set;
 
-        // Update subtrie hashes (not in parallel for simplicity)
+        // Update subtrie hashes in parallel
+        // TODO: call `update_hashes` on each subtrie in parallel
+        let (tx, rx) = mpsc::channel();
         for ChangedSubtrie { index, mut subtrie, prefix_set } in subtries {
-            // Call update_hashes on each subtrie with its own prefix set
+            // For now, compute sequentially (TODO: make parallel)
             let mut prefix_set = prefix_set;
             subtrie.update_hashes(&mut prefix_set);
+            tx.send((index, subtrie)).unwrap();
+        }
+        drop(tx);
+
+        // Return updated subtries back to the trie
+        for (index, subtrie) in rx {
             self.lower_subtries[index] = Some(subtrie);
         }
     }
