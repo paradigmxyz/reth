@@ -22,8 +22,8 @@ use reth_evm::{
 use reth_primitives_traits::{
     block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
 };
+use reth_rpc_convert::{RpcConvert, RpcTransaction};
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types_compat::{RpcTransaction, TransactionCompat};
 use reth_storage_api::noop::NoopProvider;
 use revm::{
     context_interface::result::ExecutionResult,
@@ -77,7 +77,7 @@ pub fn execute_transactions<S, T>(
 >
 where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
-    T: TransactionCompat<Primitives = S::Primitives>,
+    T: RpcConvert<Primitives = S::Primitives>,
 {
     builder.apply_pre_execution_changes()?;
 
@@ -121,7 +121,7 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
 ) -> Result<Recovered<Tx>, EthApiError>
 where
     DB::Error: Into<EthApiError>,
-    T: TransactionCompat<Primitives: NodePrimitives<SignedTx = Tx>>,
+    T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
 {
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
@@ -193,7 +193,7 @@ pub fn build_simulated_block<T, B, Halt: Clone>(
     tx_resp_builder: &T,
 ) -> Result<SimulatedBlock<Block<RpcTransaction<T::Network>, Header<B::Header>>>, T::Error>
 where
-    T: TransactionCompat<
+    T: RpcConvert<
         Primitives: NodePrimitives<SignedTx = BlockTx<B>>,
         Error: FromEthApiError + FromEvmHalt<Halt>,
     >,

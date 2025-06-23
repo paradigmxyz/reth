@@ -15,7 +15,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_api::{
-    pubsub::EthPubSubApiServer, EthApiTypes, RpcNodeCore, RpcTransaction, TransactionCompat,
+    pubsub::EthPubSubApiServer, EthApiTypes, RpcConvert, RpcNodeCore, RpcTransaction,
 };
 use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
@@ -62,7 +62,7 @@ where
             Pool: TransactionPool,
             Network: NetworkInfo,
         > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
+            RpcConvert: RpcConvert<
                 Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
             >,
         >,
@@ -211,7 +211,7 @@ where
             Pool: TransactionPool,
             Network: NetworkInfo,
         > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
+            RpcConvert: RpcConvert<
                 Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
             >,
         > + 'static,

@@ -110,7 +110,7 @@ impl ParallelSparseTrie {
 
         // If there is no subtrie for the path it means the path is UPPER_TRIE_MAX_DEPTH or less
         // nibbles, and so belongs to the upper trie.
-        self.upper_subtrie.reveal_node(path.clone(), &node, masks)?;
+        self.upper_subtrie.reveal_node(path, &node, masks)?;
 
         // The previous upper_trie.reveal_node call will not have revealed any child nodes via
         // reveal_node_or_hash if the child node would be found on a lower subtrie. We handle that
@@ -125,7 +125,7 @@ impl ParallelSparseTrie {
                     let mut stack_ptr = branch.as_ref().first_child_index();
                     for idx in CHILD_INDEX_RANGE {
                         if branch.state_mask.is_bit_set(idx) {
-                            let mut child_path = path.clone();
+                            let mut child_path = path;
                             child_path.push_unchecked(idx);
                             self.lower_subtrie_for_path(&child_path)
                                 .expect("child_path must have a lower subtrie")
@@ -136,8 +136,8 @@ impl ParallelSparseTrie {
                 }
             }
             TrieNode::Extension(ext) => {
-                let mut child_path = path.clone();
-                child_path.extend_from_slice_unchecked(&ext.key);
+                let mut child_path = path;
+                child_path.extend(&ext.key);
                 if let Some(subtrie) = self.lower_subtrie_for_path(&child_path) {
                     subtrie.reveal_node_or_hash(child_path, &ext.child)?;
                 }
@@ -275,7 +275,7 @@ impl ParallelSparseTrie {
     ) -> (Vec<ChangedSubtrie>, PrefixSetMut) {
         // Clone the prefix set to iterate over its keys. Cloning is cheap, it's just an Arc.
         let prefix_set_clone = prefix_set.clone();
-        let mut prefix_set_iter = prefix_set_clone.into_iter().cloned().peekable();
+        let mut prefix_set_iter = prefix_set_clone.into_iter().copied().peekable();
         let mut changed_subtries = Vec::new();
         let mut unchanged_prefix_set = PrefixSetMut::default();
 
@@ -291,7 +291,7 @@ impl ParallelSparseTrie {
                     // prefix set iterator.
                     let mut new_prefix_set = Vec::new();
                     while let Some(key) = prefix_set_iter.peek() {
-                        if key.has_prefix(&subtrie.path) {
+                        if key.starts_with(&subtrie.path) {
                             // If the key starts with the subtrie path, add it to the new prefix set
                             new_prefix_set.push(prefix_set_iter.next().unwrap());
                         } else if new_prefix_set.is_empty() && key < &subtrie.path {
@@ -381,10 +381,10 @@ impl SparseSubtrie {
         }
 
         if let Some(tree_mask) = masks.tree_mask {
-            self.branch_node_tree_masks.insert(path.clone(), tree_mask);
+            self.branch_node_tree_masks.insert(path, tree_mask);
         }
         if let Some(hash_mask) = masks.hash_mask {
-            self.branch_node_hash_masks.insert(path.clone(), hash_mask);
+            self.branch_node_hash_masks.insert(path, hash_mask);
         }
 
         match node {
@@ -399,7 +399,7 @@ impl SparseSubtrie {
                 let mut stack_ptr = branch.as_ref().first_child_index();
                 for idx in CHILD_INDEX_RANGE {
                     if branch.state_mask.is_bit_set(idx) {
-                        let mut child_path = path.clone();
+                        let mut child_path = path;
                         child_path.push_unchecked(idx);
                         if Self::is_child_same_level(&path, &child_path) {
                             // Reveal each child node or hash it has, but only if the child is on
@@ -432,7 +432,7 @@ impl SparseSubtrie {
                         // All other node types can't be handled.
                         node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
                             return Err(SparseTrieErrorKind::Reveal {
-                                path: entry.key().clone(),
+                                path: *entry.key(),
                                 node: Box::new(node.clone()),
                             }
                             .into())
@@ -443,14 +443,14 @@ impl SparseSubtrie {
                     }
                 }
             }
-            TrieNode::Extension(ext) => match self.nodes.entry(path.clone()) {
+            TrieNode::Extension(ext) => match self.nodes.entry(path) {
                 Entry::Occupied(mut entry) => match entry.get() {
                     // Replace a hash node with a revealed extension node.
                     SparseNode::Hash(hash) => {
-                        let mut child_path = entry.key().clone();
-                        child_path.extend_from_slice_unchecked(&ext.key);
+                        let mut child_path = *entry.key();
+                        child_path.extend(&ext.key);
                         entry.insert(SparseNode::Extension {
-                            key: ext.key.clone(),
+                            key: ext.key,
                             // Memoize the hash of a previously blinded node in a new extension
                             // node.
                             hash: Some(*hash),
@@ -466,16 +466,16 @@ impl SparseSubtrie {
                     // All other node types can't be handled.
                     node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
                         return Err(SparseTrieErrorKind::Reveal {
-                            path: entry.key().clone(),
+                            path: *entry.key(),
                             node: Box::new(node.clone()),
                         }
                         .into())
                     }
                 },
                 Entry::Vacant(entry) => {
-                    let mut child_path = entry.key().clone();
-                    child_path.extend_from_slice_unchecked(&ext.key);
-                    entry.insert(SparseNode::new_ext(ext.key.clone()));
+                    let mut child_path = *entry.key();
+                    child_path.extend(&ext.key);
+                    entry.insert(SparseNode::new_ext(ext.key));
                     if Self::is_child_same_level(&path, &child_path) {
                         self.reveal_node_or_hash(child_path, &ext.child)?;
                     }
@@ -485,11 +485,11 @@ impl SparseSubtrie {
                 Entry::Occupied(mut entry) => match entry.get() {
                     // Replace a hash node with a revealed leaf node and store leaf node value.
                     SparseNode::Hash(hash) => {
-                        let mut full = entry.key().clone();
-                        full.extend_from_slice_unchecked(&leaf.key);
+                        let mut full = *entry.key();
+                        full.extend(&leaf.key);
                         self.values.insert(full, leaf.value.clone());
                         entry.insert(SparseNode::Leaf {
-                            key: leaf.key.clone(),
+                            key: leaf.key,
                             // Memoize the hash of a previously blinded node in a new leaf
                             // node.
                             hash: Some(*hash),
@@ -502,16 +502,16 @@ impl SparseSubtrie {
                     SparseNode::Extension { .. } |
                     SparseNode::Branch { .. }) => {
                         return Err(SparseTrieErrorKind::Reveal {
-                            path: entry.key().clone(),
+                            path: *entry.key(),
                             node: Box::new(node.clone()),
                         }
                         .into())
                     }
                 },
                 Entry::Vacant(entry) => {
-                    let mut full = entry.key().clone();
-                    full.extend_from_slice_unchecked(&leaf.key);
-                    entry.insert(SparseNode::new_leaf(leaf.key.clone()));
+                    let mut full = *entry.key();
+                    full.extend(&leaf.key);
+                    entry.insert(SparseNode::new_leaf(leaf.key));
                     self.values.insert(full, leaf.value.clone());
                 }
             },
@@ -546,7 +546,7 @@ impl SparseSubtrie {
                     // Hash node with a different hash can't be handled.
                     SparseNode::Hash(previous_hash) if previous_hash != &hash => {
                         return Err(SparseTrieErrorKind::Reveal {
-                            path: entry.key().clone(),
+                            path: *entry.key(),
                             node: Box::new(SparseNode::Hash(hash)),
                         }
                         .into())
@@ -660,7 +660,7 @@ struct ChangedSubtrie {
 /// If the path is shorter than [`UPPER_TRIE_MAX_DEPTH`] nibbles.
 fn path_subtrie_index_unchecked(path: &Nibbles) -> usize {
     debug_assert_eq!(UPPER_TRIE_MAX_DEPTH, 2);
-    (path[0] << 4 | path[1]) as usize
+    path.get_byte_unchecked(0) as usize
 }
 
 #[cfg(test)]
@@ -725,7 +725,7 @@ mod tests {
 
         let (subtries, unchanged_prefix_set) = trie.take_changed_lower_subtries(&mut prefix_set);
         assert!(subtries.is_empty());
-        assert_eq!(unchanged_prefix_set, PrefixSetMut::from(prefix_set.iter().cloned()));
+        assert_eq!(unchanged_prefix_set, PrefixSetMut::from(prefix_set.iter().copied()));
     }
 
     #[test]
@@ -763,7 +763,7 @@ mod tests {
             subtries
                 .into_iter()
                 .map(|ChangedSubtrie { index, subtrie, prefix_set }| {
-                    (index, subtrie, prefix_set.iter().cloned().collect::<Vec<_>>())
+                    (index, subtrie, prefix_set.iter().copied().collect::<Vec<_>>())
                 })
                 .collect::<Vec<_>>(),
             vec![(
@@ -880,7 +880,7 @@ mod tests {
             let node = create_leaf_node(&[0x2, 0x3], 42);
             let masks = TrieMasks::none();
 
-            trie.reveal_node(path.clone(), node, masks).unwrap();
+            trie.reveal_node(path, node, masks).unwrap();
 
             assert_matches!(
                 trie.upper_subtrie.nodes.get(&path),
@@ -898,7 +898,7 @@ mod tests {
             let node = create_leaf_node(&[0x3, 0x4], 42);
             let masks = TrieMasks::none();
 
-            trie.reveal_node(path.clone(), node, masks).unwrap();
+            trie.reveal_node(path, node, masks).unwrap();
 
             // Check that the lower subtrie was created
             let idx = path_subtrie_index_unchecked(&path);
@@ -921,7 +921,7 @@ mod tests {
         let node = create_extension_node(&[0x1], child_hash);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
@@ -942,7 +942,7 @@ mod tests {
         let node = create_extension_node(&[0x1, 0x2, 0x3], child_hash);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         // Extension node should be in upper trie
         assert_matches!(
@@ -994,7 +994,7 @@ mod tests {
         let node = create_branch_node_with_children(&[0x0, 0x5], &child_hashes);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         // Branch node should be in upper trie
         assert_matches!(
@@ -1025,7 +1025,7 @@ mod tests {
         let node = create_branch_node_with_children(&[0x0, 0x7, 0xf], &child_hashes);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         // Branch node should be in upper trie
         assert_matches!(

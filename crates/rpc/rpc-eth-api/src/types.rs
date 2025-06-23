@@ -3,7 +3,7 @@
 use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_rpc_types_eth::Block;
 use reth_chain_state::CanonStateSubscriptions;
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_convert::RpcConvert;
 use reth_storage_api::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
@@ -11,7 +11,7 @@ use std::{
     fmt::{self},
 };
 
-pub use reth_rpc_types_compat::{RpcTransaction, RpcTypes};
+pub use reth_rpc_convert::{RpcTransaction, RpcTypes};
 
 /// Network specific `eth` API types.
 ///
@@ -32,10 +32,10 @@ pub trait EthApiTypes: Send + Sync + Clone {
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
     type NetworkTypes: RpcTypes;
     /// Conversion methods for transaction RPC type.
-    type TransactionCompat: Send + Sync + Clone + fmt::Debug;
+    type RpcConvert: Send + Sync + Clone + fmt::Debug;
 
     /// Returns reference to transaction response builder.
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat;
+    fn tx_resp_builder(&self) -> &Self::RpcConvert;
 }
 
 /// Adapter for network specific block type.
@@ -59,7 +59,7 @@ where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
+            RpcConvert: RpcConvert<
                 Primitives = <Self as RpcNodeCore>::Primitives,
                 Network = Self::NetworkTypes,
                 Error = RpcError<Self>,
@@ -75,7 +75,7 @@ impl<T> FullEthApiTypes for T where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
         > + EthApiTypes<
-            TransactionCompat: TransactionCompat<
+            RpcConvert: RpcConvert<
                 Primitives = <Self as RpcNodeCore>::Primitives,
                 Network = Self::NetworkTypes,
                 Error = RpcError<T>,

@@ -12,8 +12,8 @@ use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_api::{
-    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCore,
-    RpcNodeCoreExt, RpcTransaction, TransactionCompat,
+    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
+    RpcNodeCore, RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -686,7 +686,7 @@ struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
 impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
+    TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>, tx_resp_builder: TxCompat) -> Self {
@@ -724,7 +724,7 @@ impl<T, TxCompat> FullTransactionsFilter<RpcTransaction<TxCompat::Network>>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
+    TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
 {
     async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         Self::drain(self).await
