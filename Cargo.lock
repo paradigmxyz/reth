@@ -8131,6 +8131,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "reth-chainspec",
  "reth-cli-util",
+ "reth-codecs",
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
@@ -9026,6 +9027,7 @@ version = "1.4.8"
 dependencies = [
  "reth-chainspec",
  "reth-cli-util",
+ "reth-codecs",
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
