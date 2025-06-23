@@ -256,12 +256,13 @@ impl NodeTypes for OpNode {
 
 /// Add-ons w.r.t. optimism.
 ///
-/// This type provides optimism-specific addons to the node and exposes the RPC server and engine API.
+/// This type provides optimism-specific addons to the node and exposes the RPC server and engine
+/// API.
 ///
 /// # Middleware Configuration
 ///
-/// The RPC middleware can be configured through the public `rpc_add_ons` field. Since `RpcAddOns` now
-/// supports middleware configuration via `set_rpc_middleware`, you can do:
+/// The RPC middleware can be configured through the public `rpc_add_ons` field. Since `RpcAddOns`
+/// now supports middleware configuration via `set_rpc_middleware`, you can do:
 ///
 /// ```ignore
 /// let op_addons = OpAddOns::builder().build();
