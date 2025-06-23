@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vocs dev",
     "build": "vocs build",
-    "preview": "vocs preview"
+    "preview": "vocs preview",
+    "check-links": "bun check-links.ts"
   },
   "dependencies": {
     "react": "latest",
