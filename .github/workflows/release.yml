@@ -116,7 +116,7 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
-          target: ${{ matrix.configs.target }}
+          target: ${{ endsWith(matrix.configs.target, '-deb') && matrix.configs.rust_target || matrix.configs.target }}
       - name: Install cross main
         id: cross_main
         run: |

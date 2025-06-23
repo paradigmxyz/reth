@@ -1,16 +1,21 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+
+# Default target if not provided
+RUST_TARGET="${1:-x86_64-unknown-linux-gnu}"
 
 echo "Testing cargo-deb package reproducibility..."
 
 # Clean up any existing packages
 echo "Cleaning up existing packages..."
-rm -f reth_*.deb reth-deb-*.deb *-diff.txt
+make clean-deb || true
 
 # Build first package
 echo "Building first package..."
 make clean || true
-make deb-cargo
+cargo cache -a
+make deb-cargo RUST_TARGET="${RUST_TARGET}"
+
 FIRST_PACKAGE=$(find target/x86_64-unknown-linux-gnu/debian -name "*.deb" | head -1)
 if [ -n "$FIRST_PACKAGE" ]; then
     cp "$FIRST_PACKAGE" ./reth-deb-build-1.deb
@@ -22,7 +27,9 @@ fi
 # Build second package
 echo "Building second package..."
 make clean || true
-make deb-cargo
+cargo cache -a
+make deb-cargo RUST_TARGET="${RUST_TARGET}"
+
 SECOND_PACKAGE=$(find target/x86_64-unknown-linux-gnu/debian -name "*.deb" | head -1)
 if [ -n "$SECOND_PACKAGE" ]; then
     cp "$SECOND_PACKAGE" ./reth-deb-build-2.deb

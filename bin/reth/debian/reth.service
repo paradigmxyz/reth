@@ -27,8 +27,6 @@ ExecStart=/usr/bin/reth \
     --ws.addr 127.0.0.1 \
     --ws.port 8546 \
     --ws.api "eth,net,trace,web3,rpc,debug,txpool" \
-    --log.stdout.format json \
-    --log.file.max-files 0 \
     --metrics "127.0.0.1:9001" \
     --engine.persistence-threshold=0 \
     --engine.memory-block-buffer-target=0

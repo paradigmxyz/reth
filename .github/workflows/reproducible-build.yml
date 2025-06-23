@@ -21,6 +21,12 @@ jobs:
       - name: Install cargo-cache
         run: |
           cargo install cargo-cache
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+      - name: Install diffoscope for debian package comparison
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y diffoscope binutils-multiarch
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -36,3 +42,5 @@ jobs:
           mv target/x86_64-unknown-linux-gnu/release/reth reth-build-2
       - name: Compare binaries
         run: cmp reth-build-1 reth-build-2
+      - name: Test Debian package reproducibility
+        run: make test-deb-reproducible
