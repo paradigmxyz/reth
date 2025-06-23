@@ -810,6 +810,9 @@ mod tests {
                 transaction_id: 0,
             },
         )]));
+        state.merge_transitions(BundleRetention::Reverts);
+
+        // Block #7: Change storage.
         state.commit(HashMap::from_iter([(
             address1,
             RevmAccount {
@@ -823,6 +826,8 @@ mod tests {
                 transaction_id: 0,
             },
         )]));
+
+        state.merge_transitions(BundleRetention::Reverts);
 
         let bundle = state.take_bundle();
 
