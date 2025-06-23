@@ -13,10 +13,6 @@ export const sidebar: SidebarItem[] = [
                 link: "/introduction/why-reth"
             },
             {
-                text: "Benchmarks",
-                link: "/introduction/benchmarks"
-            },
-            {
                 text: "Contributing",
                 link: "/introduction/contributing"
             }
@@ -64,32 +60,34 @@ export const sidebar: SidebarItem[] = [
                 items: [
                     {
                         text: "Networks",
-                        link: "/run/networks"
-                    },
-                    {
-                        text: "Ethereum",
-                        link: "/run/ethereum",
+                        // link: "/run/networks",
                         items: [
                             {
-                                text: "Snapshots",
-                                link: "/run/ethereum/snapshots"
+                                text: "Ethereum",
+                                link: "/run/ethereum",
+                                // items: [
+                                //     {
+                                //         text: "Snapshots",
+                                //         link: "/run/ethereum/snapshots"
+                                //     }
+                                // ]
+                            },
+                            {
+                                text: "OP-stack",
+                                link: "/run/opstack",
+                                // items: [
+                                //     {
+                                //         text: "Caveats OP-Mainnet",
+                                //         link: "/run/opstack/op-mainnet-caveats"
+                                //     }
+                                // ]
+                            },
+                            {
+                                text: "Private testnets",
+                                link: "/run/private-testnets"
                             }
                         ]
                     },
-                    {
-                        text: "Opstack Networks",
-                        link: "/run/opstack",
-                        items: [
-                            {
-                                text: "Caveats OP-Mainnet",
-                                link: "/run/opstack/op-mainnet-caveats"
-                            }
-                        ]
-                    },
-                    {
-                        text: "Private testnets",
-                        link: "/run/private-testnets"
-                    }
                 ]
             },
             {
@@ -145,27 +143,13 @@ export const sidebar: SidebarItem[] = [
                     },
                     {
                         text: "Transaction types",
-                        collapsed: true,
-                        items: [
-                            {
-                                text: "Consensus",
-                                link: "/sdk/typesystem/transaction-types/consensus"
-                            },
-                            {
-                                text: "Pooled",
-                                link: "/sdk/typesystem/transaction-types/pooled"
-                            },
-                            {
-                                text: "RPC",
-                                link: "/sdk/typesystem/transaction-types/rpc"
-                            }
-                        ]
+                        link: "/sdk/typesystem/transaction-types"
                     }
                 ]
             },
             {
-                text: "What is in a node",
-                collapsed: true,
+                text: "What is in a node?",
+                collapsed: false,
                 items: [
                     {
                         text: "Network",
@@ -189,42 +173,43 @@ export const sidebar: SidebarItem[] = [
                     }
                 ]
             },
-            {
-                text: "Build a custom node",
-                items: [
-                    {
-                        text: "Prerequisites and Considerations",
-                        link: "/sdk/custom-node/prerequisites"
-                    },
-                    {
-                        text: "What modifications and how",
-                        link: "/sdk/custom-node/modifications"
-                    }
-                ]
-            },
-            {
-                text: "Examples",
-                items: [
-                    {
-                        text: "How to modify an existing node",
-                        items: [
-                            {
-                                text: "Additional features: RPC endpoints, services",
-                                link: "/sdk/examples/modify-node"
-                            }
-                        ]
-                    },
-                    {
-                        text: "How to use standalone components",
-                        items: [
-                            {
-                                text: "Interact with the disk directly + caveats",
-                                link: "/sdk/examples/standalone-components"
-                            }
-                        ]
-                    }
-                ]
-            }
+            // TODO
+            // {
+            //     text: "Build a custom node",
+            //     items: [
+            //         {
+            //             text: "Prerequisites and Considerations",
+            //             link: "/sdk/custom-node/prerequisites"
+            //         },
+            //         {
+            //             text: "What modifications and how",
+            //             link: "/sdk/custom-node/modifications"
+            //         }
+            //     ]
+            // },
+            // {
+            //     text: "Examples",
+            //     items: [
+            //         {
+            //             text: "How to modify an existing node",
+            //             items: [
+            //                 {
+            //                     text: "Additional features: RPC endpoints, services",
+            //                     link: "/sdk/examples/modify-node"
+            //                 }
+            //             ]
+            //         },
+            //         {
+            //             text: "How to use standalone components",
+            //             items: [
+            //                 {
+            //                     text: "Interact with the disk directly + caveats",
+            //                     link: "/sdk/examples/standalone-components"
+            //                 }
+            //             ]
+            //         }
+            //     ]
+            // }
         ]
     },
     {
