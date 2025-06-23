@@ -97,8 +97,8 @@ async fn test_roundtrip_export_after_import() {
     let exported_files = export(&provider_ref, &export_config).expect("Export should succeed");
 
     // Calculate how many files we expect based on the configuration
-    // We expect 4 files for 900 blocks: first 3 files with 250 blocks each, then 150 for the last
-    // file
+    // We expect 4 files for 900 blocks: first 3 files with 250 blocks each,
+    // then 150 for the last file
     let expected_files_number = EXPORT_TOTAL_BLOCKS.div_ceil(EXPORT_BLOCKS_PER_FILE);
 
     assert_eq!(

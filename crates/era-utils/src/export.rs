@@ -293,3 +293,50 @@ where
 
     Ok((compressed_header, compressed_body, compressed_receipts))
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ExportConfig;
+    use reth_era::execution_types::MAX_BLOCKS_PER_ERA1;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_export_config_validation() {
+        let temp_dir = tempdir().unwrap();
+
+        // Default config should pass
+        let default_config = ExportConfig::default();
+        assert!(default_config.validate().is_ok(), "Default config should be valid");
+
+        // Exactly at the limit should pass
+        let limit_config =
+            ExportConfig { max_blocks_per_file: MAX_BLOCKS_PER_ERA1 as u64, ..Default::default() };
+        assert!(limit_config.validate().is_ok(), "Config at ERA1 limit should pass validation");
+
+        // Valid config should pass
+        let valid_config = ExportConfig {
+            dir: temp_dir.path().to_path_buf(),
+            max_blocks_per_file: 1000,
+            ..Default::default()
+        };
+        assert!(valid_config.validate().is_ok(), "Valid config should pass validation");
+
+        // Zero blocks per file should fail
+        let zero_blocks_config = ExportConfig {
+            max_blocks_per_file: 0, // Invalid
+            ..Default::default()
+        };
+        let result = zero_blocks_config.validate();
+        assert!(result.is_err(), "Zero blocks per file should fail validation");
+        assert!(result.unwrap_err().to_string().contains("cannot be zero"));
+
+        // Exceeding era1 limit should fail
+        let oversized_config = ExportConfig {
+            max_blocks_per_file: MAX_BLOCKS_PER_ERA1 as u64 + 1, // Invalid
+            ..Default::default()
+        };
+        let result = oversized_config.validate();
+        assert!(result.is_err(), "Oversized blocks per file should fail validation");
+        assert!(result.unwrap_err().to_string().contains("exceeds ERA1 limit"));
+    }
+}
