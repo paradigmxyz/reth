@@ -584,7 +584,7 @@ impl SparseSubtrie {
 /// Used to determine the type of subtrie a certain path belongs to:
 /// - Paths in the range `0x..=0xf` belong to the upper subtrie.
 /// - Paths in the range `0x00..` belong to one of the lower subtries. The index of the lower
-///   subtrie is determined by the path first [`UPPER_TRIE_MAX_DEPTH`] nibbles of the path.
+///   subtrie is determined by the first [`UPPER_TRIE_MAX_DEPTH`] nibbles of the path.
 ///
 /// There can be at most [`NUM_LOWER_SUBTRIES`] lower subtries.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
