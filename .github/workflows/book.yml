@@ -58,10 +58,22 @@ jobs:
       pull-requests: write
     timeout-minutes: 60
     steps:
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: github-pages
+          path: ./artifact
+
+      - name: Extract artifact
+        run: |
+          cd ./artifact
+          tar -xf artifact.tar
+          ls -la
+
       - name: Deploy PR Preview
         uses: rossjrw/pr-preview-action@v1
         with:
-          source-dir: ./book/vocs/docs/dist
+          source-dir: ./artifact/
           preview-branch: gh-pages
           umbrella-dir: pr-preview
           action: auto
