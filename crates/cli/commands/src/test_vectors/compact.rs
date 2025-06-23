@@ -222,6 +222,23 @@ where
         };
         let res = obj.to_compact(&mut compact_buffer);
 
+        // `Compact` for `StoredNibbles` and `StoredNibblesSubKey` is implemented as converting to
+        // an array of nybbles, with each byte representing one nibble. This also matches the
+        // internal representation of `nybbles::Nibbles`: each nibble is stored in a separate byte,
+        // with high nibble set to zero.
+        //
+        // Unfortunately, the `Arbitrary` implementation for `nybbles::Nibbles` doesn't generate
+        // valid nibbles, as it sets the high nibble to a non-zero value.
+        //
+        // This hack sets the high nibble to zero.
+        //
+        // TODO: remove this, see https://github.com/paradigmxyz/reth/pull/17006
+        if type_name == "StoredNibbles" || type_name == "StoredNibblesSubKey" {
+            for byte in &mut compact_buffer {
+                *byte &= 0x0F;
+            }
+        }
+
         if IDENTIFIER_TYPE.contains(&type_name) {
             compact_buffer.push(res as u8);
         }
