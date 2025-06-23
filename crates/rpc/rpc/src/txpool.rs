@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::TxPoolApiServer;
+use reth_rpc_convert::{RpcConvert, RpcTypes};
 use reth_rpc_eth_api::RpcTransaction;
-use reth_rpc_types_compat::{RpcConvert, RpcTypes};
 use reth_transaction_pool::{
     AllPoolTransactions, PoolConsensusTx, PoolTransaction, TransactionPool,
 };

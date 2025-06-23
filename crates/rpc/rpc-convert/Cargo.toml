@@ -1,5 +1,5 @@
 [package]
-name = "reth-rpc-types-compat"
+name = "reth-rpc-convert"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
