@@ -1,3 +1,5 @@
+//! Conversion trait for block response to primitive block types.
+
 use alloy_network::Network;
 use std::convert::Infallible;
 
