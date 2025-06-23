@@ -80,15 +80,9 @@ pub trait BlockReader:
 
     /// Returns the pending block if available
     ///
-    /// Note: This returns a [`SealedBlock`] because it's expected that this is sealed by the
-    /// provider and the caller does not know the hash.
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>>;
-
-    /// Returns the pending block if available
-    ///
     /// Note: This returns a [`RecoveredBlock`] because it's expected that this is sealed by
     /// the provider and the caller does not know the hash.
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
 
     /// Returns the pending block and receipts if available.
     #[expect(clippy::type_complexity)]
@@ -165,11 +159,8 @@ impl<T: BlockReader> BlockReader for Arc<T> {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block(self)
-    }
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        T::pending_block_with_senders(self)
     }
     fn pending_block_and_receipts(
         &self,
@@ -226,11 +217,8 @@ impl<T: BlockReader> BlockReader for &T {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block(self)
-    }
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        T::pending_block_with_senders(self)
     }
     fn pending_block_and_receipts(
         &self,

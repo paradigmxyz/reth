@@ -18,7 +18,7 @@ use reth_provider::{
 use reth_stages::{
     stages::{
         AccountHashingStage, ExecutionStage, MerkleStage, StorageHashingStage,
-        MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+        MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
     },
     ExecutionStageThresholds, Stage, StageCheckpoint, UnwindInput,
 };
@@ -108,7 +108,7 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
             max_cumulative_gas: None,
             max_duration: None,
         },
-        MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+        MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
         ExExManagerHandle::empty(),
     );
 
@@ -161,7 +161,8 @@ where
 
     let mut stage = MerkleStage::Execution {
         // Forces updating the root instead of calculating from scratch
-        clean_threshold: u64::MAX,
+        rebuild_threshold: u64::MAX,
+        incremental_threshold: u64::MAX,
     };
 
     loop {

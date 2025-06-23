@@ -16,6 +16,10 @@ rpc-compat:
   - eth_getTransactionReceipt/get-legacy-input (reth)
   - eth_getTransactionReceipt/get-legacy-receipt (reth)
 
+  # after https://github.com/paradigmxyz/reth/pull/16742 we start the node in
+  # syncing mode, the test expects syncing to be false on start
+  - eth_syncing/check-syncing (reth)
+
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-withdrawals:
   - Withdrawals Fork On Genesis (Paris) (reth)
@@ -36,7 +40,9 @@ engine-api: []
 # no fix due to https://github.com/paradigmxyz/reth/issues/8732
 engine-cancun:
   - Invalid PayloadAttributes, Missing BeaconRoot, Syncing=True (Cancun) (reth)
-  - Invalid NewPayload, ExcessBlobGas, Syncing=True, EmptyTxs=False, DynFeeTxs=False (Cancun) (reth)
+  # the test fails with older verions of the code for which it passed before, probably related to changes
+  # in hive or its dependencies
+  - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
 
 sync: []
 

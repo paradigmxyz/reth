@@ -1040,11 +1040,7 @@ mod tests {
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use std::{
-        collections::{BTreeMap, HashMap},
-        str::FromStr,
-        string::String,
-    };
+    use std::{collections::HashMap, str::FromStr};
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -2510,31 +2506,35 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn blob_params_from_genesis() {
         let s = r#"{
-         "cancun":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         },
-         "prague":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         }
-      }"#;
-        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
-        let hardfork_params = BlobScheduleBlobParams::from_schedule(&schedule);
+            "blobSchedule": {
+                "cancun":{
+                    "baseFeeUpdateFraction":3338477,
+                    "max":6,
+                    "target":3
+                },
+                "prague":{
+                    "baseFeeUpdateFraction":3338477,
+                    "max":6,
+                    "target":3
+                }
+            }
+        }"#;
+        let config: ChainConfig = serde_json::from_str(s).unwrap();
+        let hardfork_params = config.blob_schedule_blob_params();
         let expected = BlobScheduleBlobParams {
             cancun: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
             },
             prague: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
             },
             ..Default::default()
         };

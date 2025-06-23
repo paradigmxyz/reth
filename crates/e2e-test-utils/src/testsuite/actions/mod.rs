@@ -1,22 +1,30 @@
 //! Actions that can be performed in tests.
 
 use crate::testsuite::Environment;
-use alloy_rpc_types_engine::{ForkchoiceUpdated, PayloadStatusEnum};
+use alloy_rpc_types_engine::{ForkchoiceState, ForkchoiceUpdated, PayloadStatusEnum};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::EngineTypes;
+use reth_rpc_api::clients::EngineApiClient;
 use std::future::Future;
 use tracing::debug;
 
+pub mod engine_api;
 pub mod fork;
+pub mod node_ops;
 pub mod produce_blocks;
 pub mod reorg;
 
-pub use fork::{CreateFork, SetForkBase, ValidateFork};
+pub use engine_api::{ExpectedPayloadStatus, SendNewPayload, SendNewPayloads};
+pub use fork::{CreateFork, ForkBase, SetForkBase, SetForkBaseFromBlockInfo, ValidateFork};
+pub use node_ops::{
+    CaptureBlockOnNode, CompareNodeChainTips, SelectActiveNode, ValidateBlockTag, WaitForSync,
+};
 pub use produce_blocks::{
     AssertMineBlock, BroadcastLatestForkchoice, BroadcastNextNewPayload, CheckPayloadAccepted,
-    GenerateNextPayload, GeneratePayloadAttributes, PickNextBlockProducer, ProduceBlocks,
-    UpdateBlockInfo,
+    ExpectFcuStatus, GenerateNextPayload, GeneratePayloadAttributes, PickNextBlockProducer,
+    ProduceBlocks, ProduceBlocksLocally, ProduceInvalidBlocks, TestFcuToTag, UpdateBlockInfo,
+    UpdateBlockInfoToLatestPayload, ValidateCanonicalTag,
 };
 pub use reorg::{ReorgTarget, ReorgTo, SetReorgTarget};
 
@@ -99,12 +107,20 @@ where
 
 /// Action that makes the current latest block canonical by broadcasting a forkchoice update
 #[derive(Debug, Default)]
-pub struct MakeCanonical {}
+pub struct MakeCanonical {
+    /// If true, only send to the active node. If false, broadcast to all nodes.
+    active_node_only: bool,
+}
 
 impl MakeCanonical {
     /// Create a new `MakeCanonical` action
     pub const fn new() -> Self {
-        Self {}
+        Self { active_node_only: false }
+    }
+
+    /// Create a new `MakeCanonical` action that only applies to the active node
+    pub const fn with_active_node() -> Self {
+        Self { active_node_only: true }
     }
 }
 
@@ -117,8 +133,59 @@ where
 {
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
-            let mut broadcast_action = BroadcastLatestForkchoice::default();
-            broadcast_action.execute(env).await
+            if self.active_node_only {
+                // Only update the active node
+                let latest_block = env
+                    .current_block_info()
+                    .ok_or_else(|| eyre::eyre!("No latest block information available"))?;
+
+                let fork_choice_state = ForkchoiceState {
+                    head_block_hash: latest_block.hash,
+                    safe_block_hash: latest_block.hash,
+                    finalized_block_hash: latest_block.hash,
+                };
+
+                let active_idx = env.active_node_idx;
+                let engine = env.node_clients[active_idx].engine.http_client();
+
+                let fcu_response = EngineApiClient::<Engine>::fork_choice_updated_v3(
+                    &engine,
+                    fork_choice_state,
+                    None,
+                )
+                .await?;
+
+                debug!(
+                    "Active node {}: Forkchoice update status: {:?}",
+                    active_idx, fcu_response.payload_status.status
+                );
+
+                validate_fcu_response(&fcu_response, &format!("Active node {active_idx}"))?;
+
+                Ok(())
+            } else {
+                // Original broadcast behavior
+                let mut actions: Vec<Box<dyn Action<Engine>>> = vec![
+                    Box::new(BroadcastLatestForkchoice::default()),
+                    Box::new(UpdateBlockInfo::default()),
+                ];
+
+                // if we're on a fork, validate it now that it's canonical
+                if let Ok(active_state) = env.active_node_state() {
+                    if let Some(fork_base) = active_state.current_fork_base {
+                        debug!(
+                            "MakeCanonical: Adding fork validation from base block {}",
+                            fork_base
+                        );
+                        actions.push(Box::new(ValidateFork::new(fork_base)));
+                        // clear the fork base since we're now canonical
+                        env.active_node_state_mut()?.current_fork_base = None;
+                    }
+                }
+
+                let mut sequence = Sequence::new(actions);
+                sequence.execute(env).await
+            }
         })
     }
 }
@@ -144,15 +211,14 @@ where
     fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
         Box::pin(async move {
             let current_block = env
-                .latest_block_info
-                .as_ref()
+                .current_block_info()
                 .ok_or_else(|| eyre::eyre!("No current block information available"))?;
 
-            env.block_registry.insert(self.tag.clone(), current_block.hash);
+            env.block_registry.insert(self.tag.clone(), (current_block, env.active_node_idx));
 
             debug!(
-                "Captured block {} (hash: {}) with tag '{}'",
-                current_block.number, current_block.hash, self.tag
+                "Captured block {} (hash: {}) from active node {} with tag '{}'",
+                current_block.number, current_block.hash, env.active_node_idx, self.tag
             );
 
             Ok(())

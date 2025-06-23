@@ -75,10 +75,24 @@ pub struct TreeConfig {
     max_proof_task_concurrency: u64,
     /// Number of reserved CPU cores for non-reth processes
     reserved_cpu_cores: usize,
-    /// Whether to enable the precompile cache
-    precompile_cache_enabled: bool,
+    /// Whether to disable the precompile cache
+    precompile_cache_disabled: bool,
     /// Whether to use state root fallback for testing
     state_root_fallback: bool,
+    /// Whether to always process payload attributes and begin a payload build process
+    /// even if `forkchoiceState.headBlockHash` is already the canonical head or an ancestor.
+    ///
+    /// The Engine API specification generally states that client software "MUST NOT begin a
+    /// payload build process if `forkchoiceState.headBlockHash` references a `VALID`
+    /// ancestor of the head of canonical chain".
+    /// See: <https://github.com/ethereum/execution-apis/blob/main/src/engine/paris.md#engine_forkchoiceupdatedv1> (Rule 2)
+    ///
+    /// This flag allows overriding that behavior.
+    /// This is useful for specific chain configurations (e.g., OP Stack where proposers
+    /// can reorg their own chain), various custom chains, or for development/testing purposes
+    /// where immediate payload regeneration is desired despite the head not changing or moving to
+    /// an ancestor.
+    always_process_payload_attributes_on_canonical_head: bool,
 }
 
 impl Default for TreeConfig {
@@ -97,8 +111,9 @@ impl Default for TreeConfig {
             has_enough_parallelism: has_enough_parallelism(),
             max_proof_task_concurrency: DEFAULT_MAX_PROOF_TASK_CONCURRENCY,
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
-            precompile_cache_enabled: false,
+            precompile_cache_disabled: false,
             state_root_fallback: false,
+            always_process_payload_attributes_on_canonical_head: false,
         }
     }
 }
@@ -120,8 +135,9 @@ impl TreeConfig {
         has_enough_parallelism: bool,
         max_proof_task_concurrency: u64,
         reserved_cpu_cores: usize,
-        precompile_cache_enabled: bool,
+        precompile_cache_disabled: bool,
         state_root_fallback: bool,
+        always_process_payload_attributes_on_canonical_head: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -137,8 +153,9 @@ impl TreeConfig {
             has_enough_parallelism,
             max_proof_task_concurrency,
             reserved_cpu_cores,
-            precompile_cache_enabled,
+            precompile_cache_disabled,
             state_root_fallback,
+            always_process_payload_attributes_on_canonical_head,
         }
     }
 
@@ -204,14 +221,30 @@ impl TreeConfig {
         self.cross_block_cache_size
     }
 
-    /// Returns whether precompile cache is enabled.
-    pub const fn precompile_cache_enabled(&self) -> bool {
-        self.precompile_cache_enabled
+    /// Returns whether precompile cache is disabled.
+    pub const fn precompile_cache_disabled(&self) -> bool {
+        self.precompile_cache_disabled
     }
 
     /// Returns whether to use state root fallback.
     pub const fn state_root_fallback(&self) -> bool {
         self.state_root_fallback
+    }
+
+    /// Sets whether to always process payload attributes when the FCU head is already canonical.
+    pub const fn with_always_process_payload_attributes_on_canonical_head(
+        mut self,
+        always_process_payload_attributes_on_canonical_head: bool,
+    ) -> Self {
+        self.always_process_payload_attributes_on_canonical_head =
+            always_process_payload_attributes_on_canonical_head;
+        self
+    }
+
+    /// Returns true if payload attributes should always be processed even when the FCU head is
+    /// canonical.
+    pub const fn always_process_payload_attributes_on_canonical_head(&self) -> bool {
+        self.always_process_payload_attributes_on_canonical_head
     }
 
     /// Setter for persistence threshold.
@@ -311,9 +344,9 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether to use the precompile cache.
-    pub const fn with_precompile_cache_enabled(mut self, precompile_cache_enabled: bool) -> Self {
-        self.precompile_cache_enabled = precompile_cache_enabled;
+    /// Setter for whether to disable the precompile cache.
+    pub const fn without_precompile_cache(mut self, precompile_cache_disabled: bool) -> Self {
+        self.precompile_cache_disabled = precompile_cache_disabled;
         self
     }
 

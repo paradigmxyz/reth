@@ -59,7 +59,6 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tower::Layer;
@@ -100,40 +99,6 @@ use reth_rpc::eth::sim_bundle::EthSimBundle;
 
 // Rpc rate limiter
 pub mod rate_limiter;
-
-/// Convenience function for starting a server in one step.
-#[expect(clippy::too_many_arguments)]
-pub async fn launch<N, Provider, Pool, Network, EvmConfig, EthApi>(
-    provider: Provider,
-    pool: Pool,
-    network: Network,
-    module_config: impl Into<TransportRpcModuleConfig>,
-    server_config: impl Into<RpcServerConfig>,
-    executor: Box<dyn TaskSpawner + 'static>,
-    evm_config: EvmConfig,
-    eth: EthApi,
-    consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
-) -> Result<RpcServerHandle, RpcError>
-where
-    N: NodePrimitives,
-    Provider: FullRpcProvider<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
-        + CanonStateSubscriptions<Primitives = N>
-        + AccountReader
-        + ChangeSetReader,
-    Pool: TransactionPool + 'static,
-    Network: NetworkInfo + Peers + Clone + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N> + 'static,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
-{
-    let module_config = module_config.into();
-    server_config
-        .into()
-        .start(
-            &RpcModuleBuilder::new(provider, pool, network, executor, evm_config, consensus)
-                .build(module_config, eth),
-        )
-        .await
-}
 
 /// A builder type to configure the RPC module: See [`RpcModule`]
 ///
@@ -694,7 +659,8 @@ where
             Receipt = N::Receipt,
             Transaction = N::SignedTx,
         > + AccountReader
-        + ChangeSetReader,
+        + ChangeSetReader
+        + CanonStateSubscriptions,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: EthApiServer<
             RpcTransaction<EthApi::NetworkTypes>,
@@ -1941,6 +1907,54 @@ impl TransportRpcModules {
         self.replace_ws(other.clone())?;
         self.replace_ipc(other)?;
         Ok(true)
+    }
+
+    /// Adds or replaces given [`Methods`] in http module.
+    ///
+    /// Returns `true` if the methods were replaced or added, `false` otherwise.
+    pub fn add_or_replace_http(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.remove_http_methods(other.method_names());
+        self.merge_http(other)
+    }
+
+    /// Adds or replaces given [`Methods`] in ws module.
+    ///
+    /// Returns `true` if the methods were replaced or added, `false` otherwise.
+    pub fn add_or_replace_ws(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.remove_ws_methods(other.method_names());
+        self.merge_ws(other)
+    }
+
+    /// Adds or replaces given [`Methods`] in ipc module.
+    ///
+    /// Returns `true` if the methods were replaced or added, `false` otherwise.
+    pub fn add_or_replace_ipc(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<bool, RegisterMethodError> {
+        let other = other.into();
+        self.remove_ipc_methods(other.method_names());
+        self.merge_ipc(other)
+    }
+
+    /// Adds or replaces given [`Methods`] in all configured network modules.
+    pub fn add_or_replace_configured(
+        &mut self,
+        other: impl Into<Methods>,
+    ) -> Result<(), RegisterMethodError> {
+        let other = other.into();
+        self.add_or_replace_http(other.clone())?;
+        self.add_or_replace_ws(other.clone())?;
+        self.add_or_replace_ipc(other)?;
+        Ok(())
     }
 }
 

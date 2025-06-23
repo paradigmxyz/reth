@@ -107,6 +107,11 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a receipts request.
         response: oneshot::Receiver<RequestResult<Receipts<N::Receipt>>>,
     },
+    /// Represents a response to a request for receipts.
+    Receipts69 {
+        /// The receiver channel for the response to a receipts request.
+        response: oneshot::Receiver<RequestResult<Receipts69<N::Receipt>>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -138,6 +143,9 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
             }
             Self::Receipts { response } => {
                 poll_request!(response, Receipts, cx)
+            }
+            Self::Receipts69 { response } => {
+                poll_request!(response, Receipts69, cx)
             }
         };
         Poll::Ready(res)

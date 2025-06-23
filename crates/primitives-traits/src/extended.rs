@@ -274,8 +274,28 @@ impl<Eip4844, Tx> From<EthereumTxEnvelope<Eip4844>> for Extended<EthereumTxEnvel
 mod op {
     use crate::Extended;
     use alloy_consensus::error::ValueError;
-    use alloy_primitives::{Signature, B256};
-    use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
+    use alloy_primitives::{Sealed, Signature, B256};
+    use op_alloy_consensus::{OpPooledTransaction, OpTransaction, OpTxEnvelope, TxDeposit};
+
+    impl<B, T> OpTransaction for Extended<B, T>
+    where
+        B: OpTransaction,
+        T: OpTransaction,
+    {
+        fn is_deposit(&self) -> bool {
+            match self {
+                Self::BuiltIn(b) => b.is_deposit(),
+                Self::Other(t) => t.is_deposit(),
+            }
+        }
+
+        fn as_deposit(&self) -> Option<&Sealed<TxDeposit>> {
+            match self {
+                Self::BuiltIn(b) => b.as_deposit(),
+                Self::Other(t) => t.as_deposit(),
+            }
+        }
+    }
 
     impl<Tx> TryFrom<Extended<OpTxEnvelope, Tx>> for Extended<OpPooledTransaction, Tx> {
         type Error = <OpPooledTransaction as TryFrom<OpTxEnvelope>>::Error;

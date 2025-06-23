@@ -453,7 +453,7 @@ mod tests {
     use futures::StreamExt;
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::Block;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::Block as _;
     use reth_provider::{
         providers::BlockchainProvider, test_utils::create_test_provider_factory, BlockWriter,
@@ -511,7 +511,7 @@ mod tests {
         let mut notifications = ExExNotificationsWithoutHead::new(
             node_head,
             provider,
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             notifications_rx,
             wal.handle(),
         )
@@ -579,7 +579,7 @@ mod tests {
         let mut notifications = ExExNotificationsWithoutHead::new(
             node_head,
             provider,
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             notifications_rx,
             wal.handle(),
         )
@@ -618,7 +618,7 @@ mod tests {
         provider_rw.commit()?;
         let node_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(
-                BackfillJobFactory::new(EthExecutorProvider::mainnet(), provider.clone())
+                BackfillJobFactory::new(EthEvmConfig::mainnet(), provider.clone())
                     .backfill(node_head.number..=node_head.number)
                     .next()
                     .ok_or_else(|| eyre::eyre!("failed to backfill"))??,
@@ -660,7 +660,7 @@ mod tests {
         let mut notifications = ExExNotificationsWithoutHead::new(
             node_head,
             provider,
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             notifications_rx,
             wal.handle(),
         )
@@ -736,7 +736,7 @@ mod tests {
         let mut notifications = ExExNotificationsWithoutHead::new(
             node_head,
             provider,
-            EthExecutorProvider::mainnet(),
+            EthEvmConfig::mainnet(),
             notifications_rx,
             wal.handle(),
         )

@@ -11,6 +11,7 @@ use reth_rpc_eth_api::{
     RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
+use reth_rpc_types_compat::RpcConvert;
 use reth_storage_api::{BlockReader, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -21,6 +22,7 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
+        RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         Provider: BlockReader<
             Transaction = reth_ethereum_primitives::TransactionSigned,
             Receipt = reth_ethereum_primitives::Receipt,

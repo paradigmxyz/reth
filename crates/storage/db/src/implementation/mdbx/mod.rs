@@ -1251,6 +1251,34 @@ mod tests {
     }
 
     #[test]
+    fn db_walk_dup_with_not_existing_key() {
+        let env = create_test_db(DatabaseEnvKind::RW);
+        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // PUT (0,0)
+        let value00 = StorageEntry::default();
+        env.update(|tx| tx.put::<PlainStorageState>(key, value00).expect(ERROR_PUT)).unwrap();
+
+        // PUT (2,2)
+        let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
+        env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
+
+        // PUT (1,1)
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
+
+        // Try to walk_dup with not existing key should immediately return None
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let not_existing_key = Address::ZERO;
+            let mut walker = cursor.walk_dup(Some(not_existing_key), None).unwrap();
+            assert_eq!(walker.next(), None);
+        }
+    }
+
+    #[test]
     fn db_iterate_over_all_dup_values() {
         let env = create_test_db(DatabaseEnvKind::RW);
         let key1 = Address::from_str("0x1111111111111111111111111111111111111111")

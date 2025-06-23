@@ -431,7 +431,7 @@ struct ProcessConnection<'a, HttpMiddleware, RpcMiddleware> {
 
 /// Spawns the IPC connection onto a new task
 #[instrument(name = "connection", skip_all, fields(conn_id = %params.conn_id), level = "INFO")]
-fn process_connection<'b, RpcMiddleware, HttpMiddleware>(
+fn process_connection<RpcMiddleware, HttpMiddleware>(
     params: ProcessConnection<'_, HttpMiddleware, RpcMiddleware>,
 ) where
     RpcMiddleware: Layer<RpcService> + Clone + Send + 'static,
