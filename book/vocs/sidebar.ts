@@ -59,6 +59,10 @@ export const sidebar: SidebarItem[] = [
                 text: "Running a Node",
                 items: [
                     {
+                        text: "Overview",
+                        link: "/run/overview",
+                    },
+                    {
                         text: "Networks",
                         // link: "/run/networks",
                         items: [
