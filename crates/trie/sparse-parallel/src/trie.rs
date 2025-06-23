@@ -241,48 +241,20 @@ impl ParallelSparseTrie {
         // Step 1: Update all lower subtrie hashes (not in parallel for simplicity)
         self.update_subtrie_hashes();
         
-        // Step 2: Prepare the stack with lower subtrie root nodes
-        // Only insert nodes whose paths are in the prefix set (need to be updated)
-        let mut lower_roots = Vec::new();
-        let mut prefix_set_frozen = core::mem::take(&mut self.prefix_set).freeze();
+        // Step 2: Insert lower subtrie root hashes into the upper subtrie
+        // This ensures that when update_hashes processes the upper subtrie,
+        // it will find these nodes already hashed
+        let prefix_set_frozen = core::mem::take(&mut self.prefix_set).freeze();
         
         for subtrie in self.lower_subtries.iter_mut().flatten() {
-            // Only include this subtrie's root if its path is in the prefix set
-            if prefix_set_frozen.contains(&subtrie.path) {
-                // Get the node at the subtrie's root path
-                if let Some(node) = subtrie.nodes.get(&subtrie.path) {
-                    // Get the hash of this node (should have been computed by update_hashes)
-                    if let Some(hash) = node.hash() {
-                        let rlp_node = RlpNode::word_rlp(&hash);
-                        let node_type = match node {
-                            SparseNode::Empty => SparseNodeType::Empty,
-                            SparseNode::Hash(_) => SparseNodeType::Hash,
-                            SparseNode::Leaf { .. } => SparseNodeType::Leaf,
-                            SparseNode::Extension { store_in_db_trie, .. } => {
-                                SparseNodeType::Extension { store_in_db_trie: *store_in_db_trie }
-                            }
-                            SparseNode::Branch { store_in_db_trie, .. } => {
-                                SparseNodeType::Branch { store_in_db_trie: *store_in_db_trie }
-                            }
-                        };
-                        
-                        lower_roots.push((subtrie.path, rlp_node, node_type));
-                    }
+            // Get the node at the subtrie's root path
+            if let Some(node) = subtrie.nodes.get(&subtrie.path) {
+                // Get the hash of this node (should have been computed by update_hashes)
+                if let Some(hash) = node.hash() {
+                    // Insert or update the node in the upper subtrie as a hash node
+                    self.upper_subtrie.nodes.insert(subtrie.path, SparseNode::Hash(hash));
                 }
             }
-        }
-        
-        // Sort by path in reverse order (so that when processing in order, 
-        // children will be at the top of the stack when needed)
-        lower_roots.sort_by(|a, b| b.0.cmp(&a.0));
-        
-        // Push to the stack
-        for (path, rlp_node, node_type) in lower_roots {
-            self.upper_subtrie.buffers.rlp_node_stack.push(RlpNodeStackItem {
-                path,
-                rlp_node,
-                node_type,
-            });
         }
         
         // Step 3: Update hashes for the upper subtrie
