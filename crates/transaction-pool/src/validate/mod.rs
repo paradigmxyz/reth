@@ -9,7 +9,7 @@ use crate::{
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
-use reth_primitives_traits::{Recovered, SealedBlock};
+use reth_primitives_traits::{Block, Recovered, SealedBlock};
 use std::{fmt, fmt::Debug, future::Future, time::Instant};
 
 mod constants;
@@ -21,8 +21,7 @@ pub use eth::*;
 pub use task::{TransactionValidationTaskExecutor, ValidationTask};
 
 /// Validation constants.
-pub use constants::{DEFAULT_MAX_TX_INPUT_BYTES, TX_SLOT_BYTE_SIZE};
-use reth_primitives_traits::Block;
+pub use constants::*;
 
 /// A Result type returned after checking a transaction's validity.
 #[derive(Debug)]

@@ -73,6 +73,7 @@ impl Database for WitnessDatabase<'_> {
                 nonce: account.nonce,
                 code_hash: account.code_hash,
                 code: None,
+                code_size: None,
             })
         })
     }

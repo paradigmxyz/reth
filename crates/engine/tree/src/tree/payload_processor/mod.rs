@@ -515,6 +515,7 @@ mod tests {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
+                        code_size: None,
                     },
                     storage,
                     status: AccountStatus::Touched,

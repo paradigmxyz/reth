@@ -286,6 +286,7 @@ mod tests {
                         nonce: 10,
                         code_hash: B256::random(),
                         code: Default::default(),
+                        code_size: None,
                     },
                     storage,
                     status: AccountStatus::default(),

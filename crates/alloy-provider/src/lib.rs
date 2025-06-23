@@ -1713,6 +1713,7 @@ where
                     } else {
                         Some(revm::bytecode::Bytecode::new_raw(account_info.code))
                     },
+                    code_size: None,
                 }))
             }
         })
