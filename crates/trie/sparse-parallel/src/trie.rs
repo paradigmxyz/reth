@@ -593,7 +593,7 @@ impl SparseSubtrie {
         debug_assert!(self.buffers.path_stack.is_empty());
         self.buffers.path_stack.push(RlpNodePathStackItem {
             level: 0,
-            path: self.path.clone(),
+            path: self.path,
             is_in_prefix_set: None,
         });
 
@@ -624,8 +624,8 @@ impl SparseSubtrie {
                 SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
                 SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
                 SparseNode::Leaf { key, hash } => {
-                    let mut path = path.clone();
-                    path.extend_from_slice_unchecked(key);
+                    let mut path = path;
+                    path.extend(key);
                     if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                         (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                     } else {
@@ -637,8 +637,8 @@ impl SparseSubtrie {
                     }
                 }
                 SparseNode::Extension { key, hash, store_in_db_trie } => {
-                    let mut child_path = path.clone();
-                    child_path.extend_from_slice_unchecked(key);
+                    let mut child_path = path;
+                    child_path.extend(key);
                     if let Some((hash, store_in_db_trie)) =
                         hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                     {
@@ -715,7 +715,7 @@ impl SparseSubtrie {
                     // from the stack and keep walking in the sorted order.
                     for bit in CHILD_INDEX_RANGE.rev() {
                         if state_mask.is_bit_set(bit) {
-                            let mut child = path.clone();
+                            let mut child = path;
                             child.push_unchecked(bit);
                             self.buffers.branch_child_buf.push(child);
                         }
@@ -836,7 +836,7 @@ impl SparseSubtrie {
                                 hashes,
                                 hash.filter(|_| path.is_empty()),
                             );
-                            updates.updated_nodes.insert(path.clone(), branch_node);
+                            updates.updated_nodes.insert(path, branch_node);
                         } else if self
                             .branch_node_tree_masks
                             .get(&path)
@@ -849,7 +849,7 @@ impl SparseSubtrie {
                             // need to remove the node update and add the node itself to the list of
                             // removed nodes.
                             updates.updated_nodes.remove(&path);
-                            updates.removed_nodes.insert(path.clone());
+                            updates.removed_nodes.insert(path);
                         } else if self
                             .branch_node_hash_masks
                             .get(&path)
@@ -1020,11 +1020,11 @@ mod tests {
         buf
     }
 
-    fn create_leaf_node(key: &[u8], value_nonce: u64) -> TrieNode {
+    fn create_leaf_node(key: impl AsRef<[u8]>, value_nonce: u64) -> TrieNode {
         TrieNode::Leaf(LeafNode::new(Nibbles::from_nibbles(key), encode_account_value(value_nonce)))
     }
 
-    fn create_extension_node(key: &[u8], child_hash: B256) -> TrieNode {
+    fn create_extension_node(key: impl AsRef<[u8]>, child_hash: B256) -> TrieNode {
         TrieNode::Extension(ExtensionNode::new(
             Nibbles::from_nibbles(key),
             RlpNode::word_rlp(&child_hash),
@@ -1102,14 +1102,14 @@ mod tests {
             .clone()
             .unwrap_or_default()
             .iter()
-            .map(|(path, node)| (path.clone(), node.hash_mask))
+            .map(|(path, node)| (*path, node.hash_mask))
             .collect();
         let branch_node_tree_masks = hash_builder
             .updated_branch_nodes
             .clone()
             .unwrap_or_default()
             .iter()
-            .map(|(path, node)| (path.clone(), node.tree_mask))
+            .map(|(path, node)| (*path, node.tree_mask))
             .collect();
 
         let mut trie_updates = TrieUpdates::default();
@@ -1265,7 +1265,7 @@ mod tests {
         // Reveal leaf in the upper trie
         {
             let path = Nibbles::from_nibbles([0x1, 0x2]);
-            let node = create_leaf_node(&[0x3, 0x4], 42);
+            let node = create_leaf_node([0x3, 0x4], 42);
             let masks = TrieMasks::none();
 
             trie.reveal_node(path, node, masks).unwrap();
@@ -1283,7 +1283,7 @@ mod tests {
         // Reveal leaf in a lower trie
         {
             let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-            let node = create_leaf_node(&[0x4, 0x5], 42);
+            let node = create_leaf_node([0x4, 0x5], 42);
             let masks = TrieMasks::none();
 
             trie.reveal_node(path, node, masks).unwrap();
@@ -1306,7 +1306,7 @@ mod tests {
         let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1]);
         let child_hash = B256::repeat_byte(0xab);
-        let node = create_extension_node(&[0x2], child_hash);
+        let node = create_extension_node([0x2], child_hash);
         let masks = TrieMasks::none();
 
         trie.reveal_node(path, node, masks).unwrap();
@@ -1327,7 +1327,7 @@ mod tests {
         let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2]);
         let child_hash = B256::repeat_byte(0xcd);
-        let node = create_extension_node(&[0x3], child_hash);
+        let node = create_extension_node([0x3], child_hash);
         let masks = TrieMasks::none();
 
         trie.reveal_node(path, node, masks).unwrap();
@@ -1478,9 +1478,9 @@ mod tests {
         let account_1 = create_account(1);
         let account_2 = create_account(2);
         let account_3 = create_account(3);
-        let leaf_1 = create_leaf_node(leaf_1_key.as_slice(), account_1.nonce);
-        let leaf_2 = create_leaf_node(leaf_2_key.as_slice(), account_2.nonce);
-        let leaf_3 = create_leaf_node(leaf_3_key.as_slice(), account_3.nonce);
+        let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), account_1.nonce);
+        let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), account_2.nonce);
+        let leaf_3 = create_leaf_node(leaf_3_key.to_vec(), account_3.nonce);
 
         // Create bottom branch node
         let branch_1_path = Nibbles::from_nibbles([0, 0, 0, 0]);
@@ -1496,7 +1496,7 @@ mod tests {
         let extension_path = Nibbles::from_nibbles([0, 0, 0]);
         let extension_key = Nibbles::from_nibbles([0]);
         let extension = create_extension_node(
-            extension_key.as_slice(),
+            extension_key.to_vec(),
             RlpNode::from_rlp(&alloy_rlp::encode(&branch_1)).as_hash().unwrap(),
         );
 
@@ -1511,29 +1511,29 @@ mod tests {
         );
 
         // Reveal nodes
-        subtrie.reveal_node(branch_2_path.clone(), &branch_2, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_1_path.clone(), &leaf_1, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(extension_path.clone(), &extension, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(branch_1_path.clone(), &branch_1, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_2_path.clone(), &leaf_2, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_3_path.clone(), &leaf_3, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(branch_2_path, &branch_2, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_1_path, &leaf_1, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(extension_path, &extension, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(branch_1_path, &branch_1, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_2_path, &leaf_2, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
 
         // Run hash builder for two leaf nodes
         let (_, _, proof_nodes, _, _) = run_hash_builder(
             [
-                (leaf_1_full_path.clone(), account_1),
-                (leaf_2_full_path.clone(), account_2),
-                (leaf_3_full_path.clone(), account_3),
+                (leaf_1_full_path, account_1),
+                (leaf_2_full_path, account_2),
+                (leaf_3_full_path, account_3),
             ],
             NoopAccountTrieCursor::default(),
             Default::default(),
             [
-                branch_1_path.clone(),
-                extension_path.clone(),
-                branch_2_path.clone(),
-                leaf_1_full_path.clone(),
-                leaf_2_full_path.clone(),
-                leaf_3_full_path.clone(),
+                branch_1_path,
+                extension_path,
+                branch_2_path,
+                leaf_1_full_path,
+                leaf_2_full_path,
+                leaf_3_full_path,
             ],
         );
 
