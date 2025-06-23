@@ -148,7 +148,7 @@ where
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
     let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
-    let PayloadConfig { parent_header, attributes } = config;
+    let PayloadConfig { parent_header, attributes, keep_alive: _ } = config;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
     let state = StateProviderDatabase::new(&state_provider);

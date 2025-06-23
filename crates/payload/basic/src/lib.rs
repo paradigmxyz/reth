@@ -24,14 +24,13 @@ use reth_tasks::TaskSpawner;
 use std::{
     fmt,
     future::Future,
-    ops::Deref,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
-    sync::{oneshot, Semaphore},
+    sync::{oneshot},
     time::{Interval, Sleep},
 };
 use tracing::{debug, trace, warn};
@@ -55,8 +54,6 @@ pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
     executor: Tasks,
     /// The configuration for the job generator.
     config: BasicPayloadJobGeneratorConfig,
-    /// Restricts how many generator tasks can be executed at once.
-    payload_task_guard: PayloadTaskGuard,
     /// The type responsible for building payloads.
     ///
     /// See [`PayloadBuilder`]
@@ -79,7 +76,6 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
         Self {
             client,
             executor,
-            payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
             builder,
             pre_cached: None,
@@ -95,20 +91,22 @@ impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
     #[inline]
-    fn max_job_duration(&self, unix_timestamp: u64) -> Duration {
-        let duration_until_timestamp = duration_until(unix_timestamp);
+    fn max_job_duration(&self, unix_timestamp: u64) -> Option<Duration> {
+        self.config.deadline.map(|deadline| {
+            let duration_until_timestamp = duration_until(unix_timestamp);
 
-        // safety in case clocks are bad
-        let duration_until_timestamp = duration_until_timestamp.min(self.config.deadline * 3);
+            // safety in case clocks are bad
+            let duration_until_timestamp = duration_until_timestamp.min(deadline * 3);
 
-        self.config.deadline + duration_until_timestamp
+            deadline + duration_until_timestamp
+        })
     }
 
     /// Returns the [Instant](tokio::time::Instant) at which the job should be terminated because it
     /// is considered timed out.
     #[inline]
-    fn job_deadline(&self, unix_timestamp: u64) -> tokio::time::Instant {
-        tokio::time::Instant::now() + self.max_job_duration(unix_timestamp)
+    fn job_deadline(&self, unix_timestamp: u64) -> Option<tokio::time::Instant> {
+        self.max_job_duration(unix_timestamp).map(|d| tokio::time::Instant::now() + d)
     }
 
     /// Returns a reference to the tasks type
@@ -158,10 +156,10 @@ where
                 .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
         };
 
-        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
+        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes, self.config.keep_payload_jobs_alive);
 
-        let until = self.job_deadline(config.attributes.timestamp());
-        let deadline = Box::pin(tokio::time::sleep_until(until));
+        let deadline = self.job_deadline(config.attributes.timestamp()).map
+            (|job_deadline| Box::pin(tokio::time::sleep_until(job_deadline)));
 
         let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
@@ -174,13 +172,12 @@ where
             best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
-            payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
         };
 
-        // start the first job right away
-        job.spawn_build_job();
+        // start the first payload task right away
+        job.spawn_build_task();
 
         Ok(job)
     }
@@ -216,27 +213,6 @@ pub struct PrecachedState {
     pub cached: CachedReads,
 }
 
-/// Restricts how many generator tasks can be executed at once.
-#[derive(Debug, Clone)]
-pub struct PayloadTaskGuard(Arc<Semaphore>);
-
-impl Deref for PayloadTaskGuard {
-    type Target = Semaphore;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-// === impl PayloadTaskGuard ===
-
-impl PayloadTaskGuard {
-    /// Constructs `Self` with a maximum task count of `max_payload_tasks`.
-    pub fn new(max_payload_tasks: usize) -> Self {
-        Self(Arc::new(Semaphore::new(max_payload_tasks)))
-    }
-}
-
 /// Settings for the [`BasicPayloadJobGenerator`].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
@@ -245,9 +221,9 @@ pub struct BasicPayloadJobGeneratorConfig {
     /// The deadline for when the payload builder job should resolve.
     ///
     /// By default this is [`SLOT_DURATION`]: 12s
-    deadline: Duration,
+    deadline: Option<Duration>,
     /// Maximum number of tasks to spawn for building a payload.
-    max_payload_tasks: usize,
+    keep_payload_jobs_alive: KeepPayloadJobAlive
 }
 
 // === impl BasicPayloadJobGeneratorConfig ===
@@ -261,20 +237,28 @@ impl BasicPayloadJobGeneratorConfig {
 
     /// Sets the deadline when this job should resolve.
     pub const fn deadline(mut self, deadline: Duration) -> Self {
-        self.deadline = deadline;
+        self.deadline = Some(deadline);
         self
     }
 
-    /// Sets the maximum number of tasks to spawn for building a payload(s).
-    ///
-    /// # Panics
-    ///
-    /// If `max_payload_tasks` is 0.
-    pub fn max_payload_tasks(mut self, max_payload_tasks: usize) -> Self {
-        assert!(max_payload_tasks > 0, "max_payload_tasks must be greater than 0");
-        self.max_payload_tasks = max_payload_tasks;
+    /// Gives this job no deadline.
+    pub const fn nodeadline(mut self) -> Self {
+        self.deadline = None;
         self
     }
+
+    /// Keep payload jobs alive after they return a payload.
+    pub const fn keep_payload_jobs_alive(mut self) -> Self {
+        self.keep_payload_jobs_alive = KeepPayloadJobAlive::Yes;
+        self
+    }
+
+    /// Do not keep payload jobs alive after they return a payload.
+    pub const fn do_not_keep_payload_jobs_alive(mut self) -> Self {
+        self.keep_payload_jobs_alive = KeepPayloadJobAlive::No;
+        self
+    }
+
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
@@ -282,8 +266,8 @@ impl Default for BasicPayloadJobGeneratorConfig {
         Self {
             interval: Duration::from_secs(1),
             // 12s slot time
-            deadline: SLOT_DURATION,
-            max_payload_tasks: 3,
+            deadline: Some(SLOT_DURATION),
+            keep_payload_jobs_alive: KeepPayloadJobAlive::No
         }
     }
 }
@@ -308,15 +292,13 @@ where
     /// How to spawn building tasks
     executor: Tasks,
     /// The deadline when this job should resolve.
-    deadline: Pin<Box<Sleep>>,
+    deadline: Option<Pin<Box<Sleep>>>,
     /// The interval at which the job should build a new payload after the last.
     interval: Interval,
     /// The best payload so far and its state.
     best_payload: PayloadState<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
-    /// Restricts how many generator tasks can be executed at once.
-    payload_task_guard: PayloadTaskGuard,
     /// Caches all disk reads for the state the new payloads builds on
     ///
     /// This is used to avoid reading the same state over and over again when new attempts are
@@ -338,12 +320,11 @@ where
     Builder::BuiltPayload: Unpin + Clone,
 {
     /// Spawns a new payload build task.
-    fn spawn_build_job(&mut self) {
+    fn spawn_build_task(&mut self) {
         trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
         let cancel = CancelOnDrop::default();
         let _cancel = cancel.clone();
-        let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
         let best_payload = self.best_payload.payload().cloned();
         self.metrics.inc_initiated_payload_builds();
@@ -351,7 +332,6 @@ where
         let builder = self.builder.clone();
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
-            let _permit = guard.acquire().await;
             let args =
                 BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
             let result = builder.try_build(args);
@@ -375,17 +355,18 @@ where
         let this = self.get_mut();
 
         // check if the deadline is reached
-        if this.deadline.as_mut().poll(cx).is_ready() {
+        if this.deadline.as_mut()
+            .is_some_and(|f| f.as_mut().poll(cx).is_ready()) {
             trace!(target: "payload_builder", "payload building deadline reached");
             return Poll::Ready(Ok(()))
         }
 
         // check if the interval is reached
         while this.interval.poll_tick(cx).is_ready() {
-            // start a new job if there is no pending block, we haven't reached the deadline,
+            // start a new task if there is no pending block, we haven't reached the deadline,
             // and the payload isn't frozen
             if this.pending_block.is_none() && !this.best_payload.is_frozen() {
-                this.spawn_build_job();
+                this.spawn_build_task();
             }
         }
 
@@ -461,8 +442,9 @@ where
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.payload().cloned();
         if best_payload.is_none() && self.pending_block.is_none() {
-            // ensure we have a job scheduled if we don't have a best payload yet and none is active
-            self.spawn_build_job();
+            // ensure we have a task scheduled if we don't have a best payload
+            // yet and none is active
+            self.spawn_build_task();
         }
 
         let maybe_better = self.pending_block.take();
@@ -516,7 +498,7 @@ where
             empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
         };
 
-        (fut, KeepPayloadJobAlive::No)
+        (fut, self.config.keep_alive)
     }
 }
 
@@ -660,6 +642,9 @@ pub struct PayloadConfig<Attributes, Header = alloy_consensus::Header> {
     pub parent_header: Arc<SealedHeader<Header>>,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
+    /// Whether to keep the payload job alive after the CL has requested a
+    /// payload.
+    pub keep_alive: KeepPayloadJobAlive,
 }
 
 impl<Attributes, Header> PayloadConfig<Attributes, Header>
@@ -667,8 +652,8 @@ where
     Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
-    pub const fn new(parent_header: Arc<SealedHeader<Header>>, attributes: Attributes) -> Self {
-        Self { parent_header, attributes }
+    pub const fn new(parent_header: Arc<SealedHeader<Header>>, attributes: Attributes, keep_alive: KeepPayloadJobAlive) -> Self {
+        Self { parent_header, attributes, keep_alive }
     }
 
     /// Returns the payload id.
