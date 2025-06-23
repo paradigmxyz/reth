@@ -39,6 +39,8 @@ pub static SCROLL_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(||
         (ScrollHardfork::DarwinV2.boxed(), ForkCondition::Timestamp(1725264000)),
         (ScrollHardfork::Euclid.boxed(), ForkCondition::Timestamp(1744815600)),
         (ScrollHardfork::EuclidV2.boxed(), ForkCondition::Timestamp(1745305200)),
+        // TODO: update
+        (ScrollHardfork::Feynman.boxed(), ForkCondition::Timestamp(u64::MAX)),
     ])
 });
 
@@ -62,6 +64,8 @@ pub static SCROLL_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(||
         (ScrollHardfork::DarwinV2.boxed(), ForkCondition::Timestamp(1724832000)),
         (ScrollHardfork::Euclid.boxed(), ForkCondition::Timestamp(1741680000)),
         (ScrollHardfork::EuclidV2.boxed(), ForkCondition::Timestamp(1741852800)),
+        // TODO: update
+        (ScrollHardfork::Feynman.boxed(), ForkCondition::Timestamp(u64::MAX)),
     ])
 });
 
@@ -85,5 +89,6 @@ pub static DEV_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (ScrollHardfork::DarwinV2.boxed(), ForkCondition::Timestamp(0)),
         (ScrollHardfork::Euclid.boxed(), ForkCondition::Timestamp(0)),
         (ScrollHardfork::EuclidV2.boxed(), ForkCondition::Timestamp(0)),
+        (ScrollHardfork::Feynman.boxed(), ForkCondition::Timestamp(0)),
     ])
 });

@@ -82,7 +82,7 @@ mod tests {
             CURIE_L1_GAS_PRICE_ORACLE_STORAGE, IS_CURIE_SLOT, L1_BLOB_BASE_FEE_SLOT,
             L1_GAS_PRICE_ORACLE_ADDRESS,
         },
-        ScrollBlockExecutor, ScrollEvm,
+        ScrollBlockExecutionCtx, ScrollBlockExecutor, ScrollEvm,
     };
     use scroll_alloy_hardforks::ScrollHardforks;
 
@@ -117,7 +117,12 @@ mod tests {
 
         let evm = evm_config.evm_for_block(state, block.header());
         let receipt_builder = ScrollRethReceiptBuilder::default();
-        ScrollBlockExecutor::new(evm, chain_spec, receipt_builder)
+        ScrollBlockExecutor::new(
+            evm,
+            ScrollBlockExecutionCtx { parent_hash: block.parent_hash },
+            chain_spec,
+            receipt_builder,
+        )
     }
 
     fn block(

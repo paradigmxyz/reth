@@ -33,7 +33,12 @@ auto_impl = { workspace = true, default-features = false }
 serde = { workspace = true, default-features = false, features = ["derive"], optional = true }
 
 [dev-dependencies]
+alloy-hardforks.workspace = true
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 eyre.workspace = true
+reth-evm.workspace = true
+reth-scroll-chainspec.workspace = true
+reth-scroll-evm.workspace = true
 
 [features]
 std = [
@@ -46,6 +51,8 @@ std = [
     "alloy-eips/std",
     "scroll-alloy-consensus/std",
     "scroll-alloy-hardforks/std",
+    "reth-evm/std",
+    "reth-scroll-chainspec/std",
 ]
 serde = [
     "dep:serde",
@@ -56,4 +63,5 @@ serde = [
     "alloy-consensus/serde",
     "scroll-alloy-consensus/serde",
     "scroll-alloy-hardforks/serde",
+    "alloy-hardforks/serde",
 ]

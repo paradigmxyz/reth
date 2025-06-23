@@ -397,6 +397,9 @@ impl From<Genesis> for ScrollChainSpec {
             (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
             (ScrollHardfork::Darwin.boxed(), hard_fork_info.darwin_time),
             (ScrollHardfork::DarwinV2.boxed(), hard_fork_info.darwin_v2_time),
+            (ScrollHardfork::Euclid.boxed(), hard_fork_info.euclid_time),
+            (ScrollHardfork::EuclidV2.boxed(), hard_fork_info.euclid_v2_time),
+            (ScrollHardfork::Feynman.boxed(), hard_fork_info.feynman_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -507,7 +510,11 @@ mod tests {
                 ),
                 (
                     Head { number: 7096836, timestamp: 1745305200, ..Default::default() },
-                    ForkId { hash: ForkHash([0x0e, 0xcf, 0xb2, 0x31]), next: 0 },
+                    ForkId { hash: ForkHash([0x0e, 0xcf, 0xb2, 0x31]), next: 18446744073709551615 },
+                ),
+                (
+                    Head { number: 7096836, timestamp: 18446744073709551615, ..Default::default() },
+                    ForkId { hash: ForkHash([0x80, 0x47, 0xc0, 0x76]), next: 0 },
                 ),
             ],
         );
@@ -591,7 +598,11 @@ mod tests {
                 ),
                 (
                     Head { number: 4740239, timestamp: 1741852800, ..Default::default() },
-                    ForkId { hash: ForkHash([0x51, 0x7e, 0x0f, 0x1c]), next: 0 },
+                    ForkId { hash: ForkHash([0x51, 0x7e, 0x0f, 0x1c]), next: 18446744073709551615 },
+                ),
+                (
+                    Head { number: 4740239, timestamp: 18446744073709551615, ..Default::default() },
+                    ForkId { hash: ForkHash([0xc8, 0x43, 0x01, 0x5b]), next: 0 },
                 ),
             ],
         );
