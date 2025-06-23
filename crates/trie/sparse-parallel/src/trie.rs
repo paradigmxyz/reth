@@ -234,7 +234,33 @@ impl ParallelSparseTrie {
     /// 2. The keccak256 hash of the root node's RLP representation
     pub fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
-        todo!()
+        
+        // Step 1: Update all lower subtrie hashes (not in parallel for simplicity)
+        self.update_subtrie_hashes();
+        
+        // Step 2: Insert lower subtrie root hashes into the upper subtrie
+        // This ensures that when update_hashes processes the upper subtrie,
+        // it will find these nodes already hashed
+        for subtrie in self.lower_subtries.iter_mut().flatten() {
+            // Get the node at the subtrie's root path
+            if let Some(node) = subtrie.nodes.get(&subtrie.path) {
+                // Get the hash of this node (should have been computed by update_hashes)
+                if let Some(hash) = node.hash() {
+                    // Insert or update the node in the upper subtrie as a hash node
+                    self.upper_subtrie.nodes.insert(subtrie.path, SparseNode::Hash(hash));
+                }
+            }
+        }
+        
+        // Step 3: Update hashes for the upper subtrie
+        // After update_subtrie_hashes, self.prefix_set contains the unchanged keys
+        // that don't belong to any lower subtrie - these are exactly the keys
+        // that belong to the upper subtrie and need to be updated.
+        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
+        let root_rlp = self.upper_subtrie.update_hashes(&mut prefix_set);
+        
+        // Step 4: Return the root hash
+        root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
     }
 
     /// Configures the trie to retain information about updates.
