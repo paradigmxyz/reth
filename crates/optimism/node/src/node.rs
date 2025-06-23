@@ -258,20 +258,6 @@ impl NodeTypes for OpNode {
 ///
 /// This type provides optimism-specific addons to the node and exposes the RPC server and engine
 /// API.
-///
-/// # Middleware Configuration
-///
-/// The RPC middleware can be configured through the public `rpc_add_ons` field. Since `RpcAddOns`
-/// now supports middleware configuration via `set_rpc_middleware`, you can do:
-///
-/// ```ignore
-/// let op_addons = OpAddOns::builder().build();
-/// let custom_middleware = RpcServiceBuilder::new().layer(MyCustomLayer);
-/// let op_addons = OpAddOns {
-///     rpc_add_ons: op_addons.rpc_add_ons.set_rpc_middleware(custom_middleware),
-///     ..op_addons
-/// };
-/// ```
 #[derive(Debug)]
 pub struct OpAddOns<N: FullNodeComponents, EthB: EthApiBuilder<N>, EV, EB> {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers

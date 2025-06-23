@@ -431,7 +431,10 @@ pub struct RpcAddOns<
     engine_validator_builder: EV,
     /// Builder for `EngineApi`
     engine_api_builder: EB,
-    /// Configurable RPC middleware
+    /// Configurable RPC middleware stack.
+    ///
+    /// This middleware is applied to all RPC requests across all transports (HTTP, WS, IPC).
+    /// See [`RpcAddOns::set_rpc_middleware`] for more details.
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
 }
 
@@ -504,7 +507,44 @@ where
         }
     }
 
-    /// Sets the RPC middleware.
+    /// Sets the RPC middleware stack for processing RPC requests.
+    ///
+    /// This method configures a custom middleware stack that will be applied to all RPC requests
+    /// across HTTP, WebSocket, and IPC transports. The middleware is applied to the RPC service
+    /// layer, allowing you to intercept, modify, or enhance RPC request processing.
+    ///
+    ///
+    /// # How It Works
+    ///
+    /// The middleware uses the Tower ecosystem's `Layer` pattern. When an RPC server is started,
+    /// the configured middleware stack is applied to create a layered service that processes
+    /// requests in the order the layers were added.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use reth_rpc_builder::{RpcServiceBuilder, RpcRequestMetrics};
+    /// use tower::Layer;
+    ///
+    /// // Simple example with metrics
+    /// let metrics_layer = RpcRequestMetrics::new(metrics_recorder);
+    /// let with_metrics = rpc_addons.set_rpc_middleware(
+    ///     RpcServiceBuilder::new().layer(metrics_layer)
+    /// );
+    ///
+    /// // Composing multiple middleware layers
+    /// let middleware_stack = RpcServiceBuilder::new()
+    ///     .layer(rate_limit_layer)
+    ///     .layer(logging_layer)
+    ///     .layer(metrics_layer);
+    /// let with_full_stack = rpc_addons.set_rpc_middleware(middleware_stack);
+    /// ```
+    ///
+    /// # Notes
+    ///
+    /// - Middleware is applied to the RPC service layer, not the HTTP transport layer
+    /// - The default middleware is `Identity` (no-op), which passes through requests unchanged
+    /// - Middleware layers are applied in the order they are added via `.layer()`
     pub fn set_rpc_middleware<T>(
         self,
         rpc_middleware: RpcServiceBuilder<T>,
