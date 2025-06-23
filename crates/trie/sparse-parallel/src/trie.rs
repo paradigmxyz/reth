@@ -302,15 +302,15 @@ impl ParallelSparseTrie {
     pub fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
-        // Step 1: Update all lower subtrie hashes (not in parallel for simplicity)
+        // Update all lower subtrie hashes
         self.update_subtrie_hashes();
 
-        // Step 2: Update hashes for the upper subtrie using our specialized function
+        // Update hashes for the upper subtrie using our specialized function
         // that can access both upper and lower subtrie nodes
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let root_rlp = self.update_upper_subtrie_hashes(&mut prefix_set);
 
-        // Step 4: Return the root hash
+        // Return the root hash
         root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
     }
 
@@ -1802,21 +1802,10 @@ mod tests {
         let mut trie = ParallelSparseTrie::default();
         let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let mut subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
         let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
-
-        // Add some nodes to subtrie_2 so it has something to hash
-        // First, add a root node for the subtrie at its path [0x1, 0x0]
-        subtrie_2.nodes.insert(
-            subtrie_2.path,
-            SparseNode::Leaf {
-                key: Nibbles::new(), // empty key since the full path is already used
-                hash: None,
-            },
-        );
-        subtrie_2.values.insert(subtrie_2.path, vec![1, 2, 3, 4]);
 
         // Add subtries at specific positions
         trie.lower_subtries[subtrie_1_index] = Some(subtrie_1);
@@ -1845,6 +1834,125 @@ mod tests {
         assert!(trie.lower_subtries[subtrie_1_index].is_some());
         assert!(trie.lower_subtries[subtrie_2_index].is_some());
         assert!(trie.lower_subtries[subtrie_3_index].is_some());
+    }
+
+    #[test]
+    fn test_subtrie_update_hashes() {
+        let mut subtrie =
+            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])).with_updates(true));
+
+        // Create leaf nodes with paths 0x0...0, 0x00001...0, 0x0010...0
+        let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
+        let leaf_1_path = leaf_1_full_path.slice(..5);
+        let leaf_1_key = leaf_1_full_path.slice(5..);
+        let leaf_2_full_path = Nibbles::from_nibbles([vec![0, 0, 0, 0, 1], vec![0; 59]].concat());
+        let leaf_2_path = leaf_2_full_path.slice(..5);
+        let leaf_2_key = leaf_2_full_path.slice(5..);
+        let leaf_3_full_path = Nibbles::from_nibbles([vec![0, 0, 1], vec![0; 61]].concat());
+        let leaf_3_path = leaf_3_full_path.slice(..3);
+        let leaf_3_key = leaf_3_full_path.slice(3..);
+
+        let account_1 = create_account(1);
+        let account_2 = create_account(2);
+        let account_3 = create_account(3);
+        let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), account_1.nonce);
+        let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), account_2.nonce);
+        let leaf_3 = create_leaf_node(leaf_3_key.to_vec(), account_3.nonce);
+
+        // Create bottom branch node
+        let branch_1_path = Nibbles::from_nibbles([0, 0, 0, 0]);
+        let branch_1 = create_branch_node_with_children(
+            &[0, 1],
+            vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1)),
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2)),
+            ],
+        );
+
+        // Create an extension node
+        let extension_path = Nibbles::from_nibbles([0, 0, 0]);
+        let extension_key = Nibbles::from_nibbles([0]);
+        let extension = create_extension_node(
+            extension_key.to_vec(),
+            RlpNode::from_rlp(&alloy_rlp::encode(&branch_1)).as_hash().unwrap(),
+        );
+
+        // Create top branch node
+        let branch_2_path = Nibbles::from_nibbles([0, 0]);
+        let branch_2 = create_branch_node_with_children(
+            &[0, 1],
+            vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&extension)),
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_3)),
+            ],
+        );
+
+        // Reveal nodes
+        subtrie.reveal_node(branch_2_path, &branch_2, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_1_path, &leaf_1, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(extension_path, &extension, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(branch_1_path, &branch_1, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_2_path, &leaf_2, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
+
+        // Run hash builder for two leaf nodes
+        let (_, _, proof_nodes, _, _) = run_hash_builder(
+            [
+                (leaf_1_full_path, account_1),
+                (leaf_2_full_path, account_2),
+                (leaf_3_full_path, account_3),
+            ],
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            [
+                branch_1_path,
+                extension_path,
+                branch_2_path,
+                leaf_1_full_path,
+                leaf_2_full_path,
+                leaf_3_full_path,
+            ],
+        );
+
+        // Update hashes for the subtrie
+        subtrie.update_hashes(
+            &mut PrefixSetMut::from([leaf_1_full_path, leaf_2_full_path, leaf_3_full_path])
+                .freeze(),
+        );
+
+        // Compare hashes between hash builder and subtrie
+
+        let hash_builder_branch_1_hash =
+            RlpNode::from_rlp(proof_nodes.get(&branch_1_path).unwrap().as_ref()).as_hash().unwrap();
+        let subtrie_branch_1_hash = subtrie.nodes.get(&branch_1_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_branch_1_hash, subtrie_branch_1_hash);
+
+        let hash_builder_extension_hash =
+            RlpNode::from_rlp(proof_nodes.get(&extension_path).unwrap().as_ref())
+                .as_hash()
+                .unwrap();
+        let subtrie_extension_hash = subtrie.nodes.get(&extension_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_extension_hash, subtrie_extension_hash);
+
+        let hash_builder_branch_2_hash =
+            RlpNode::from_rlp(proof_nodes.get(&branch_2_path).unwrap().as_ref()).as_hash().unwrap();
+        let subtrie_branch_2_hash = subtrie.nodes.get(&branch_2_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_branch_2_hash, subtrie_branch_2_hash);
+
+        let subtrie_leaf_1_hash = subtrie.nodes.get(&leaf_1_path).unwrap().hash().unwrap();
+        let hash_builder_leaf_1_hash =
+            RlpNode::from_rlp(proof_nodes.get(&leaf_1_path).unwrap().as_ref()).as_hash().unwrap();
+        assert_eq!(hash_builder_leaf_1_hash, subtrie_leaf_1_hash);
+
+        let hash_builder_leaf_2_hash =
+            RlpNode::from_rlp(proof_nodes.get(&leaf_2_path).unwrap().as_ref()).as_hash().unwrap();
+        let subtrie_leaf_2_hash = subtrie.nodes.get(&leaf_2_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_leaf_2_hash, subtrie_leaf_2_hash);
+
+        let hash_builder_leaf_3_hash =
+            RlpNode::from_rlp(proof_nodes.get(&leaf_3_path).unwrap().as_ref()).as_hash().unwrap();
+        let subtrie_leaf_3_hash = subtrie.nodes.get(&leaf_3_path).unwrap().hash().unwrap();
+        assert_eq!(hash_builder_leaf_3_hash, subtrie_leaf_3_hash);
     }
 
     #[test]
@@ -1985,124 +2093,5 @@ mod tests {
         assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_some());
         assert!(leaf_1_subtrie.nodes.get(&leaf_1_path).unwrap().hash().is_some());
         assert!(leaf_2_subtrie.nodes.get(&leaf_2_path).unwrap().hash().is_some());
-    }
-
-    #[test]
-    fn test_subtrie_update_hashes() {
-        let mut subtrie =
-            Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])).with_updates(true));
-
-        // Create leaf nodes with paths 0x0...0, 0x00001...0, 0x0010...0
-        let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
-        let leaf_1_path = leaf_1_full_path.slice(..5);
-        let leaf_1_key = leaf_1_full_path.slice(5..);
-        let leaf_2_full_path = Nibbles::from_nibbles([vec![0, 0, 0, 0, 1], vec![0; 59]].concat());
-        let leaf_2_path = leaf_2_full_path.slice(..5);
-        let leaf_2_key = leaf_2_full_path.slice(5..);
-        let leaf_3_full_path = Nibbles::from_nibbles([vec![0, 0, 1], vec![0; 61]].concat());
-        let leaf_3_path = leaf_3_full_path.slice(..3);
-        let leaf_3_key = leaf_3_full_path.slice(3..);
-
-        let account_1 = create_account(1);
-        let account_2 = create_account(2);
-        let account_3 = create_account(3);
-        let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), account_1.nonce);
-        let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), account_2.nonce);
-        let leaf_3 = create_leaf_node(leaf_3_key.to_vec(), account_3.nonce);
-
-        // Create bottom branch node
-        let branch_1_path = Nibbles::from_nibbles([0, 0, 0, 0]);
-        let branch_1 = create_branch_node_with_children(
-            &[0, 1],
-            vec![
-                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1)),
-                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2)),
-            ],
-        );
-
-        // Create an extension node
-        let extension_path = Nibbles::from_nibbles([0, 0, 0]);
-        let extension_key = Nibbles::from_nibbles([0]);
-        let extension = create_extension_node(
-            extension_key.to_vec(),
-            RlpNode::from_rlp(&alloy_rlp::encode(&branch_1)).as_hash().unwrap(),
-        );
-
-        // Create top branch node
-        let branch_2_path = Nibbles::from_nibbles([0, 0]);
-        let branch_2 = create_branch_node_with_children(
-            &[0, 1],
-            vec![
-                RlpNode::from_rlp(&alloy_rlp::encode(&extension)),
-                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_3)),
-            ],
-        );
-
-        // Reveal nodes
-        subtrie.reveal_node(branch_2_path, &branch_2, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_1_path, &leaf_1, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(extension_path, &extension, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(branch_1_path, &branch_1, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_2_path, &leaf_2, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
-
-        // Run hash builder for two leaf nodes
-        let (_, _, proof_nodes, _, _) = run_hash_builder(
-            [
-                (leaf_1_full_path, account_1),
-                (leaf_2_full_path, account_2),
-                (leaf_3_full_path, account_3),
-            ],
-            NoopAccountTrieCursor::default(),
-            Default::default(),
-            [
-                branch_1_path,
-                extension_path,
-                branch_2_path,
-                leaf_1_full_path,
-                leaf_2_full_path,
-                leaf_3_full_path,
-            ],
-        );
-
-        // Update hashes for the subtrie
-        subtrie.update_hashes(
-            &mut PrefixSetMut::from([leaf_1_full_path, leaf_2_full_path, leaf_3_full_path])
-                .freeze(),
-        );
-
-        // Compare hashes between hash builder and subtrie
-
-        let hash_builder_branch_1_hash =
-            RlpNode::from_rlp(proof_nodes.get(&branch_1_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_branch_1_hash = subtrie.nodes.get(&branch_1_path).unwrap().hash().unwrap();
-        assert_eq!(hash_builder_branch_1_hash, subtrie_branch_1_hash);
-
-        let hash_builder_extension_hash =
-            RlpNode::from_rlp(proof_nodes.get(&extension_path).unwrap().as_ref())
-                .as_hash()
-                .unwrap();
-        let subtrie_extension_hash = subtrie.nodes.get(&extension_path).unwrap().hash().unwrap();
-        assert_eq!(hash_builder_extension_hash, subtrie_extension_hash);
-
-        let hash_builder_branch_2_hash =
-            RlpNode::from_rlp(proof_nodes.get(&branch_2_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_branch_2_hash = subtrie.nodes.get(&branch_2_path).unwrap().hash().unwrap();
-        assert_eq!(hash_builder_branch_2_hash, subtrie_branch_2_hash);
-
-        let subtrie_leaf_1_hash = subtrie.nodes.get(&leaf_1_path).unwrap().hash().unwrap();
-        let hash_builder_leaf_1_hash =
-            RlpNode::from_rlp(proof_nodes.get(&leaf_1_path).unwrap().as_ref()).as_hash().unwrap();
-        assert_eq!(hash_builder_leaf_1_hash, subtrie_leaf_1_hash);
-
-        let hash_builder_leaf_2_hash =
-            RlpNode::from_rlp(proof_nodes.get(&leaf_2_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_leaf_2_hash = subtrie.nodes.get(&leaf_2_path).unwrap().hash().unwrap();
-        assert_eq!(hash_builder_leaf_2_hash, subtrie_leaf_2_hash);
-
-        let hash_builder_leaf_3_hash =
-            RlpNode::from_rlp(proof_nodes.get(&leaf_3_path).unwrap().as_ref()).as_hash().unwrap();
-        let subtrie_leaf_3_hash = subtrie.nodes.get(&leaf_3_path).unwrap().hash().unwrap();
-        assert_eq!(hash_builder_leaf_3_hash, subtrie_leaf_3_hash);
     }
 }
