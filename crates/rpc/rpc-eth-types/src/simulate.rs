@@ -22,8 +22,8 @@ use reth_evm::{
 use reth_primitives_traits::{
     block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
 };
+use reth_rpc_convert::{RpcConvert, RpcTransaction};
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types_compat::{RpcConvert, RpcTransaction};
 use reth_storage_api::noop::NoopProvider;
 use revm::{
     context_interface::result::ExecutionResult,
