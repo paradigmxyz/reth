@@ -45,7 +45,7 @@ where
             tx: &Tx,
             content: &mut BTreeMap<
                 Address,
-                BTreeMap<String, <RpcTxB::Network as RpcTypes>::Transaction>,
+                BTreeMap<String, <RpcTxB::Network as RpcTypes>::TransactionResponse>,
             >,
             resp_builder: &RpcTxB,
         ) -> Result<(), RpcTxB::Error>
