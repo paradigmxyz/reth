@@ -7172,7 +7172,6 @@ dependencies = [
  "reth-trie",
  "revm",
  "revm-primitives",
- "serde_json",
  "tokio",
  "tracing",
 ]
