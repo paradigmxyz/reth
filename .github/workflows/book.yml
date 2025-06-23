@@ -58,6 +58,9 @@ jobs:
       pull-requests: write
     timeout-minutes: 60
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Download build artifact
         uses: actions/download-artifact@v4
         with:
