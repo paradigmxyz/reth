@@ -303,60 +303,60 @@ pub struct TransactionConversionError(String);
 
 /// Generic RPC response object converter for primitives `N` and network `E`.
 #[derive(Debug)]
-pub struct RpcConverter<N, E, Evm, Err, Map = ()> {
-    phantom: PhantomData<(N, E, Evm, Err)>,
+pub struct RpcConverter<E, Evm, Err, Map = ()> {
+    phantom: PhantomData<(E, Evm, Err)>,
     mapper: Map,
 }
 
-impl<N, E, Evm, Err> RpcConverter<N, E, Evm, Err, ()> {
+impl<E, Evm, Err> RpcConverter<E, Evm, Err, ()> {
     /// Creates a new [`RpcConverter`] with the default mapper.
     pub const fn new() -> Self {
         Self::with_mapper(())
     }
 }
 
-impl<N, E, Evm, Err, Map> RpcConverter<N, E, Evm, Err, Map> {
+impl<E, Evm, Err, Map> RpcConverter<E, Evm, Err, Map> {
     /// Creates a new [`RpcConverter`] with `mapper`.
     pub const fn with_mapper(mapper: Map) -> Self {
         Self { phantom: PhantomData, mapper }
     }
 
     /// Converts the generic types.
-    pub fn convert<N2, E2, Evm2, Err2>(self) -> RpcConverter<N2, E2, Evm2, Err2, Map> {
+    pub fn convert<E2, Evm2, Err2>(self) -> RpcConverter<E2, Evm2, Err2, Map> {
         RpcConverter::with_mapper(self.mapper)
     }
 
     /// Swaps the inner `mapper`.
-    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<N, E, Evm, Err, Map2> {
+    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<E, Evm, Err, Map2> {
         RpcConverter::with_mapper(mapper)
     }
 
     /// Converts the generic types and swaps the inner `mapper`.
-    pub fn convert_map<N2, E2, Evm2, Err2, Map2>(
+    pub fn convert_map<E2, Evm2, Err2, Map2>(
         self,
         mapper: Map2,
-    ) -> RpcConverter<N2, E2, Evm2, Err2, Map2> {
+    ) -> RpcConverter<E2, Evm2, Err2, Map2> {
         self.convert().map(mapper)
     }
 }
 
-impl<N, E, Evm, Err, Map: Clone> Clone for RpcConverter<N, E, Evm, Err, Map> {
+impl<E, Evm, Err, Map: Clone> Clone for RpcConverter<E, Evm, Err, Map> {
     fn clone(&self) -> Self {
         Self::with_mapper(self.mapper.clone())
     }
 }
 
-impl<N, E, Evm, Err> Default for RpcConverter<N, E, Evm, Err> {
+impl<E, Evm, Err> Default for RpcConverter<E, Evm, Err> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N, E, Evm, Err, Map> TransactionCompat for RpcConverter<N, E, Evm, Err, Map>
+impl<N, E, Evm, Err, Map> TransactionCompat for RpcConverter<E, Evm, Err, Map>
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
-    Evm: ConfigureEvm,
+    Evm: ConfigureEvm<Primitives = N>,
     TxTy<N>: IntoRpcTx<E::Transaction> + Clone + Debug,
     TransactionRequest: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Err: From<TransactionConversionError>
