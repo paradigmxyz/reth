@@ -13,30 +13,30 @@ const projects: SdkProject[] = [
   {
     name: 'Base Node',
     description: "Coinbase's L2 scaling solution node implementation",
-    loc: '~200',
+    loc: '~3K',
     githubUrl: 'https://github.com/base/node-reth',
     company: 'Coinbase'
   },
   {
     name: 'Bera Reth',
     description: "Berachain's high-performance EVM node with custom features",
-    loc: '~300',
+    loc: '~1K',
     githubUrl: 'https://github.com/berachain/bera-reth',
     company: 'Berachain'
   },
   {
-    name: 'Gnosis Reth',
+    name: 'Reth Gnosis',
     description: "Gnosis Chain's xDai-compatible execution client",
-    loc: '~400',
+    loc: '~5K',
     githubUrl: 'https://github.com/gnosischain/reth_gnosis',
     company: 'Gnosis'
   },
   {
-    name: 'World Chain',
-    description: "Worldcoin's identity-focused blockchain node",
-    loc: '~250',
-    githubUrl: 'https://github.com/worldcoin/world-chain',
-    company: 'Worldcoin'
+    name: 'Reth BSC',
+    description: "BNB Smart Chain execution client implementation",
+    loc: '~6K',
+    githubUrl: 'https://github.com/loocapro/reth-bsc',
+    company: 'LooCa Protocol'
   }
 ]
 
