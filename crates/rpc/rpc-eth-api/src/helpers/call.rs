@@ -190,7 +190,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let block = simulate::build_simulated_block(
                         result.block,
                         results,
-                        return_full_transactions,
+                        return_full_transactions.into(),
                         this.tx_resp_builder(),
                     )?;
 

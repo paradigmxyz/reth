@@ -279,6 +279,14 @@ where
             for start_block in range.step_by(incremental_threshold as usize) {
                 let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
                 let chunk_range = start_block..=chunk_to;
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?current_block_number,
+                    target = ?to_block,
+                    incremental_threshold,
+                    chunk_range = ?chunk_range,
+                    "Processing chunk"
+                );
                 let (root, updates) =
                 StateRoot::incremental_root_with_updates(provider.tx_ref(), chunk_range)
                     .map_err(|e| {
