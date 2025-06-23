@@ -242,12 +242,13 @@ impl ParallelSparseTrie {
         self.update_subtrie_hashes();
         
         // Step 2: Prepare the stack with lower subtrie root nodes
-        // Only insert nodes that are actually referenced by the upper subtrie
+        // Only insert nodes whose paths are in the prefix set (need to be updated)
         let mut lower_roots = Vec::new();
+        let mut prefix_set_frozen = core::mem::take(&mut self.prefix_set).freeze();
         
         for subtrie in self.lower_subtries.iter_mut().flatten() {
-            // Only include this subtrie's root if it's referenced in the upper subtrie
-            if self.upper_subtrie.nodes.contains_key(&subtrie.path) {
+            // Only include this subtrie's root if its path is in the prefix set
+            if prefix_set_frozen.contains(&subtrie.path) {
                 // Get the node at the subtrie's root path
                 if let Some(node) = subtrie.nodes.get(&subtrie.path) {
                     // Get the hash of this node (should have been computed by update_hashes)
@@ -288,7 +289,7 @@ impl ParallelSparseTrie {
         // After update_subtrie_hashes, self.prefix_set contains the unchanged keys
         // that don't belong to any lower subtrie - these are exactly the keys
         // that belong to the upper subtrie and need to be updated.
-        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
+        let mut prefix_set = prefix_set_frozen;
         let root_rlp = self.upper_subtrie.update_hashes(&mut prefix_set);
         
         // Step 4: Return the root hash
