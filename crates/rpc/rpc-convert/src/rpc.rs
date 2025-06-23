@@ -10,7 +10,9 @@ pub trait RpcTypes {
     /// Receipt response type.
     type Receipt: RpcObject + ReceiptResponse;
     /// Transaction response type.
-    type Transaction: RpcObject + TransactionResponse;
+    type TransactionResponse: RpcObject + TransactionResponse;
+    /// Transaction response type.
+    type TransactionRequest: RpcObject;
 }
 
 impl<T> RpcTypes for T
@@ -19,8 +21,9 @@ where
 {
     type Header = T::HeaderResponse;
     type Receipt = T::ReceiptResponse;
-    type Transaction = T::TransactionResponse;
+    type TransactionResponse = T::TransactionResponse;
+    type TransactionRequest = T::TransactionRequest;
 }
 
 /// Adapter for network specific transaction type.
-pub type RpcTransaction<T> = <T as RpcTypes>::Transaction;
+pub type RpcTransaction<T> = <T as RpcTypes>::TransactionResponse;
