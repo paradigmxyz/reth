@@ -62,10 +62,6 @@ build: ## Build the reth binary into `target` directory.
 # Environment variables for reproducible builds
 # Initialize RUSTFLAGS
 RUST_BUILD_FLAGS =
-# Enable static linking to ensure reproducibility across builds
-RUST_BUILD_FLAGS += --C target-feature=+crt-static
-# Set the linker to use static libgcc to ensure reproducibility across builds
-RUST_BUILD_FLAGS += -C link-arg=-static-libgcc
 # Remove build ID from the binary to ensure reproducibility across builds
 RUST_BUILD_FLAGS += -C link-arg=-Wl,--build-id=none
 # Remove metadata hash from symbol names to ensure reproducible builds
