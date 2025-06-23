@@ -27,7 +27,7 @@ use reth_revm::{
     db::{CacheDB, State},
     DatabaseRef,
 };
-use reth_rpc_convert::RpcConvert;
+use reth_rpc_convert::{RpcConvert, RpcTypes};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
@@ -456,7 +456,10 @@ pub trait Call:
                 SignedTx = ProviderTx<Self::Provider>,
             >,
         >,
-        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
+        RpcConvert: RpcConvert<
+            TxEnv = TxEnvFor<Self::Evm>,
+            Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+        >,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,
@@ -705,7 +708,7 @@ pub trait Call:
             );
         }
 
-        Ok(self.tx_resp_builder().tx_env(request, &evm_env.cfg_env, &evm_env.block_env)?)
+        Ok(self.tx_resp_builder().tx_env(request.into(), &evm_env.cfg_env, &evm_env.block_env)?)
     }
 
     /// Prepares the [`EvmEnv`] for execution of calls.

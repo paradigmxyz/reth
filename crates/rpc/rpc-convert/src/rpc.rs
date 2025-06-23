@@ -25,5 +25,8 @@ where
     type TransactionRequest = T::TransactionRequest;
 }
 
-/// Adapter for network specific transaction type.
+/// Adapter for network specific transaction response.
 pub type RpcTransaction<T> = <T as RpcTypes>::TransactionResponse;
+
+/// Adapter for network specific transaction request.
+pub type RpcTxReq<T> = <T as RpcTypes>::TransactionRequest;
