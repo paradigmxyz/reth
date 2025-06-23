@@ -561,7 +561,7 @@ where
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-    for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
+    <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
         Send
             + Sync
             + 'static
@@ -833,7 +833,7 @@ where
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-    for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
+    <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
         Send
             + Sync
             + 'static
