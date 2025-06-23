@@ -17,8 +17,8 @@ pub mod transaction;
 pub use fees::{CallFees, CallFeesError};
 pub use rpc::*;
 pub use transaction::{
-    EthTxEnvError, IntoRpcTx, RpcConverter, TransactionCompat, TransactionConversionError,
-    TryIntoSimTx, TxInfoMapper,
+    EthTxEnvError, IntoRpcTx, RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx,
+    TxInfoMapper,
 };
 
 #[cfg(feature = "op")]
