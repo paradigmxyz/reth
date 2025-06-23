@@ -963,6 +963,44 @@ impl SparseSubtrieInner {
     }
 }
 
+/// Computes the RLP encoding for a single trie node and manages the traversal state.
+///
+/// This function is the core workhorse of the parallel sparse trie RLP computation. It processes
+/// a single node, computing its RLP encoding based on the node type and maintaining all necessary
+/// state for iterative traversal. Unlike the main `SparseTrie::rlp_node`, this function is
+/// designed to be called repeatedly as part of the iterative traversal managed by the caller.
+///
+/// # Node Processing Details
+///
+/// - **Empty/Hash nodes**: Return pre-computed or cached RLP immediately
+/// - **Leaf nodes**: Encode the key-value pair and update the node's hash
+/// - **Extension nodes**: May need to defer processing until child is computed
+/// - **Branch nodes**: Complex processing involving up to 16 children and mask management
+///
+/// # Deferred Processing
+///
+/// When a node depends on child nodes that haven't been computed yet, the function pushes
+/// the current node back onto the path stack along with its children, then returns early.
+/// This allows the iterative algorithm to process children first before retrying the parent.
+///
+/// # Parameters
+///
+/// - `branch_node_tree_masks`: Database masks indicating which branch children are stored
+/// - `branch_node_hash_masks`: Database masks indicating which branch children have hashes
+/// - `values`: The complete set of leaf values in the trie
+/// - `updates`: Optional accumulator for tracking trie changes (node updates/removals)
+/// - `buffers`: Reusable buffers for traversal state and RLP accumulation
+/// - `prefix_set`: Set of paths that need updating (optimization to skip unchanged nodes)
+/// - `path`: The nibble path to the current node
+/// - `is_in_prefix_set`: Cached flag indicating if this path needs updating
+/// - `node`: The sparse node to process (will be mutated to update hash)
+///
+/// # Side Effects
+///
+/// - Updates the node's hash field after computing RLP
+/// - Modifies buffers (path_stack, rlp_node_stack, etc.) to manage traversal
+/// - Updates the `updates` accumulator when tracking changes
+/// - May push items onto the path stack for deferred processing
 fn rlp_node(
     branch_node_tree_masks: &HashMap<Nibbles, TrieMask>,
     branch_node_hash_masks: &HashMap<Nibbles, TrieMask>,
