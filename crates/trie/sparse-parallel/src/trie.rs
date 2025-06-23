@@ -232,28 +232,31 @@ impl ParallelSparseTrie {
         self.update_subtrie_hashes();
         
         // Step 2: Prepare the stack with lower subtrie root nodes
-        // We need to collect all lower subtrie roots and sort them properly
+        // Only insert nodes that are actually referenced by the upper subtrie
         let mut lower_roots = Vec::new();
         
         for subtrie in self.lower_subtries.iter_mut().flatten() {
-            // Get the node at the subtrie's root path
-            if let Some(node) = subtrie.nodes.get(&subtrie.path) {
-                // Get the hash of this node (should have been computed by update_hashes)
-                if let Some(hash) = node.hash() {
-                    let rlp_node = RlpNode::word_rlp(&hash);
-                    let node_type = match node {
-                        SparseNode::Empty => SparseNodeType::Empty,
-                        SparseNode::Hash(_) => SparseNodeType::Hash,
-                        SparseNode::Leaf { .. } => SparseNodeType::Leaf,
-                        SparseNode::Extension { store_in_db_trie, .. } => {
-                            SparseNodeType::Extension { store_in_db_trie: *store_in_db_trie }
-                        }
-                        SparseNode::Branch { store_in_db_trie, .. } => {
-                            SparseNodeType::Branch { store_in_db_trie: *store_in_db_trie }
-                        }
-                    };
-                    
-                    lower_roots.push((subtrie.path, rlp_node, node_type));
+            // Only include this subtrie's root if it's referenced in the upper subtrie
+            if self.upper_subtrie.nodes.contains_key(&subtrie.path) {
+                // Get the node at the subtrie's root path
+                if let Some(node) = subtrie.nodes.get(&subtrie.path) {
+                    // Get the hash of this node (should have been computed by update_hashes)
+                    if let Some(hash) = node.hash() {
+                        let rlp_node = RlpNode::word_rlp(&hash);
+                        let node_type = match node {
+                            SparseNode::Empty => SparseNodeType::Empty,
+                            SparseNode::Hash(_) => SparseNodeType::Hash,
+                            SparseNode::Leaf { .. } => SparseNodeType::Leaf,
+                            SparseNode::Extension { store_in_db_trie, .. } => {
+                                SparseNodeType::Extension { store_in_db_trie: *store_in_db_trie }
+                            }
+                            SparseNode::Branch { store_in_db_trie, .. } => {
+                                SparseNodeType::Branch { store_in_db_trie: *store_in_db_trie }
+                            }
+                        };
+                        
+                        lower_roots.push((subtrie.path, rlp_node, node_type));
+                    }
                 }
             }
         }
@@ -658,18 +661,8 @@ impl SparseSubtrie {
             self.inner.rlp_node(prefix_set_contains, path, node);
         }
 
-        // The stack should contain exactly one root node plus any pre-populated nodes
-        // Find the root node (the one with the subtrie root path)
-        let root_item = self.inner.buffers.rlp_node_stack
-            .iter()
-            .position(|item| item.path == self.path)
-            .map(|pos| self.inner.buffers.rlp_node_stack.remove(pos))
-            .expect("Root node should be in the stack");
-        
-        // Clear any remaining pre-populated items
-        self.inner.buffers.rlp_node_stack.clear();
-        
-        root_item.rlp_node
+        debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
+        self.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
     }
 
     /// Consumes and returns the currently accumulated trie updates.
