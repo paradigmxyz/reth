@@ -1,8 +1,10 @@
 //! Compatibility functions for rpc `Transaction` type.
 
-use crate::fees::{CallFees, CallFeesError};
+use crate::{
+    fees::{CallFees, CallFeesError},
+    RpcTransaction, RpcTypes,
+};
 use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
-use alloy_network::Network;
 use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
     request::{TransactionInputError, TransactionRequest},
@@ -15,22 +17,29 @@ use reth_evm::{
 };
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
-/// Builds RPC transaction w.r.t. network.
-pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
-    /// The lower layer consensus types to convert from.
+/// Responsible for the conversions from and into RPC requests and responses.
+///
+/// The JSON-RPC schema and the Node primitives are configurable using the [`RpcConvert::Network`]
+/// and [`RpcConvert::Primitives`] associated types respectively.
+///
+/// A generic implementation [`RpcConverter`] should be preferred over a manual implementation. As
+/// long as its trait bound requirements are met, the implementation is created automatically and
+/// can be used in RPC method handlers for all the conversions.
+pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
+    /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
-    /// RPC transaction response type.
-    type Transaction: Serialize + for<'de> Deserialize<'de> + Send + Sync + Unpin + Clone + Debug;
+    /// Associated upper layer JSON-RPC API network requests and responses to convert from and into
+    /// types of [`Self::Primitives`].
+    type Network: RpcTypes + Send + Sync + Unpin + Clone + Debug;
 
     /// A set of variables for executing a transaction.
     type TxEnv;
 
-    /// RPC transaction error type.
+    /// An associated RPC conversion error.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
 
     /// Wrapper for `fill()` with default `TransactionInfo`
@@ -39,7 +48,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     fn fill_pending(
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
-    ) -> Result<Self::Transaction, Self::Error> {
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error> {
         self.fill(tx, TransactionInfo::default())
     }
 
@@ -52,7 +61,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
         &self,
         tx: Recovered<TxTy<Self::Primitives>>,
         tx_inf: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error>;
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error>;
 
     /// Builds a fake transaction from a transaction request for inclusion into block built in
     /// `eth_simulateV1`.
@@ -299,63 +308,76 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
 #[error("Failed to convert transaction into RPC response: {0}")]
 pub struct TransactionConversionError(String);
 
-/// Generic RPC response object converter for primitives `N` and network `E`.
+/// Generic RPC response object converter for `Evm` and network `E`.
+///
+/// The main purpose of this struct is to provide an implementation of [`RpcConvert`] for generic
+/// associated types. This struct can then be used for conversions in RPC method handlers.
+///
+/// An [`RpcConvert`] implementation is generated if the following traits are implemented for the
+/// network and EVM associated primitives:
+/// * [`FromConsensusTx`]: from signed transaction into RPC response object.
+/// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
+/// * [`TryIntoTxEnv`]: from RPC transaction request into an executable transaction.
+/// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`FromConsensusTx::TxInfo`]. Should be
+///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
+///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
+///   object.
 #[derive(Debug)]
-pub struct RpcConverter<N, E, Evm, Err, Map = ()> {
-    phantom: PhantomData<(N, E, Evm, Err)>,
+pub struct RpcConverter<E, Evm, Err, Map = ()> {
+    phantom: PhantomData<(E, Evm, Err)>,
     mapper: Map,
 }
 
-impl<N, E, Evm, Err> RpcConverter<N, E, Evm, Err, ()> {
+impl<E, Evm, Err> RpcConverter<E, Evm, Err, ()> {
     /// Creates a new [`RpcConverter`] with the default mapper.
     pub const fn new() -> Self {
         Self::with_mapper(())
     }
 }
 
-impl<N, E, Evm, Err, Map> RpcConverter<N, E, Evm, Err, Map> {
+impl<E, Evm, Err, Map> RpcConverter<E, Evm, Err, Map> {
     /// Creates a new [`RpcConverter`] with `mapper`.
     pub const fn with_mapper(mapper: Map) -> Self {
         Self { phantom: PhantomData, mapper }
     }
 
     /// Converts the generic types.
-    pub fn convert<N2, E2, Evm2, Err2>(self) -> RpcConverter<N2, E2, Evm2, Err2, Map> {
+    pub fn convert<E2, Evm2, Err2>(self) -> RpcConverter<E2, Evm2, Err2, Map> {
         RpcConverter::with_mapper(self.mapper)
     }
 
     /// Swaps the inner `mapper`.
-    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<N, E, Evm, Err, Map2> {
+    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<E, Evm, Err, Map2> {
         RpcConverter::with_mapper(mapper)
     }
 
     /// Converts the generic types and swaps the inner `mapper`.
-    pub fn convert_map<N2, E2, Evm2, Err2, Map2>(
+    pub fn convert_map<E2, Evm2, Err2, Map2>(
         self,
         mapper: Map2,
-    ) -> RpcConverter<N2, E2, Evm2, Err2, Map2> {
+    ) -> RpcConverter<E2, Evm2, Err2, Map2> {
         self.convert().map(mapper)
     }
 }
 
-impl<N, E, Evm, Err, Map: Clone> Clone for RpcConverter<N, E, Evm, Err, Map> {
+impl<E, Evm, Err, Map: Clone> Clone for RpcConverter<E, Evm, Err, Map> {
     fn clone(&self) -> Self {
         Self::with_mapper(self.mapper.clone())
     }
 }
 
-impl<N, E, Evm, Err> Default for RpcConverter<N, E, Evm, Err> {
+impl<E, Evm, Err> Default for RpcConverter<E, Evm, Err> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N, E, Evm, Err, Map> TransactionCompat for RpcConverter<N, E, Evm, Err, Map>
+impl<N, E, Evm, Err, Map> RpcConvert for RpcConverter<E, Evm, Err, Map>
 where
     N: NodePrimitives,
-    E: Network + Unpin,
-    Evm: ConfigureEvm,
-    TxTy<N>: IntoRpcTx<<E as Network>::TransactionResponse> + Clone + Debug,
+    E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
+    Evm: ConfigureEvm<Primitives = N>,
+    TxTy<N>: IntoRpcTx<E::TransactionResponse> + Clone + Debug,
     TransactionRequest: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Err: From<TransactionConversionError>
         + From<<TransactionRequest as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
@@ -367,7 +389,7 @@ where
         + Into<jsonrpsee_types::ErrorObject<'static>>,
     Map: for<'a> TxInfoMapper<
             &'a TxTy<N>,
-            Out = <TxTy<N> as IntoRpcTx<<E as Network>::TransactionResponse>>::TxInfo,
+            Out = <TxTy<N> as IntoRpcTx<E::TransactionResponse>>::TxInfo,
         > + Clone
         + Debug
         + Unpin
@@ -375,7 +397,7 @@ where
         + Sync,
 {
     type Primitives = N;
-    type Transaction = <E as Network>::TransactionResponse;
+    type Network = E;
     type TxEnv = TxEnvFor<Evm>;
     type Error = Err;
 
@@ -383,7 +405,7 @@ where
         &self,
         tx: Recovered<TxTy<N>>,
         tx_info: TransactionInfo,
-    ) -> Result<Self::Transaction, Self::Error> {
+    ) -> Result<E::TransactionResponse, Self::Error> {
         let (tx, signer) = tx.into_parts();
         let tx_info = self.mapper.try_map(&tx, tx_info)?;
 

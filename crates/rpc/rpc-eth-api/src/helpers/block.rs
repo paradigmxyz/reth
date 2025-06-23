@@ -13,7 +13,7 @@ use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_convert::RpcConvert;
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;

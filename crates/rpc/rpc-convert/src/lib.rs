@@ -11,11 +11,14 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 mod fees;
+mod rpc;
 pub mod transaction;
+
 pub use fees::{CallFees, CallFeesError};
+pub use rpc::*;
 pub use transaction::{
-    EthTxEnvError, IntoRpcTx, RpcConverter, TransactionCompat, TransactionConversionError,
-    TryIntoSimTx, TxInfoMapper,
+    EthTxEnvError, IntoRpcTx, RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx,
+    TxInfoMapper,
 };
 
 #[cfg(feature = "op")]
