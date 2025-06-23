@@ -57,6 +57,19 @@ impl Default for ParallelSparseTrie {
 }
 
 impl ParallelSparseTrie {
+    /// Gets a node for the given path, checking upper subtrie for short paths
+    /// and lower subtries for longer paths.
+    fn get_node_for_path(&self, path: &Nibbles) -> &SparseNode {
+        if path.len() < UPPER_TRIE_MAX_DEPTH {
+            self.upper_subtrie.nodes.get(path).expect("upper subtrie node must exist")
+        } else {
+            let index = path_subtrie_index_unchecked(path);
+            self.lower_subtries[index]
+                .as_ref().expect("lower subtrie must exist")
+                .nodes.get(path).expect("lower subtrie node must exist")
+        }
+    }
+
     /// Returns mutable ref to the lower `SparseSubtrie` for the given path, or None if the path
     /// belongs to the upper trie.
     fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
@@ -229,6 +242,212 @@ impl ParallelSparseTrie {
         }
     }
 
+    /// Updates hashes for the upper subtrie, using nodes from both upper and lower subtries.
+    fn update_upper_subtrie_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
+        trace!(target: "trie::parallel_sparse", "Updating upper subtrie hashes");
+
+        debug_assert!(self.upper_subtrie.buffers.path_stack.is_empty());
+        self.upper_subtrie.buffers.path_stack.push(RlpNodePathStackItem {
+            level: 0,
+            path: Nibbles::default(), // Start from root
+            is_in_prefix_set: None,
+        });
+
+        'main: while let Some(RlpNodePathStackItem { level, path, mut is_in_prefix_set }) =
+            self.upper_subtrie.buffers.path_stack.pop()
+        {
+            // Clone the node data to avoid borrow checker issues
+            let node = self.get_node_for_path(&path).clone();
+            trace!(
+                target: "trie::parallel_sparse",
+                ?level,
+                ?path,
+                ?is_in_prefix_set,
+                ?node,
+                "Processing node in upper subtrie update"
+            );
+
+            // Check if the path is in the prefix set
+            let mut prefix_set_contains =
+                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
+
+            let (rlp_node, node_type) = match &node {
+                SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
+                SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
+                SparseNode::Leaf { key, hash } => {
+                    let mut full_path = path;
+                    full_path.extend(key);
+                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&full_path)) {
+                        (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
+                    } else {
+                        // For leaf nodes in lower subtries, we expect the hash to be computed
+                        if path.len() >= UPPER_TRIE_MAX_DEPTH {
+                            let hash = node.hash().expect("lower subtrie leaf must have computed hash");
+                            (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
+                        } else {
+                            // Upper subtrie leaf - need to get value and compute hash
+                            let value = self.upper_subtrie.values.get(&full_path).expect("leaf value must exist");
+                            self.upper_subtrie.buffers.rlp_buf.clear();
+                            let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.upper_subtrie.buffers.rlp_buf);
+                            // Update hash in upper subtrie node
+                            if let SparseNode::Leaf { hash: node_hash, .. } = self.upper_subtrie.nodes.get_mut(&path).unwrap() {
+                                *node_hash = rlp_node.as_hash();
+                            }
+                            (rlp_node, SparseNodeType::Leaf)
+                        }
+                    }
+                }
+                SparseNode::Extension { key, hash, store_in_db_trie } => {
+                    let mut child_path = path;
+                    child_path.extend(key);
+                    if let Some((hash, store_in_db_trie)) =
+                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+                    {
+                        (
+                            RlpNode::word_rlp(&hash),
+                            SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
+                        )
+                    } else if self
+                        .upper_subtrie.buffers
+                        .rlp_node_stack
+                        .last()
+                        .is_some_and(|e| e.path == child_path)
+                    {
+                        let RlpNodeStackItem {
+                            path: _,
+                            rlp_node: child,
+                            node_type: child_node_type,
+                        } = self.upper_subtrie.buffers.rlp_node_stack.pop().unwrap();
+                        self.upper_subtrie.buffers.rlp_buf.clear();
+                        let rlp_node =
+                            ExtensionNodeRef::new(key, &child).rlp(&mut self.upper_subtrie.buffers.rlp_buf);
+                        
+                        // Update hash in upper subtrie node if it belongs to upper subtrie
+                        if path.len() < UPPER_TRIE_MAX_DEPTH {
+                            if let SparseNode::Extension { hash: node_hash, store_in_db_trie: node_store, .. } = 
+                                self.upper_subtrie.nodes.get_mut(&path).unwrap() 
+                            {
+                                *node_hash = rlp_node.as_hash();
+                                *node_store = child_node_type.store_in_db_trie();
+                            }
+                        }
+
+                        let store_in_db_trie_value = child_node_type.store_in_db_trie();
+                        (
+                            rlp_node,
+                            SparseNodeType::Extension { store_in_db_trie: store_in_db_trie_value },
+                        )
+                    } else {
+                        // need to get rlp node for child first
+                        self.upper_subtrie.buffers.path_stack.extend([
+                            RlpNodePathStackItem { level, path, is_in_prefix_set },
+                            RlpNodePathStackItem {
+                                level: level + 1,
+                                path: child_path,
+                                is_in_prefix_set: None,
+                            },
+                        ]);
+                        continue
+                    }
+                }
+                SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
+                    if let Some((hash, store_in_db_trie)) =
+                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+                    {
+                        self.upper_subtrie.buffers.rlp_node_stack.push(RlpNodeStackItem {
+                            path,
+                            rlp_node: RlpNode::word_rlp(&hash),
+                            node_type: SparseNodeType::Branch {
+                                store_in_db_trie: Some(store_in_db_trie),
+                            },
+                        });
+                        continue
+                    }
+
+                    self.upper_subtrie.buffers.branch_child_buf.clear();
+                    // Walk children in reverse order
+                    for bit in CHILD_INDEX_RANGE.rev() {
+                        if state_mask.is_bit_set(bit) {
+                            let mut child = path;
+                            child.push_unchecked(bit);
+                            self.upper_subtrie.buffers.branch_child_buf.push(child);
+                        }
+                    }
+
+                    self.upper_subtrie.buffers
+                        .branch_value_stack_buf
+                        .resize(self.upper_subtrie.buffers.branch_child_buf.len(), Default::default());
+                    let mut added_children = false;
+
+                    for (i, child_path) in self.upper_subtrie.buffers.branch_child_buf.iter().enumerate() {
+                        if self.upper_subtrie.buffers.rlp_node_stack.last().is_some_and(|e| &e.path == child_path)
+                        {
+                            let RlpNodeStackItem {
+                                path: _,
+                                rlp_node: child,
+                                node_type: _child_node_type,
+                            } = self.upper_subtrie.buffers.rlp_node_stack.pop().unwrap();
+
+                            // Insert children in normal order
+                            let original_idx = self.upper_subtrie.buffers.branch_child_buf.len() - i - 1;
+                            self.upper_subtrie.buffers.branch_value_stack_buf[original_idx] = child;
+                            added_children = true;
+                        } else {
+                            debug_assert!(!added_children);
+                            self.upper_subtrie.buffers.path_stack.push(RlpNodePathStackItem {
+                                level,
+                                path,
+                                is_in_prefix_set,
+                            });
+                            self.upper_subtrie.buffers.path_stack.extend(
+                                self.upper_subtrie.buffers.branch_child_buf.drain(..).map(|path| {
+                                    RlpNodePathStackItem {
+                                        level: level + 1,
+                                        path,
+                                        is_in_prefix_set: None,
+                                    }
+                                }),
+                            );
+                            continue 'main
+                        }
+                    }
+
+                    self.upper_subtrie.buffers.rlp_buf.clear();
+                    let branch_node_ref =
+                        BranchNodeRef::new(&self.upper_subtrie.buffers.branch_value_stack_buf, *state_mask);
+                    let rlp_node = branch_node_ref.rlp(&mut self.upper_subtrie.buffers.rlp_buf);
+                    
+                    // Update hash in upper subtrie node if it belongs to upper subtrie
+                    if path.len() < UPPER_TRIE_MAX_DEPTH {
+                        if let SparseNode::Branch { hash: node_hash, .. } = 
+                            self.upper_subtrie.nodes.get_mut(&path).unwrap() 
+                        {
+                            *node_hash = rlp_node.as_hash();
+                        }
+                    }
+
+                    (
+                        rlp_node,
+                        SparseNodeType::Branch { store_in_db_trie: Some(false) },
+                    )
+                }
+            };
+
+            trace!(
+                target: "trie::parallel_sparse",
+                ?level,
+                ?path,
+                ?node_type,
+                "Added node to rlp node stack"
+            );
+
+            self.upper_subtrie.buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
+        }
+
+        debug_assert_eq!(self.upper_subtrie.buffers.rlp_node_stack.len(), 1);
+        self.upper_subtrie.buffers.rlp_node_stack.pop().unwrap().rlp_node
+    }
+
     /// Calculates and returns the root hash of the trie.
     ///
     /// Before computing the hash, this function processes any remaining (dirty) nodes by
@@ -241,28 +460,10 @@ impl ParallelSparseTrie {
         // Step 1: Update all lower subtrie hashes (not in parallel for simplicity)
         self.update_subtrie_hashes();
         
-        // Step 2: Insert lower subtrie root hashes into the upper subtrie
-        // This ensures that when update_hashes processes the upper subtrie,
-        // it will find these nodes already hashed
-        let prefix_set_frozen = core::mem::take(&mut self.prefix_set).freeze();
-        
-        for subtrie in self.lower_subtries.iter_mut().flatten() {
-            // Get the node at the subtrie's root path
-            if let Some(node) = subtrie.nodes.get(&subtrie.path) {
-                // Get the hash of this node (should have been computed by update_hashes)
-                if let Some(hash) = node.hash() {
-                    // Insert or update the node in the upper subtrie as a hash node
-                    self.upper_subtrie.nodes.insert(subtrie.path, SparseNode::Hash(hash));
-                }
-            }
-        }
-        
-        // Step 3: Update hashes for the upper subtrie
-        // After update_subtrie_hashes, self.prefix_set contains the unchanged keys
-        // that don't belong to any lower subtrie - these are exactly the keys
-        // that belong to the upper subtrie and need to be updated.
-        let mut prefix_set = prefix_set_frozen;
-        let root_rlp = self.upper_subtrie.update_hashes(&mut prefix_set);
+        // Step 2: Update hashes for the upper subtrie using our specialized function
+        // that can access both upper and lower subtrie nodes
+        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
+        let root_rlp = self.update_upper_subtrie_hashes(&mut prefix_set);
         
         // Step 4: Return the root hash
         root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
@@ -1512,10 +1713,18 @@ mod tests {
         let mut trie = ParallelSparseTrie::default();
         let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let mut subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
         let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
+
+        // Add some nodes to subtrie_2 so it has something to hash
+        // First, add a root node for the subtrie at its path [0x1, 0x0]
+        subtrie_2.nodes.insert(subtrie_2.path, SparseNode::Leaf { 
+            key: Nibbles::new(), // empty key since the full path is already used
+            hash: None 
+        });
+        subtrie_2.values.insert(subtrie_2.path, vec![1, 2, 3, 4]);
 
         // Add subtries at specific positions
         trie.lower_subtries[subtrie_1_index] = Some(subtrie_1);
