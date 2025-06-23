@@ -19,8 +19,8 @@ use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
-use reth_rpc_types_compat::RpcConvert;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     ReceiptProvider, StateProviderFactory,

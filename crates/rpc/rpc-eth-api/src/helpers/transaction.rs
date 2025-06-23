@@ -19,11 +19,11 @@ use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
+use reth_rpc_convert::transaction::RpcConvert;
 use reth_rpc_eth_types::{
     utils::binary_search, EthApiError, EthApiError::TransactionConfirmationTimeout, SignError,
     TransactionSource,
 };
-use reth_rpc_types_compat::transaction::RpcConvert;
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
