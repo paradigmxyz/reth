@@ -1624,14 +1624,37 @@ mod tests {
         trie.reveal_node(leaf_1_path, leaf_1, TrieMasks::none()).unwrap();
         trie.reveal_node(leaf_2_path, leaf_2, TrieMasks::none()).unwrap();
 
-        // Step 3: Add changed paths to prefix set
+        // Step 3: Reset hashes for all revealed nodes to test actual hash calculation
+        // Reset upper subtrie node hashes  
+        trie.upper_subtrie.nodes.get_mut(&extension_path).unwrap().set_hash(None);
+        trie.upper_subtrie.nodes.get_mut(&branch_path).unwrap().set_hash(None);
+        
+        // Reset lower subtrie node hashes
+        let leaf_1_subtrie_idx = path_subtrie_index_unchecked(&leaf_1_path);
+        let leaf_2_subtrie_idx = path_subtrie_index_unchecked(&leaf_2_path);
+        
+        trie.lower_subtries[leaf_1_subtrie_idx].as_mut().unwrap().nodes.get_mut(&leaf_1_path).unwrap().set_hash(None);
+        trie.lower_subtries[leaf_2_subtrie_idx].as_mut().unwrap().nodes.get_mut(&leaf_2_path).unwrap().set_hash(None);
+
+        // Step 4: Add changed paths to prefix set
         trie.prefix_set.insert(leaf_1_full_path);
         trie.prefix_set.insert(leaf_2_full_path);
+        // Also add the upper subtrie paths that need updating
+        trie.prefix_set.insert(extension_path);
+        trie.prefix_set.insert(branch_path);
+        trie.prefix_set.insert(leaf_1_path);
+        trie.prefix_set.insert(leaf_2_path);
 
-        // Step 4: Calculate root using our implementation
+        // Verify that hashes were indeed reset
+        assert!(trie.upper_subtrie.nodes.get(&extension_path).unwrap().hash().is_none());
+        assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_none());
+        assert!(trie.lower_subtries[leaf_1_subtrie_idx].as_ref().unwrap().nodes.get(&leaf_1_path).unwrap().hash().is_none());
+        assert!(trie.lower_subtries[leaf_2_subtrie_idx].as_ref().unwrap().nodes.get(&leaf_2_path).unwrap().hash().is_none());
+
+        // Step 5: Calculate root using our implementation
         let parallel_trie_root = trie.root();
 
-        // Step 5: Calculate root using HashBuilder for comparison
+        // Step 6: Calculate root using HashBuilder for comparison
         let (hash_builder_root, _, _proof_nodes, _, _) = run_hash_builder(
             [(leaf_1_full_path, account_1), (leaf_2_full_path, account_2)],
             NoopAccountTrieCursor::default(),
@@ -1639,7 +1662,7 @@ mod tests {
             [extension_path, branch_path, leaf_1_full_path, leaf_2_full_path],
         );
 
-        // Step 6: Verify the roots match
+        // Step 7: Verify the roots match
         assert_eq!(parallel_trie_root, hash_builder_root);
 
         // Additional checks to verify the structure

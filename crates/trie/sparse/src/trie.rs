@@ -2063,6 +2063,20 @@ impl SparseNode {
             }
         }
     }
+
+    /// Sets the hash of the node for testing purposes.
+    /// This method is only available when the `test-utils` feature is enabled.
+    #[cfg(feature = "test-utils")]
+    pub fn set_hash(&mut self, new_hash: Option<B256>) {
+        match self {
+            Self::Empty | Self::Hash(_) => {
+                // Cannot set hash for Empty or Hash nodes
+            }
+            Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
+                *hash = new_hash;
+            }
+        }
+    }
 }
 
 /// A helper struct used to store information about a node that has been removed
