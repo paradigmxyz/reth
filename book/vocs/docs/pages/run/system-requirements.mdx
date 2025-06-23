@@ -28,6 +28,8 @@ Below are the minimum system requirements for running a Base node as of 2025-06-
 
 :::note
 **On CPU clock speeds**: We've seen >1s payload latency on EPYC GENOA 9254 (2.9 GHz/3.9 GHz), best performance we see on AMD EPYC™ 4004.
+
+**On CPU cores for Base**: 5+ cores are needed because the state root task splits work into separate threads that run in parallel with each other. The state root task is generally more performant and can scale with the number of CPU cores, while regular state root always uses only one core. This is not a requirement for Mainnet, but for Base you may encounter block processing latencies of more than 2s, which can lead to lagging behind the head of the chain.
 :::
 
 
