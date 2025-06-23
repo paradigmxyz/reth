@@ -968,7 +968,7 @@ mod tests {
         let node = create_extension_node(&[0x2], child_hash);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path.clone(), node, masks).unwrap();
+        trie.reveal_node(path, node, masks).unwrap();
 
         // Extension node should be in upper trie
         assert_matches!(
