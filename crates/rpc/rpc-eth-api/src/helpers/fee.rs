@@ -136,7 +136,8 @@ pub trait EthFees: LoadFee {
                 }
 
                 for entry in &fee_entries {
-                    base_fee_per_gas.push(entry.base_fee_per_gas as u128);
+                    base_fee_per_gas
+                        .push(entry.header.base_fee_per_gas.unwrap_or_default() as u128);
                     gas_used_ratio.push(entry.gas_used_ratio);
                     base_fee_per_blob_gas.push(entry.base_fee_per_blob_gas.unwrap_or_default());
                     blob_gas_used_ratio.push(entry.blob_gas_used_ratio);
@@ -153,15 +154,10 @@ pub trait EthFees: LoadFee {
 
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
-                let last_header = self
-                    .provider()
-                    .header(&last_entry.header_hash)
-                    .map_err(Self::Error::from_eth_err)?
-                    .ok_or(EthApiError::HeaderNotFound(last_entry.header_hash.into()))?;
                 base_fee_per_gas.push(
                     self.provider()
                         .chain_spec()
-                        .next_block_base_fee(&last_header, last_entry.timestamp)
+                        .next_block_base_fee(&last_entry.header, last_entry.header.timestamp)
                         .unwrap_or_default() as u128,
                 );
 

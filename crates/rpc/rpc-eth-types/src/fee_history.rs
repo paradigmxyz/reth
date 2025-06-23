@@ -6,9 +6,8 @@ use std::{
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
-use alloy_consensus::{BlockHeader, Transaction, TxReceipt};
+use alloy_consensus::{BlockHeader, Header, Transaction, TxReceipt};
 use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::B256;
 use alloy_rpc_types_eth::TxGasAndReward;
 use futures::{
     future::{Fuse, FusedFuture},
@@ -74,6 +73,7 @@ impl FeeHistoryCache {
     async fn insert_blocks<'a, I, B, R, C>(&self, blocks: I, chain_spec: &C)
     where
         B: Block + 'a,
+        B::Header: BlockHeader,
         R: TxReceipt + 'a,
         I: IntoIterator<Item = (&'a SealedBlock<B>, &'a [R])>,
         C: EthChainSpec,
@@ -89,8 +89,8 @@ impl FeeHistoryCache {
             );
             fee_history_entry.rewards = calculate_reward_percentiles_for_block(
                 &percentiles,
-                fee_history_entry.gas_used,
-                fee_history_entry.base_fee_per_gas,
+                fee_history_entry.header.gas_used,
+                fee_history_entry.header.base_fee_per_gas.unwrap_or_default(),
                 block.body().transactions(),
                 receipts,
             )
@@ -337,8 +337,8 @@ where
 /// A cached entry for a block's fee history.
 #[derive(Debug, Clone)]
 pub struct FeeHistoryEntry {
-    /// The base fee per gas for this block.
-    pub base_fee_per_gas: u64,
+    /// The full block header.
+    pub header: Header,
     /// Gas used ratio this block.
     pub gas_used_ratio: f64,
     /// The base per blob gas for EIP-4844.
@@ -349,21 +349,8 @@ pub struct FeeHistoryEntry {
     /// Calculated as the ratio of blob gas used and the available blob data gas per block.
     /// Will be zero if no blob gas was used or pre EIP-4844.
     pub blob_gas_used_ratio: f64,
-    /// The excess blob gas of the block.
-    pub excess_blob_gas: Option<u64>,
-    /// The total amount of blob gas consumed by the transactions within the block,
-    /// added in EIP-4844
-    pub blob_gas_used: Option<u64>,
-    /// Gas used by this block.
-    pub gas_used: u64,
-    /// Gas limit by this block.
-    pub gas_limit: u64,
-    /// Hash of the block.
-    pub header_hash: B256,
     /// Approximated rewards for the configured percentiles.
     pub rewards: Vec<u128>,
-    /// The timestamp of the block.
-    pub timestamp: u64,
     /// Blob parameters for this block.
     pub blob_params: Option<BlobParams>,
 }
@@ -372,12 +359,38 @@ impl FeeHistoryEntry {
     /// Creates a new entry from a sealed block.
     ///
     /// Note: This does not calculate the rewards for the block.
-    pub fn new<B: Block>(block: &SealedBlock<B>, blob_params: Option<BlobParams>) -> Self {
+    pub fn new<B>(block: &SealedBlock<B>, blob_params: Option<BlobParams>) -> Self
+    where
+        B: Block,
+        B::Header: BlockHeader,
+    {
+        let header = block.header();
         Self {
-            base_fee_per_gas: block.header().base_fee_per_gas().unwrap_or_default(),
-            gas_used_ratio: block.header().gas_used() as f64 / block.header().gas_limit() as f64,
-            base_fee_per_blob_gas: block
-                .header()
+            header: Header {
+                parent_hash: header.parent_hash(),
+                ommers_hash: header.ommers_hash(),
+                beneficiary: header.beneficiary(),
+                state_root: header.state_root(),
+                transactions_root: header.transactions_root(),
+                receipts_root: header.receipts_root(),
+                withdrawals_root: header.withdrawals_root(),
+                logs_bloom: header.logs_bloom(),
+                difficulty: header.difficulty(),
+                number: header.number(),
+                gas_limit: header.gas_limit(),
+                gas_used: header.gas_used(),
+                timestamp: header.timestamp(),
+                mix_hash: header.mix_hash().unwrap_or_default(),
+                nonce: header.nonce().unwrap_or_default(),
+                base_fee_per_gas: header.base_fee_per_gas(),
+                blob_gas_used: header.blob_gas_used(),
+                excess_blob_gas: header.excess_blob_gas(),
+                parent_beacon_block_root: header.parent_beacon_block_root(),
+                requests_hash: header.requests_hash(),
+                extra_data: Default::default(),
+            },
+            gas_used_ratio: header.gas_used() as f64 / header.gas_limit() as f64,
+            base_fee_per_blob_gas: header
                 .excess_blob_gas()
                 .and_then(|excess_blob_gas| Some(blob_params?.calc_blob_fee(excess_blob_gas))),
             blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
@@ -386,13 +399,7 @@ impl FeeHistoryEntry {
                     .map(|params| params.max_blob_gas_per_block())
                     .unwrap_or(alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK_DENCUN)
                     as f64,
-            excess_blob_gas: block.header().excess_blob_gas(),
-            blob_gas_used: block.header().blob_gas_used(),
-            gas_used: block.header().gas_used(),
-            header_hash: block.hash(),
-            gas_limit: block.header().gas_limit(),
             rewards: Vec::new(),
-            timestamp: block.header().timestamp(),
             blob_params,
         }
     }
@@ -411,8 +418,11 @@ impl FeeHistoryEntry {
     ///
     /// Returns a `None` if no excess blob gas is set, no EIP-4844 support
     pub fn next_block_excess_blob_gas(&self) -> Option<u64> {
-        self.excess_blob_gas.and_then(|excess_blob_gas| {
-            Some(self.blob_params?.next_block_excess_blob_gas(excess_blob_gas, self.blob_gas_used?))
+        self.header.excess_blob_gas.and_then(|excess_blob_gas| {
+            Some(
+                self.blob_params?
+                    .next_block_excess_blob_gas(excess_blob_gas, self.header.blob_gas_used?),
+            )
         })
     }
 }
