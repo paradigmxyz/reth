@@ -1945,15 +1945,18 @@ pub enum SparseNodeType {
 }
 
 impl SparseNodeType {
-    const fn is_hash(&self) -> bool {
+    /// Returns true if the node is a hash node.
+    pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash)
     }
 
-    const fn is_branch(&self) -> bool {
+    /// Returns true if the node is a branch node.
+    pub const fn is_branch(&self) -> bool {
         matches!(self, Self::Branch { .. })
     }
 
-    const fn store_in_db_trie(&self) -> Option<bool> {
+    /// Returns true if the node should be stored in the database.
+    pub const fn store_in_db_trie(&self) -> Option<bool> {
         match *self {
             Self::Extension { store_in_db_trie } | Self::Branch { store_in_db_trie } => {
                 store_in_db_trie
@@ -2049,6 +2052,17 @@ impl SparseNode {
     pub const fn is_hash(&self) -> bool {
         matches!(self, Self::Hash(_))
     }
+
+    /// Returns the hash of the node if it exists.
+    pub const fn hash(&self) -> Option<B256> {
+        match self {
+            Self::Empty => None,
+            Self::Hash(hash) => Some(*hash),
+            Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
+                *hash
+            }
+        }
+    }
 }
 
 /// A helper struct used to store information about a node that has been removed
@@ -2129,9 +2143,12 @@ pub struct RlpNodeStackItem {
 /// one to make batch updates to a persistent database.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SparseTrieUpdates {
-    pub(crate) updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    pub(crate) removed_nodes: HashSet<Nibbles>,
-    pub(crate) wiped: bool,
+    /// Collection of updated intermediate nodes indexed by full path.
+    pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    /// Collection of removed intermediate nodes indexed by full path.
+    pub removed_nodes: HashSet<Nibbles>,
+    /// Flag indicating whether the trie was wiped.
+    pub wiped: bool,
 }
 
 impl SparseTrieUpdates {

@@ -10573,6 +10573,7 @@ dependencies = [
  "rand 0.9.1",
  "reth-execution-errors",
  "reth-primitives-traits",
+ "reth-trie",
  "reth-trie-common",
  "reth-trie-sparse",
  "smallvec",
