@@ -513,9 +513,6 @@ pub enum RpcInvalidTransactionError {
     /// Blob transaction is a create transaction
     #[error("blob transaction is a create transaction")]
     BlobTransactionIsCreate,
-    /// EOF crate should have `to` address
-    #[error("EOF crate should have `to` address")]
-    EofCrateShouldHaveToAddress,
     /// EIP-7702 is not enabled.
     #[error("EIP-7702 authorization list not supported")]
     AuthorizationListNotSupported,
