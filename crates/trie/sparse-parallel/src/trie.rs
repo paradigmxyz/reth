@@ -1,5 +1,3 @@
-use std::sync::mpsc;
-
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
@@ -212,16 +210,11 @@ impl ParallelSparseTrie {
         // Update the prefix set with the keys that didn't have matching subtries
         self.prefix_set = unchanged_prefix_set;
 
-        // Update subtrie hashes in parallel
-        // TODO: call `update_hashes` on each subtrie in parallel
-        let (tx, rx) = mpsc::channel();
-        for subtrie in subtries {
-            tx.send((subtrie.index, subtrie.subtrie)).unwrap();
-        }
-        drop(tx);
-
-        // Return updated subtries back to the trie
-        for (index, subtrie) in rx {
+        // Update subtrie hashes (not in parallel for simplicity)
+        for ChangedSubtrie { index, mut subtrie, prefix_set } in subtries {
+            // Call update_hashes on each subtrie with its own prefix set
+            let mut prefix_set = prefix_set;
+            subtrie.update_hashes(&mut prefix_set);
             self.lower_subtries[index] = Some(subtrie);
         }
     }
@@ -238,18 +231,44 @@ impl ParallelSparseTrie {
         // Step 1: Update all lower subtrie hashes (not in parallel for simplicity)
         self.update_subtrie_hashes();
         
-        // Step 2: Insert lower subtrie root hashes into the upper subtrie
-        // This ensures that when update_hashes processes the upper subtrie,
-        // it will find these nodes already hashed
+        // Step 2: Prepare the stack with lower subtrie root nodes
+        // We need to collect all lower subtrie roots and sort them properly
+        let mut lower_roots = Vec::new();
+        
         for subtrie in self.lower_subtries.iter_mut().flatten() {
             // Get the node at the subtrie's root path
             if let Some(node) = subtrie.nodes.get(&subtrie.path) {
                 // Get the hash of this node (should have been computed by update_hashes)
                 if let Some(hash) = node.hash() {
-                    // Insert or update the node in the upper subtrie as a hash node
-                    self.upper_subtrie.nodes.insert(subtrie.path, SparseNode::Hash(hash));
+                    let rlp_node = RlpNode::word_rlp(&hash);
+                    let node_type = match node {
+                        SparseNode::Empty => SparseNodeType::Empty,
+                        SparseNode::Hash(_) => SparseNodeType::Hash,
+                        SparseNode::Leaf { .. } => SparseNodeType::Leaf,
+                        SparseNode::Extension { store_in_db_trie, .. } => {
+                            SparseNodeType::Extension { store_in_db_trie: *store_in_db_trie }
+                        }
+                        SparseNode::Branch { store_in_db_trie, .. } => {
+                            SparseNodeType::Branch { store_in_db_trie: *store_in_db_trie }
+                        }
+                    };
+                    
+                    lower_roots.push((subtrie.path, rlp_node, node_type));
                 }
             }
+        }
+        
+        // Sort by path in reverse order (so that when processing in order, 
+        // children will be at the top of the stack when needed)
+        lower_roots.sort_by(|a, b| b.0.cmp(&a.0));
+        
+        // Push to the stack
+        for (path, rlp_node, node_type) in lower_roots {
+            self.upper_subtrie.buffers.rlp_node_stack.push(RlpNodeStackItem {
+                path,
+                rlp_node,
+                node_type,
+            });
         }
         
         // Step 3: Update hashes for the upper subtrie
@@ -639,8 +658,18 @@ impl SparseSubtrie {
             self.inner.rlp_node(prefix_set_contains, path, node);
         }
 
-        debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
-        self.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
+        // The stack should contain exactly one root node plus any pre-populated nodes
+        // Find the root node (the one with the subtrie root path)
+        let root_item = self.inner.buffers.rlp_node_stack
+            .iter()
+            .position(|item| item.path == self.path)
+            .map(|pos| self.inner.buffers.rlp_node_stack.remove(pos))
+            .expect("Root node should be in the stack");
+        
+        // Clear any remaining pre-populated items
+        self.inner.buffers.rlp_node_stack.clear();
+        
+        root_item.rlp_node
     }
 
     /// Consumes and returns the currently accumulated trie updates.
