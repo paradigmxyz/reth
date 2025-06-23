@@ -436,8 +436,11 @@ where
     Node: NodeTypes,
     BlockTy<Node>: TryFromBlockResponse<N>,
 {
-    fn block_by_id(&self, _id: BlockId) -> ProviderResult<Option<Self::Block>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
+        match id {
+            BlockId::Number(number_or_tag) => self.block_by_number_or_tag(number_or_tag),
+            BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+        }
     }
 
     fn sealed_header_by_id(
