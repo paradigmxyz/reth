@@ -77,7 +77,7 @@ pub struct BlobStoreMetrics {
 }
 
 /// Transaction pool maintenance metrics
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "transaction_pool")]
 pub struct MaintainPoolMetrics {
     /// Gauge indicating the number of addresses with pending updates in the pool,
