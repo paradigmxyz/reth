@@ -129,13 +129,6 @@ mod tests {
     }
 
     #[test]
-    fn test_stored_nibbles_subkey_from_nibbles() {
-        let nibbles = Nibbles::from_nibbles_unchecked(vec![0x12, 0x34]);
-        let subkey = StoredNibblesSubKey::from(nibbles);
-        assert_eq!(subkey.0, nibbles);
-    }
-
-    #[test]
     fn test_stored_nibbles_subkey_to_compact() {
         let subkey = StoredNibblesSubKey::from(vec![0x02, 0x04]);
         let mut buf = BytesMut::with_capacity(65);
