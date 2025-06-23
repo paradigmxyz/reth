@@ -510,7 +510,7 @@ where
     /// Sets the RPC middleware stack for processing RPC requests.
     ///
     /// This method configures a custom middleware stack that will be applied to all RPC requests
-    /// across HTTP, WebSocket, and IPC transports. The middleware is applied to the RPC service
+    /// across HTTP, `WebSocket`, and IPC transports. The middleware is applied to the RPC service
     /// layer, allowing you to intercept, modify, or enhance RPC request processing.
     ///
     ///
