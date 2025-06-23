@@ -1,5 +1,8 @@
 //! Builder support for rpc components.
 
+pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
+pub use reth_rpc_builder::{Identity, RpcRequestMetricsService};
+
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
@@ -31,6 +34,7 @@ use std::{
     future::Future,
     ops::{Deref, DerefMut},
 };
+use tower::Layer;
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -417,6 +421,7 @@ pub struct RpcAddOns<
     EthB: EthApiBuilder<Node>,
     EV,
     EB = BasicEngineApiBuilder<EV>,
+    RpcMiddleware = Identity,
 > {
     /// Additional RPC add-ons.
     pub hooks: RpcHooks<Node, EthB::EthApi>,
@@ -426,9 +431,11 @@ pub struct RpcAddOns<
     engine_validator_builder: EV,
     /// Builder for `EngineApi`
     engine_api_builder: EB,
+    /// Configurable RPC middleware
+    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
 }
 
-impl<Node, EthB, EV, EB> Debug for RpcAddOns<Node, EthB, EV, EB>
+impl<Node, EthB, EV, EB, RpcMiddleware> Debug for RpcAddOns<Node, EthB, EV, EB, RpcMiddleware>
 where
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
@@ -441,11 +448,12 @@ where
             .field("eth_api_builder", &"...")
             .field("engine_validator_builder", &self.engine_validator_builder)
             .field("engine_api_builder", &self.engine_api_builder)
+            .field("rpc_middleware", &"...")
             .finish()
     }
 }
 
-impl<Node, EthB, EV, EB> RpcAddOns<Node, EthB, EV, EB>
+impl<Node, EthB, EV, EB, RpcMiddleware> RpcAddOns<Node, EthB, EV, EB, RpcMiddleware>
 where
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
@@ -455,28 +463,61 @@ where
         eth_api_builder: EthB,
         engine_validator_builder: EV,
         engine_api_builder: EB,
+        rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
     ) -> Self {
         Self {
             hooks: RpcHooks::default(),
             eth_api_builder,
             engine_validator_builder,
             engine_api_builder,
+            rpc_middleware,
         }
     }
 
     /// Maps the [`EngineApiBuilder`] builder type.
-    pub fn with_engine_api<T>(self, engine_api_builder: T) -> RpcAddOns<Node, EthB, EV, T> {
-        let Self { hooks, eth_api_builder, engine_validator_builder, .. } = self;
-        RpcAddOns { hooks, eth_api_builder, engine_validator_builder, engine_api_builder }
+    pub fn with_engine_api<T>(
+        self,
+        engine_api_builder: T,
+    ) -> RpcAddOns<Node, EthB, EV, T, RpcMiddleware> {
+        let Self { hooks, eth_api_builder, engine_validator_builder, rpc_middleware, .. } = self;
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+        }
     }
 
     /// Maps the [`EngineValidatorBuilder`] builder type.
     pub fn with_engine_validator<T>(
         self,
         engine_validator_builder: T,
-    ) -> RpcAddOns<Node, EthB, T, EB> {
-        let Self { hooks, eth_api_builder, engine_api_builder, .. } = self;
-        RpcAddOns { hooks, eth_api_builder, engine_validator_builder, engine_api_builder }
+    ) -> RpcAddOns<Node, EthB, T, EB, RpcMiddleware> {
+        let Self { hooks, eth_api_builder, engine_api_builder, rpc_middleware, .. } = self;
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+        }
+    }
+
+    /// Sets the RPC middleware.
+    pub fn set_rpc_middleware<T>(
+        self,
+        rpc_middleware: RpcServiceBuilder<T>,
+    ) -> RpcAddOns<Node, EthB, EV, EB, T> {
+        let Self { hooks, eth_api_builder, engine_validator_builder, engine_api_builder, .. } =
+            self;
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+        }
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -500,7 +541,7 @@ where
     }
 }
 
-impl<Node, EthB, EV, EB> Default for RpcAddOns<Node, EthB, EV, EB>
+impl<Node, EthB, EV, EB> Default for RpcAddOns<Node, EthB, EV, EB, Identity>
 where
     Node: FullNodeComponents,
     EthB: EthApiBuilder<Node>,
@@ -508,17 +549,27 @@ where
     EB: Default,
 {
     fn default() -> Self {
-        Self::new(EthB::default(), EV::default(), EB::default())
+        Self::new(EthB::default(), EV::default(), EB::default(), RpcServiceBuilder::new())
     }
 }
 
-impl<N, EthB, EV, EB> RpcAddOns<N, EthB, EV, EB>
+impl<N, EthB, EV, EB, RpcMiddleware> RpcAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
+    RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
+    for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
+        Send
+            + Sync
+            + 'static
+            + jsonrpsee::server::middleware::rpc::RpcServiceT<
+                MethodResponse = jsonrpsee::MethodResponse,
+                BatchResponse = jsonrpsee::MethodResponse,
+                NotificationResponse = jsonrpsee::MethodResponse,
+            >,
 {
     /// Launches only the regular RPC server (HTTP/WS/IPC), without the authenticated Engine API
     /// server.
@@ -533,6 +584,7 @@ where
     where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
+        let rpc_middleware = self.rpc_middleware.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -546,7 +598,7 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = config.rpc.rpc_server_config();
+        let server_config = config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware);
         let rpc_server_handle = Self::launch_rpc_server_internal(server_config, &modules).await?;
 
         let handles =
@@ -579,6 +631,7 @@ where
     where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
+        let rpc_middleware = self.rpc_middleware.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -592,7 +645,7 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = config.rpc.rpc_server_config();
+        let server_config = config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware);
         let auth_module_clone = auth_module.clone();
 
         // launch servers concurrently
@@ -706,10 +759,22 @@ where
     }
 
     /// Helper to launch the RPC server
-    async fn launch_rpc_server_internal(
-        server_config: RpcServerConfig,
+    async fn launch_rpc_server_internal<M>(
+        server_config: RpcServerConfig<M>,
         modules: &TransportRpcModules,
-    ) -> eyre::Result<RpcServerHandle> {
+    ) -> eyre::Result<RpcServerHandle>
+    where
+        M: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
+        for<'a> <M as Layer<RpcRequestMetricsService<RpcService>>>::Service:
+            Send
+                + Sync
+                + 'static
+                + jsonrpsee::server::middleware::rpc::RpcServiceT<
+                    MethodResponse = jsonrpsee::MethodResponse,
+                    BatchResponse = jsonrpsee::MethodResponse,
+                    NotificationResponse = jsonrpsee::MethodResponse,
+                >,
+    {
         let handle = server_config.start(modules).await?;
 
         if let Some(path) = handle.ipc_endpoint() {
@@ -760,13 +825,23 @@ where
     }
 }
 
-impl<N, EthB, EV, EB> NodeAddOns<N> for RpcAddOns<N, EthB, EV, EB>
+impl<N, EthB, EV, EB, RpcMiddleware> NodeAddOns<N> for RpcAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
+    RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
+    for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
+        Send
+            + Sync
+            + 'static
+            + jsonrpsee::server::middleware::rpc::RpcServiceT<
+                MethodResponse = jsonrpsee::MethodResponse,
+                BatchResponse = jsonrpsee::MethodResponse,
+                NotificationResponse = jsonrpsee::MethodResponse,
+            >,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -787,7 +862,8 @@ pub trait RethRpcAddOns<N: FullNodeComponents>:
     fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>;
 }
 
-impl<N: FullNodeComponents, EthB, EV, EB> RethRpcAddOns<N> for RpcAddOns<N, EthB, EV, EB>
+impl<N: FullNodeComponents, EthB, EV, EB, RpcMiddleware> RethRpcAddOns<N>
+    for RpcAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     Self: NodeAddOns<N, Handle = RpcHandle<N, EthB::EthApi>>,
     EthB: EthApiBuilder<N>,

@@ -27,7 +27,7 @@ use reth_node_builder::{
     node::{FullNodeTypes, NodeTypes},
     rpc::{
         EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder,
-        RethRpcAddOns, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
+        RethRpcAddOns, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle, RpcServiceBuilder,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
@@ -255,6 +255,22 @@ impl NodeTypes for OpNode {
 }
 
 /// Add-ons w.r.t. optimism.
+///
+/// This type provides optimism-specific addons to the node and exposes the RPC server and engine API.
+///
+/// # Middleware Configuration
+///
+/// The RPC middleware can be configured through the public `rpc_add_ons` field. Since `RpcAddOns` now
+/// supports middleware configuration via `set_rpc_middleware`, you can do:
+///
+/// ```ignore
+/// let op_addons = OpAddOns::builder().build();
+/// let custom_middleware = RpcServiceBuilder::new().layer(MyCustomLayer);
+/// let op_addons = OpAddOns {
+///     rpc_add_ons: op_addons.rpc_add_ons.set_rpc_middleware(custom_middleware),
+///     ..op_addons
+/// };
+/// ```
 #[derive(Debug)]
 pub struct OpAddOns<N: FullNodeComponents, EthB: EthApiBuilder<N>, EV, EB> {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
@@ -591,6 +607,7 @@ impl<NetworkT> OpAddOnsBuilder<NetworkT> {
                     .with_min_suggested_priority_fee(min_suggested_priority_fee),
                 EV::default(),
                 EB::default(),
+                RpcServiceBuilder::new(),
             ),
             da_config: da_config.unwrap_or_default(),
             sequencer_url,
