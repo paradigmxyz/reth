@@ -40,7 +40,6 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 # other
 tracing.workspace = true
-serde_json.workspace = true
 
 # revm
 revm.workspace = true
