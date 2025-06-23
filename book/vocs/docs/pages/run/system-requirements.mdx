@@ -2,7 +2,11 @@
 
 The hardware requirements for running Reth depend on the node configuration and can change over time as the network grows or new features are implemented.
 
-The most important requirement is by far the disk, whereas CPU and RAM requirements are relatively flexible. Below are the requirements for Ethereum Mainnet.
+The most important requirement is by far the disk, whereas CPU and RAM requirements are relatively flexible.
+
+## Ethereum Mainnet Requirements
+
+Below are the requirements for Ethereum Mainnet:
 
 |           | Archive Node                          | Full Node                             |
 | --------- | ------------------------------------- | ------------------------------------- |
@@ -11,9 +15,21 @@ The most important requirement is by far the disk, whereas CPU and RAM requireme
 | CPU       | Higher clock speed over core count    | Higher clock speeds over core count   |
 | Bandwidth | Stable 24Mbps+                        | Stable 24Mbps+                        |
 
-Running reth on OP-Stack chains like Base require higher hardware requirements:
+## Base System Requirements
 
-{/* TODO: Base Hardware Requirements */}
+Below are the minimum system requirements for running a Base node as of 2025-06-23, block number 31.9M:
+
+|           | Archive Node                          | Full Node                             |
+| --------- | ------------------------------------- | ------------------------------------- |
+| Disk      | At least 4.1TB (TLC NVMe recommended) | At least 2TB (TLC NVMe recommended)   |
+| Memory    | 128GB+                                | 128GB+                                |
+| CPU       | 6 cores+, Higher clock speed over core count | 6 cores+, Higher clock speed over core count |
+| Bandwidth | Stable 24Mbps+                        | Stable 24Mbps+                        |
+
+:::note
+**On CPU clock speeds**: We've seen >1s payload latency on EPYC GENOA 9254 (2.9 GHz/3.9 GHz), best performance we see on AMD EPYC™ 4004.
+:::
+
 
 #### QLC and TLC
 
