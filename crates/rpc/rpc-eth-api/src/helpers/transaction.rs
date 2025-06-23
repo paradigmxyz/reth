@@ -23,7 +23,7 @@ use reth_rpc_eth_types::{
     utils::binary_search, EthApiError, EthApiError::TransactionConfirmationTimeout, SignError,
     TransactionSource,
 };
-use reth_rpc_types_compat::transaction::TransactionCompat;
+use reth_rpc_types_compat::transaction::RpcConvert;
 use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,

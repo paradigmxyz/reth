@@ -21,7 +21,7 @@ use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
 /// Builds RPC transaction w.r.t. network.
-pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
+pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
@@ -352,7 +352,7 @@ impl<E, Evm, Err> Default for RpcConverter<E, Evm, Err> {
     }
 }
 
-impl<N, E, Evm, Err, Map> TransactionCompat for RpcConverter<E, Evm, Err, Map>
+impl<N, E, Evm, Err, Map> RpcConvert for RpcConverter<E, Evm, Err, Map>
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
