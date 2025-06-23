@@ -9,7 +9,7 @@ use reth_era::{
     era1_types::{BlockIndex, Era1Id},
     execution_types::{
         Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-        TotalDifficulty,
+        TotalDifficulty, MAX_BLOCKS_PER_ERA1,
     },
 };
 use reth_fs_util as fs;
@@ -26,7 +26,7 @@ const VERSION_ENTRY_SIZE: usize = ENTRY_HEADER_SIZE;
 
 /// Configuration to export block history
 /// to era1 files
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ExportConfig {
     /// Directory to export era1 files to
     pub dir: PathBuf,
@@ -35,9 +35,42 @@ pub struct ExportConfig {
     /// Last block to export
     pub last_block_number: BlockNumber,
     /// Number of blocks per era1 file
-    pub step: u64,
+    /// It can never be larger than `MAX_BLOCKS_PER_ERA1 = 8192`
+    /// See also <`https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md`>
+    pub max_blocks_per_file: u64,
     /// Network name
     pub network: String,
+}
+
+impl Default for ExportConfig {
+    fn default() -> Self {
+        Self {
+            dir: PathBuf::new(),
+            first_block_number: 0,
+            last_block_number: (MAX_BLOCKS_PER_ERA1 - 1) as u64,
+            max_blocks_per_file: MAX_BLOCKS_PER_ERA1 as u64,
+            network: "mainnet".to_string(),
+        }
+    }
+}
+
+impl ExportConfig {
+    /// Validates the export configuration parameters
+    pub fn validate(&self) -> Result<()> {
+        if self.max_blocks_per_file > MAX_BLOCKS_PER_ERA1 as u64 {
+            return Err(eyre!(
+                "Max blocks per file ({}) exceeds ERA1 limit ({})",
+                self.max_blocks_per_file,
+                MAX_BLOCKS_PER_ERA1
+            ));
+        }
+
+        if self.max_blocks_per_file == 0 {
+            return Err(eyre!("Max blocks per file cannot be zero"));
+        }
+
+        Ok(())
+    }
 }
 
 /// Fetches block history data from the provider
@@ -49,9 +82,10 @@ where
     B: Into<BlockBody<P::Transaction, Header>>,
     P::Header: Into<Header>,
 {
+    config.validate()?;
     info!(
-        "Exporting blockchain history from block {} to {} in steps of {}",
-        config.first_block_number, config.last_block_number, config.step
+        "Exporting blockchain history from block {} to {} with this max of blocks per file of {}",
+        config.first_block_number, config.last_block_number, config.max_blocks_per_file
     );
 
     // Determine the actual last block to export
@@ -62,7 +96,7 @@ where
         target: "era::history::export",
         first = config.first_block_number,
         last = last_block_number,
-        step = config.step,
+        max_blocks_per_file = config.max_blocks_per_file,
         "Preparing era1 export data"
     );
 
@@ -87,10 +121,11 @@ where
         U256::ZERO
     };
 
-    // Process blocks in chunks according to step size
-    for start_block in (config.first_block_number..=last_block_number).step_by(config.step as usize)
+    // Process blocks in chunks according to `max_blocks_per_file`
+    for start_block in
+        (config.first_block_number..=last_block_number).step_by(config.max_blocks_per_file as usize)
     {
-        let end_block = (start_block + config.step - 1).min(last_block_number);
+        let end_block = (start_block + config.max_blocks_per_file - 1).min(last_block_number);
         let block_count = (end_block - start_block + 1) as usize;
 
         info!(

@@ -12,6 +12,7 @@ use tempfile::tempdir;
 const EXPORT_FIRST_BLOCK: u64 = 0;
 const EXPORT_BLOCK_PER_FILE: u64 = 250;
 const EXPORT_TOTAL_BLOCKS: u64 = 1000;
+const EXPORT_LAST_BLOCK: u64 = EXPORT_FIRST_BLOCK + EXPORT_TOTAL_BLOCKS - 1;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_history_imports_from_fresh_state_successfully() {
@@ -43,7 +44,8 @@ async fn test_history_imports_from_fresh_state_successfully() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_roundtrip_export_after_import() {
-    let url = Url::from_str("https://era.ithaca.xyz/era1/index.html").unwrap();
+    // URL where the ERA1 files are hosted
+    let url = Url::from_str(ITHACA_ERA_INDEX_URL).unwrap();
     let download_folder = tempdir().unwrap();
     let download_folder = download_folder.path().to_owned().into_boxed_path();
 
@@ -71,15 +73,14 @@ async fn test_roundtrip_export_after_import() {
         assert!(block_exists, "Block {block_num} should exist after importing 8191 blocks");
     }
 
-    let last_block = EXPORT_FIRST_BLOCK + EXPORT_TOTAL_BLOCKS - 1;
     let expected_files = EXPORT_TOTAL_BLOCKS.div_ceil(EXPORT_BLOCK_PER_FILE);
 
     let export_folder = tempdir().unwrap();
     let export_config = ExportConfig {
         dir: export_folder.path().to_path_buf(),
         first_block_number: EXPORT_FIRST_BLOCK,
-        last_block_number: last_block,
-        step: EXPORT_BLOCK_PER_FILE,
+        last_block_number: EXPORT_LAST_BLOCK,
+        max_blocks_per_file: EXPORT_BLOCK_PER_FILE,
         network: "mainnet".to_string(),
     };
 
@@ -118,9 +119,9 @@ async fn test_roundtrip_export_after_import() {
     }
 
     // Verify total coverage matches expected range
-    let total_blocks_exported = (last_block - EXPORT_FIRST_BLOCK) + 1;
+    let total_blocks_exported = (EXPORT_LAST_BLOCK - EXPORT_FIRST_BLOCK) + 1;
     assert_eq!(
         total_blocks_exported, EXPORT_TOTAL_BLOCKS,
-        "Should export exactly {EXPORT_TOTAL_BLOCKS} blocks (from {EXPORT_FIRST_BLOCK} to {last_block})"
+        "Should export exactly {EXPORT_TOTAL_BLOCKS} blocks (from {EXPORT_FIRST_BLOCK} to {EXPORT_LAST_BLOCK})"
     );
 }

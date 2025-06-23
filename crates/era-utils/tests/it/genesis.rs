@@ -13,13 +13,7 @@ fn test_export_with_genesis_only() {
     assert!(provider.block_by_number(1).unwrap().is_none(), "Block 1 should not exist");
 
     let export_dir = tempdir().unwrap();
-    let export_config = ExportConfig {
-        dir: export_dir.path().to_owned(),
-        first_block_number: 0,
-        last_block_number: 0,
-        step: 1,
-        network: "mainnet".to_string(),
-    };
+    let export_config = ExportConfig { dir: export_dir.path().to_owned(), ..Default::default() };
 
     let exported_files =
         export(&provider_factory.provider_rw().unwrap().0, &export_config).unwrap();
