@@ -1255,15 +1255,14 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError>
     where
         RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-        for<'a> <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
-            Send
-                + Sync
-                + 'static
-                + RpcServiceT<
-                    MethodResponse = MethodResponse,
-                    BatchResponse = MethodResponse,
-                    NotificationResponse = MethodResponse,
-                >,
+        <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service: Send
+            + Sync
+            + 'static
+            + RpcServiceT<
+                MethodResponse = MethodResponse,
+                BatchResponse = MethodResponse,
+                NotificationResponse = MethodResponse,
+            >,
     {
         let mut http_handle = None;
         let mut ws_handle = None;
