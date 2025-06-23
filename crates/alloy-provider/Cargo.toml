@@ -24,6 +24,7 @@ reth-node-types.workspace = true
 reth-trie.workspace = true
 reth-stages-types.workspace = true
 reth-db-api.workspace = true
+reth-rpc-convert.workspace = true
 
 # alloy
 alloy-provider.workspace = true
@@ -39,6 +40,7 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 # other
 tracing.workspace = true
+serde_json.workspace = true
 
 # revm
 revm.workspace = true
