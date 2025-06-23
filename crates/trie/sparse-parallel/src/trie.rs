@@ -590,6 +590,8 @@ impl SparseSubtrie {
     pub fn update_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", root=?self.path, "Updating subtrie hashes");
 
+        debug_assert!(prefix_set.iter().all(|path| path.starts_with(&self.path)));
+
         debug_assert!(self.buffers.path_stack.is_empty());
         self.buffers.path_stack.push(RlpNodePathStackItem {
             level: 0,
