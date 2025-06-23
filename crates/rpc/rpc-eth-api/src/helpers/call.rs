@@ -27,6 +27,7 @@ use reth_revm::{
     db::{CacheDB, State},
     DatabaseRef,
 };
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
@@ -34,7 +35,6 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_rpc_types_compat::RpcConvert;
 use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
 use revm::{
     context_interface::{
