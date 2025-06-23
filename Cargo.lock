@@ -6084,7 +6084,7 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 [[package]]
 name = "op-alloy-consensus"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#57b9c101c00a82e199bf4bcfbba429afd9f81369"
+source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-eips 0.15.11",
@@ -6109,7 +6109,7 @@ checksum = "a79f352fc3893dcd670172e615afef993a41798a1d3fc0db88a3e60ef2e70ecc"
 [[package]]
 name = "op-alloy-network"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#57b9c101c00a82e199bf4bcfbba429afd9f81369"
+source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-network",
@@ -6123,7 +6123,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#57b9c101c00a82e199bf4bcfbba429afd9f81369"
+source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -6132,7 +6132,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#57b9c101c00a82e199bf4bcfbba429afd9f81369"
+source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-eips 0.15.11",
@@ -6149,7 +6149,7 @@ dependencies = [
 [[package]]
 name = "op-alloy-rpc-types-engine"
 version = "0.15.4"
-source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#57b9c101c00a82e199bf4bcfbba429afd9f81369"
+source = "git+https://github.com/mantle-xyz/op-alloy?branch=v151#da4e2190e9bdddcee078c0d39060a21ca82d6a04"
 dependencies = [
  "alloy-consensus 0.15.11",
  "alloy-eips 0.15.11",
