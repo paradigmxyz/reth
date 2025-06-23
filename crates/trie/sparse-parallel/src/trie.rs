@@ -16,7 +16,7 @@ use reth_trie_sparse::{
     TrieMasks,
 };
 use smallvec::SmallVec;
-use tracing::trace;
+use tracing::{instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -230,6 +230,7 @@ impl ParallelSparseTrie {
     }
 
     /// Updates hashes for the upper subtrie, using nodes from both upper and lower subtries.
+    #[instrument(level = "trace", target = "engine::tree", skip_all, ret)]
     fn update_upper_subtrie_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating upper subtrie hashes");
 
@@ -252,6 +253,8 @@ impl ParallelSparseTrie {
                     .nodes
                     .get_mut(&path)
                     .expect("lower subtrie node must exist");
+                // Lower subtrie root node hashes must be computed before updating upper subtrie
+                // hashes
                 debug_assert!(node.hash().is_some());
                 node
             };
@@ -260,10 +263,10 @@ impl ParallelSparseTrie {
                 ?path,
                 ?is_in_prefix_set,
                 ?node,
-                "Processing node in upper subtrie update"
+                "Popped node from path stack"
             );
 
-            if let Some((rlp_node, node_type)) = node_rlp(
+            rlp_node(
                 &self.upper_subtrie.branch_node_tree_masks,
                 &self.upper_subtrie.branch_node_hash_masks,
                 &self.upper_subtrie.values,
@@ -273,20 +276,7 @@ impl ParallelSparseTrie {
                 path,
                 &mut is_in_prefix_set,
                 node,
-            ) {
-                trace!(
-                    target: "trie::parallel_sparse",
-                    ?path,
-                    ?node_type,
-                    "Added node to rlp node stack"
-                );
-
-                self.upper_subtrie.buffers.rlp_node_stack.push(RlpNodeStackItem {
-                    path,
-                    rlp_node,
-                    node_type,
-                });
-            }
+            );
         }
 
         debug_assert_eq!(self.upper_subtrie.buffers.rlp_node_stack.len(), 1);
@@ -653,9 +643,9 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[allow(unused)]
+    #[instrument(level = "trace", target = "engine::tree", skip_all, fields(root = ?self.path), ret)]
     pub fn update_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
-        trace!(target: "trie::parallel_sparse", root=?self.path, "Updating subtrie hashes");
+        trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
         debug_assert!(prefix_set.iter().all(|path| path.starts_with(&self.path)));
 
@@ -672,16 +662,8 @@ impl SparseSubtrie {
                 .nodes
                 .get_mut(&path)
                 .unwrap_or_else(|| panic!("node at path {path:?} does not exist"));
-            trace!(
-                target: "trie::parallel_sparse",
-                root = ?self.path,
-                ?path,
-                ?is_in_prefix_set,
-                ?node,
-                "Popped node from path stack"
-            );
 
-            if let Some((rlp_node, node_type)) = node_rlp(
+            rlp_node(
                 &self.branch_node_tree_masks,
                 &self.branch_node_hash_masks,
                 &self.values,
@@ -691,15 +673,7 @@ impl SparseSubtrie {
                 path,
                 &mut is_in_prefix_set,
                 node,
-            ) {
-                trace!(
-                    target: "trie::parallel_sparse",
-                    ?path,
-                    ?node_type,
-                    "Added node to rlp node stack"
-                );
-
-            self.inner.rlp_node(prefix_set_contains, path, node);
+            );
         }
 
         debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
@@ -989,7 +963,7 @@ impl SparseSubtrieInner {
     }
 }
 
-fn node_rlp(
+fn rlp_node(
     branch_node_tree_masks: &HashMap<Nibbles, TrieMask>,
     branch_node_hash_masks: &HashMap<Nibbles, TrieMask>,
     values: &HashMap<Nibbles, Vec<u8>>,
@@ -999,7 +973,15 @@ fn node_rlp(
     path: Nibbles,
     is_in_prefix_set: &mut Option<bool>,
     node: &mut SparseNode,
-) -> Option<(RlpNode, SparseNodeType)> {
+) {
+    trace!(
+        target: "trie::parallel_sparse",
+        ?path,
+        ?is_in_prefix_set,
+        ?node,
+        "Calculating node RLP"
+    );
+
     let mut prefix_set_contains =
         |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
 
@@ -1062,7 +1044,7 @@ fn node_rlp(
                     RlpNodePathStackItem { path, is_in_prefix_set: *is_in_prefix_set },
                     RlpNodePathStackItem { path: child_path, is_in_prefix_set: None },
                 ]);
-                return None
+                return
             }
         }
         SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
@@ -1074,7 +1056,7 @@ fn node_rlp(
                     rlp_node: RlpNode::word_rlp(&hash),
                     node_type: SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie) },
                 });
-                return None
+                return
             }
             let retain_updates = updates.is_some() && prefix_set_contains(&path);
 
@@ -1157,7 +1139,7 @@ fn node_rlp(
                             .drain(..)
                             .map(|path| RlpNodePathStackItem { path, is_in_prefix_set: None }),
                     );
-                    return None
+                    return
                 }
             }
 
@@ -1218,7 +1200,13 @@ fn node_rlp(
         }
     };
 
-    Some((rlp_node, node_type))
+    buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
+    trace!(
+        target: "trie::parallel_sparse",
+        ?path,
+        ?node_type,
+        "Added node to rlp node stack"
+    );
 }
 
 /// Sparse Subtrie Type.
