@@ -308,7 +308,20 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
 #[error("Failed to convert transaction into RPC response: {0}")]
 pub struct TransactionConversionError(String);
 
-/// Generic RPC response object converter for primitives `N` and network `E`.
+/// Generic RPC response object converter for `Evm` and network `E`.
+///
+/// The main purpose of this struct is to provide an implementation of [`RpcConvert`] for generic
+/// associated types. This struct can then be used for conversions in RPC method handlers.
+///
+/// An [`RpcConvert`] implementation is generated if the following traits are implemented for the
+/// network and EVM associated primitives:
+/// * [`FromConsensusTx`]: from signed transaction into RPC response object.
+/// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
+/// * [`TryIntoTxEnv`]: from RPC transaction request into an executable transaction.
+/// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`FromConsensusTx::TxInfo`]. Should be
+///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
+///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
+///   object.
 #[derive(Debug)]
 pub struct RpcConverter<E, Evm, Err, Map = ()> {
     phantom: PhantomData<(E, Evm, Err)>,

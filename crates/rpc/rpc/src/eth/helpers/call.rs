@@ -5,11 +5,11 @@ use alloy_evm::block::BlockExecutorFactory;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmFactory, TxEnvFor};
 use reth_node_api::NodePrimitives;
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEvmError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_rpc_types_compat::RpcConvert;
 use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::context::TxEnv;

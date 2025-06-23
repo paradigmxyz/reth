@@ -22,34 +22,13 @@ impl From<Vec<u8>> for StoredNibbles {
     }
 }
 
-impl PartialEq<[u8]> for StoredNibbles {
-    #[inline]
-    fn eq(&self, other: &[u8]) -> bool {
-        self.0.as_slice() == other
-    }
-}
-
-impl PartialOrd<[u8]> for StoredNibbles {
-    #[inline]
-    fn partial_cmp(&self, other: &[u8]) -> Option<core::cmp::Ordering> {
-        self.0.as_slice().partial_cmp(other)
-    }
-}
-
-impl core::borrow::Borrow<[u8]> for StoredNibbles {
-    #[inline]
-    fn borrow(&self) -> &[u8] {
-        self.0.as_slice()
-    }
-}
-
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for StoredNibbles {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        buf.put_slice(self.0.as_slice());
+        buf.put_slice(&self.0.to_vec());
         self.0.len()
     }
 
@@ -98,7 +77,7 @@ impl reth_codecs::Compact for StoredNibblesSubKey {
         assert!(self.0.len() <= 64);
 
         // right-pad with zeros
-        buf.put_slice(&self.0[..]);
+        buf.put_slice(&self.0.to_vec());
         static ZERO: &[u8; 64] = &[0; 64];
         buf.put_slice(&ZERO[self.0.len()..]);
 
@@ -121,7 +100,7 @@ mod tests {
     #[test]
     fn test_stored_nibbles_from_nibbles() {
         let nibbles = Nibbles::from_nibbles_unchecked(vec![0x02, 0x04, 0x06]);
-        let stored = StoredNibbles::from(nibbles.clone());
+        let stored = StoredNibbles::from(nibbles);
         assert_eq!(stored.0, nibbles);
     }
 
@@ -129,21 +108,7 @@ mod tests {
     fn test_stored_nibbles_from_vec() {
         let bytes = vec![0x02, 0x04, 0x06];
         let stored = StoredNibbles::from(bytes.clone());
-        assert_eq!(stored.0.as_slice(), bytes.as_slice());
-    }
-
-    #[test]
-    fn test_stored_nibbles_equality() {
-        let bytes = vec![0x02, 0x04];
-        let stored = StoredNibbles::from(bytes.clone());
-        assert_eq!(stored, *bytes.as_slice());
-    }
-
-    #[test]
-    fn test_stored_nibbles_partial_cmp() {
-        let stored = StoredNibbles::from(vec![0x02, 0x04]);
-        let other = vec![0x02, 0x05];
-        assert!(stored < *other.as_slice());
+        assert_eq!(stored.0.to_vec(), bytes);
     }
 
     #[test]
@@ -159,15 +124,8 @@ mod tests {
     fn test_stored_nibbles_from_compact() {
         let buf = vec![0x02, 0x04, 0x06];
         let (stored, remaining) = StoredNibbles::from_compact(&buf, 2);
-        assert_eq!(stored.0.as_slice(), &[0x02, 0x04]);
+        assert_eq!(stored.0.to_vec(), vec![0x02, 0x04]);
         assert_eq!(remaining, &[0x06]);
-    }
-
-    #[test]
-    fn test_stored_nibbles_subkey_from_nibbles() {
-        let nibbles = Nibbles::from_nibbles_unchecked(vec![0x02, 0x04]);
-        let subkey = StoredNibblesSubKey::from(nibbles.clone());
-        assert_eq!(subkey.0, nibbles);
     }
 
     #[test]
@@ -186,7 +144,7 @@ mod tests {
         buf.resize(65, 0);
         buf[64] = 2;
         let (subkey, remaining) = StoredNibblesSubKey::from_compact(&buf, 65);
-        assert_eq!(subkey.0.as_slice(), &[0x02, 0x04]);
+        assert_eq!(subkey.0.to_vec(), vec![0x02, 0x04]);
         assert_eq!(remaining, &[] as &[u8]);
     }
 

@@ -6,7 +6,7 @@ use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{NodePrimitives, Recovered, SignedTransaction};
-use reth_rpc_types_compat::{RpcConvert, RpcTransaction};
+use reth_rpc_convert::{RpcConvert, RpcTransaction};
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
