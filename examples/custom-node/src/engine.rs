@@ -23,7 +23,7 @@ use reth_op::{
     },
     OpTransactionSigned,
 };
-use revm_primitives::U256;
+use revm_primitives::{Bytes, U256};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -86,6 +86,10 @@ impl PayloadAttributes for CustomPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
         self.inner.parent_beacon_block_root()
     }
+    
+    fn il(&self) -> Option<&Vec<Bytes>>{
+        self.inner.il()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -130,6 +134,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         self.inner.parent_beacon_block_root()
     }
 
+    fn il(&self) -> Option<&Vec<Bytes>>{
+        self.inner.il()
+    }
+    
     fn suggested_fee_recipient(&self) -> revm_primitives::Address {
         self.inner.suggested_fee_recipient()
     }

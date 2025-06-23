@@ -1,7 +1,7 @@
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes,B256};
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
@@ -120,6 +120,14 @@ where
         match self {
             Self::ExecutionPayload { .. } => MessageValidationKind::Payload,
             Self::PayloadAttributes(_) => MessageValidationKind::PayloadAttributes,
+        }
+    }
+
+    /// Returns the IL for the payload or attributes.
+    pub fn il(&self) -> Option<&Vec<Bytes>> {
+        match self {
+            Self::ExecutionPayload { .. } => None,
+            Self::PayloadAttributes(attributes) => attributes.il(),
         }
     }
 }

@@ -4,7 +4,7 @@ use crate::{
 };
 
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::BuiltPayload;
 use reth_primitives_traits::{NodePrimitives, SealedBlock};
@@ -118,6 +118,12 @@ where
         match self {
             Self::Left(l) => l.withdrawals(),
             Self::Right(r) => r.withdrawals(),
+        }
+    }
+    fn il(&self) -> Option<&Vec<Bytes>> { 
+        match self {
+            Self::Left(l) => l.il(),
+            Self::Right(r) => r.il(),
         }
     }
 }

@@ -45,6 +45,7 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
                 suggested_fee_recipient: Address::random(),
                 withdrawals: None,
                 parent_beacon_block_root: None,
+                il: None,
             },
         ));
 

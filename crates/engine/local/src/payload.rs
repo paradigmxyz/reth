@@ -39,6 +39,8 @@ where
                 .chain_spec
                 .is_cancun_active_at_timestamp(timestamp)
                 .then(B256::random),
+            // TODO: add a dummy IL
+            il: Some(vec![])
         }
     }
 }

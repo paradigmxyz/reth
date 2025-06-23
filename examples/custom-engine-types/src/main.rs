@@ -19,7 +19,7 @@
 
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -98,6 +98,10 @@ impl PayloadAttributes for CustomPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.inner.parent_beacon_block_root()
     }
+    
+    fn il(&self) -> Option<&Vec<Bytes>> {
+       self.inner.il()
+    }
 }
 
 /// New type around the payload builder attributes type
@@ -132,6 +136,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         self.0.parent_beacon_block_root
     }
 
+    fn il(&self) -> Option<&Vec<Bytes>> {
+       self.0.il()
+    }
+    
     fn suggested_fee_recipient(&self) -> Address {
         self.0.suggested_fee_recipient
     }

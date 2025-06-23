@@ -191,6 +191,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 .chain_spec()
                 .is_shanghai_active_at_timestamp(self.timestamp)
                 .then(Vec::new),
+            // TODO: add a dummy IL
+            il: Some(vec![]),
         };
         let payload_config = PayloadConfig::new(
             Arc::new(SealedHeader::new(best_block.header().clone(), best_block.hash())),

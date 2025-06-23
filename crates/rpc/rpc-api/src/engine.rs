@@ -74,6 +74,20 @@ pub trait EngineApi<Engine: EngineTypes> {
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
 
+    /// Post Amsterdam payload handler
+    ///
+    /// TODO: Update Link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    #[method(name = "newPayloadV5")]
+    async fn new_payload_v5(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        il: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatus>;
+    
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.

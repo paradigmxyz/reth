@@ -295,6 +295,39 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
     Ok(())
 }
 
+/// Validates the presence of the `il` field according to the payload timestamp.
+/// After Prague, il field must be [Some] for [`MessageValidationKind::PayloadAttributes`].
+/// Before Amsterdam, il field must be [None];
+pub const fn validate_il_presence<T: EthereumHardforks>(
+    _chain_spec: &T,
+    version: EngineApiMessageVersion,
+    message_validation_kind: MessageValidationKind,
+    has_il: bool,
+) -> Result<(), EngineObjectValidationError> {
+    match version {
+        EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4=> {
+            if has_il {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::IlNotSupportedBeforeV5))
+            }
+        }
+        EngineApiMessageVersion::V5 => {
+            // NOTE
+            //
+            // the IL is not part of the execution payload, so we only check for the payload
+            // attributes
+            if std::matches!(message_validation_kind, MessageValidationKind::PayloadAttributes) &&
+                !has_il
+            {
+                return Err(message_validation_kind
+                    .to_error(VersionSpecificValidationError::NoIlPostAmsterdam))
+            }
+        }
+    };
+
+    Ok(())
+}
+
 /// A type that represents whether or not we are validating a payload or payload attributes.
 ///
 /// This is used to ensure that the correct error code is returned when validating the payload or
@@ -306,7 +339,6 @@ pub enum MessageValidationKind {
     /// We are validating fields of a payload.
     Payload,
 }
-
 impl MessageValidationKind {
     /// Returns an `EngineObjectValidationError` based on the given
     /// `VersionSpecificValidationError` and the current validation kind.
@@ -351,6 +383,12 @@ where
         payload_or_attrs.message_validation_kind(),
         payload_or_attrs.timestamp(),
         payload_or_attrs.parent_beacon_block_root().is_some(),
+    )?;
+    validate_il_presence(
+        chain_spec,
+        version,
+        payload_or_attrs.message_validation_kind(),
+        payload_or_attrs.il().is_some(),
     )
 }
 

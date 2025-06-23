@@ -7,7 +7,7 @@ use alloy_eips::{
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     eip7685::Requests,
 };
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
@@ -329,6 +329,8 @@ pub struct EthPayloadBuilderAttributes {
     pub withdrawals: Withdrawals,
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
+    /// Inclusion list for the generated payload.
+    pub il: Option<Vec<Bytes>>,
 }
 
 // === impl EthPayloadBuilderAttributes ===
@@ -353,6 +355,7 @@ impl EthPayloadBuilderAttributes {
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
+            il: attributes.il,
         }
     }
 }
@@ -398,6 +401,10 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.withdrawals
+    }
+
+    fn il(&self) -> Option<&Vec<Bytes>> {
+        self.il.as_ref()
     }
 }
 
@@ -456,6 +463,8 @@ mod tests {
             .unwrap(),
             withdrawals: None,
             parent_beacon_block_root: None,
+            // TODO: add a dummy IL
+            il: Some(vec![]),
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -493,6 +502,8 @@ mod tests {
                 },
             ]),
             parent_beacon_block_root: None,
+            // TODO: add a dummy IL
+            il: None,
         };
 
         // Verify that the generated payload ID matches the expected value
@@ -525,6 +536,8 @@ mod tests {
                 )
                 .unwrap(),
             ),
+            // TODO: add a dummy IL
+            il: None,
         };
 
         // Verify that the generated payload ID matches the expected value
