@@ -119,8 +119,9 @@ impl ParallelSparseTrie {
         match node {
             TrieNode::Branch(branch) => {
                 // If a branch is at the cutoff level of the trie then it will be in the upper trie,
-                // but all of its children will be in a lower trie.
-                if path.len() == UPPER_TRIE_MAX_DEPTH {
+                // but all of its children will be in a lower trie. Check if a child node would be
+                // in the lower subtrie, and reveal accordingly.
+                if !SparseSubtrieType::path_len_is_upper(path.len() + 1) {
                     let mut stack_ptr = branch.as_ref().first_child_index();
                     for idx in CHILD_INDEX_RANGE {
                         if branch.state_mask.is_bit_set(idx) {
@@ -137,10 +138,8 @@ impl ParallelSparseTrie {
             TrieNode::Extension(ext) => {
                 let mut child_path = path;
                 child_path.extend(&ext.key);
-                if child_path.len() > UPPER_TRIE_MAX_DEPTH {
-                    self.lower_subtrie_for_path(&child_path)
-                        .expect("child_path must have a lower subtrie")
-                        .reveal_node_or_hash(child_path, &ext.child)?;
+                if let Some(subtrie) = self.lower_subtrie_for_path(&child_path) {
+                    subtrie.reveal_node_or_hash(child_path, &ext.child)?;
                 }
             }
             TrieNode::EmptyRoot | TrieNode::Leaf(_) => (),
@@ -583,24 +582,32 @@ impl SparseSubtrie {
 /// Sparse Subtrie Type.
 ///
 /// Used to determine the type of subtrie a certain path belongs to:
-/// - Paths in the range `0x..=0xff` belong to the upper subtrie.
-/// - Paths in the range `0x000..` belong to one of the lower subtries. The index of the lower
-///   subtrie is determined by the path first nibbles of the path.
+/// - Paths in the range `0x..=0xf` belong to the upper subtrie.
+/// - Paths in the range `0x00..` belong to one of the lower subtries. The index of the lower
+///   subtrie is determined by the first [`UPPER_TRIE_MAX_DEPTH`] nibbles of the path.
 ///
 /// There can be at most [`NUM_LOWER_SUBTRIES`] lower subtries.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SparseSubtrieType {
-    /// Upper subtrie with paths in the range `0x..=0xff`
+    /// Upper subtrie with paths in the range `0x..=0xf`
     Upper,
-    /// Lower subtrie with paths in the range `0x000..`. Includes the index of the subtrie,
+    /// Lower subtrie with paths in the range `0x00..`. Includes the index of the subtrie,
     /// according to the path prefix.
     Lower(usize),
 }
 
 impl SparseSubtrieType {
+    /// Returns true if a node at a path of the given length would be placed in the upper subtrie.
+    ///
+    /// Nodes with paths shorter than [`UPPER_TRIE_MAX_DEPTH`] nibbles belong to the upper subtrie,
+    /// while longer paths belong to the lower subtries.
+    pub const fn path_len_is_upper(len: usize) -> bool {
+        len < UPPER_TRIE_MAX_DEPTH
+    }
+
     /// Returns the type of subtrie based on the given path.
     pub fn from_path(path: &Nibbles) -> Self {
-        if path.len() <= UPPER_TRIE_MAX_DEPTH {
+        if Self::path_len_is_upper(path.len()) {
             Self::Upper
         } else {
             Self::Lower(path_subtrie_index_unchecked(path))
@@ -815,49 +822,62 @@ mod tests {
     }
 
     #[test]
-    fn sparse_subtrie_type() {
+    fn test_sparse_subtrie_type() {
+        assert_eq!(SparseSubtrieType::from_path(&Nibbles::new()), SparseSubtrieType::Upper);
         assert_eq!(
-            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 0])),
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0])),
             SparseSubtrieType::Upper
         );
         assert_eq!(
-            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 15])),
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15])),
             SparseSubtrieType::Upper
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 0])),
+            SparseSubtrieType::Lower(0)
         );
         assert_eq!(
             SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 0, 0])),
             SparseSubtrieType::Lower(0)
         );
         assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 1])),
+            SparseSubtrieType::Lower(1)
+        );
+        assert_eq!(
             SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 1, 0])),
             SparseSubtrieType::Lower(1)
         );
         assert_eq!(
-            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 15, 0])),
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([0, 15])),
             SparseSubtrieType::Lower(15)
         );
         assert_eq!(
-            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 0, 0])),
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 0])),
             SparseSubtrieType::Lower(240)
         );
         assert_eq!(
-            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 1, 0])),
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 1])),
             SparseSubtrieType::Lower(241)
         );
         assert_eq!(
-            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 15, 0])),
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 15])),
+            SparseSubtrieType::Lower(255)
+        );
+        assert_eq!(
+            SparseSubtrieType::from_path(&Nibbles::from_nibbles([15, 15, 15])),
             SparseSubtrieType::Lower(255)
         );
     }
 
     #[test]
-    fn reveal_node_leaves() {
+    fn test_reveal_node_leaves() {
         let mut trie = ParallelSparseTrie::default();
 
         // Reveal leaf in the upper trie
         {
-            let path = Nibbles::from_nibbles([0x1, 0x2]);
-            let node = create_leaf_node(&[0x3, 0x4], 42);
+            let path = Nibbles::from_nibbles([0x1]);
+            let node = create_leaf_node(&[0x2, 0x3], 42);
             let masks = TrieMasks::none();
 
             trie.reveal_node(path, node, masks).unwrap();
@@ -865,17 +885,17 @@ mod tests {
             assert_matches!(
                 trie.upper_subtrie.nodes.get(&path),
                 Some(SparseNode::Leaf { key, hash: None })
-                if key == &Nibbles::from_nibbles([0x3, 0x4])
+                if key == &Nibbles::from_nibbles([0x2, 0x3])
             );
 
-            let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
+            let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
             assert_eq!(trie.upper_subtrie.values.get(&full_path), Some(&encode_account_value(42)));
         }
 
         // Reveal leaf in a lower trie
         {
-            let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-            let node = create_leaf_node(&[0x4, 0x5], 42);
+            let path = Nibbles::from_nibbles([0x1, 0x2]);
+            let node = create_leaf_node(&[0x3, 0x4], 42);
             let masks = TrieMasks::none();
 
             trie.reveal_node(path, node, masks).unwrap();
@@ -888,17 +908,17 @@ mod tests {
             assert_matches!(
                 lower_subtrie.nodes.get(&path),
                 Some(SparseNode::Leaf { key, hash: None })
-                if key == &Nibbles::from_nibbles([0x4, 0x5])
+                if key == &Nibbles::from_nibbles([0x3, 0x4])
             );
         }
     }
 
     #[test]
-    fn reveal_node_extension_all_upper() {
+    fn test_reveal_node_extension_all_upper() {
         let mut trie = ParallelSparseTrie::default();
-        let path = Nibbles::from_nibbles([0x1]);
+        let path = Nibbles::new();
         let child_hash = B256::repeat_byte(0xab);
-        let node = create_extension_node(&[0x2], child_hash);
+        let node = create_extension_node(&[0x1], child_hash);
         let masks = TrieMasks::none();
 
         trie.reveal_node(path, node, masks).unwrap();
@@ -906,20 +926,20 @@ mod tests {
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
             Some(SparseNode::Extension { key, hash: None, .. })
-            if key == &Nibbles::from_nibbles([0x2])
+            if key == &Nibbles::from_nibbles([0x1])
         );
 
         // Child path should be in upper trie
-        let child_path = Nibbles::from_nibbles([0x1, 0x2]);
+        let child_path = Nibbles::from_nibbles([0x1]);
         assert_eq!(trie.upper_subtrie.nodes.get(&child_path), Some(&SparseNode::Hash(child_hash)));
     }
 
     #[test]
-    fn reveal_node_extension_cross_level() {
+    fn test_reveal_node_extension_cross_level() {
         let mut trie = ParallelSparseTrie::default();
-        let path = Nibbles::from_nibbles([0x1, 0x2]);
+        let path = Nibbles::new();
         let child_hash = B256::repeat_byte(0xcd);
-        let node = create_extension_node(&[0x3], child_hash);
+        let node = create_extension_node(&[0x1, 0x2, 0x3], child_hash);
         let masks = TrieMasks::none();
 
         trie.reveal_node(path, node, masks).unwrap();
@@ -928,7 +948,7 @@ mod tests {
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
             Some(SparseNode::Extension { key, hash: None, .. })
-            if key == &Nibbles::from_nibbles([0x3])
+            if key == &Nibbles::from_nibbles([0x1, 0x2, 0x3])
         );
 
         // Child path (0x1, 0x2, 0x3) should be in lower trie
@@ -941,9 +961,35 @@ mod tests {
     }
 
     #[test]
-    fn reveal_node_branch_all_upper() {
+    fn test_reveal_node_extension_cross_level_boundary() {
         let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1]);
+        let child_hash = B256::repeat_byte(0xcd);
+        let node = create_extension_node(&[0x2], child_hash);
+        let masks = TrieMasks::none();
+
+        trie.reveal_node(path, node, masks).unwrap();
+
+        // Extension node should be in upper trie
+        assert_matches!(
+            trie.upper_subtrie.nodes.get(&path),
+            Some(SparseNode::Extension { key, hash: None, .. })
+            if key == &Nibbles::from_nibbles([0x2])
+        );
+
+        // Child path (0x1, 0x2) should be in lower trie
+        let child_path = Nibbles::from_nibbles([0x1, 0x2]);
+        let idx = path_subtrie_index_unchecked(&child_path);
+        assert!(trie.lower_subtries[idx].is_some());
+
+        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        assert_eq!(lower_subtrie.nodes.get(&child_path), Some(&SparseNode::Hash(child_hash)));
+    }
+
+    #[test]
+    fn test_reveal_node_branch_all_upper() {
+        let mut trie = ParallelSparseTrie::default();
+        let path = Nibbles::new();
         let child_hashes = [B256::repeat_byte(0x11), B256::repeat_byte(0x22)];
         let node = create_branch_node_with_children(&[0x0, 0x5], &child_hashes);
         let masks = TrieMasks::none();
@@ -958,8 +1004,8 @@ mod tests {
         );
 
         // Children should be in upper trie (paths of length 2)
-        let child_path_0 = Nibbles::from_nibbles([0x1, 0x0]);
-        let child_path_5 = Nibbles::from_nibbles([0x1, 0x5]);
+        let child_path_0 = Nibbles::from_nibbles([0x0]);
+        let child_path_5 = Nibbles::from_nibbles([0x5]);
         assert_eq!(
             trie.upper_subtrie.nodes.get(&child_path_0),
             Some(&SparseNode::Hash(child_hashes[0]))
@@ -971,9 +1017,9 @@ mod tests {
     }
 
     #[test]
-    fn reveal_node_branch_cross_level() {
+    fn test_reveal_node_branch_cross_level() {
         let mut trie = ParallelSparseTrie::default();
-        let path = Nibbles::from_nibbles([0x1, 0x2]); // Exactly 2 nibbles - boundary case
+        let path = Nibbles::from_nibbles([0x1]); // Exactly 1 nibbles - boundary case
         let child_hashes =
             [B256::repeat_byte(0x33), B256::repeat_byte(0x44), B256::repeat_byte(0x55)];
         let node = create_branch_node_with_children(&[0x0, 0x7, 0xf], &child_hashes);
@@ -990,9 +1036,9 @@ mod tests {
 
         // All children should be in lower tries since they have paths of length 3
         let child_paths = [
-            Nibbles::from_nibbles([0x1, 0x2, 0x0]),
-            Nibbles::from_nibbles([0x1, 0x2, 0x7]),
-            Nibbles::from_nibbles([0x1, 0x2, 0xf]),
+            Nibbles::from_nibbles([0x1, 0x0]),
+            Nibbles::from_nibbles([0x1, 0x7]),
+            Nibbles::from_nibbles([0x1, 0xf]),
         ];
 
         for (i, child_path) in child_paths.iter().enumerate() {
