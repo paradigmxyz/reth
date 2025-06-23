@@ -2992,8 +2992,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         // this table in `canonical_hashes_range`.
         self.remove::<tables::CanonicalHeaders>(block + 1..)?;
         self.remove::<tables::Headers<HeaderTy<N>>>(block + 1..)?;
-        // Note: HeaderTerminalDifficulties table is read-only in the database after
-        // Paris/Merge, so we do not remove entries from it here.
 
         // First transaction to be removed
         let unwind_tx_from = self

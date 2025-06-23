@@ -4,7 +4,6 @@ use crate::{segments, segments::Segment, StaticFileProducerEvent};
 use alloy_primitives::BlockNumber;
 use parking_lot::Mutex;
 use rayon::prelude::*;
-use reth_chainspec::EthereumHardforks;
 use reth_codecs::Compact;
 use reth_db_api::table::Value;
 use reth_primitives_traits::NodePrimitives;
@@ -98,7 +97,6 @@ where
                 >,
             > + StageCheckpointReader
                           + BlockReader
-                          + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         >,
 {
     /// Listen for events on the `static_file_producer`.

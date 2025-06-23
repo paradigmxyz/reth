@@ -1,6 +1,5 @@
 use crate::segments::Segment;
 use alloy_primitives::BlockNumber;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_codecs::Compact;
 use reth_db_api::{cursor::DbCursorRO, table::Value, tables, transaction::DbTx};
 use reth_primitives_traits::NodePrimitives;
@@ -19,7 +18,6 @@ impl<Provider> Segment<Provider> for Headers
 where
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact + Value>>
         + DBProvider
-        + ChainSpecProvider<ChainSpec: EthereumHardforks>,
 {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Headers
@@ -42,46 +40,23 @@ where
 
         let mut header_td_cursor =
             provider.tx_ref().cursor_read::<tables::HeaderTerminalDifficulties>()?;
+        let header_td_walker = header_td_cursor.walk_range(block_range.clone())?;
 
         let mut canonical_headers_cursor =
             provider.tx_ref().cursor_read::<tables::CanonicalHeaders>()?;
-        let canonical_headers_walker = canonical_headers_cursor.walk_range(block_range.clone())?;
+        let canonical_headers_walker = canonical_headers_cursor.walk_range(block_range)?;
 
-        // Get the final Paris difficulty for post-merge blocks
-        let final_paris_difficulty = provider.chain_spec().final_paris_total_difficulty();
-
-        let header_td_walker = header_td_cursor.walk_range(block_range)?;
-        let mut header_td_iter = header_td_walker.peekable();
-
-        for (header_entry, canonical_header_entry) in headers_walker.zip(canonical_headers_walker) {
+        for ((header_entry, header_td_entry), canonical_header_entry) in
+            headers_walker.zip(header_td_walker).zip(canonical_headers_walker)
+        {
             let (header_block, header) = header_entry?;
+            let (header_td_block, header_td) = header_td_entry?;
             let (canonical_header_block, canonical_header) = canonical_header_entry?;
 
-            debug_assert_eq!(header_block, canonical_header_block);
+            debug_assert_eq!(header_block, header_td_block);
+            debug_assert_eq!(header_td_block, canonical_header_block);
 
-            // For post-merge blocks, use final Paris difficulty
-            // For pre-merge blocks, get the stored difficulty from the iterator
-            let total_difficulty = if provider.chain_spec().is_paris_active_at_block(header_block) {
-                final_paris_difficulty.unwrap_or_default()
-            } else {
-                // For pre-merge blocks, we expect an entry in the terminal difficulties table
-                // Check if we have a matching entry in our iterator
-                match header_td_iter.peek() {
-                    Some(Ok((td_block, _))) if *td_block == header_block => {
-                        // We have a matching entry, consume it
-                        let (_, header_td) = header_td_iter.next().unwrap()?;
-                        header_td.0
-                    }
-                    _ => {
-                        // No matching entry for this pre-merge block - this shouldn't happen
-                        return Err(reth_storage_errors::provider::ProviderError::HeaderNotFound(
-                            header_block.into(),
-                        ));
-                    }
-                }
-            };
-
-            static_file_writer.append_header(&header, total_difficulty, &canonical_header)?;
+            static_file_writer.append_header(&header, header_td.0, &canonical_header)?;
         }
 
         Ok(())

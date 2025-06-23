@@ -343,8 +343,7 @@ where
                 (input.unwind_to + 1)..,
             )?;
         provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        // Note: We no longer unwind HeaderTerminalDifficulties table after Paris/Merge
-        // as it's read-only and kept for backward compatibility
+
         let unfinalized_headers_unwound =
             provider.tx_ref().unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
 
@@ -572,12 +571,6 @@ mod tests {
                 self.db.ensure_no_entry_above::<tables::CanonicalHeaders, _>(block, |key| key)?;
                 self.db.ensure_no_entry_above::<tables::Headers, _>(block, |key| key)?;
 
-                // Note: We no longer unwind HeaderTerminalDifficulties table after Paris/Merge, so
-                // we don't need to ensure entry above
-                // self.db.ensure_no_entry_above::<tables::HeaderTerminalDifficulties, _>(
-                //     block,
-                //     |num| num,
-                // )?;
                 Ok(())
             }
 

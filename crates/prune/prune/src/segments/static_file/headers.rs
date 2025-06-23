@@ -68,9 +68,6 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
         let mut canonical_headers_cursor =
             provider.tx_ref().cursor_write::<tables::CanonicalHeaders>()?;
 
-        // Note: We no longer prune HeaderTerminalDifficulties table after Paris/Merge
-        // as it's read-only and kept for backward compatibility
-
         let mut limiter = input.limiter.floor_deleted_entries_limit_to_multiple_of(
             NonZeroUsize::new(HEADER_TABLES_TO_PRUNE).unwrap(),
         );
@@ -217,8 +214,6 @@ mod tests {
 
         assert_eq!(db.table::<tables::CanonicalHeaders>().unwrap().len(), headers.len());
         assert_eq!(db.table::<tables::Headers>().unwrap().len(), headers.len());
-        // Note: HeaderTerminalDifficulties table is read-only in database after Paris/Merge
-        // so we don't check its length as it's not being written to
 
         let test_prune = |to_block: BlockNumber, expected_result: (PruneProgress, usize)| {
             let segment = super::Headers::new(db.factory.static_file_provider());
@@ -282,8 +277,6 @@ mod tests {
                 db.table::<tables::Headers>().unwrap().len(),
                 headers.len() - (last_pruned_block_number + 1) as usize
             );
-            // Note: HeaderTerminalDifficulties table is read-only in database after
-            // Paris/Merge so we don't check its length as it's not being written to
             assert_eq!(
                 db.factory.provider().unwrap().get_prune_checkpoint(PruneSegment::Headers).unwrap(),
                 Some(PruneCheckpoint {
