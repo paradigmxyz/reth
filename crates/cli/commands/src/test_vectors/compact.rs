@@ -222,6 +222,13 @@ where
         };
         let res = obj.to_compact(&mut compact_buffer);
 
+        // TODO: remove this, see https://github.com/paradigmxyz/reth/pull/17006
+        if type_name == "StoredNibbles" || type_name == "StoredNibblesSubKey" {
+            for byte in &mut compact_buffer {
+                *byte &= 0x0F;
+            }
+        }
+
         if IDENTIFIER_TYPE.contains(&type_name) {
             compact_buffer.push(res as u8);
         }
