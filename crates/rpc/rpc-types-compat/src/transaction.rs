@@ -20,8 +20,15 @@ use revm_context::{BlockEnv, CfgEnv, TxEnv};
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
 
-/// Builds RPC transaction w.r.t. network.
-pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
+/// Responsible for the conversions from and into RPC requests and responses.
+///
+/// The JSON-RPC schema and the Node primitives are configurable using the [`RpcConvert::Network`]
+/// and [`RpcConvert::Primitives`] associated types respectively.
+///
+/// A generic implementation [`RpcConverter`] should be preferred over a manual implementation. As
+/// long as its trait bound requirements are met, the implementation is created automatically and
+/// can be used in RPC method handlers for all the conversions.
+pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
@@ -32,7 +39,7 @@ pub trait TransactionCompat: Send + Sync + Unpin + Clone + Debug {
     /// A set of variables for executing a transaction.
     type TxEnv;
 
-    /// RPC transaction error type.
+    /// An associated RPC conversion error.
     type Error: error::Error + Into<jsonrpsee_types::ErrorObject<'static>>;
 
     /// Wrapper for `fill()` with default `TransactionInfo`
@@ -352,7 +359,7 @@ impl<E, Evm, Err> Default for RpcConverter<E, Evm, Err> {
     }
 }
 
-impl<N, E, Evm, Err, Map> TransactionCompat for RpcConverter<E, Evm, Err, Map>
+impl<N, E, Evm, Err, Map> RpcConvert for RpcConverter<E, Evm, Err, Map>
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,

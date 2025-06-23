@@ -12,7 +12,7 @@ use reth_rpc_eth_api::{
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_types_compat::RpcConvert;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     StateProviderFactory,
@@ -28,7 +28,7 @@ where
                 Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
             Error: FromEvmError<Self::Evm>,
-            TransactionCompat: TransactionCompat<Network = Self::NetworkTypes>,
+            RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<Receipt = Provider::Receipt, Block = Provider::Block>
                           + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>

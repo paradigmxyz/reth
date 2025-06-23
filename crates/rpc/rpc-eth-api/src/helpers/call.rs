@@ -34,7 +34,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_types_compat::RpcConvert;
 use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
 use revm::{
     context_interface::{
@@ -456,9 +456,9 @@ pub trait Call:
                 SignedTx = ProviderTx<Self::Provider>,
             >,
         >,
-        TransactionCompat: TransactionCompat<TxEnv = TxEnvFor<Self::Evm>>,
+        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
-                   + From<<Self::TransactionCompat as TransactionCompat>::Error>
+                   + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,
     > + SpawnBlocking
 {
