@@ -23,7 +23,7 @@ use reth_primitives_traits::{
     block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
 };
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types_compat::TransactionCompat;
+use reth_rpc_types_compat::{RpcTransaction, TransactionCompat};
 use reth_storage_api::noop::NoopProvider;
 use revm::{
     context_interface::result::ExecutionResult,
@@ -189,9 +189,9 @@ where
 pub fn build_simulated_block<T, B, Halt: Clone>(
     block: RecoveredBlock<B>,
     results: Vec<ExecutionResult<Halt>>,
-    full_transactions: bool,
+    txs_kind: BlockTransactionsKind,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
+) -> Result<SimulatedBlock<Block<RpcTransaction<T::Network>, Header<B::Header>>>, T::Error>
 where
     T: TransactionCompat<
         Primitives: NodePrimitives<SignedTx = BlockTx<B>>,
@@ -255,9 +255,6 @@ where
 
         calls.push(call);
     }
-
-    let txs_kind =
-        if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
 
     let block = block.into_rpc_block(txs_kind, |tx, tx_info| tx_resp_builder.fill(tx, tx_info))?;
     Ok(SimulatedBlock { inner: block, calls })

@@ -92,6 +92,10 @@ pub trait StateProvider:
     }
 }
 
+/// Minimal requirements to read a full account, for example, to validate its new transactions
+pub trait AccountInfoReader: AccountReader + BytecodeReader {}
+impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
+
 /// Trait implemented for database providers that can provide the [`reth_trie_db::StateCommitment`]
 /// type.
 #[cfg(feature = "db-api")]
