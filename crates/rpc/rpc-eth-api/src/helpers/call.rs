@@ -27,6 +27,7 @@ use reth_revm::{
     db::{CacheDB, State},
     DatabaseRef,
 };
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
@@ -34,7 +35,6 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_rpc_types_compat::TransactionCompat;
 use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
 use revm::{
     context_interface::{
@@ -190,7 +190,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let block = simulate::build_simulated_block(
                         result.block,
                         results,
-                        return_full_transactions,
+                        return_full_transactions.into(),
                         this.tx_resp_builder(),
                     )?;
 
@@ -456,9 +456,9 @@ pub trait Call:
                 SignedTx = ProviderTx<Self::Provider>,
             >,
         >,
-        TransactionCompat: TransactionCompat<TxEnv = TxEnvFor<Self::Evm>>,
+        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
-                   + From<<Self::TransactionCompat as TransactionCompat>::Error>
+                   + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,
     > + SpawnBlocking
 {

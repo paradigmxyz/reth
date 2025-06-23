@@ -82,6 +82,28 @@ impl<N> OpNodeTypes for N where
 {
 }
 
+/// Helper trait for Optimism node types with full configuration including storage and execution
+/// data.
+pub trait OpFullNodeTypes:
+    NodeTypes<
+    ChainSpec: OpHardforks,
+    Primitives: OpPayloadPrimitives,
+    Storage = OpStorage,
+    Payload: EngineTypes<ExecutionData = OpExecutionData>,
+>
+{
+}
+
+impl<N> OpFullNodeTypes for N where
+    N: NodeTypes<
+        ChainSpec: OpHardforks,
+        Primitives: OpPayloadPrimitives,
+        Storage = OpStorage,
+        Payload: EngineTypes<ExecutionData = OpExecutionData>,
+    >
+{
+}
+
 /// Type configuration for a regular Optimism node.
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
@@ -181,14 +203,7 @@ impl OpNode {
 
 impl<N> Node<N> for OpNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
-            ChainSpec: OpHardforks + Hardforks,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-        >,
-    >,
+    N: FullNodeTypes<Types: OpFullNodeTypes + OpNodeTypes>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -360,14 +375,10 @@ where
 impl<N, NetworkT, EV, EB> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives: OpPayloadPrimitives,
-            Storage = OpStorage,
-            Payload: EngineTypes<ExecutionData = OpExecutionData>,
-        >,
+        Types: OpFullNodeTypes,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
+    N::Types: NodeTypes<Primitives: OpPayloadPrimitives>,
     OpEthApiError: FromEvmError<N::Evm>,
     <N::Pool as TransactionPool>::Transaction: OpPooledTx,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
@@ -459,12 +470,7 @@ where
 impl<N, NetworkT, EV, EB> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Payload: EngineTypes<ExecutionData = OpExecutionData>,
-        >,
+        Types: OpFullNodeTypes,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -484,13 +490,7 @@ where
 
 impl<N, NetworkT, EV, EB> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives = OpPrimitives,
-            Payload: EngineTypes<ExecutionData = OpExecutionData>,
-        >,
-    >,
+    N: FullNodeComponents<Types: OpFullNodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N> + Default,
     EB: EngineApiBuilder<N>,
@@ -996,10 +996,9 @@ where
 #[non_exhaustive]
 pub struct OpEngineValidatorBuilder;
 
-impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
+impl<Node> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives, Payload = OpEngineTypes>,
-    Node: FullNodeComponents<Types = Types>,
+    Node: FullNodeComponents<Types: OpNodeTypes>,
 {
     type Validator = OpEngineValidator<
         Node::Provider,
@@ -1008,7 +1007,7 @@ where
     >;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(OpEngineValidator::new::<KeyHasherTy<Types>>(
+        Ok(OpEngineValidator::new::<KeyHasherTy<Node::Types>>(
             ctx.config.chain.clone(),
             ctx.node.provider().clone(),
         ))

@@ -38,7 +38,7 @@ Reth is a high-performance Ethereum execution client written in Rust, focusing o
 
 2. **Linting**: Run clippy with all features
    ```bash
-   RUSTFLAGS="-D warnings" cargo clippy --workspace --lib --examples --tests --benches --all-features --locked
+   RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --lib --examples --tests --benches --all-features --locked
    ```
 
 3. **Testing**: Use nextest for faster test execution
@@ -147,6 +147,7 @@ mod tests {
 1. **Avoid Allocations in Hot Paths**: Use references and borrowing
 2. **Parallel Processing**: Use rayon for CPU-bound parallel work
 3. **Async/Await**: Use tokio for I/O-bound operations
+4. **File Operations**: Use `reth_fs_util` instead of `std::fs` for better error handling
 
 ### Common Pitfalls
 
@@ -292,7 +293,7 @@ Let's say you want to fix a bug where external IP resolution fails on startup:
 cargo +nightly fmt --all
 
 # Run lints
-RUSTFLAGS="-D warnings" cargo clippy --workspace --all-features --locked
+RUSTFLAGS="-D warnings" cargo +nightly clippy --workspace --all-features --locked
 
 # Run tests
 cargo nextest run --workspace

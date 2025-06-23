@@ -5,6 +5,7 @@ use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, NodePrimitives};
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
@@ -21,6 +22,7 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
+        RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         Provider: BlockReader<
             Transaction = reth_ethereum_primitives::TransactionSigned,
             Receipt = reth_ethereum_primitives::Receipt,
