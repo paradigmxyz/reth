@@ -1,10 +1,12 @@
 //! Loads and formats OP receipt RPC response.
 
+use crate::{OpEthApi, OpEthApiError};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
+use op_revm::constants::{GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT};
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_chainspec::OpChainSpec;
@@ -13,9 +15,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
-use reth_storage_api::{ReceiptProvider, TransactionsProvider};
-
-use crate::{OpEthApi, OpEthApiError};
+use reth_storage_api::{ReceiptProvider, StateProviderFactory, TransactionsProvider};
 
 impl<N> LoadReceipt for OpEthApi<N>
 where
@@ -43,6 +43,12 @@ where
 
         let mut l1_block_info =
             reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
+
+        // [TODO] It's a temporary solution to get token ratio from state, we should modify the
+        // receipt
+        let state = self.inner.eth_api.provider().state_by_block_hash(meta.block_hash).unwrap();
+        let token_ratio = state.storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into()).unwrap();
+        l1_block_info.token_ratio = token_ratio;
 
         Ok(OpReceiptBuilder::new(
             &self.inner.eth_api.provider().chain_spec(),
@@ -144,6 +150,8 @@ impl OpReceiptFieldsBuilder {
         //         l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
         // }
 
+        self.token_ratio = l1_block_info.token_ratio.map(|ratio| ratio.saturating_to());
+
         Ok(self)
     }
 
@@ -189,10 +197,10 @@ impl OpReceiptFieldsBuilder {
                 l1_blob_base_fee_scalar: None,
                 operator_fee_scalar: None,
                 operator_fee_constant: None,
+                token_ratio,
             },
             deposit_nonce,
             deposit_receipt_version: None,
-            token_ratio,
         }
     }
 }
