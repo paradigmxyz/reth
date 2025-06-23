@@ -597,7 +597,10 @@ pub enum SparseSubtrieType {
 }
 
 impl SparseSubtrieType {
-    /// Returns true if a node at a path of the given length would be places in the upper subtrie.
+    /// Returns true if a node at a path of the given length would be placed in the upper subtrie.
+    ///
+    /// Nodes with paths shorter than [`UPPER_TRIE_MAX_DEPTH`] nibbles belong to the upper subtrie,
+    /// while longer paths belong to the lower subtries.
     pub const fn path_len_is_upper(len: usize) -> bool {
         len < UPPER_TRIE_MAX_DEPTH
     }
