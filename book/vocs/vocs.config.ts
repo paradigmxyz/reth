@@ -66,5 +66,8 @@ export default defineConfig({
       light: '#1f1f1f',
       dark: '#ffffff',
     }
+  },
+  editLink: {
+    pattern: "https://github.com/paradigmxyz/reth/edit/main/book/vocs/docs/pages/:path",
   }
 })
