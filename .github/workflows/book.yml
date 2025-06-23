@@ -7,7 +7,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, reopened, synchronize, closed]
   merge_group:
+
+# Add concurrency to prevent conflicts when multiple PR previews are being deployed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -39,6 +45,26 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: "./book/vocs/docs/dist"
+
+  preview:
+    # Deploy PR previews for pull requests
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    needs: [build]
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      pull-requests: write
+    timeout-minutes: 60
+    steps:
+      - name: Deploy PR Preview
+        uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: ./book/vocs/docs/dist
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          action: auto
 
   deploy:
     # Only deploy if a push to main
