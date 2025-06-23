@@ -1542,6 +1542,97 @@ mod tests {
     }
 
     #[test]
+    fn test_parallel_sparse_trie_root() {
+        let mut trie = ParallelSparseTrie::default().with_updates(true);
+
+        // Step 1: Create the trie structure
+        // Extension node at 0x with key 0x2 (goes to upper subtrie)
+        let extension_path = Nibbles::new();
+        let extension_key = Nibbles::from_nibbles([0x2]);
+
+        // Branch node at 0x2 with children 0 and 1 (goes to upper subtrie)
+        let branch_path = Nibbles::from_nibbles([0x2]);
+
+        // Leaf nodes at 0x20 and 0x21 (go to lower subtries)
+        let leaf_1_path = Nibbles::from_nibbles([0x2, 0x0]);
+        let leaf_1_key = Nibbles::from_nibbles(vec![0; 62]); // Remaining key
+        let leaf_1_full_path = Nibbles::from_nibbles([vec![0x2, 0x0], vec![0; 62]].concat());
+
+        let leaf_2_path = Nibbles::from_nibbles([0x2, 0x1]);
+        let leaf_2_key = Nibbles::from_nibbles(vec![0; 62]); // Remaining key
+        let leaf_2_full_path = Nibbles::from_nibbles([vec![0x2, 0x1], vec![0; 62]].concat());
+
+        // Create accounts
+        let account_1 = create_account(1);
+        let account_2 = create_account(2);
+
+        // Create leaf nodes
+        let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), account_1.nonce);
+        let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), account_2.nonce);
+
+        // Create branch node with children at indices 0 and 1
+        let branch = create_branch_node_with_children(
+            &[0, 1],
+            vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1)),
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2)),
+            ],
+        );
+
+        // Create extension node pointing to branch
+        let extension = create_extension_node(
+            extension_key.to_vec(),
+            RlpNode::from_rlp(&alloy_rlp::encode(&branch)).as_hash().unwrap(),
+        );
+
+        // Step 2: Reveal nodes in the trie
+        trie.reveal_node(extension_path, extension, TrieMasks::none()).unwrap();
+        trie.reveal_node(branch_path, branch, TrieMasks::none()).unwrap();
+        trie.reveal_node(leaf_1_path, leaf_1, TrieMasks::none()).unwrap();
+        trie.reveal_node(leaf_2_path, leaf_2, TrieMasks::none()).unwrap();
+
+        // Step 3: Add changed paths to prefix set
+        trie.prefix_set.insert(leaf_1_full_path);
+        trie.prefix_set.insert(leaf_2_full_path);
+
+        // Step 4: Calculate root using our implementation
+        let parallel_trie_root = trie.root();
+
+        // Step 5: Calculate root using HashBuilder for comparison
+        let (hash_builder_root, _, _proof_nodes, _, _) = run_hash_builder(
+            [(leaf_1_full_path, account_1), (leaf_2_full_path, account_2)],
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            [extension_path, branch_path, leaf_1_full_path, leaf_2_full_path],
+        );
+
+        // Step 6: Verify the roots match
+        assert_eq!(parallel_trie_root, hash_builder_root);
+
+        // Additional checks to verify the structure
+        // Check that extension and branch are in upper subtrie
+        assert!(trie.upper_subtrie.nodes.contains_key(&extension_path));
+        assert!(trie.upper_subtrie.nodes.contains_key(&branch_path));
+
+        // Check that leaf nodes are in lower subtries
+        let leaf_1_subtrie_idx = path_subtrie_index_unchecked(&leaf_1_path);
+        let leaf_2_subtrie_idx = path_subtrie_index_unchecked(&leaf_2_path);
+        assert!(trie.lower_subtries[leaf_1_subtrie_idx].is_some());
+        assert!(trie.lower_subtries[leaf_2_subtrie_idx].is_some());
+
+        let leaf_1_subtrie = trie.lower_subtries[leaf_1_subtrie_idx].as_ref().unwrap();
+        let leaf_2_subtrie = trie.lower_subtries[leaf_2_subtrie_idx].as_ref().unwrap();
+        assert!(leaf_1_subtrie.nodes.contains_key(&leaf_1_path));
+        assert!(leaf_2_subtrie.nodes.contains_key(&leaf_2_path));
+
+        // Verify hashes were computed
+        assert!(trie.upper_subtrie.nodes.get(&extension_path).unwrap().hash().is_some());
+        assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_some());
+        assert!(leaf_1_subtrie.nodes.get(&leaf_1_path).unwrap().hash().is_some());
+        assert!(leaf_2_subtrie.nodes.get(&leaf_2_path).unwrap().hash().is_some());
+    }
+
+    #[test]
     fn test_subtrie_update_hashes() {
         let mut subtrie =
             Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])).with_updates(true));
