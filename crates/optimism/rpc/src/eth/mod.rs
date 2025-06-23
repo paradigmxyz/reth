@@ -239,7 +239,7 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         self.inner.eth_api.fee_history_cache()
     }
 

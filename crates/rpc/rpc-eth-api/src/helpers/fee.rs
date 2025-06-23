@@ -13,7 +13,7 @@ use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, EthApiError, FeeHistoryCache,
     FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
-use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider};
+use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderHeader};
 use tracing::debug;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
@@ -137,7 +137,7 @@ pub trait EthFees: LoadFee {
 
                 for entry in &fee_entries {
                     base_fee_per_gas
-                        .push(entry.header.base_fee_per_gas.unwrap_or_default() as u128);
+                        .push(entry.header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(entry.gas_used_ratio);
                     base_fee_per_blob_gas.push(entry.base_fee_per_blob_gas.unwrap_or_default());
                     blob_gas_used_ratio.push(entry.blob_gas_used_ratio);
@@ -157,7 +157,7 @@ pub trait EthFees: LoadFee {
                 base_fee_per_gas.push(
                     self.provider()
                         .chain_spec()
-                        .next_block_base_fee(&last_entry.header, last_entry.header.timestamp)
+                        .next_block_base_fee(&last_entry.header, last_entry.header.timestamp())
                         .unwrap_or_default() as u128,
                 );
 
@@ -240,7 +240,11 @@ pub trait EthFees: LoadFee {
 
     /// Approximates reward at a given percentile for a specific block
     /// Based on the configured resolution
-    fn approximate_percentile(&self, entry: &FeeHistoryEntry, requested_percentile: f64) -> u128 {
+    fn approximate_percentile(
+        &self,
+        entry: &FeeHistoryEntry<ProviderHeader<Self::Provider>>,
+        requested_percentile: f64,
+    ) -> u128 {
         let resolution = self.fee_history_cache().resolution();
         let rounded_percentile =
             (requested_percentile * resolution as f64).round() / resolution as f64;
@@ -268,7 +272,7 @@ where
     /// Returns a handle for reading fee history data from memory.
     ///
     /// Data access in default (L1) trait method implementations.
-    fn fee_history_cache(&self) -> &FeeHistoryCache;
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Self::Provider>>;
 
     /// Returns the gas price if it is set, otherwise fetches a suggested gas price for legacy
     /// transactions.

@@ -19,7 +19,8 @@ use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
+    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderHeader,
+    ProviderReceipt,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -127,7 +128,7 @@ where
         max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
+        fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
         evm_config: EvmConfig,
         proof_permits: usize,
     ) -> Self {
@@ -276,7 +277,7 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// A pool dedicated to CPU heavy blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
-    fee_history_cache: FeeHistoryCache,
+    fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
 
@@ -303,7 +304,7 @@ where
         max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
+        fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
         evm_config: EvmConfig,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
@@ -411,7 +412,7 @@ where
 
     /// Returns a handle to the fee history cache.
     #[inline]
-    pub const fn fee_history_cache(&self) -> &FeeHistoryCache {
+    pub const fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
         &self.fee_history_cache
     }
 
