@@ -24,7 +24,7 @@ use tokio::{
 };
 use tracing::{debug, error};
 
-/// Configuration for setting upa test environment
+/// Configuration for setting up test environment
 #[derive(Debug)]
 pub struct Setup<I> {
     /// Chain specification to use
