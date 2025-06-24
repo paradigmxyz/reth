@@ -963,19 +963,19 @@ impl SparseSubtrieInner {
     }
 }
 
-/// Computes the RLP encoding for a single trie node and manages the traversal state.
-///
-/// This function is the core workhorse of the parallel sparse trie RLP computation. It processes
-/// a single node, computing its RLP encoding based on the node type and maintaining all necessary
-/// state for iterative traversal. Unlike the main `SparseTrie::rlp_node`, this function is
-/// designed to be called repeatedly as part of the iterative traversal managed by the caller.
+/// Computes the RLP encoding for a single (trie node)[`SparseTrieNode`] and manages the traversal
+/// state.
 ///
 /// # Node Processing Details
 ///
 /// - **Empty/Hash nodes**: Return pre-computed or cached RLP immediately
+/// - **Pre-computed nodes**: If the node hash is already computed, and the node path is not in the
+///   prefix set, return the pre-computed RLP
 /// - **Leaf nodes**: Encode the key-value pair and update the node's hash
-/// - **Extension nodes**: May need to defer processing until child is computed
-/// - **Branch nodes**: Complex processing involving up to 16 children and mask management
+/// - **Extension nodes**: May need to defer processing until child is computed, on the next
+///   invocation update the node's hash.
+/// - **Branch nodes**: May need to defer processing until all children are computed, on the next
+///   invocation update the node's hash.
 ///
 /// # Deferred Processing
 ///
@@ -998,9 +998,14 @@ impl SparseSubtrieInner {
 /// # Side Effects
 ///
 /// - Updates the node's hash field after computing RLP
-/// - Modifies buffers (path_stack, rlp_node_stack, etc.) to manage traversal
-/// - Updates the `updates` accumulator when tracking changes
+/// - Pushes nodes to [`SparseSubtrieBuffers::path_stack`] to manage traversal
+/// - Updates the (trie updates)[`SparseTrieUpdates`] accumulator when tracking changes, if [`Some`]
 /// - May push items onto the path stack for deferred processing
+///
+/// # Exit condition
+///
+/// Once all nodes have been processed and all RLPs and hashes calculated, pushes the root node onto
+/// the [`SparseSubtrieBuffers::rlp_node_stack`] and exits.
 fn rlp_node(
     branch_node_tree_masks: &HashMap<Nibbles, TrieMask>,
     branch_node_hash_masks: &HashMap<Nibbles, TrieMask>,
