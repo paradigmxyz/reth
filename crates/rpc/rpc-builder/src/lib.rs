@@ -26,11 +26,8 @@ use error::{ConflictingModules, RpcError, ServerKind};
 use http::{header::AUTHORIZATION, HeaderMap};
 use jsonrpsee::{
     core::RegisterMethodError,
-    server::{
-        middleware::rpc::{RpcService, RpcServiceBuilder, RpcServiceT},
-        AlreadyStoppedError, IdProvider, ServerHandle,
-    },
-    MethodResponse, Methods, RpcModule,
+    server::{middleware::rpc::RpcServiceBuilder, AlreadyStoppedError, IdProvider, ServerHandle},
+    Methods, RpcModule,
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
@@ -62,7 +59,6 @@ use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tower::Layer;
 use tower_http::cors::CorsLayer;
 
 pub use cors::CorsDomainError;
@@ -82,6 +78,9 @@ pub mod auth;
 /// RPC server utilities.
 pub mod config;
 
+/// Utils for installing Rpc middleware
+pub mod middleware;
+
 /// Cors utilities.
 mod cors;
 
@@ -94,6 +93,7 @@ pub use eth::EthHandlers;
 
 // Rpc server metrics
 mod metrics;
+use crate::middleware::RethRpcMiddleware;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc::eth::sim_bundle::EthSimBundle;
@@ -1256,15 +1256,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Returns the [`RpcServerHandle`] with the handle to the started servers.
     pub async fn start(self, modules: &TransportRpcModules) -> Result<RpcServerHandle, RpcError>
     where
-        RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-        <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service: Send
-            + Sync
-            + 'static
-            + RpcServiceT<
-                MethodResponse = MethodResponse,
-                BatchResponse = MethodResponse,
-                NotificationResponse = MethodResponse,
-            >,
+        RpcMiddleware: RethRpcMiddleware,
     {
         let mut http_handle = None;
         let mut ws_handle = None;

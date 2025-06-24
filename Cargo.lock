@@ -8856,7 +8856,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
- "tower",
  "tracing",
 ]
 
@@ -9384,6 +9383,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.12",
  "tokio",
+ "tower",
  "tracing",
 ]
 

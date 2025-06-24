@@ -1,12 +1,12 @@
 //! Builder support for rpc components.
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
-pub use reth_rpc_builder::{Identity, RpcRequestMetricsService};
+pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity};
 
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
-use jsonrpsee::RpcModule;
+use jsonrpsee::{core::middleware::layer, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
@@ -23,7 +23,8 @@ use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
+    RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, Stack,
+    TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
@@ -34,7 +35,6 @@ use std::{
     future::Future,
     ops::{Deref, DerefMut},
 };
-use tower::Layer;
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -560,6 +560,50 @@ where
         }
     }
 
+    /// Add a new layer `T` to the configured [`RpcServiceBuilder`].
+    pub fn layer_rpc_middleware<T>(
+        self,
+        layer: T,
+    ) -> RpcAddOns<Node, EthB, EV, EB, Stack<T, RpcMiddleware>> {
+        let Self {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+        } = self;
+        let rpc_middleware = rpc_middleware.layer(layer);
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+        }
+    }
+
+    /// Optionally adds a new layer `T` to the configured [`RpcServiceBuilder`].
+    pub fn option_layer_rpc_middleware<T>(
+        self,
+        layer: Option<T>,
+    ) -> RpcAddOns<Node, EthB, EV, EB, Stack<layer::Either<T, Identity>, RpcMiddleware>> {
+        let Self {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+        } = self;
+        let rpc_middleware = rpc_middleware.option_layer(layer);
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+        }
+    }
+
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
     where
@@ -600,16 +644,7 @@ where
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
-    RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-    <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
-        Send
-            + Sync
-            + 'static
-            + jsonrpsee::server::middleware::rpc::RpcServiceT<
-                MethodResponse = jsonrpsee::MethodResponse,
-                BatchResponse = jsonrpsee::MethodResponse,
-                NotificationResponse = jsonrpsee::MethodResponse,
-            >,
+    RpcMiddleware: RethRpcMiddleware,
 {
     /// Launches only the regular RPC server (HTTP/WS/IPC), without the authenticated Engine API
     /// server.
@@ -804,16 +839,7 @@ where
         modules: &TransportRpcModules,
     ) -> eyre::Result<RpcServerHandle>
     where
-        M: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-        for<'a> <M as Layer<RpcRequestMetricsService<RpcService>>>::Service:
-            Send
-                + Sync
-                + 'static
-                + jsonrpsee::server::middleware::rpc::RpcServiceT<
-                    MethodResponse = jsonrpsee::MethodResponse,
-                    BatchResponse = jsonrpsee::MethodResponse,
-                    NotificationResponse = jsonrpsee::MethodResponse,
-                >,
+        M: RethRpcMiddleware,
     {
         let handle = server_config.start(modules).await?;
 
@@ -872,16 +898,7 @@ where
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
-    RpcMiddleware: Layer<RpcRequestMetricsService<RpcService>> + Clone + Send + 'static,
-    <RpcMiddleware as Layer<RpcRequestMetricsService<RpcService>>>::Service:
-        Send
-            + Sync
-            + 'static
-            + jsonrpsee::server::middleware::rpc::RpcServiceT<
-                MethodResponse = jsonrpsee::MethodResponse,
-                BatchResponse = jsonrpsee::MethodResponse,
-                NotificationResponse = jsonrpsee::MethodResponse,
-            >,
+    RpcMiddleware: RethRpcMiddleware,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
