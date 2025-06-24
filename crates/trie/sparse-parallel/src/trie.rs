@@ -677,8 +677,7 @@ struct SparseSubtrieInner {
 }
 
 impl SparseSubtrieInner {
-    /// Computes the RLP encoding for a single (trie node)[`SparseNode`] and manages the
-    /// traversal state.
+    /// Computes the RLP encoding and its hash for a single (trie node)[`SparseNode`].
     ///
     /// # Node Processing Details
     ///
