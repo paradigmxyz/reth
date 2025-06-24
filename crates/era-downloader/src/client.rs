@@ -92,7 +92,9 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 }
             }
 
-            self.assert_checksum(number, actual_checksum?).await?;
+            self.assert_checksum(number, actual_checksum?)
+                .await
+                .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
         }
 
         Ok(path.into_boxed_path())

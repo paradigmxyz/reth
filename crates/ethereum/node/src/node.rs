@@ -25,7 +25,7 @@ use reth_node_builder::{
     node::{FullNodeTypes, NodeTypes},
     rpc::{
         BasicEngineApiBuilder, EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder,
-        EthApiBuilder, EthApiCtx, RethRpcAddOns, RpcAddOns, RpcHandle,
+        EthApiBuilder, EthApiCtx, RethRpcAddOns, RpcAddOns, RpcHandle, RpcServiceBuilder,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
     PayloadTypes,
@@ -174,6 +174,7 @@ where
                 EthereumEthApiBuilder,
                 EthereumEngineValidatorBuilder::default(),
                 BasicEngineApiBuilder::default(),
+                RpcServiceBuilder::new(),
             ),
         }
     }

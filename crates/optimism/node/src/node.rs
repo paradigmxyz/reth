@@ -27,7 +27,7 @@ use reth_node_builder::{
     node::{FullNodeTypes, NodeTypes},
     rpc::{
         EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder,
-        RethRpcAddOns, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
+        RethRpcAddOns, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle, RpcServiceBuilder,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
@@ -77,6 +77,28 @@ impl<N> OpNodeTypes for N where
         Payload = OpEngineTypes,
         ChainSpec: OpHardforks + Hardforks,
         Primitives = OpPrimitives,
+    >
+{
+}
+
+/// Helper trait for Optimism node types with full configuration including storage and execution
+/// data.
+pub trait OpFullNodeTypes:
+    NodeTypes<
+    ChainSpec: OpHardforks,
+    Primitives: OpPayloadPrimitives,
+    Storage = OpStorage,
+    Payload: EngineTypes<ExecutionData = OpExecutionData>,
+>
+{
+}
+
+impl<N> OpFullNodeTypes for N where
+    N: NodeTypes<
+        ChainSpec: OpHardforks,
+        Primitives: OpPayloadPrimitives,
+        Storage = OpStorage,
+        Payload: EngineTypes<ExecutionData = OpExecutionData>,
     >
 {
 }
@@ -180,14 +202,7 @@ impl OpNode {
 
 impl<N> Node<N> for OpNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = OpEngineTypes,
-            ChainSpec: OpHardforks + Hardforks,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-        >,
-    >,
+    N: FullNodeTypes<Types: OpFullNodeTypes + OpNodeTypes>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -240,6 +255,9 @@ impl NodeTypes for OpNode {
 }
 
 /// Add-ons w.r.t. optimism.
+///
+/// This type provides optimism-specific addons to the node and exposes the RPC server and engine
+/// API.
 #[derive(Debug)]
 pub struct OpAddOns<N: FullNodeComponents, EthB: EthApiBuilder<N>, EV, EB> {
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
@@ -359,14 +377,10 @@ where
 impl<N, NetworkT, EV, EB> NodeAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives: OpPayloadPrimitives,
-            Storage = OpStorage,
-            Payload: EngineTypes<ExecutionData = OpExecutionData>,
-        >,
+        Types: OpFullNodeTypes,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
+    N::Types: NodeTypes<Primitives: OpPayloadPrimitives>,
     OpEthApiError: FromEvmError<N::Evm>,
     <N::Pool as TransactionPool>::Transaction: OpPooledTx,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = op_revm::OpTransaction<TxEnv>>,
@@ -458,12 +472,7 @@ where
 impl<N, NetworkT, EV, EB> RethRpcAddOns<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
     N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives = OpPrimitives,
-            Storage = OpStorage,
-            Payload: EngineTypes<ExecutionData = OpExecutionData>,
-        >,
+        Types: OpFullNodeTypes,
         Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
     >,
     OpEthApiError: FromEvmError<N::Evm>,
@@ -483,13 +492,7 @@ where
 
 impl<N, NetworkT, EV, EB> EngineValidatorAddOn<N> for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, EB>
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            ChainSpec: OpHardforks,
-            Primitives = OpPrimitives,
-            Payload: EngineTypes<ExecutionData = OpExecutionData>,
-        >,
-    >,
+    N: FullNodeComponents<Types: OpFullNodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N> + Default,
     EB: EngineApiBuilder<N>,
@@ -591,6 +594,7 @@ impl<NetworkT> OpAddOnsBuilder<NetworkT> {
                     .with_min_suggested_priority_fee(min_suggested_priority_fee),
                 EV::default(),
                 EB::default(),
+                RpcServiceBuilder::new(),
             ),
             da_config: da_config.unwrap_or_default(),
             sequencer_url,
@@ -982,10 +986,9 @@ where
 #[non_exhaustive]
 pub struct OpEngineValidatorBuilder;
 
-impl<Node, Types> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
+impl<Node> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Types: NodeTypes<ChainSpec: OpHardforks, Primitives = OpPrimitives, Payload = OpEngineTypes>,
-    Node: FullNodeComponents<Types = Types>,
+    Node: FullNodeComponents<Types: OpNodeTypes>,
 {
     type Validator = OpEngineValidator<
         Node::Provider,
@@ -994,7 +997,7 @@ where
     >;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
-        Ok(OpEngineValidator::new::<KeyHasherTy<Types>>(
+        Ok(OpEngineValidator::new::<KeyHasherTy<Node::Types>>(
             ctx.config.chain.clone(),
             ctx.node.provider().clone(),
         ))

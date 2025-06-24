@@ -163,3 +163,119 @@ pub enum CallFeesError {
     #[error("blob transaction missing blob hashes")]
     BlobTransactionMissingBlobHashes,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::constants::GWEI_TO_WEI;
+
+    #[test]
+    fn test_ensure_0_fallback() {
+        let CallFees { gas_price, .. } =
+            CallFees::ensure_fees(None, None, None, U256::from(99), None, None, Some(U256::ZERO))
+                .unwrap();
+        assert!(gas_price.is_zero());
+    }
+
+    #[test]
+    fn test_ensure_max_fee_0_exception() {
+        let CallFees { gas_price, .. } =
+            CallFees::ensure_fees(None, Some(U256::ZERO), None, U256::from(99), None, None, None)
+                .unwrap();
+        assert!(gas_price.is_zero());
+    }
+
+    #[test]
+    fn test_blob_fees() {
+        let CallFees { gas_price, max_fee_per_blob_gas, .. } =
+            CallFees::ensure_fees(None, None, None, U256::from(99), None, None, Some(U256::ZERO))
+                .unwrap();
+        assert!(gas_price.is_zero());
+        assert_eq!(max_fee_per_blob_gas, None);
+
+        let CallFees { gas_price, max_fee_per_blob_gas, .. } = CallFees::ensure_fees(
+            None,
+            None,
+            None,
+            U256::from(99),
+            Some(&[B256::from(U256::ZERO)]),
+            None,
+            Some(U256::from(99)),
+        )
+        .unwrap();
+        assert!(gas_price.is_zero());
+        assert_eq!(max_fee_per_blob_gas, Some(U256::from(99)));
+    }
+
+    #[test]
+    fn test_eip_1559_fees() {
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(25 * GWEI_TO_WEI)),
+            Some(U256::from(15 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(25 * GWEI_TO_WEI));
+
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(25 * GWEI_TO_WEI)),
+            Some(U256::from(5 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(20 * GWEI_TO_WEI));
+
+        let CallFees { gas_price, .. } = CallFees::ensure_fees(
+            None,
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        )
+        .unwrap();
+        assert_eq!(gas_price, U256::from(30 * GWEI_TO_WEI));
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::from(30 * GWEI_TO_WEI)),
+            Some(U256::from(31 * GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::from(5 * GWEI_TO_WEI)),
+            Some(U256::from(GWEI_TO_WEI)),
+            U256::from(15 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
+
+        let call_fees = CallFees::ensure_fees(
+            None,
+            Some(U256::MAX),
+            Some(U256::MAX),
+            U256::from(5 * GWEI_TO_WEI),
+            None,
+            None,
+            Some(U256::ZERO),
+        );
+        assert!(call_fees.is_err());
+    }
+}

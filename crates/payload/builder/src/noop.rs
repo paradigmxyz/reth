@@ -57,3 +57,10 @@ where
         }
     }
 }
+
+impl<T: PayloadTypes> Default for NoopPayloadBuilderService<T> {
+    fn default() -> Self {
+        let (service, _) = Self::new();
+        service
+    }
+}
