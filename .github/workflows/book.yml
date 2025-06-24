@@ -10,11 +10,6 @@ on:
     types: [opened, reopened, synchronize, closed]
   merge_group:
 
-# Add concurrency to prevent conflicts when multiple PR previews are being deployed
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
-
 jobs:
   build:
     runs-on: ubuntu-latest
