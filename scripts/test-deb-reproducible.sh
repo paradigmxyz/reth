@@ -51,7 +51,7 @@ if cmp -s reth-deb-build-1.deb reth-deb-build-2.deb; then
 else
     echo "❌ FAILED: cargo-deb packages differ"
     echo "Running detailed analysis with diffoscope..."
-    diffoscope --text reth-deb-build-1.deb reth-deb-build-2.deb > cargo-deb-diff.txt || true
+    diffoscope reth-deb-build-1.deb reth-deb-build-2.deb > cargo-deb-diff.txt || true
     echo "Differences saved to cargo-deb-diff.txt"
     echo "❌ Reproducible build FAILED"
     exit 1
