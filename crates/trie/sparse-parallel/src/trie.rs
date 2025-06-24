@@ -693,7 +693,7 @@ struct SparseSubtrieInner {
 }
 
 impl SparseSubtrieInner {
-    /// Computes the RLP encoding for a single (trie node)[`SparseTrieNode`] and manages the
+    /// Computes the RLP encoding for a single (trie node)[`SparseNode`] and manages the
     /// traversal state.
     ///
     /// # Node Processing Details
@@ -1572,12 +1572,30 @@ mod tests {
     fn test_update_subtrie_hashes() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let mut subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let mut subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let mut subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
+
+        // Reveal dummy leaf nodes that form an incorrect trie structure but enough to test the
+        // method
+        let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
+        let leaf_1_path = leaf_1_full_path.slice(..2);
+        let leaf_1_key = leaf_1_full_path.slice(2..);
+        let leaf_2_full_path = Nibbles::from_nibbles([vec![1, 0], vec![0; 62]].concat());
+        let leaf_2_path = leaf_2_full_path.slice(..2);
+        let leaf_2_key = leaf_2_full_path.slice(2..);
+        let leaf_3_full_path = Nibbles::from_nibbles([vec![3, 0], vec![0; 62]].concat());
+        let leaf_3_path = leaf_3_full_path.slice(..2);
+        let leaf_3_key = leaf_3_full_path.slice(2..);
+        let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), 1);
+        let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), 2);
+        let leaf_3 = create_leaf_node(leaf_3_key.to_vec(), 3);
+        subtrie_1.reveal_node(leaf_1_path, &leaf_1, TrieMasks::none()).unwrap();
+        subtrie_2.reveal_node(leaf_2_path, &leaf_2, TrieMasks::none()).unwrap();
+        subtrie_3.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
 
         // Add subtries at specific positions
         trie.lower_subtries[subtrie_1_index] = Some(subtrie_1);
