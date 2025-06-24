@@ -720,12 +720,13 @@ pub struct EthTransactionValidatorBuilder<Client> {
 impl<Client> EthTransactionValidatorBuilder<Client> {
     /// Creates a new builder for the given client
     ///
-    /// By default this assumes the network is on the `Cancun` hardfork and the following
+    /// By default this assumes the network is on the `Prague` hardfork and the following
     /// transactions are allowed:
     ///  - Legacy
     ///  - EIP-2718
     ///  - EIP-1559
     ///  - EIP-4844
+    ///  - EIP-7702
     pub fn new(client: Client) -> Self {
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
