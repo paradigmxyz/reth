@@ -2,10 +2,11 @@
 
 use crate::EthApi;
 use alloy_evm::block::BlockExecutorFactory;
+use alloy_rpc_types_eth::TransactionRequest;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmFactory, TxEnvFor};
 use reth_node_api::NodePrimitives;
-use reth_rpc_convert::RpcConvert;
+use reth_rpc_convert::{RpcConvert, RpcTypes};
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEvmError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
@@ -41,7 +42,8 @@ where
                     SignedTx = ProviderTx<Self::Provider>,
                 >,
             >,
-            RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
+            RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Network = Self::NetworkTypes>,
+            NetworkTypes: RpcTypes<TransactionRequest: From<TransactionRequest>>,
             Error: FromEvmError<Self::Evm>
                        + From<<Self::RpcConvert as RpcConvert>::Error>
                        + From<ProviderError>,

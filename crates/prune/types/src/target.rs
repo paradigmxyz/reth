@@ -75,6 +75,15 @@ pub struct PruneModes {
         )
     )]
     pub storage_history: Option<PruneMode>,
+    /// Bodies History pruning configuration.
+    #[cfg_attr(
+        any(test, feature = "serde"),
+        serde(
+            skip_serializing_if = "Option::is_none",
+            deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
+        )
+    )]
+    pub bodies_history: Option<PruneMode>,
     /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
     /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
     ///
@@ -97,6 +106,7 @@ impl PruneModes {
             receipts: Some(PruneMode::Full),
             account_history: Some(PruneMode::Full),
             storage_history: Some(PruneMode::Full),
+            bodies_history: Some(PruneMode::Full),
             receipts_log_filter: Default::default(),
         }
     }
