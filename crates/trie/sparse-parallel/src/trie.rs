@@ -238,9 +238,8 @@ impl ParallelSparseTrie {
             is_in_prefix_set: None,
         });
 
-        while let Some(RlpNodePathStackItem { path, mut is_in_prefix_set }) =
-            self.upper_subtrie.inner.buffers.path_stack.pop()
-        {
+        while let Some(stack_item) = self.upper_subtrie.inner.buffers.path_stack.pop() {
+            let path = stack_item.path;
             let node = if path.len() < UPPER_TRIE_MAX_DEPTH {
                 self.upper_subtrie.nodes.get_mut(&path).expect("upper subtrie node must exist")
             } else {
@@ -256,17 +255,9 @@ impl ParallelSparseTrie {
                 debug_assert!(node.hash().is_some());
                 node
             };
-            trace!(
-                target: "trie::parallel_sparse",
-                ?path,
-                ?is_in_prefix_set,
-                ?node,
-                "Popped node from path stack"
-            );
 
-            let prefix_set_contains =
-                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
-            self.upper_subtrie.inner.rlp_node(prefix_set_contains, path, node);
+            // Calculate the RLP node for the current node using upper subtrie
+            self.upper_subtrie.inner.rlp_node(prefix_set, stack_item, node);
         }
 
         debug_assert_eq!(self.upper_subtrie.inner.buffers.rlp_node_stack.len(), 1);
@@ -645,17 +636,14 @@ impl SparseSubtrie {
             .path_stack
             .push(RlpNodePathStackItem { path: self.path, is_in_prefix_set: None });
 
-        while let Some(RlpNodePathStackItem { path, mut is_in_prefix_set }) =
-            self.inner.buffers.path_stack.pop()
-        {
+        while let Some(stack_item) = self.inner.buffers.path_stack.pop() {
+            let path = stack_item.path;
             let node = self
                 .nodes
                 .get_mut(&path)
                 .unwrap_or_else(|| panic!("node at path {path:?} does not exist"));
 
-            let prefix_set_contains =
-                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
-            self.inner.rlp_node(prefix_set_contains, path, node);
+            self.inner.rlp_node(prefix_set, stack_item, node);
         }
 
         debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
@@ -711,9 +699,8 @@ impl SparseSubtrieInner {
     ///
     /// # Parameters
     ///
-    /// - `prefix_set_contains`: Closure that returns a boolean indicating if the given path is in
-    ///   the prefix set. The value can be cached on the caller side.
-    /// - `path`: The nibble path to the current node
+    /// - `prefix_set`: Set of prefixes (key paths) that have been marked as updated
+    /// - `stack_item`: The stack item to process
     /// - `node`: The sparse node to process (will be mutated to update hash)
     ///
     /// # Side Effects
@@ -730,16 +717,24 @@ impl SparseSubtrieInner {
     /// onto the [`SparseSubtrieBuffers::rlp_node_stack`] and exits.
     fn rlp_node(
         &mut self,
-        mut prefix_set_contains: impl FnMut(&Nibbles) -> bool,
-        path: Nibbles,
+        prefix_set: &mut PrefixSet,
+        mut stack_item: RlpNodePathStackItem,
         node: &mut SparseNode,
     ) {
+        let path = stack_item.path;
         trace!(
             target: "trie::parallel_sparse",
             ?path,
             ?node,
             "Calculating node RLP"
         );
+
+        // Check if the path is in the prefix set.
+        // First, check the cached value. If it's `None`, then check the prefix set, and update
+        // the cached value.        let prefix_set_contains =
+        let mut prefix_set_contains = |path: &Nibbles| {
+            *stack_item.is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path))
+        };
 
         let (rlp_node, node_type) = match node {
             SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
