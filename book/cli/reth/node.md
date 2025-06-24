@@ -721,6 +721,15 @@ Pruning:
       --prune.storagehistory.before <BLOCK_NUMBER>
           Prune storage history before the specified block number. The specified block number is not pruned
 
+      --prune.bodies.pre-merge
+          Prune bodies before the merge block
+
+      --prune.bodies.distance <BLOCKS>
+          Prune bodies before the `head-N` block number. In other words, keep last N + 1 blocks
+
+      --prune.bodies.before <BLOCK_NUMBER>
+          Prune storage history before the specified block number. The specified block number is not pruned
+
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
           Configure persistence threshold for engine experimental
