@@ -359,18 +359,9 @@ where
     }
 
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        let block_response = match id {
-            BlockHashOrNumber::Hash(hash) => self.block_on_async(async {
-                self.provider.get_block_by_hash(hash).full().await.map_err(ProviderError::other)
-            }),
-            BlockHashOrNumber::Number(num) => self.block_on_async(async {
-                self.provider
-                    .get_block_by_number(num.into())
-                    .full()
-                    .await
-                    .map_err(ProviderError::other)
-            }),
-        }?;
+        let block_response = self.block_on_async(async {
+            self.provider.get_block(id.into()).full().await.map_err(ProviderError::other)
+        })?;
 
         let Some(block_response) = block_response else {
             // If the block was not found, return None
