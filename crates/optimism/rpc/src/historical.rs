@@ -115,7 +115,7 @@ pub struct HistoricalRpcService<S, P> {
 impl<S, P> HistoricalRpcService<S, P> {
     /// Constructs a new historical RPC service with the given inner service, historical client,
     /// provider, and bedrock block number.
-    fn new(inner: S, historical: Arc<HistoricalRpcInner<P>>) -> Self {
+    const fn new(inner: S, historical: Arc<HistoricalRpcInner<P>>) -> Self {
         Self { inner, historical }
     }
 }

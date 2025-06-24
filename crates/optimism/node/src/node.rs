@@ -28,7 +28,6 @@ use reth_node_builder::{
     rpc::{
         EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, Identity,
         RethRpcAddOns, RethRpcMiddleware, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
-        RpcServiceBuilder,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
@@ -378,10 +377,7 @@ where
     /// layer, allowing you to intercept, modify, or enhance RPC request processing.
     ///
     /// See also [`RpcAddOns::with_rpc_middleware`].
-    pub fn with_rpc_middleware<T>(
-        self,
-        rpc_middleware: RpcServiceBuilder<T>,
-    ) -> OpAddOns<N, EthB, EV, EB, T> {
+    pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> OpAddOns<N, EthB, EV, EB, T> {
         let Self {
             rpc_add_ons,
             da_config,
@@ -677,7 +673,7 @@ impl<NetworkT> OpAddOnsBuilder<NetworkT> {
                     .with_min_suggested_priority_fee(min_suggested_priority_fee),
                 EV::default(),
                 EB::default(),
-                RpcServiceBuilder::new(),
+                Default::default(),
             ),
             da_config: da_config.unwrap_or_default(),
             sequencer_url,

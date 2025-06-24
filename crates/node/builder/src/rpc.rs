@@ -6,7 +6,7 @@ pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity};
 use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
-use jsonrpsee::{core::middleware::layer, RpcModule};
+use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
@@ -435,7 +435,7 @@ pub struct RpcAddOns<
     ///
     /// This middleware is applied to all RPC requests across all transports (HTTP, WS, IPC).
     /// See [`RpcAddOns::with_rpc_middleware`] for more details.
-    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
+    rpc_middleware: RpcMiddleware,
 }
 
 impl<Node, EthB, EV, EB, RpcMiddleware> Debug for RpcAddOns<Node, EthB, EV, EB, RpcMiddleware>
@@ -466,7 +466,7 @@ where
         eth_api_builder: EthB,
         engine_validator_builder: EV,
         engine_api_builder: EB,
-        rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
+        rpc_middleware: RpcMiddleware,
     ) -> Self {
         Self {
             hooks: RpcHooks::default(),
@@ -545,10 +545,7 @@ where
     /// - Middleware is applied to the RPC service layer, not the HTTP transport layer
     /// - The default middleware is `Identity` (no-op), which passes through requests unchanged
     /// - Middleware layers are applied in the order they are added via `.layer()`
-    pub fn with_rpc_middleware<T>(
-        self,
-        rpc_middleware: RpcServiceBuilder<T>,
-    ) -> RpcAddOns<Node, EthB, EV, EB, T> {
+    pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> RpcAddOns<Node, EthB, EV, EB, T> {
         let Self { hooks, eth_api_builder, engine_validator_builder, engine_api_builder, .. } =
             self;
         RpcAddOns {
@@ -564,7 +561,7 @@ where
     pub fn layer_rpc_middleware<T>(
         self,
         layer: T,
-    ) -> RpcAddOns<Node, EthB, EV, EB, Stack<T, RpcMiddleware>> {
+    ) -> RpcAddOns<Node, EthB, EV, EB, Stack<RpcMiddleware, T>> {
         let Self {
             hooks,
             eth_api_builder,
@@ -572,7 +569,7 @@ where
             engine_api_builder,
             rpc_middleware,
         } = self;
-        let rpc_middleware = rpc_middleware.layer(layer);
+        let rpc_middleware = Stack::new(rpc_middleware, layer);
         RpcAddOns {
             hooks,
             eth_api_builder,
@@ -586,28 +583,9 @@ where
     pub fn option_layer_rpc_middleware<T>(
         self,
         layer: Option<T>,
-    ) -> RpcAddOns<
-        Node,
-        EthB,
-        EV,
-        EB,
-        Stack<jsonrpsee::core::middleware::layer::Either<T, Identity>, RpcMiddleware>,
-    > {
-        let Self {
-            hooks,
-            eth_api_builder,
-            engine_validator_builder,
-            engine_api_builder,
-            rpc_middleware,
-        } = self;
-        let rpc_middleware = rpc_middleware.option_layer(layer);
-        RpcAddOns {
-            hooks,
-            eth_api_builder,
-            engine_validator_builder,
-            engine_api_builder,
-            rpc_middleware,
-        }
+    ) -> RpcAddOns<Node, EthB, EV, EB, Stack<RpcMiddleware, Either<T, Identity>>> {
+        let layer = layer.map(Either::Left).unwrap_or(Either::Right(Identity::new()));
+        self.layer_rpc_middleware(layer)
     }
 
     /// Sets the hook that is run once the rpc server is started.
@@ -639,7 +617,7 @@ where
     EB: Default,
 {
     fn default() -> Self {
-        Self::new(EthB::default(), EV::default(), EB::default(), RpcServiceBuilder::new())
+        Self::new(EthB::default(), EV::default(), EB::default(), Default::default())
     }
 }
 

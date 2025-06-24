@@ -1043,7 +1043,7 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     /// JWT secret for authentication
     jwt_secret: Option<JwtSecret>,
     /// Configurable RPC middleware
-    rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
+    rpc_middleware: RpcMiddleware,
 }
 
 // === impl RpcServerConfig ===
@@ -1062,7 +1062,7 @@ impl Default for RpcServerConfig<Identity> {
             ipc_server_config: None,
             ipc_endpoint: None,
             jwt_secret: None,
-            rpc_middleware: RpcServiceBuilder::new(),
+            rpc_middleware: Default::default(),
         }
     }
 }
@@ -1114,7 +1114,7 @@ impl RpcServerConfig {
 
 impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configure rpc middleware
-    pub fn set_rpc_middleware<T>(self, rpc_middleware: RpcServiceBuilder<T>) -> RpcServerConfig<T> {
+    pub fn set_rpc_middleware<T>(self, rpc_middleware: T) -> RpcServerConfig<T> {
         RpcServerConfig {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,
@@ -1317,14 +1317,16 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                             )),
                     )
                     .set_rpc_middleware(
-                        self.rpc_middleware.clone().layer(
-                            modules
-                                .http
-                                .as_ref()
-                                .or(modules.ws.as_ref())
-                                .map(RpcRequestMetrics::same_port)
-                                .unwrap_or_default(),
-                        ),
+                        RpcServiceBuilder::default()
+                            .layer(
+                                modules
+                                    .http
+                                    .as_ref()
+                                    .or(modules.ws.as_ref())
+                                    .map(RpcRequestMetrics::same_port)
+                                    .unwrap_or_default(),
+                            )
+                            .layer(self.rpc_middleware.clone()),
                     )
                     .set_config(config.build())
                     .build(http_socket_addr)
@@ -1366,9 +1368,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
                 )
                 .set_rpc_middleware(
-                    self.rpc_middleware
-                        .clone()
-                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default()),
+                    RpcServiceBuilder::default()
+                        .layer(modules.ws.as_ref().map(RpcRequestMetrics::ws).unwrap_or_default())
+                        .layer(self.rpc_middleware.clone()),
                 )
                 .build(ws_socket_addr)
                 .await
@@ -1392,9 +1394,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         .option_layer(Self::maybe_compression_layer(self.http_disable_compression)),
                 )
                 .set_rpc_middleware(
-                    self.rpc_middleware.clone().layer(
-                        modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
-                    ),
+                    RpcServiceBuilder::default()
+                        .layer(
+                            modules.http.as_ref().map(RpcRequestMetrics::http).unwrap_or_default(),
+                        )
+                        .layer(self.rpc_middleware.clone()),
                 )
                 .build(http_socket_addr)
                 .await
