@@ -8856,6 +8856,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
+ "tower",
  "tracing",
 ]
 
