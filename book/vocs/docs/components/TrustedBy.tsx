@@ -8,19 +8,19 @@ interface TrustedCompany {
 const companies: TrustedCompany[] = [
   {
     name: 'Flashbots',
-    logoUrl: '/reth/flashbots.png'
+    logoUrl: '/flashbots.png'
   },
   {
     name: 'Coinbase',
-    logoUrl: '/reth/coinbase.png'
+    logoUrl: '/coinbase.png'
   },
   {
     name: 'Alchemy',
-    logoUrl: '/reth/alchemy.png'
+    logoUrl: '/alchemy.png'
   },
   {
     name: 'Succinct Labs',
-    logoUrl: '/reth/succinct.png'
+    logoUrl: '/succinct.png'
   }
 ]
 
