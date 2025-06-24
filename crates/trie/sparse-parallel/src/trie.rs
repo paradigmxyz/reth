@@ -12,8 +12,8 @@ use reth_trie_common::{
     BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieNode, CHILD_INDEX_RANGE,
 };
 use reth_trie_sparse::{
-    blinded::BlindedProvider, RlpNodePathStackItem, RlpNodeStackItem, SparseNode, SparseNodeType,
-    SparseTrieUpdates, TrieMasks,
+    blinded::BlindedProvider, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrieUpdates,
+    TrieMasks,
 };
 use smallvec::SmallVec;
 use tracing::trace;
@@ -335,17 +335,8 @@ pub struct SparseSubtrie {
     path: Nibbles,
     /// The map from paths to sparse trie nodes within this subtrie.
     nodes: HashMap<Nibbles, SparseNode>,
-    /// When a branch is set, the corresponding child subtree is stored in the database.
-    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
-    /// When a bit is set, the corresponding child is stored as a hash in the database.
-    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
-    /// Map from leaf key paths to their values.
-    /// All values are stored here instead of directly in leaf nodes.
-    values: HashMap<Nibbles, Vec<u8>>,
-    /// Optional tracking of trie updates for later use.
-    updates: Option<SparseTrieUpdates>,
-    /// Reusable buffers for [`SparseSubtrie::update_hashes`].
-    buffers: SparseSubtrieBuffers,
+    /// Subset of fields for mutable access while `nodes` field is also being mutably borrowed.
+    inner: SparseSubtrieInner,
 }
 
 impl SparseSubtrie {
@@ -358,7 +349,7 @@ impl SparseSubtrie {
     /// If `retain_updates` is true, the trie will record branch node updates and deletions.
     /// This information can then be used to efficiently update an external database.
     pub fn with_updates(mut self, retain_updates: bool) -> Self {
-        self.updates = retain_updates.then_some(SparseTrieUpdates::default());
+        self.inner.updates = retain_updates.then_some(SparseTrieUpdates::default());
         self
     }
 
@@ -385,10 +376,10 @@ impl SparseSubtrie {
         }
 
         if let Some(tree_mask) = masks.tree_mask {
-            self.branch_node_tree_masks.insert(path, tree_mask);
+            self.inner.branch_node_tree_masks.insert(path, tree_mask);
         }
         if let Some(hash_mask) = masks.hash_mask {
-            self.branch_node_hash_masks.insert(path, hash_mask);
+            self.inner.branch_node_hash_masks.insert(path, hash_mask);
         }
 
         match node {
@@ -491,7 +482,7 @@ impl SparseSubtrie {
                     SparseNode::Hash(hash) => {
                         let mut full = *entry.key();
                         full.extend(&leaf.key);
-                        self.values.insert(full, leaf.value.clone());
+                        self.inner.values.insert(full, leaf.value.clone());
                         entry.insert(SparseNode::Leaf {
                             key: leaf.key,
                             // Memoize the hash of a previously blinded node in a new leaf
@@ -516,7 +507,7 @@ impl SparseSubtrie {
                     let mut full = *entry.key();
                     full.extend(&leaf.key);
                     entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.values.insert(full, leaf.value.clone());
+                    self.inner.values.insert(full, leaf.value.clone());
                 }
             },
         }
@@ -591,15 +582,14 @@ impl SparseSubtrie {
 
         debug_assert!(prefix_set.iter().all(|path| path.starts_with(&self.path)));
 
-        debug_assert!(self.buffers.path_stack.is_empty());
-        self.buffers.path_stack.push(RlpNodePathStackItem {
-            level: 0,
-            path: self.path,
-            is_in_prefix_set: None,
-        });
+        debug_assert!(self.inner.buffers.path_stack.is_empty());
+        self.inner
+            .buffers
+            .path_stack
+            .push(RlpNodePathStackItem { path: self.path, is_in_prefix_set: None });
 
-        'main: while let Some(RlpNodePathStackItem { level, path, mut is_in_prefix_set }) =
-            self.buffers.path_stack.pop()
+        while let Some(RlpNodePathStackItem { path, mut is_in_prefix_set }) =
+            self.inner.buffers.path_stack.pop()
         {
             let node = self
                 .nodes
@@ -608,7 +598,6 @@ impl SparseSubtrie {
             trace!(
                 target: "trie::parallel_sparse",
                 root = ?self.path,
-                ?level,
                 ?path,
                 ?is_in_prefix_set,
                 ?node,
@@ -621,278 +610,11 @@ impl SparseSubtrie {
             let mut prefix_set_contains =
                 |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
 
-            let (rlp_node, node_type) = match node {
-                SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
-                SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
-                SparseNode::Leaf { key, hash } => {
-                    let mut path = path;
-                    path.extend(key);
-                    if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                        (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
-                    } else {
-                        let value = self.values.get(&path).unwrap();
-                        self.buffers.rlp_buf.clear();
-                        let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
-                        *hash = rlp_node.as_hash();
-                        (rlp_node, SparseNodeType::Leaf)
-                    }
-                }
-                SparseNode::Extension { key, hash, store_in_db_trie } => {
-                    let mut child_path = path;
-                    child_path.extend(key);
-                    if let Some((hash, store_in_db_trie)) =
-                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
-                    {
-                        (
-                            RlpNode::word_rlp(&hash),
-                            SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
-                        )
-                    } else if self
-                        .buffers
-                        .rlp_node_stack
-                        .last()
-                        .is_some_and(|e| e.path == child_path)
-                    {
-                        let RlpNodeStackItem {
-                            path: _,
-                            rlp_node: child,
-                            node_type: child_node_type,
-                        } = self.buffers.rlp_node_stack.pop().unwrap();
-                        self.buffers.rlp_buf.clear();
-                        let rlp_node =
-                            ExtensionNodeRef::new(key, &child).rlp(&mut self.buffers.rlp_buf);
-                        *hash = rlp_node.as_hash();
-
-                        let store_in_db_trie_value = child_node_type.store_in_db_trie();
-
-                        trace!(
-                            target: "trie::parallel_sparse",
-                            ?path,
-                            ?child_path,
-                            ?child_node_type,
-                            "Extension node"
-                        );
-
-                        *store_in_db_trie = store_in_db_trie_value;
-
-                        (
-                            rlp_node,
-                            SparseNodeType::Extension {
-                                // Inherit the `store_in_db_trie` flag from the child node, which is
-                                // always the branch node
-                                store_in_db_trie: store_in_db_trie_value,
-                            },
-                        )
-                    } else {
-                        // need to get rlp node for child first
-                        self.buffers.path_stack.extend([
-                            RlpNodePathStackItem { level, path, is_in_prefix_set },
-                            RlpNodePathStackItem {
-                                level: level + 1,
-                                path: child_path,
-                                is_in_prefix_set: None,
-                            },
-                        ]);
-                        continue
-                    }
-                }
-                SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
-                    if let Some((hash, store_in_db_trie)) =
-                        hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
-                    {
-                        self.buffers.rlp_node_stack.push(RlpNodeStackItem {
-                            path,
-                            rlp_node: RlpNode::word_rlp(&hash),
-                            node_type: SparseNodeType::Branch {
-                                store_in_db_trie: Some(store_in_db_trie),
-                            },
-                        });
-                        continue
-                    }
-                    let retain_updates = self.updates.is_some() && prefix_set_contains(&path);
-
-                    self.buffers.branch_child_buf.clear();
-                    // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
-                    // from the stack and keep walking in the sorted order.
-                    for bit in CHILD_INDEX_RANGE.rev() {
-                        if state_mask.is_bit_set(bit) {
-                            let mut child = path;
-                            child.push_unchecked(bit);
-                            self.buffers.branch_child_buf.push(child);
-                        }
-                    }
-
-                    self.buffers
-                        .branch_value_stack_buf
-                        .resize(self.buffers.branch_child_buf.len(), Default::default());
-                    let mut added_children = false;
-
-                    let mut tree_mask = TrieMask::default();
-                    let mut hash_mask = TrieMask::default();
-                    let mut hashes = Vec::new();
-                    for (i, child_path) in self.buffers.branch_child_buf.iter().enumerate() {
-                        if self.buffers.rlp_node_stack.last().is_some_and(|e| &e.path == child_path)
-                        {
-                            let RlpNodeStackItem {
-                                path: _,
-                                rlp_node: child,
-                                node_type: child_node_type,
-                            } = self.buffers.rlp_node_stack.pop().unwrap();
-
-                            // Update the masks only if we need to retain trie updates
-                            if retain_updates {
-                                // SAFETY: it's a child, so it's never empty
-                                let last_child_nibble = child_path.last().unwrap();
-
-                                // Determine whether we need to set trie mask bit.
-                                let should_set_tree_mask_bit = if let Some(store_in_db_trie) =
-                                    child_node_type.store_in_db_trie()
-                                {
-                                    // A branch or an extension node explicitly set the
-                                    // `store_in_db_trie` flag
-                                    store_in_db_trie
-                                } else {
-                                    // A blinded node has the tree mask bit set
-                                    child_node_type.is_hash() &&
-                                        self.branch_node_tree_masks.get(&path).is_some_and(
-                                            |mask| mask.is_bit_set(last_child_nibble),
-                                        )
-                                };
-                                if should_set_tree_mask_bit {
-                                    tree_mask.set_bit(last_child_nibble);
-                                }
-
-                                // Set the hash mask. If a child node is a revealed branch node OR
-                                // is a blinded node that has its hash mask bit set according to the
-                                // database, set the hash mask bit and save the hash.
-                                let hash = child.as_hash().filter(|_| {
-                                    child_node_type.is_branch() ||
-                                        (child_node_type.is_hash() &&
-                                            self.branch_node_hash_masks
-                                                .get(&path)
-                                                .is_some_and(|mask| {
-                                                    mask.is_bit_set(last_child_nibble)
-                                                }))
-                                });
-                                if let Some(hash) = hash {
-                                    hash_mask.set_bit(last_child_nibble);
-                                    hashes.push(hash);
-                                }
-                            }
-
-                            // Insert children in the resulting buffer in a normal order,
-                            // because initially we iterated in reverse.
-                            // SAFETY: i < len and len is never 0
-                            let original_idx = self.buffers.branch_child_buf.len() - i - 1;
-                            self.buffers.branch_value_stack_buf[original_idx] = child;
-                            added_children = true;
-                        } else {
-                            debug_assert!(!added_children);
-                            self.buffers.path_stack.push(RlpNodePathStackItem {
-                                level,
-                                path,
-                                is_in_prefix_set,
-                            });
-                            self.buffers.path_stack.extend(
-                                self.buffers.branch_child_buf.drain(..).map(|path| {
-                                    RlpNodePathStackItem {
-                                        level: level + 1,
-                                        path,
-                                        is_in_prefix_set: None,
-                                    }
-                                }),
-                            );
-                            continue 'main
-                        }
-                    }
-
-                    trace!(
-                        target: "trie::parallel_sparse",
-                        ?path,
-                        ?tree_mask,
-                        ?hash_mask,
-                        "Branch node masks"
-                    );
-
-                    self.buffers.rlp_buf.clear();
-                    let branch_node_ref =
-                        BranchNodeRef::new(&self.buffers.branch_value_stack_buf, *state_mask);
-                    let rlp_node = branch_node_ref.rlp(&mut self.buffers.rlp_buf);
-                    *hash = rlp_node.as_hash();
-
-                    // Save a branch node update only if it's not a root node, and we need to
-                    // persist updates.
-                    let store_in_db_trie_value = if let Some(updates) =
-                        self.updates.as_mut().filter(|_| retain_updates && !path.is_empty())
-                    {
-                        let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
-                        if store_in_db_trie {
-                            // Store in DB trie if there are either any children that are stored in
-                            // the DB trie, or any children represent hashed values
-                            hashes.reverse();
-                            let branch_node = BranchNodeCompact::new(
-                                *state_mask,
-                                tree_mask,
-                                hash_mask,
-                                hashes,
-                                hash.filter(|_| path.is_empty()),
-                            );
-                            updates.updated_nodes.insert(path, branch_node);
-                        } else if self
-                            .branch_node_tree_masks
-                            .get(&path)
-                            .is_some_and(|mask| !mask.is_empty()) ||
-                            self.branch_node_hash_masks
-                                .get(&path)
-                                .is_some_and(|mask| !mask.is_empty())
-                        {
-                            // If new tree and hash masks are empty, but previously they weren't, we
-                            // need to remove the node update and add the node itself to the list of
-                            // removed nodes.
-                            updates.updated_nodes.remove(&path);
-                            updates.removed_nodes.insert(path);
-                        } else if self
-                            .branch_node_hash_masks
-                            .get(&path)
-                            .is_none_or(|mask| mask.is_empty()) &&
-                            self.branch_node_hash_masks
-                                .get(&path)
-                                .is_none_or(|mask| mask.is_empty())
-                        {
-                            // If new tree and hash masks are empty, and they were previously empty
-                            // as well, we need to remove the node update.
-                            updates.updated_nodes.remove(&path);
-                        }
-
-                        store_in_db_trie
-                    } else {
-                        false
-                    };
-                    *store_in_db_trie = Some(store_in_db_trie_value);
-
-                    (
-                        rlp_node,
-                        SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie_value) },
-                    )
-                }
-            };
-
-            trace!(
-                target: "trie::parallel_sparse",
-                root = ?self.path,
-                ?level,
-                ?path,
-                ?node,
-                ?node_type,
-                ?is_in_prefix_set,
-                "Added node to rlp node stack"
-            );
-
-            self.buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
+            self.inner.rlp_node(prefix_set_contains, path, node);
         }
 
-        debug_assert_eq!(self.buffers.rlp_node_stack.len(), 1);
-        self.buffers.rlp_node_stack.pop().unwrap().rlp_node
+        debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
+        self.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
     }
 
     /// Consumes and returns the currently accumulated trie updates.
@@ -900,7 +622,281 @@ impl SparseSubtrie {
     /// This is useful when you want to apply the updates to an external database,
     /// and then start tracking a new set of updates.
     fn take_updates(&mut self) -> SparseTrieUpdates {
-        self.updates.take().unwrap_or_default()
+        self.inner.updates.take().unwrap_or_default()
+    }
+}
+
+/// Helper type for [`SparseSubtrie`] to mutably access only a subset of fields from the original
+/// struct.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+struct SparseSubtrieInner {
+    /// When a branch is set, the corresponding child subtree is stored in the database.
+    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// When a bit is set, the corresponding child is stored as a hash in the database.
+    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    /// Map from leaf key paths to their values.
+    /// All values are stored here instead of directly in leaf nodes.
+    values: HashMap<Nibbles, Vec<u8>>,
+    /// Optional tracking of trie updates for later use.
+    updates: Option<SparseTrieUpdates>,
+    /// Reusable buffers for [`SparseSubtrie::update_hashes`].
+    buffers: SparseSubtrieBuffers,
+}
+
+impl SparseSubtrieInner {
+    fn rlp_node(
+        &mut self,
+        mut prefix_set_contains: impl FnMut(&Nibbles) -> bool,
+        path: Nibbles,
+        node: &mut SparseNode,
+    ) {
+        let (rlp_node, node_type) = match node {
+            SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
+            SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
+            SparseNode::Leaf { key, hash } => {
+                let mut path = path;
+                path.extend(key);
+                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
+                    (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
+                } else {
+                    let value = self.values.get(&path).unwrap();
+                    self.buffers.rlp_buf.clear();
+                    let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
+                    *hash = rlp_node.as_hash();
+                    (rlp_node, SparseNodeType::Leaf)
+                }
+            }
+            SparseNode::Extension { key, hash, store_in_db_trie } => {
+                let mut child_path = path;
+                child_path.extend(key);
+                if let Some((hash, store_in_db_trie)) =
+                    hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+                {
+                    (
+                        RlpNode::word_rlp(&hash),
+                        SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
+                    )
+                } else if self.buffers.rlp_node_stack.last().is_some_and(|e| e.path == child_path) {
+                    let RlpNodeStackItem { path: _, rlp_node: child, node_type: child_node_type } =
+                        self.buffers.rlp_node_stack.pop().unwrap();
+                    self.buffers.rlp_buf.clear();
+                    let rlp_node =
+                        ExtensionNodeRef::new(key, &child).rlp(&mut self.buffers.rlp_buf);
+                    *hash = rlp_node.as_hash();
+
+                    let store_in_db_trie_value = child_node_type.store_in_db_trie();
+
+                    trace!(
+                        target: "trie::parallel_sparse",
+                        ?path,
+                        ?child_path,
+                        ?child_node_type,
+                        "Extension node"
+                    );
+
+                    *store_in_db_trie = store_in_db_trie_value;
+
+                    (
+                        rlp_node,
+                        SparseNodeType::Extension {
+                            // Inherit the `store_in_db_trie` flag from the child node, which is
+                            // always the branch node
+                            store_in_db_trie: store_in_db_trie_value,
+                        },
+                    )
+                } else {
+                    // need to get rlp node for child first
+                    self.buffers.path_stack.extend([
+                        RlpNodePathStackItem {
+                            path,
+                            is_in_prefix_set: Some(prefix_set_contains(&path)),
+                        },
+                        RlpNodePathStackItem { path: child_path, is_in_prefix_set: None },
+                    ]);
+                    return
+                }
+            }
+            SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
+                if let Some((hash, store_in_db_trie)) =
+                    hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
+                {
+                    self.buffers.rlp_node_stack.push(RlpNodeStackItem {
+                        path,
+                        rlp_node: RlpNode::word_rlp(&hash),
+                        node_type: SparseNodeType::Branch {
+                            store_in_db_trie: Some(store_in_db_trie),
+                        },
+                    });
+                    return
+                }
+                let retain_updates = self.updates.is_some() && prefix_set_contains(&path);
+
+                self.buffers.branch_child_buf.clear();
+                // Walk children in a reverse order from `f` to `0`, so we pop the `0` first
+                // from the stack and keep walking in the sorted order.
+                for bit in CHILD_INDEX_RANGE.rev() {
+                    if state_mask.is_bit_set(bit) {
+                        let mut child = path;
+                        child.push_unchecked(bit);
+                        self.buffers.branch_child_buf.push(child);
+                    }
+                }
+
+                self.buffers
+                    .branch_value_stack_buf
+                    .resize(self.buffers.branch_child_buf.len(), Default::default());
+                let mut added_children = false;
+
+                let mut tree_mask = TrieMask::default();
+                let mut hash_mask = TrieMask::default();
+                let mut hashes = Vec::new();
+                for (i, child_path) in self.buffers.branch_child_buf.iter().enumerate() {
+                    if self.buffers.rlp_node_stack.last().is_some_and(|e| &e.path == child_path) {
+                        let RlpNodeStackItem {
+                            path: _,
+                            rlp_node: child,
+                            node_type: child_node_type,
+                        } = self.buffers.rlp_node_stack.pop().unwrap();
+
+                        // Update the masks only if we need to retain trie updates
+                        if retain_updates {
+                            // SAFETY: it's a child, so it's never empty
+                            let last_child_nibble = child_path.last().unwrap();
+
+                            // Determine whether we need to set trie mask bit.
+                            let should_set_tree_mask_bit = if let Some(store_in_db_trie) =
+                                child_node_type.store_in_db_trie()
+                            {
+                                // A branch or an extension node explicitly set the
+                                // `store_in_db_trie` flag
+                                store_in_db_trie
+                            } else {
+                                // A blinded node has the tree mask bit set
+                                child_node_type.is_hash() &&
+                                    self.branch_node_tree_masks
+                                        .get(&path)
+                                        .is_some_and(|mask| mask.is_bit_set(last_child_nibble))
+                            };
+                            if should_set_tree_mask_bit {
+                                tree_mask.set_bit(last_child_nibble);
+                            }
+
+                            // Set the hash mask. If a child node is a revealed branch node OR
+                            // is a blinded node that has its hash mask bit set according to the
+                            // database, set the hash mask bit and save the hash.
+                            let hash = child.as_hash().filter(|_| {
+                                child_node_type.is_branch() ||
+                                    (child_node_type.is_hash() &&
+                                        self.branch_node_hash_masks.get(&path).is_some_and(
+                                            |mask| mask.is_bit_set(last_child_nibble),
+                                        ))
+                            });
+                            if let Some(hash) = hash {
+                                hash_mask.set_bit(last_child_nibble);
+                                hashes.push(hash);
+                            }
+                        }
+
+                        // Insert children in the resulting buffer in a normal order,
+                        // because initially we iterated in reverse.
+                        // SAFETY: i < len and len is never 0
+                        let original_idx = self.buffers.branch_child_buf.len() - i - 1;
+                        self.buffers.branch_value_stack_buf[original_idx] = child;
+                        added_children = true;
+                    } else {
+                        debug_assert!(!added_children);
+                        self.buffers.path_stack.push(RlpNodePathStackItem {
+                            path,
+                            is_in_prefix_set: Some(prefix_set_contains(&path)),
+                        });
+                        self.buffers.path_stack.extend(
+                            self.buffers
+                                .branch_child_buf
+                                .drain(..)
+                                .map(|path| RlpNodePathStackItem { path, is_in_prefix_set: None }),
+                        );
+                        return
+                    }
+                }
+
+                trace!(
+                    target: "trie::parallel_sparse",
+                    ?path,
+                    ?tree_mask,
+                    ?hash_mask,
+                    "Branch node masks"
+                );
+
+                self.buffers.rlp_buf.clear();
+                let branch_node_ref =
+                    BranchNodeRef::new(&self.buffers.branch_value_stack_buf, *state_mask);
+                let rlp_node = branch_node_ref.rlp(&mut self.buffers.rlp_buf);
+                *hash = rlp_node.as_hash();
+
+                // Save a branch node update only if it's not a root node, and we need to
+                // persist updates.
+                let store_in_db_trie_value = if let Some(updates) =
+                    self.updates.as_mut().filter(|_| retain_updates && !path.is_empty())
+                {
+                    let store_in_db_trie = !tree_mask.is_empty() || !hash_mask.is_empty();
+                    if store_in_db_trie {
+                        // Store in DB trie if there are either any children that are stored in
+                        // the DB trie, or any children represent hashed values
+                        hashes.reverse();
+                        let branch_node = BranchNodeCompact::new(
+                            *state_mask,
+                            tree_mask,
+                            hash_mask,
+                            hashes,
+                            hash.filter(|_| path.is_empty()),
+                        );
+                        updates.updated_nodes.insert(path, branch_node);
+                    } else if self
+                        .branch_node_tree_masks
+                        .get(&path)
+                        .is_some_and(|mask| !mask.is_empty()) ||
+                        self.branch_node_hash_masks
+                            .get(&path)
+                            .is_some_and(|mask| !mask.is_empty())
+                    {
+                        // If new tree and hash masks are empty, but previously they weren't, we
+                        // need to remove the node update and add the node itself to the list of
+                        // removed nodes.
+                        updates.updated_nodes.remove(&path);
+                        updates.removed_nodes.insert(path);
+                    } else if self
+                        .branch_node_hash_masks
+                        .get(&path)
+                        .is_none_or(|mask| mask.is_empty()) &&
+                        self.branch_node_hash_masks.get(&path).is_none_or(|mask| mask.is_empty())
+                    {
+                        // If new tree and hash masks are empty, and they were previously empty
+                        // as well, we need to remove the node update.
+                        updates.updated_nodes.remove(&path);
+                    }
+
+                    store_in_db_trie
+                } else {
+                    false
+                };
+                *store_in_db_trie = Some(store_in_db_trie_value);
+
+                (
+                    rlp_node,
+                    SparseNodeType::Branch { store_in_db_trie: Some(store_in_db_trie_value) },
+                )
+            }
+        };
+
+        trace!(
+            target: "trie::parallel_sparse",
+            ?path,
+            ?node,
+            ?node_type,
+            "Added node to rlp node stack"
+        );
+
+        self.buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
     }
 }
 
@@ -963,6 +959,15 @@ pub struct SparseSubtrieBuffers {
     branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
     /// Reusable RLP buffer
     rlp_buf: Vec<u8>,
+}
+
+/// RLP node path stack item.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct RlpNodePathStackItem {
+    /// Path to the node.
+    pub path: Nibbles,
+    /// Whether the path is in the prefix set. If [`None`], then unknown yet.
+    pub is_in_prefix_set: Option<bool>,
 }
 
 /// Changed subtrie.
@@ -1299,7 +1304,10 @@ mod tests {
             );
 
             let full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-            assert_eq!(trie.upper_subtrie.values.get(&full_path), Some(&encode_account_value(42)));
+            assert_eq!(
+                trie.upper_subtrie.inner.values.get(&full_path),
+                Some(&encode_account_value(42))
+            );
         }
 
         // Reveal leaf in a lower trie
