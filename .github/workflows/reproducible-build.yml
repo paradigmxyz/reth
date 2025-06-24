@@ -11,45 +11,98 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: rui314/setup-mold@v1
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker  # Use docker driver instead of docker-container for reproducibility
+
+      - name: Build first reproducible Docker image
+        run: |
+          echo "=== Building first Docker image ==="
+          docker build -f Dockerfile.reproducible -t build-reth-1 .
+
+          echo "=== Extracting binary from first build ==="
+          docker create --name extract-reth-1 build-reth-1
+          docker cp extract-reth-1:/reth ./reth-build-1
+          docker rm extract-reth-1
+
+          echo "=== First build info ==="
+          ls -la reth-build-1
+          sha256sum reth-build-1
+          file reth-build-1
+
+      - name: Clean Docker state completely
+        run: |
+          echo "=== Cleaning Docker state ==="
+          # Remove the first image
+          docker rmi build-reth-1 || true
+
+          # Remove all build cache (important for reproducibility testing)
+          docker buildx prune -f || true
+          docker system prune -f || true
+
+          # Clear any remaining containers
+          docker container prune -f || true
+
+          echo "=== Docker state cleaned ==="
+          docker images
+          docker ps -a
+
+      - name: Build second reproducible Docker image
+        run: |
+          echo "=== Building second Docker image ==="
+          docker build -f Dockerfile.reproducible -t build-reth-2 .
+
+          echo "=== Extracting binary from second build ==="
+          docker create --name extract-reth-2 build-reth-2
+          docker cp extract-reth-2:/reth ./reth-build-2
+          docker rm extract-reth-2
+
+          echo "=== Second build info ==="
+          ls -la reth-build-2
+          sha256sum reth-build-2
+          file reth-build-2
+
+      - name: Compare Docker-built binaries
+        run: |
+          echo "=== Comparing Docker-built binaries ==="
+          echo "Build 1 info:"
+          ls -la reth-build-1
+          echo "Build 2 info:"
+          ls -la reth-build-2
+
+          echo "=== SHA256 checksums ==="
+          sha256sum reth-build-*
+
+          echo "=== Binary comparison ==="
+          if cmp reth-build-1 reth-build-2; then
+            echo "✅ SUCCESS: Docker-built binaries are identical!"
+            echo "✅ Reproducible Docker build PASSED"
+          else
+            echo "❌ FAILED: Docker-built binaries differ"
+            echo "First 10 differences:"
+            cmp -l reth-build-1 reth-build-2 | head -10
+            exit 1
+          fi
+
+      - name: Setup Rust for Debian testing
+        uses: dtolnay/rust-toolchain@stable
         with:
           target: x86_64-unknown-linux-gnu
-      - name: Install cross main
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross
-      - name: Install cargo-cache
-        run: |
-          cargo install cargo-cache
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libclang-dev \
-            build-essential \
-            binutils-multiarch
-
-      - name: Build Reth
-        run: |
-          make build-reproducible
-          mv target/x86_64-unknown-linux-gnu/release/reth reth-build-1
-      - name: Clean cache
-        run: make clean && cargo cache -a
-      - name: Build Reth again
-        run: |
-          make build-reproducible
-          mv target/x86_64-unknown-linux-gnu/release/reth reth-build-2
-      - name: Compare binaries
-        run: cmp reth-build-1 reth-build-2
 
       - name: Install tools for Debian testing
         run: |
           # Install cargo-deb & cargo-cache
           cargo install cargo-deb
+          cargo install cargo-cache
           # Install native build dependencies
           sudo apt-get update
           sudo apt-get install -y \
+            libclang-dev \
+            build-essential \
             diffoscope \
+            binutils-multiarch
 
       - name: Test Debian package reproducibility
         run: |
