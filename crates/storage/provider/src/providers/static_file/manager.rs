@@ -242,7 +242,7 @@ pub struct StaticFileProviderInner<N> {
     /// block number that has been expired (missing). The first, non expired block is
     /// `expired_history_height + 1`.
     ///
-    /// This is effecitvely the transaction range that has been expired:
+    /// This is effectively the transaction range that has been expired:
     /// [`StaticFileProvider::delete_transactions_below`] and mirrors
     /// `static_files_min_block[transactions] - blocks_per_file`.
     ///
