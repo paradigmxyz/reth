@@ -239,7 +239,7 @@ impl ParallelSparseTrie {
                     return Ok(FindNextToLeafOutcome::NotFound)
                 }
 
-                let nibble = leaf_full_path.get(from_path.len()).unwrap();
+                let nibble = leaf_full_path.get_unchecked(from_path.len());
                 if !state_mask.is_bit_set(nibble) {
                     return Ok(FindNextToLeafOutcome::NotFound)
                 }
@@ -300,7 +300,7 @@ impl ParallelSparseTrie {
         debug_assert!(remaining_child_path.len() > parent_path.len());
         debug_assert!(remaining_child_path.starts_with(parent_path));
 
-        let remaining_child_nibble = remaining_child_path.get(parent_path.len()).unwrap();
+        let remaining_child_nibble = remaining_child_path.get_unchecked(parent_path.len());
 
         // If we swap the branch node out either an extension or leaf, depending on
         // what its remaining child is.
@@ -499,7 +499,7 @@ impl ParallelSparseTrie {
         if let (Some(branch_path), Some(SparseNode::Branch { mut state_mask, .. })) =
             (&branch_parent_path, &branch_parent_node)
         {
-            let child_nibble = leaf_path.get(branch_path.len()).unwrap();
+            let child_nibble = leaf_path.get_unchecked(branch_path.len());
             state_mask.unset_bit(child_nibble);
 
             let new_branch_node = if state_mask.count_bits() == 1 {
