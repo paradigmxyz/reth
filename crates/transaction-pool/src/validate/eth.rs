@@ -87,11 +87,6 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
         self.inner.eip7702
     }
 
-    /// Returns the current max gas limit
-    pub fn block_gas_limit(&self) -> &AtomicU64 {
-        &self.inner.block_gas_limit
-    }
-
     /// Returns the current tx fee cap limit in wei locally submitted into the pool
     pub fn tx_fee_cap(&self) -> &Option<u128> {
         &self.inner.tx_fee_cap
@@ -124,6 +119,11 @@ where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
+    /// Returns the current max gas limit
+    pub fn block_gas_limit(&self) -> u64 {
+        self.inner.max_gas_limit()
+    }
+
     /// Validates a single transaction.
     ///
     /// See also [`TransactionValidator::validate_transaction`]
