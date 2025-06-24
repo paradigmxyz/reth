@@ -1,5 +1,6 @@
 import { defineConfig } from 'vocs'
 import { sidebar } from './sidebar'
+import { basePath } from './redirects.config'
 
 export default defineConfig({
   title: 'Reth',
@@ -7,7 +8,7 @@ export default defineConfig({
   iconUrl: '/logo.png',
   ogImageUrl: '/reth-prod.png',
   sidebar,
-  basePath: '/reth',
+  basePath,
   topNav: [
     { text: 'Run', link: '/run/ethereum' },
     { text: 'SDK', link: '/sdk/overview' },

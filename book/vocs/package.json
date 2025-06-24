@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vocs dev",
-    "build": "vocs build",
+    "build": "vocs build && bun generate-redirects.ts",
     "preview": "vocs preview",
-    "check-links": "bun check-links.ts"
+    "check-links": "bun check-links.ts",
+    "generate-redirects": "bun generate-redirects.ts"
   },
   "dependencies": {
     "react": "latest",
