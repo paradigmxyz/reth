@@ -15,6 +15,8 @@ const GENESIS_ITHACA_INDEX_RESPONSE: &[u8] = b"<a href=\"https://era.ithaca.xyz/
 mod genesis;
 mod history;
 
+const fn main() {}
+
 /// An HTTP client that fakes the file list to always show one known file
 ///
 /// but passes all other calls including actual downloads to a real HTTP client
