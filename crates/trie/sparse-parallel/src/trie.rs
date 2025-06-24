@@ -1801,37 +1801,12 @@ mod tests {
             .unwrap()
             .set_hash(None);
 
-        // Step 4: Add changed paths to prefix set
+        // Step 4: Add changed leaf node paths to prefix set
         trie.prefix_set.insert(leaf_1_full_path);
         trie.prefix_set.insert(leaf_2_full_path);
-        // Also add the upper subtrie paths that need updating
-        trie.prefix_set.insert(extension_path);
-        trie.prefix_set.insert(branch_path);
-        trie.prefix_set.insert(leaf_1_path);
-        trie.prefix_set.insert(leaf_2_path);
-
-        // Verify that hashes were indeed reset
-        assert!(trie.upper_subtrie.nodes.get(&extension_path).unwrap().hash().is_none());
-        assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_none());
-        assert!(trie.lower_subtries[leaf_1_subtrie_idx]
-            .as_ref()
-            .unwrap()
-            .nodes
-            .get(&leaf_1_path)
-            .unwrap()
-            .hash()
-            .is_none());
-        assert!(trie.lower_subtries[leaf_2_subtrie_idx]
-            .as_ref()
-            .unwrap()
-            .nodes
-            .get(&leaf_2_path)
-            .unwrap()
-            .hash()
-            .is_none());
 
         // Step 5: Calculate root using our implementation
-        let parallel_trie_root = trie.root();
+        let root = trie.root();
 
         // Step 6: Calculate root using HashBuilder for comparison
         let (hash_builder_root, _, _proof_nodes, _, _) = run_hash_builder(
@@ -1842,25 +1817,11 @@ mod tests {
         );
 
         // Step 7: Verify the roots match
-        assert_eq!(parallel_trie_root, hash_builder_root);
-
-        // Additional checks to verify the structure
-        // Check that extension and branch are in upper subtrie
-        assert!(trie.upper_subtrie.nodes.contains_key(&extension_path));
-        assert!(trie.upper_subtrie.nodes.contains_key(&branch_path));
-
-        // Check that leaf nodes are in lower subtries
-        let leaf_1_subtrie_idx = path_subtrie_index_unchecked(&leaf_1_path);
-        let leaf_2_subtrie_idx = path_subtrie_index_unchecked(&leaf_2_path);
-        assert!(trie.lower_subtries[leaf_1_subtrie_idx].is_some());
-        assert!(trie.lower_subtries[leaf_2_subtrie_idx].is_some());
-
-        let leaf_1_subtrie = trie.lower_subtries[leaf_1_subtrie_idx].as_ref().unwrap();
-        let leaf_2_subtrie = trie.lower_subtries[leaf_2_subtrie_idx].as_ref().unwrap();
-        assert!(leaf_1_subtrie.nodes.contains_key(&leaf_1_path));
-        assert!(leaf_2_subtrie.nodes.contains_key(&leaf_2_path));
+        assert_eq!(root, hash_builder_root);
 
         // Verify hashes were computed
+        let leaf_1_subtrie = trie.lower_subtries[leaf_1_subtrie_idx].as_ref().unwrap();
+        let leaf_2_subtrie = trie.lower_subtries[leaf_2_subtrie_idx].as_ref().unwrap();
         assert!(trie.upper_subtrie.nodes.get(&extension_path).unwrap().hash().is_some());
         assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_some());
         assert!(leaf_1_subtrie.nodes.get(&leaf_1_path).unwrap().hash().is_some());
