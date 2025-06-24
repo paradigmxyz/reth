@@ -194,52 +194,52 @@ impl ParallelSparseTrie {
     }
 
     /// Returns the next node in the traversal path from the given path towards the leaf for the
-    /// given full key, or an error if any node along the traversal path is not revealed.
+    /// given full leaf path, or an error if any node along the traversal path is not revealed.
     ///
     /// ## Invariants
     ///
-    /// - `from_path` must be a prefix of `key`.
+    /// - `from_path` must be a prefix of `leaf_full_path`.
     fn find_next_to_leaf(
         from_path: &Nibbles,
         from_node: &SparseNode,
-        key: &Nibbles,
+        leaf_full_path: &Nibbles,
     ) -> SparseTrieResult<FindNextToLeafOutcome> {
-        debug_assert!(key.len() >= from_path.len());
-        debug_assert!(key.starts_with(from_path));
+        debug_assert!(leaf_full_path.len() >= from_path.len());
+        debug_assert!(leaf_full_path.starts_with(from_path));
 
         match from_node {
             SparseNode::Empty => Err(SparseTrieErrorKind::Blind.into()),
             SparseNode::Hash(hash) => {
                 Err(SparseTrieErrorKind::BlindedNode { path: *from_path, hash: *hash }.into())
             }
-            SparseNode::Leaf { key: leaf_key, .. } => {
-                let mut found_key = *from_path;
-                found_key.extend(leaf_key);
+            SparseNode::Leaf { key, .. } => {
+                let mut found_full_path = *from_path;
+                found_full_path.extend(key);
 
-                if &found_key == key {
+                if &found_full_path == leaf_full_path {
                     return Ok(FindNextToLeafOutcome::Found)
                 }
                 Ok(FindNextToLeafOutcome::NotFound)
             }
-            SparseNode::Extension { key: ext_key, .. } => {
-                if key.len() == from_path.len() {
+            SparseNode::Extension { key, .. } => {
+                if leaf_full_path.len() == from_path.len() {
                     return Ok(FindNextToLeafOutcome::NotFound)
                 }
 
                 let mut child_path = *from_path;
-                child_path.extend(ext_key);
+                child_path.extend(key);
 
-                if !key.starts_with(&child_path) {
+                if !leaf_full_path.starts_with(&child_path) {
                     return Ok(FindNextToLeafOutcome::NotFound)
                 }
                 Ok(FindNextToLeafOutcome::ContinueFrom(child_path))
             }
             SparseNode::Branch { state_mask, .. } => {
-                if key.len() == from_path.len() {
+                if leaf_full_path.len() == from_path.len() {
                     return Ok(FindNextToLeafOutcome::NotFound)
                 }
 
-                let nibble = key.get(from_path.len()).unwrap();
+                let nibble = leaf_full_path.get(from_path.len()).unwrap();
                 if !state_mask.is_bit_set(nibble) {
                     return Ok(FindNextToLeafOutcome::NotFound)
                 }
@@ -268,7 +268,7 @@ impl ParallelSparseTrie {
             return;
         }
 
-        if let SparseNode::Leaf { key: shortkey, .. } = new_parent_node {
+        if let SparseNode::Leaf { key, .. } = new_parent_node {
             let prev_child_subtrie =
                 if let Some(subtrie) = self.lower_subtrie_for_path(prev_child_path) {
                     subtrie
@@ -276,11 +276,11 @@ impl ParallelSparseTrie {
                     return;
                 };
 
-            let mut key = *parent_path;
-            key.extend(shortkey);
+            let mut leaf_full_path = *parent_path;
+            leaf_full_path.extend(key);
 
-            let val = prev_child_subtrie.inner.values.remove(&key).expect("ParallelSparseTrie is in an inconsistent state, expected value on subtrie which wasn't found");
-            self.upper_subtrie.inner.values.insert(key, val);
+            let val = prev_child_subtrie.inner.values.remove(&leaf_full_path).expect("ParallelSparseTrie is in an inconsistent state, expected value on subtrie which wasn't found");
+            self.upper_subtrie.inner.values.insert(leaf_full_path, val);
         }
     }
 
@@ -333,9 +333,9 @@ impl ParallelSparseTrie {
         }
     }
 
-    /// Given the path to a parent extension and its short-key, and a child node (not necessarily on
-    /// this subtrie), returns an optional replacement parent node. If a replacement is returned
-    /// then the child node should be deleted.
+    /// Given the path to a parent extension and its key, and a child node (not necessarily on this
+    /// subtrie), returns an optional replacement parent node. If a replacement is returned then the
+    /// child node should be deleted.
     ///
     /// ## Invariants
     ///
@@ -343,7 +343,7 @@ impl ParallelSparseTrie {
     /// - The parent's path must be a prefix of the child's path.
     fn extension_changes_on_leaf_removal(
         parent_path: &Nibbles,
-        parent_shortkey: &Nibbles,
+        parent_key: &Nibbles,
         child_path: &Nibbles,
         child: &SparseNode,
     ) -> Option<SparseNode> {
@@ -361,16 +361,16 @@ impl ParallelSparseTrie {
             // followed by a leaf node in a complete trie, it's possible here because we
             // could have downgraded the extension node's child into a leaf node from a
             // branch in a previous call to `branch_changes_on_leaf_removal`.
-            SparseNode::Leaf { key: leaf_key, .. } => {
-                let mut new_key = *parent_shortkey;
-                new_key.extend(leaf_key);
+            SparseNode::Leaf { key, .. } => {
+                let mut new_key = *parent_key;
+                new_key.extend(key);
                 Some(SparseNode::new_leaf(new_key))
             }
             // Similar to the leaf node, for an extension node, we collapse them into one
             // extension node, extending the key.
-            SparseNode::Extension { key: extension_key, .. } => {
-                let mut new_key = *parent_shortkey;
-                new_key.extend(extension_key);
+            SparseNode::Extension { key, .. } => {
+                let mut new_key = *parent_key;
+                new_key.extend(key);
                 Some(SparseNode::new_ext(new_key))
             }
             // For a branch node, we just leave the extension node as-is.
@@ -378,7 +378,8 @@ impl ParallelSparseTrie {
         }
     }
 
-    /// Removes a leaf node from the trie at the specified key path.
+    /// Removes a leaf node from the trie at the specified full path of a value (that is, the leaf's
+    /// path + its key).
     ///
     /// This function removes the leaf value from the internal values map and then traverses
     /// the trie to remove or adjust intermediate nodes, merging or collapsing them as necessary.
@@ -389,7 +390,7 @@ impl ParallelSparseTrie {
     /// otherwise returns an error if a blinded node prevents removal.
     pub fn remove_leaf(
         &mut self,
-        key: &Nibbles,
+        leaf_full_path: &Nibbles,
         provider: impl BlindedProvider,
     ) -> SparseTrieResult<()> {
         // When removing a leaf node it's possibly necessary to modify its parent node, and possibly
@@ -423,7 +424,7 @@ impl ParallelSparseTrie {
         loop {
             let curr_node = curr_subtrie.nodes.get(&curr_path).unwrap();
 
-            match Self::find_next_to_leaf(&curr_path, curr_node, key)? {
+            match Self::find_next_to_leaf(&curr_path, curr_node, leaf_full_path)? {
                 FindNextToLeafOutcome::NotFound => return Ok(()), // leaf isn't in the trie
                 FindNextToLeafOutcome::Found => {
                     // this node is the target leaf
@@ -476,8 +477,8 @@ impl ParallelSparseTrie {
 
         // We've traversed to the leaf and collected its ancestors as necessary. Remove the leaf
         // from its SparseSubtrie.
-        self.prefix_set.insert(*key);
-        leaf_subtrie.inner.values.remove(key);
+        self.prefix_set.insert(*leaf_full_path);
+        leaf_subtrie.inner.values.remove(leaf_full_path);
         leaf_subtrie.nodes.remove(&leaf_path);
 
         // If the leaf was at the root replace its node with the empty value. We can stop execution
@@ -2161,16 +2162,16 @@ mod tests {
 
         let provider = MockBlindedProvider::new();
 
-        // Remove the leaf with a full key of 0x537
-        let key = Nibbles::from_nibbles([0x5, 0x3, 0x7]);
-        trie.remove_leaf(&key, provider).unwrap();
+        // Remove the leaf with a full path of 0x537
+        let leaf_full_path = Nibbles::from_nibbles([0x5, 0x3, 0x7]);
+        trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
         let lower_subtrie_50 = trie.lower_subtries[0x50].as_ref().unwrap();
         let lower_subtrie_53 = trie.lower_subtries[0x53].as_ref().unwrap();
 
-        // Check that the full key was removed from the appropriate `SparseSubtrie`.
-        assert_matches!(lower_subtrie_53.inner.values.get(&key), None);
+        // Check that the leaf value was removed from the appropriate `SparseSubtrie`.
+        assert_matches!(lower_subtrie_53.inner.values.get(&leaf_full_path), None);
 
         // Check that the leaf node was removed, and that its parent/grandparent were modified
         // appropriately.
@@ -2222,14 +2223,14 @@ mod tests {
 
         let provider = MockBlindedProvider::new();
 
-        // Remove the leaf with a full key of 0x012
-        let key = Nibbles::from_nibbles([0x0, 0x1, 0x2]);
-        trie.remove_leaf(&key, provider).unwrap();
+        // Remove the leaf with a full path of 0x012
+        let leaf_full_path = Nibbles::from_nibbles([0x0, 0x1, 0x2]);
+        trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
 
-        // Check that the full key was removed
-        assert_matches!(upper_subtrie.inner.values.get(&key), None);
+        // Check that the leaf's value was removed
+        assert_matches!(upper_subtrie.inner.values.get(&leaf_full_path), None);
 
         // Check that the branch node collapsed into a leaf node with the remaining child's key
         assert_matches!(
@@ -2281,21 +2282,21 @@ mod tests {
 
         let provider = MockBlindedProvider::new();
 
-        // Remove the leaf with a full key of 0x5012
-        let key = Nibbles::from_nibbles([0x5, 0x0, 0x1, 0x2]);
-        trie.remove_leaf(&key, provider).unwrap();
+        // Remove the leaf with a full path of 0x5012
+        let leaf_full_path = Nibbles::from_nibbles([0x5, 0x0, 0x1, 0x2]);
+        trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
         let lower_subtrie_50 = trie.lower_subtries[0x50].as_ref().unwrap();
         let lower_subtrie_51 = trie.lower_subtries[0x51].as_ref().unwrap();
 
         // Check that the full key was removed
-        assert_matches!(lower_subtrie_50.inner.values.get(&key), None);
+        assert_matches!(lower_subtrie_50.inner.values.get(&leaf_full_path), None);
 
         // Check that the other leaf's value was moved to the upper trie
-        let other_key = Nibbles::from_nibbles([0x5, 0x1, 0x3, 0x4]);
-        assert_matches!(lower_subtrie_51.inner.values.get(&other_key), None);
-        assert_matches!(upper_subtrie.inner.values.get(&other_key), Some(_));
+        let other_leaf_full_value = Nibbles::from_nibbles([0x5, 0x1, 0x3, 0x4]);
+        assert_matches!(lower_subtrie_51.inner.values.get(&other_leaf_full_value), None);
+        assert_matches!(upper_subtrie.inner.values.get(&other_leaf_full_value), Some(_));
 
         // Check that the extension node collapsed into a leaf node
         assert_matches!(
@@ -2343,21 +2344,21 @@ mod tests {
 
         let provider = MockBlindedProvider::new();
 
-        // Remove the leaf with a full key of 0x2034
-        let key = Nibbles::from_nibbles([0x2, 0x0, 0x3, 0x4]);
-        trie.remove_leaf(&key, provider).unwrap();
+        // Remove the leaf with a full path of 0x2034
+        let leaf_full_path = Nibbles::from_nibbles([0x2, 0x0, 0x3, 0x4]);
+        trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
         let lower_subtrie_20 = trie.lower_subtries[0x20].as_ref().unwrap();
         let lower_subtrie_21 = trie.lower_subtries[0x21].as_ref().unwrap();
 
-        // Check that the full key was removed
-        assert_matches!(lower_subtrie_20.inner.values.get(&key), None);
+        // Check that the leaf's value was removed
+        assert_matches!(lower_subtrie_20.inner.values.get(&leaf_full_path), None);
 
         // Check that the other leaf's value was moved to the upper trie
-        let other_key = Nibbles::from_nibbles([0x2, 0x1, 0x5, 0x6]);
-        assert_matches!(lower_subtrie_21.inner.values.get(&other_key), None);
-        assert_matches!(upper_subtrie.inner.values.get(&other_key), Some(_));
+        let other_leaf_full_value = Nibbles::from_nibbles([0x2, 0x1, 0x5, 0x6]);
+        assert_matches!(lower_subtrie_21.inner.values.get(&other_leaf_full_value), None);
+        assert_matches!(upper_subtrie.inner.values.get(&other_leaf_full_value), Some(_));
 
         // Check that the root branch still exists unchanged
         assert_matches!(
@@ -2409,14 +2410,14 @@ mod tests {
             RevealedNode { node: encoded.into(), tree_mask: None, hash_mask: None },
         );
 
-        // Remove the leaf with a full key of 0x012
-        let key = Nibbles::from_nibbles([0x0, 0x1, 0x2]);
-        trie.remove_leaf(&key, provider).unwrap();
+        // Remove the leaf with a full path of 0x012
+        let leaf_full_path = Nibbles::from_nibbles([0x0, 0x1, 0x2]);
+        trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
 
-        // Check that the full key was removed
-        assert_matches!(upper_subtrie.inner.values.get(&key), None);
+        // Check that the leaf value was removed
+        assert_matches!(upper_subtrie.inner.values.get(&leaf_full_path), None);
 
         // Check that the branch node collapsed into a leaf node with the revealed child's key
         assert_matches!(
@@ -2444,13 +2445,13 @@ mod tests {
         let provider = MockBlindedProvider::new();
 
         // Remove the leaf with a full key of 0x123
-        let key = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
-        trie.remove_leaf(&key, provider).unwrap();
+        let leaf_full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
 
-        // Check that the full key was removed
-        assert_matches!(upper_subtrie.inner.values.get(&key), None);
+        // Check that the leaf value was removed
+        assert_matches!(upper_subtrie.inner.values.get(&leaf_full_path), None);
 
         // Check that the root node was changed to Empty
         assert_matches!(upper_subtrie.nodes.get(&Nibbles::default()), Some(SparseNode::Empty));
