@@ -503,6 +503,7 @@ mod tests {
                             EvmStorageSlot::new_changed(
                                 U256::ZERO,
                                 U256::from(rng.random::<u64>()),
+                                0,
                             ),
                         );
                     }
@@ -517,6 +518,7 @@ mod tests {
                     },
                     storage,
                     status: AccountStatus::Touched,
+                    transaction_id: 0,
                 };
 
                 state_update.insert(address, account);

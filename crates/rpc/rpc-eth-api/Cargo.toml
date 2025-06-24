@@ -21,7 +21,7 @@ reth-errors.workspace = true
 reth-evm.workspace = true
 reth-storage-api.workspace = true
 reth-revm.workspace = true
-reth-rpc-types-compat.workspace = true
+reth-rpc-convert.workspace = true
 reth-tasks = { workspace = true, features = ["rayon"] }
 reth-transaction-pool.workspace = true
 reth-chainspec.workspace = true
@@ -62,3 +62,8 @@ tracing.workspace = true
 [features]
 js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
 client = ["jsonrpsee/client", "jsonrpsee/async-client"]
+op = [
+    "reth-evm/op",
+    "reth-primitives-traits/op",
+    "reth-rpc-convert/op",
+]

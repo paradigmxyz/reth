@@ -1,4 +1,4 @@
-//! Error types emitted by types or implementations of this crate.
+//! Error types for payload operations.
 
 use alloc::{boxed::Box, string::ToString};
 use alloy_primitives::B256;

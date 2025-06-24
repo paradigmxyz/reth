@@ -18,7 +18,7 @@ use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
-use precompile_cache::{CachedPrecompile, PrecompileCacheMap};
+use precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -276,6 +276,9 @@ where
     evm_config: C,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
+    /// Metrics for precompile cache, saved between block executions so we don't re-allocate for
+    /// every block.
+    precompile_cache_metrics: CachedPrecompileMetrics,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -370,6 +373,7 @@ where
             payload_processor,
             evm_config,
             precompile_cache_map,
+            precompile_cache_metrics: Default::default(),
         }
     }
 
@@ -2443,6 +2447,7 @@ where
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
                     *self.evm_config.evm_env(block.header()).spec_id(),
+                    Some(self.precompile_cache_metrics.clone()),
                 )
             });
         }

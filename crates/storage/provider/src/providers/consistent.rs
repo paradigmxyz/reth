@@ -27,7 +27,7 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StorageChangeSetReader,
+    StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::states::PlainStorageRevert;
@@ -590,6 +590,28 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
             return fetch_from_block_state(block_state)
         }
         fetch_from_db(&self.storage_provider)
+    }
+
+    /// Consumes the provider and returns a state provider for the specific block hash.
+    pub(crate) fn into_state_provider_at_block_hash(
+        self,
+        block_hash: BlockHash,
+    ) -> ProviderResult<Box<dyn StateProvider>> {
+        let Self { storage_provider, head_block, .. } = self;
+        let into_history_at_block_hash = |block_hash| -> ProviderResult<Box<dyn StateProvider>> {
+            let block_number = storage_provider
+                .block_number(block_hash)?
+                .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
+            storage_provider.try_into_history_at_block(block_number)
+        };
+        if let Some(Some(block_state)) =
+            head_block.as_ref().map(|b| b.block_on_chain(block_hash.into()))
+        {
+            let anchor_hash = block_state.anchor().hash;
+            let latest_historical = into_history_at_block_hash(anchor_hash)?;
+            return Ok(Box::new(block_state.state_provider(latest_historical)));
+        }
+        into_history_at_block_hash(block_hash)
     }
 }
 
