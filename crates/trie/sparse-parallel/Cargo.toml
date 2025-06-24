@@ -40,7 +40,3 @@ proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
 rand_08.workspace = true
-
-[features]
-default = []
-test-utils = ["reth-trie-sparse/test-utils"]
