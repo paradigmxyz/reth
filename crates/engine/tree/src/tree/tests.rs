@@ -142,9 +142,8 @@ impl TestHarness {
             persistence_handle,
             PersistenceState::default(),
             payload_builder,
-            // TODO: fix tests for state root task https://github.com/paradigmxyz/reth/issues/14376
             // always assume enough parallelism for tests
-            TreeConfig::default().with_legacy_state_root(true).with_has_enough_parallelism(true),
+            TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
             EngineApiKind::Ethereum,
             evm_config,
         );
