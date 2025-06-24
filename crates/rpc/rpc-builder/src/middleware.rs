@@ -3,8 +3,6 @@ use jsonrpsee::server::middleware::rpc::RpcService;
 use tower::Layer;
 
 /// A Helper alias trait for the RPC middleware supported by the server.
-///
-/// Note: This trait is only used to simplify the trait bounds in the RPC builder stack.
 pub trait RethRpcMiddleware:
     Layer<
         RpcRequestMetricsService<RpcService>,

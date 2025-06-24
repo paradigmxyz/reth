@@ -220,6 +220,17 @@ mod tests {
     use super::*;
     use alloy_eips::{BlockId, BlockNumberOrTag};
     use jsonrpsee::types::Params;
+    use jsonrpsee_core::middleware::layer::Either;
+    use reth_node_builder::rpc::RethRpcMiddleware;
+    use reth_storage_api::noop::NoopProvider;
+    use tower::layer::util::Identity;
+
+    #[test]
+    fn check_historical_rpc() {
+        fn assert_historical_rpc<T: RethRpcMiddleware>() {}
+        assert_historical_rpc::<HistoricalRpc<NoopProvider>>();
+        assert_historical_rpc::<Either<HistoricalRpc<NoopProvider>, Identity>>();
+    }
 
     /// Tests that various valid id types can be parsed from the first parameter.
     #[test]

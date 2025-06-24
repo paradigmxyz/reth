@@ -474,6 +474,7 @@ where
             })
             .transpose()?;
 
+        // TODO: why does this not satisfy the RethRpcMiddleware
         let rpc_add_ons = rpc_add_ons.option_layer_rpc_middleware(maybe_pre_bedrock_historical_rpc);
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(

@@ -586,7 +586,13 @@ where
     pub fn option_layer_rpc_middleware<T>(
         self,
         layer: Option<T>,
-    ) -> RpcAddOns<Node, EthB, EV, EB, Stack<layer::Either<T, Identity>, RpcMiddleware>> {
+    ) -> RpcAddOns<
+        Node,
+        EthB,
+        EV,
+        EB,
+        Stack<jsonrpsee::core::middleware::layer::Either<T, Identity>, RpcMiddleware>,
+    > {
         let Self {
             hooks,
             eth_api_builder,
