@@ -114,8 +114,8 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
 
     /// Returns the maximum size in bytes a single transaction can have in order to be accepted into
     /// the pool.
-    pub fn max_tx_input_bytes(&self) -> &usize {
-        &self.inner.max_tx_input_bytes
+    pub fn max_tx_input_bytes(&self) -> usize {
+        self.inner.max_tx_input_bytes
     }
 }
 
