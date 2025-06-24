@@ -7,7 +7,7 @@ use crate::{
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction};
+use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction, TransactionRequest};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
@@ -210,7 +210,7 @@ where
             let mut last_error = None;
 
             while retry_count < MAX_RETRIES {
-                match EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
+                match EthApiClient::<TransactionRequest, Transaction, RpcBlock, Receipt, Header>::block_by_number(
                     &client.rpc,
                     BlockNumberOrTag::Latest,
                     false,
@@ -244,14 +244,17 @@ where
         // Initialize each node's state with genesis block information
         let genesis_block_info = {
             let first_client = &env.node_clients[0];
-            let genesis_block =
-                EthApiClient::<Transaction, RpcBlock, Receipt, Header>::block_by_number(
-                    &first_client.rpc,
-                    BlockNumberOrTag::Number(0),
-                    false,
-                )
-                .await?
-                .ok_or_else(|| eyre!("Genesis block not found"))?;
+            let genesis_block = EthApiClient::<
+                TransactionRequest,
+                Transaction,
+                RpcBlock,
+                Receipt,
+                Header,
+            >::block_by_number(
+                &first_client.rpc, BlockNumberOrTag::Number(0), false
+            )
+            .await?
+            .ok_or_else(|| eyre!("Genesis block not found"))?;
 
             crate::testsuite::BlockInfo {
                 hash: genesis_block.header.hash,

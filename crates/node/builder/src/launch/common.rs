@@ -941,6 +941,7 @@ where
                 // Verify that the healthy node is running the same chain as the current node.
                 let chain_id = futures::executor::block_on(async {
                     EthApiClient::<
+                        alloy_rpc_types::TransactionRequest,
                         alloy_rpc_types::Transaction,
                         alloy_rpc_types::Block,
                         alloy_rpc_types::Receipt,
