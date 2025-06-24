@@ -36,7 +36,7 @@ const projects: SdkProject[] = [
     description: "BNB Smart Chain execution client implementation",
     loc: '~6K',
     githubUrl: 'https://github.com/loocapro/reth-bsc',
-    company: 'LooCa Protocol'
+    company: 'Binance Smart Chain'
   }
 ]
 
@@ -60,7 +60,7 @@ export function SdkShowcase() {
                 {project.name}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
-                by {project.company}
+                {project.company}
               </p>
             </div>
             
