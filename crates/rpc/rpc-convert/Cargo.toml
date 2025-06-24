@@ -1,0 +1,52 @@
+[package]
+name = "reth-rpc-convert"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Compatibility layer for reth-primitives and ethereum RPC types"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-storage-api = { workspace = true, optional = true }
+reth-evm.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
+alloy-consensus.workspace = true
+alloy-network.workspace = true
+alloy-json-rpc.workspace = true
+
+# optimism
+op-alloy-consensus = { workspace = true, optional = true }
+op-alloy-rpc-types = { workspace = true, optional = true }
+reth-optimism-primitives = { workspace = true, optional = true }
+op-revm = { workspace = true, optional = true }
+
+# revm
+revm-context.workspace = true
+
+# io
+jsonrpsee-types.workspace = true
+
+# error
+thiserror.workspace = true
+
+[features]
+default = []
+op = [
+    "dep:op-alloy-consensus",
+    "dep:op-alloy-rpc-types",
+    "dep:reth-optimism-primitives",
+    "dep:reth-storage-api",
+    "dep:op-revm",
+    "reth-evm/op",
+    "reth-primitives-traits/op",
+]

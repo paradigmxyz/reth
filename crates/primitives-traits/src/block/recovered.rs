@@ -470,6 +470,44 @@ impl<B: Block> From<RecoveredBlock<B>> for Sealed<B> {
     }
 }
 
+/// Converts a block with recovered transactions into a [`RecoveredBlock`].
+///
+/// This implementation takes an `alloy_consensus::Block` where transactions are of type
+/// `Recovered<T>` (transactions with their recovered senders) and converts it into a
+/// [`RecoveredBlock`] which stores transactions and senders separately for efficiency.
+impl<T, H> From<alloy_consensus::Block<Recovered<T>, H>>
+    for RecoveredBlock<alloy_consensus::Block<T, H>>
+where
+    T: SignedTransaction,
+    H: crate::block::header::BlockHeader,
+{
+    fn from(block: alloy_consensus::Block<Recovered<T>, H>) -> Self {
+        let header = block.header;
+
+        // Split the recovered transactions into transactions and senders
+        let (transactions, senders): (Vec<T>, Vec<Address>) = block
+            .body
+            .transactions
+            .into_iter()
+            .map(|recovered| {
+                let (tx, sender) = recovered.into_parts();
+                (tx, sender)
+            })
+            .unzip();
+
+        // Reconstruct the block with regular transactions
+        let body = alloy_consensus::BlockBody {
+            transactions,
+            ommers: block.body.ommers,
+            withdrawals: block.body.withdrawals,
+        };
+
+        let block = alloy_consensus::Block::new(header, body);
+
+        Self::new_unhashed(block, senders)
+    }
+}
+
 #[cfg(any(test, feature = "arbitrary"))]
 impl<'a, B> arbitrary::Arbitrary<'a> for RecoveredBlock<B>
 where
@@ -834,5 +872,50 @@ pub(super) mod serde_bincode_compat {
         fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
             repr.into()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Header, TxLegacy};
+    use alloy_primitives::{bytes, Signature, TxKind};
+
+    #[test]
+    fn test_from_block_with_recovered_transactions() {
+        let tx = TxLegacy {
+            chain_id: Some(1),
+            nonce: 0,
+            gas_price: 21_000_000_000,
+            gas_limit: 21_000,
+            to: TxKind::Call(Address::ZERO),
+            value: U256::ZERO,
+            input: bytes!(),
+        };
+
+        let signature = Signature::new(U256::from(1), U256::from(2), false);
+        let sender = Address::from([0x01; 20]);
+
+        let signed_tx = alloy_consensus::TxEnvelope::Legacy(
+            alloy_consensus::Signed::new_unchecked(tx, signature, B256::ZERO),
+        );
+
+        let recovered_tx = Recovered::new_unchecked(signed_tx, sender);
+
+        let header = Header::default();
+        let body = alloy_consensus::BlockBody {
+            transactions: vec![recovered_tx],
+            ommers: vec![],
+            withdrawals: None,
+        };
+        let block_with_recovered = alloy_consensus::Block::new(header, body);
+
+        let recovered_block: RecoveredBlock<
+            alloy_consensus::Block<alloy_consensus::TxEnvelope, Header>,
+        > = block_with_recovered.into();
+
+        assert_eq!(recovered_block.senders().len(), 1);
+        assert_eq!(recovered_block.senders()[0], sender);
+        assert_eq!(recovered_block.body().transactions().count(), 1);
     }
 }

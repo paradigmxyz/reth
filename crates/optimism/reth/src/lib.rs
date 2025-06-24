@@ -48,6 +48,7 @@ pub mod consensus {
 }
 
 /// Re-exported from `reth_chainspec`
+#[allow(ambiguous_glob_reexports)]
 pub mod chainspec {
     #[doc(inline)]
     pub use reth_chainspec::*;
@@ -98,6 +99,10 @@ pub mod provider {
     #[doc(inline)]
     pub use reth_db as db;
 }
+
+/// Re-exported codec crate
+#[cfg(feature = "provider")]
+pub use reth_codecs as codec;
 
 /// Re-exported reth storage api types
 #[cfg(feature = "storage-api")]

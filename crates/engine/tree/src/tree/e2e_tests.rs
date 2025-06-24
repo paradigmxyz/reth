@@ -7,7 +7,7 @@ use reth_e2e_test_utils::testsuite::{
     actions::{
         CaptureBlock, CompareNodeChainTips, CreateFork, ExpectFcuStatus, MakeCanonical,
         ProduceBlocks, ProduceBlocksLocally, ProduceInvalidBlocks, ReorgTo, SelectActiveNode,
-        SendNewPayloads, UpdateBlockInfo, ValidateCanonicalTag,
+        SendNewPayloads, UpdateBlockInfo, ValidateCanonicalTag, WaitForSync,
     },
     setup::{NetworkSetup, Setup},
     TestBuilder,
@@ -235,6 +235,97 @@ async fn test_engine_tree_buffered_blocks_are_eventually_connected_e2e() -> Resu
         // make block 2 canonical on node 1 with a forkchoice update
         .with_action(MakeCanonical::with_active_node())
         // verify both nodes eventually have the same chain tip
+        .with_action(CompareNodeChainTips::expect_same(0, 1));
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Test that verifies forkchoice updates can extend the canonical chain progressively.
+///
+/// This test creates a longer chain of blocks, then uses forkchoice updates to make
+/// different parts of the chain canonical in sequence, verifying that FCU properly
+/// advances the canonical head when all blocks are already available.
+#[tokio::test]
+async fn test_engine_tree_fcu_extends_canon_chain_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let test = TestBuilder::new()
+        .with_setup(default_engine_tree_setup())
+        // create and make canonical a base chain with 1 block
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::new())
+        // extend the chain with 10 more blocks (total 11 blocks: 0-10)
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(10))
+        // capture block 6 as our intermediate target (from 0-indexed, this is block 6)
+        .with_action(CaptureBlock::new("target_block"))
+        // make the intermediate target canonical via FCU
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("target_block"))
+        // now make the chain tip canonical via FCU
+        .with_action(MakeCanonical::new());
+
+    test.run::<EthereumNode>().await?;
+
+    Ok(())
+}
+
+/// Test that verifies live sync transition where a long chain eventually becomes canonical.
+///
+/// This test simulates a scenario where:
+/// 1. Both nodes start with the same short base chain
+/// 2. Node 0 builds a long chain locally (no broadcast, becomes its canonical tip)
+/// 3. Node 1 still has only the short base chain as its canonical tip
+/// 4. Node 1 receives FCU pointing to Node 0's long chain tip and must sync
+/// 5. Both nodes end up with the same canonical chain through real P2P sync
+#[tokio::test]
+async fn test_engine_tree_live_sync_transition_eventually_canonical_e2e() -> Result<()> {
+    reth_tracing::init_test_tracing();
+
+    const MIN_BLOCKS_FOR_PIPELINE_RUN: u64 = 32; // EPOCH_SLOTS from alloy-eips
+
+    let test = TestBuilder::new()
+        .with_setup(
+            Setup::default()
+                .with_chain_spec(Arc::new(
+                    ChainSpecBuilder::default()
+                        .chain(MAINNET.chain)
+                        .genesis(
+                            serde_json::from_str(include_str!(
+                                "../../../../e2e-test-utils/src/testsuite/assets/genesis.json"
+                            ))
+                            .unwrap(),
+                        )
+                        .cancun_activated()
+                        .build(),
+                ))
+                .with_network(NetworkSetup::multi_node(2)) // Two connected nodes
+                .with_tree_config(
+                    TreeConfig::default()
+                        .with_legacy_state_root(false)
+                        .with_has_enough_parallelism(true),
+                ),
+        )
+        // Both nodes start with the same base chain (1 block)
+        .with_action(SelectActiveNode::new(0))
+        .with_action(ProduceBlocks::<EthEngineTypes>::new(1))
+        .with_action(MakeCanonical::new()) // Both nodes have the same base chain
+        .with_action(CaptureBlock::new("base_chain_tip"))
+        // Node 0: Build a much longer chain but don't broadcast it yet
+        .with_action(ProduceBlocksLocally::<EthEngineTypes>::new(MIN_BLOCKS_FOR_PIPELINE_RUN + 10))
+        .with_action(MakeCanonical::with_active_node()) // Only make it canonical on Node 0
+        .with_action(CaptureBlock::new("long_chain_tip"))
+        // Verify Node 0's canonical tip is the long chain tip
+        .with_action(ValidateCanonicalTag::new("long_chain_tip"))
+        // Verify Node 1's canonical tip is still the base chain tip
+        .with_action(SelectActiveNode::new(1))
+        .with_action(ValidateCanonicalTag::new("base_chain_tip"))
+        // Node 1: Send FCU pointing to Node 0's long chain tip
+        // This should trigger Node 1 to sync the missing blocks from Node 0
+        .with_action(ReorgTo::<EthEngineTypes>::new_from_tag("long_chain_tip"))
+        // Wait for Node 1 to sync with Node 0
+        .with_action(WaitForSync::new(0, 1).with_timeout(60))
+        // Verify both nodes end up with the same canonical chain
         .with_action(CompareNodeChainTips::expect_same(0, 1));
 
     test.run::<EthereumNode>().await?;

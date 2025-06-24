@@ -15,6 +15,6 @@ pub use core::{EthApi, EthApiFor};
 pub use filter::EthFilter;
 pub use pubsub::EthPubSub;
 
-pub use helpers::signer::DevSigner;
+pub use helpers::{signer::DevSigner, sync_listener::SyncListener};
 
 pub use reth_rpc_eth_api::{EthApiServer, EthApiTypes, FullEthApiServer, RpcNodeCore};
