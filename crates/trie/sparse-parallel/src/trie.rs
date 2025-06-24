@@ -16,7 +16,7 @@ use reth_trie_sparse::{
     TrieMasks,
 };
 use smallvec::SmallVec;
-use tracing::trace;
+use tracing::{instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -228,7 +228,7 @@ impl ParallelSparseTrie {
     }
 
     /// Updates hashes for the upper subtrie, using nodes from both upper and lower subtries.
-    #[tracing::instrument(level = "trace", target = "engine::tree", skip_all, ret)]
+    #[instrument(level = "trace", target = "engine::tree", skip_all, ret)]
     fn update_upper_subtrie_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating upper subtrie hashes");
 
@@ -624,7 +624,7 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[tracing::instrument(level = "trace", target = "engine::tree", skip_all, fields(root = ?self.path), ret)]
+    #[instrument(level = "trace", target = "engine::tree", skip_all, fields(root = ?self.path), ret)]
     pub fn update_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
