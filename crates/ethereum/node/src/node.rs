@@ -308,8 +308,6 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    EV: Send + 'static,
-    EB: Send + 'static,
 {
     type PayloadAttributes = EthPayloadAttributes;
 

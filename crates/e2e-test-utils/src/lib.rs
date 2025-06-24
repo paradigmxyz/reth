@@ -3,7 +3,7 @@
 use node::NodeTestContext;
 use reth_chainspec::{ChainSpec, EthChainSpec};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
-use reth_engine_local::LocalPayloadAttributesBuilder;
+use reth_engine_local::{LocalPayloadAttributesAddOn, LocalPayloadAttributesBuilder};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
@@ -52,7 +52,9 @@ where
         TmpNodeAdapter<N>,
         Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
     >,
-    N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
+    N::AddOns: RethRpcAddOns<Adapter<N>>
+        + EngineValidatorAddOn<Adapter<N>>
+        + LocalPayloadAttributesAddOn<Adapter<N>, PayloadAttributes = PayloadAttrTy<N>>,
     LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<PayloadAttrTy<N>>,
 {
     let tasks = TaskManager::current();
@@ -144,8 +146,6 @@ pub async fn setup_engine_with_connection<N>(
 )>
 where
     N: NodeBuilderHelper,
-    LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();
@@ -259,16 +259,16 @@ where
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             > + EngineValidatorAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            > + LocalPayloadAttributesAddOn<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                PayloadAttributes = <Self::Payload as PayloadTypes>::PayloadAttributes,
             >,
             ChainSpec: From<ChainSpec> + Clone,
         >,
-    LocalPayloadAttributesBuilder<Self::ChainSpec>:
-        PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes>,
 {
 }
 
-impl<T> NodeBuilderHelper for T
-where
+impl<T> NodeBuilderHelper for T where
     Self: Default
         + NodeTypesForProvider<
             Payload: PayloadTypes<
@@ -293,10 +293,11 @@ where
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             > + EngineValidatorAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+            > + LocalPayloadAttributesAddOn<
+                Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
+                PayloadAttributes = <Self::Payload as PayloadTypes>::PayloadAttributes,
             >,
             ChainSpec: From<ChainSpec> + Clone,
-        >,
-    LocalPayloadAttributesBuilder<Self::ChainSpec>:
-        PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes>,
+        >
 {
 }

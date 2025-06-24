@@ -64,16 +64,8 @@ where
         }
     }
 }
-
-/// A temporary workaround to support local payload engine launcher for arbitrary payload
-/// attributes.
-// TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented
-// for any
-// TODO: to not forgot to remove it
-pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
-
 /// Provides local payload attributes builder functionality
-pub trait LocalPayloadAttributesAddOn<N: FullNodeComponents>: Send + 'static {
+pub trait LocalPayloadAttributesAddOn<N: FullNodeComponents> {
     /// The payload attributes type this builder produces
     type PayloadAttributes;
 
@@ -84,12 +76,26 @@ pub trait LocalPayloadAttributesAddOn<N: FullNodeComponents>: Send + 'static {
     ) -> eyre::Result<impl PayloadAttributesBuilder<Self::PayloadAttributes>>;
 }
 
-impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
-where
-    ChainSpec: Send + Sync + 'static,
-    T: UnsupportedLocalAttributes,
+impl PayloadAttributesBuilder<()> for LocalPayloadAttributesBuilder<()> {
+    fn build(&self, _: u64) {
+        unreachable!("Unit type builder should never be used")
+    }
+}
+
+/// Default implementation that returns an error for unsupported payload types
+#[derive(Debug)]
+pub struct UnsupportedLocalPayloadAttributesAddOn;
+
+impl<N: FullNodeComponents> LocalPayloadAttributesAddOn<N>
+    for UnsupportedLocalPayloadAttributesAddOn
 {
-    fn build(&self, _: u64) -> T {
-        panic!("Unsupported payload attributes")
+    type PayloadAttributes = ();
+
+    fn local_payload_attributes_builder(
+        &self,
+        _ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<impl PayloadAttributesBuilder<Self::PayloadAttributes>> {
+        Err(eyre::eyre!("Not supported"))
+            .map(|_: ()| LocalPayloadAttributesBuilder::new(Arc::new(())))
     }
 }

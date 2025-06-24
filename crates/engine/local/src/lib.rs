@@ -12,4 +12,7 @@ pub mod miner;
 pub mod payload;
 
 pub use miner::{LocalMiner, MiningMode};
-pub use payload::{LocalPayloadAttributesAddOn, LocalPayloadAttributesBuilder};
+pub use payload::{
+    LocalPayloadAttributesAddOn, LocalPayloadAttributesBuilder,
+    UnsupportedLocalPayloadAttributesAddOn,
+};

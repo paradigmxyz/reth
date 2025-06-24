@@ -3303,7 +3303,6 @@ dependencies = [
  "alloy-rpc-types",
  "eyre",
  "reth-basic-payload-builder",
- "reth-engine-local",
  "reth-ethereum",
  "reth-ethereum-payload-builder",
  "reth-payload-builder",
