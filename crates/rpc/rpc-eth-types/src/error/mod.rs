@@ -3,6 +3,7 @@
 pub mod api;
 use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
+use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
@@ -256,6 +257,40 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 impl From<TransactionConversionError> for EthApiError {
     fn from(_: TransactionConversionError) -> Self {
         Self::TransactionConversionError
+    }
+}
+
+impl<E> From<CallError<E>> for EthApiError
+where
+    E: Into<Self>,
+{
+    fn from(value: CallError<E>) -> Self {
+        match value {
+            CallError::Database(err) => err.into(),
+            CallError::InsufficientFunds(insufficient_funds_error) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::InsufficientFunds {
+                    cost: insufficient_funds_error.cost,
+                    balance: insufficient_funds_error.balance,
+                })
+            }
+        }
+    }
+}
+
+impl<E> From<StateOverrideError<E>> for EthApiError
+where
+    E: Into<Self>,
+{
+    fn from(value: StateOverrideError<E>) -> Self {
+        match value {
+            StateOverrideError::InvalidBytecode(bytecode_decode_error) => {
+                Self::InvalidBytecode(bytecode_decode_error.to_string())
+            }
+            StateOverrideError::BothStateAndStateDiff(address) => {
+                Self::BothStateAndStateDiffInOverride(address)
+            }
+            StateOverrideError::Database(err) => err.into(),
+        }
     }
 }
 
