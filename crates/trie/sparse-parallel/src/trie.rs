@@ -215,9 +215,7 @@ impl ParallelSparseTrie {
         // Update subtrie hashes in parallel
         // TODO: call `update_hashes` on each subtrie in parallel
         let (tx, rx) = mpsc::channel();
-        for ChangedSubtrie { index, mut subtrie, prefix_set } in subtries {
-            // For now, compute sequentially (TODO: make parallel)
-            let mut prefix_set = prefix_set;
+        for ChangedSubtrie { index, mut subtrie, mut prefix_set } in subtries {
             subtrie.update_hashes(&mut prefix_set);
             tx.send((index, subtrie)).unwrap();
         }
