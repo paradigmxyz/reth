@@ -715,8 +715,8 @@ impl SparseSubtrieInner {
     ///
     /// # Parameters
     ///
-    /// - `is_in_prefix_set`: Closure that returns a boolean indicating if the given path is in the
-    ///   prefix set. The value can be cached on the caller side.
+    /// - `prefix_set_contains`: Closure that returns a boolean indicating if the given path is in
+    ///   the prefix set. The value can be cached on the caller side.
     /// - `path`: The nibble path to the current node
     /// - `node`: The sparse node to process (will be mutated to update hash)
     ///
@@ -745,15 +745,13 @@ impl SparseSubtrieInner {
             "Calculating node RLP"
         );
 
-        let is_in_prefix_set = prefix_set_contains(&path);
-
         let (rlp_node, node_type) = match node {
             SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
             SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
             SparseNode::Leaf { key, hash } => {
                 let mut path = path;
                 path.extend(key);
-                if let Some(hash) = hash.filter(|_| !is_in_prefix_set) {
+                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 } else {
                     let value = self.values.get(&path).unwrap();
@@ -767,7 +765,7 @@ impl SparseSubtrieInner {
                 let mut child_path = path;
                 child_path.extend(key);
                 if let Some((hash, store_in_db_trie)) =
-                    hash.zip(*store_in_db_trie).filter(|_| !is_in_prefix_set)
+                    hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                 {
                     (
                         RlpNode::word_rlp(&hash),
@@ -804,7 +802,10 @@ impl SparseSubtrieInner {
                 } else {
                     // need to get rlp node for child first
                     self.buffers.path_stack.extend([
-                        RlpNodePathStackItem { path, is_in_prefix_set: Some(is_in_prefix_set) },
+                        RlpNodePathStackItem {
+                            path,
+                            is_in_prefix_set: Some(prefix_set_contains(&path)),
+                        },
                         RlpNodePathStackItem { path: child_path, is_in_prefix_set: None },
                     ]);
                     return
@@ -812,7 +813,7 @@ impl SparseSubtrieInner {
             }
             SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
                 if let Some((hash, store_in_db_trie)) =
-                    hash.zip(*store_in_db_trie).filter(|_| !is_in_prefix_set)
+                    hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                 {
                     self.buffers.rlp_node_stack.push(RlpNodeStackItem {
                         path,
@@ -901,7 +902,7 @@ impl SparseSubtrieInner {
                         debug_assert!(!added_children);
                         self.buffers.path_stack.push(RlpNodePathStackItem {
                             path,
-                            is_in_prefix_set: Some(is_in_prefix_set),
+                            is_in_prefix_set: Some(prefix_set_contains(&path)),
                         });
                         self.buffers.path_stack.extend(
                             self.buffers
