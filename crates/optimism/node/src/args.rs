@@ -56,7 +56,11 @@ pub struct RollupArgs {
     pub sequencer_headers: Vec<String>,
 
     /// RPC endpoint for historical data.
-    #[arg(long = "rollup.historicalrpc", value_name = "HISTORICAL_HTTP_URL")]
+    #[arg(
+        long = "rollup.historicalrpc",
+        alias = "rollup.historical-rpc",
+        value_name = "HISTORICAL_HTTP_URL"
+    )]
     pub historical_rpc: Option<String>,
 
     /// Minimum suggested priority fee (tip) in wei, default `1_000_000`

@@ -463,14 +463,15 @@ where
                     .map(|bedrock_block| (historical_rpc, bedrock_block))
             })
             .map(|(historical_rpc, bedrock_block)| -> eyre::Result<_> {
+                info!(target: "reth::cli", %bedrock_block, ?historical_rpc, "Using historical RPC endpoint pre bedrock");
                 let provider = ctx.node.provider().clone();
                 let client = HistoricalRpcClient::new(&historical_rpc)?;
                 let layer = HistoricalRpc::new(provider, client, bedrock_block);
                 Ok(layer)
             })
-            .transpose()?;
+            .transpose()?
+            ;
 
-        // TODO: why does this not satisfy the RethRpcMiddleware
         let rpc_add_ons = rpc_add_ons.option_layer_rpc_middleware(maybe_pre_bedrock_historical_rpc);
 
         let builder = reth_optimism_payload_builder::OpPayloadBuilder::new(
