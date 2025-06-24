@@ -22,14 +22,18 @@ Read more about things you can build with Execution Extensions in the [Paradigm 
 Execution Extensions are not separate processes that connect to the main Reth node process.
 Instead, ExExes are compiled into the same binary as Reth, and run alongside it, using shared memory for communication.
 
-If you want to build an Execution Extension that sends data into a separate process, check out the [Remote](./remote) chapter.
+If you want to build an Execution Extension that sends data into a separate process, check out the [Remote](/exex/remote) chapter.
 
 ## How do I build an Execution Extension?
 
 Let's dive into how to build our own ExEx from scratch, add tests for it,
 and run it on the Holesky testnet.
 
-1. [How do ExExes work?](./how-it-works)
-1. [Hello World](./hello-world)
-1. [Tracking State](./tracking-state)
-1. [Remote](./remote)
+1. [How do ExExes work?](/exex/how-it-works)
+1. [Hello World](/exex/hello-world)
+1. [Tracking State](/exex/tracking-state)
+1. [Remote](/exex/remote)
+
+:::tip
+For more practical examples and ready-to-use ExEx implementations, check out the [reth-exex-examples](https://github.com/paradigmxyz/reth-exex-examples) repository which contains various ExEx examples including indexers, bridges, and other state derivation patterns.
+:::
