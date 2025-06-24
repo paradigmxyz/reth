@@ -82,9 +82,6 @@ serde_json.workspace = true
 # tracing
 tracing.workspace = true
 
-# tower
-tower.workspace = true
-
 [dev-dependencies]
 tempfile.workspace = true
 
