@@ -36,7 +36,7 @@ const projects: SdkProject[] = [
     description: "BNB Smart Chain execution client implementation",
     loc: '~6K',
     githubUrl: 'https://github.com/loocapro/reth-bsc',
-    company: 'LooCa Protocol'
+    company: 'Binance Smart Chain'
   }
 ]
 
