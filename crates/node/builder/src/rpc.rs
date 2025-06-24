@@ -434,7 +434,7 @@ pub struct RpcAddOns<
     /// Configurable RPC middleware stack.
     ///
     /// This middleware is applied to all RPC requests across all transports (HTTP, WS, IPC).
-    /// See [`RpcAddOns::set_rpc_middleware`] for more details.
+    /// See [`RpcAddOns::with_rpc_middleware`] for more details.
     rpc_middleware: RpcServiceBuilder<RpcMiddleware>,
 }
 
@@ -528,7 +528,7 @@ where
     ///
     /// // Simple example with metrics
     /// let metrics_layer = RpcRequestMetrics::new(metrics_recorder);
-    /// let with_metrics = rpc_addons.set_rpc_middleware(
+    /// let with_metrics = rpc_addons.with_rpc_middleware(
     ///     RpcServiceBuilder::new().layer(metrics_layer)
     /// );
     ///
@@ -537,7 +537,7 @@ where
     ///     .layer(rate_limit_layer)
     ///     .layer(logging_layer)
     ///     .layer(metrics_layer);
-    /// let with_full_stack = rpc_addons.set_rpc_middleware(middleware_stack);
+    /// let with_full_stack = rpc_addons.with_rpc_middleware(middleware_stack);
     /// ```
     ///
     /// # Notes
@@ -545,7 +545,7 @@ where
     /// - Middleware is applied to the RPC service layer, not the HTTP transport layer
     /// - The default middleware is `Identity` (no-op), which passes through requests unchanged
     /// - Middleware layers are applied in the order they are added via `.layer()`
-    pub fn set_rpc_middleware<T>(
+    pub fn with_rpc_middleware<T>(
         self,
         rpc_middleware: RpcServiceBuilder<T>,
     ) -> RpcAddOns<Node, EthB, EV, EB, T> {
