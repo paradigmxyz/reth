@@ -87,12 +87,12 @@ impl LaunchContext {
     /// `config`.
     ///
     /// Attaches both the `NodeConfig` and the loaded `reth.toml` config to the launch context.
-    pub fn with_loaded_toml_config<ChainSpec: EthChainSpec>(
+    pub fn with_loaded_toml_config<ChainSpec>(
         self,
         config: NodeConfig<ChainSpec>,
     ) -> eyre::Result<LaunchContextWith<WithConfigs<ChainSpec>>>
     where
-        ChainSpec: reth_chainspec::EthereumHardforks,
+        ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
     {
         let toml_config = self.load_toml_config(&config)?;
         Ok(self.with(WithConfigs { config, toml_config }))

@@ -474,24 +474,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 "Deleting transaction static file below block"
             );
 
-            // now we need to wipe the static file
-            self.delete_jar(StaticFileSegment::Transactions, block_height)?;
-
-            // // mark this as the new expired height
-            // self.expired_history_height.store(block_height,
-            // std::sync::atomic::Ordering::Relaxed);
-            //
-            // // Now we need to shift the index by the batch size and repeat the process.
-            // // basically if the lowest static file block was 4499K we shift it by 1 batch size
-            // self.static_files_min_block
-            //     .write()
-            //     .insert(StaticFileSegment::Transactions, block_height + self.blocks_per_file);
+            // now we need to wipe the static file, this will take care of updating the index and
+            // advance the lowest tracked block height for the transactions segment.
+            self.delete_jar(StaticFileSegment::Transactions, block_height)
+                .inspect_err(|err| {
+                    warn!( target: "provider::static_file", %block_height, ?err, "Failed to delete transaction static file below block")
+                })
+                ?;
         }
     }
 
     /// Given a segment and block, it deletes the jar and all files from the respective block range.
     ///
     /// CAUTION: destructive. Deletes files on disk.
+    ///
+    /// This will re-initialize the index after deletion, so all files are tracked.
     pub fn delete_jar(&self, segment: StaticFileSegment, block: BlockNumber) -> ProviderResult<()> {
         let fixed_block_range = self.find_fixed_range(block);
         let key = (fixed_block_range.end(), segment);
@@ -511,11 +508,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         jar.delete().map_err(ProviderError::other)?;
 
-        // let mut segment_max_block = None;
-        // if fixed_block_range.start() > 0 {
-        //     segment_max_block = Some(fixed_block_range.start() - 1)
-        // };
-        // self.update_index(segment, segment_max_block)?;
         self.initialize_index()?;
 
         Ok(())

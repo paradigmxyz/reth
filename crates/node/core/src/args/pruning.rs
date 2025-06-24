@@ -170,13 +170,11 @@ impl PruningArgs {
             chain_spec
                 .ethereum_fork_activation(EthereumHardfork::Paris)
                 .block_number()
-                .map(|merge_block| PruneMode::Before(merge_block))
+                .map(PruneMode::Before)
         } else if let Some(distance) = self.bodies_distance {
             Some(PruneMode::Distance(distance))
-        } else if let Some(block_number) = self.bodies_before {
-            Some(PruneMode::Before(block_number))
         } else {
-            None
+            self.bodies_before.map(PruneMode::Before)
         }
     }
 
