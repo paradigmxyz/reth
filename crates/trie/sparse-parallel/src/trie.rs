@@ -202,7 +202,7 @@ impl ParallelSparseTrie {
     ///
     /// This function first identifies all nodes that have changed (based on the prefix set) below
     /// level [`UPPER_TRIE_MAX_DEPTH`] of the trie, then recalculates their RLP representation.
-    pub fn update_subtrie_hashes(&mut self) {
+    pub fn update_lower_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
         // Take changed subtries according to the prefix set
@@ -274,7 +274,7 @@ impl ParallelSparseTrie {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
 
         // Update all lower subtrie hashes
-        self.update_subtrie_hashes();
+        self.update_lower_subtrie_hashes();
 
         // Update hashes for the upper subtrie using our specialized function
         // that can access both upper and lower subtrie nodes
@@ -1606,7 +1606,7 @@ mod tests {
         trie.prefix_set = prefix_set;
 
         // Update subtrie hashes
-        trie.update_subtrie_hashes();
+        trie.update_lower_subtrie_hashes();
 
         // Check that the prefix set was updated
         assert_eq!(trie.prefix_set, unchanged_prefix_set);
