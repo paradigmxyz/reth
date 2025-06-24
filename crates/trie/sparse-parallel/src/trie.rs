@@ -264,11 +264,9 @@ impl ParallelSparseTrie {
                 "Popped node from path stack"
             );
 
-            self.upper_subtrie.inner.rlp_node(
-                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path)),
-                path,
-                node,
-            );
+            let prefix_set_contains =
+                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
+            self.upper_subtrie.inner.rlp_node(prefix_set_contains, path, node);
         }
 
         debug_assert_eq!(self.upper_subtrie.inner.buffers.rlp_node_stack.len(), 1);
@@ -655,11 +653,9 @@ impl SparseSubtrie {
                 .get_mut(&path)
                 .unwrap_or_else(|| panic!("node at path {path:?} does not exist"));
 
-            self.inner.rlp_node(
-                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path)),
-                path,
-                node,
-            );
+            let prefix_set_contains =
+                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
+            self.inner.rlp_node(prefix_set_contains, path, node);
         }
 
         debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
