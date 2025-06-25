@@ -608,27 +608,33 @@ impl ComparisonGenerator {
 
         chart.configure_mesh().x_desc("Block Number").y_desc("NewPayload Latency (ns)").draw()?;
 
-        // Draw baseline line
+        // Draw baseline line using individual points connected with lines
+        let baseline_points: Vec<_> = block_numbers
+            .iter()
+            .zip(valid_baseline.iter())
+            .map(|(&block, &latency)| (block, latency))
+            .collect();
+        
         chart
-            .draw_series(LineSeries::new(
-                block_numbers
-                    .iter()
-                    .zip(valid_baseline.iter())
-                    .map(|(&block, &latency)| (block, latency)),
-                &BLUE.stroke_width(2),
-            ))?
+            .draw_series(std::iter::once(PathElement::new(
+                baseline_points.clone(),
+                BLUE.stroke_width(2),
+            )))?
             .label(&format!("Baseline ({})", self.baseline_branch_name))
             .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], BLUE.stroke_width(2)));
 
-        // Draw feature line
+        // Draw feature line using individual points connected with lines
+        let feature_points: Vec<_> = block_numbers
+            .iter()
+            .zip(valid_feature.iter())
+            .map(|(&block, &latency)| (block, latency))
+            .collect();
+            
         chart
-            .draw_series(LineSeries::new(
-                block_numbers
-                    .iter()
-                    .zip(valid_feature.iter())
-                    .map(|(&block, &latency)| (block, latency)),
-                &RED.stroke_width(2),
-            ))?
+            .draw_series(std::iter::once(PathElement::new(
+                feature_points,
+                RED.stroke_width(2),
+            )))?
             .label(&format!("Feature ({})", self.feature_branch_name))
             .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], RED.stroke_width(2)));
 
