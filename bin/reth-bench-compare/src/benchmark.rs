@@ -7,7 +7,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
 };
-use tracing::{info, warn};
+use tracing::info;
 
 /// Manages benchmark execution using reth-bench
 pub struct BenchmarkRunner {
