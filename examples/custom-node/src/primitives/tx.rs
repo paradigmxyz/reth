@@ -8,15 +8,18 @@ use alloy_consensus::{
     SignableTransaction, Signed, Transaction,
 };
 use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
-use alloy_primitives::{keccak256, Signature, TxHash};
+use alloy_primitives::{keccak256, Sealed, Signature, TxHash};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth_codecs::{
     alloy::transaction::{FromTxCompact, ToTxCompact},
     Compact,
 };
-use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
-use reth_op::primitives::{Extended, SignedTransaction};
+use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, InMemorySize};
+use reth_op::{
+    primitives::{Extended, SignedTransaction},
+    OpTransaction,
+};
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
@@ -195,20 +198,7 @@ impl ToTxCompact for CustomTransactionEnvelope {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BincodeCompatSignedTxCustom(pub Signed<TxPayment>);
-
-impl SerdeBincodeCompat for CustomTransactionEnvelope {
-    type BincodeRepr<'a> = BincodeCompatSignedTxCustom;
-
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        BincodeCompatSignedTxCustom(self.inner.clone())
-    }
-
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        Self { inner: repr.0.clone() }
-    }
-}
+impl RlpBincode for CustomTransactionEnvelope {}
 
 impl reth_codecs::alloy::transaction::Envelope for CustomTransactionEnvelope {
     fn signature(&self) -> &Signature {
@@ -233,5 +223,15 @@ impl Compact for CustomTransactionEnvelope {
         let (inner, buf) = <TxPayment as Compact>::from_compact(rest, len);
         let signed = Signed::new_unhashed(inner, signature);
         (CustomTransactionEnvelope { inner: signed }, buf)
+    }
+}
+
+impl OpTransaction for CustomTransactionEnvelope {
+    fn is_deposit(&self) -> bool {
+        false
+    }
+
+    fn as_deposit(&self) -> Option<&Sealed<TxDeposit>> {
+        None
     }
 }

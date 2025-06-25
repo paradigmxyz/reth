@@ -381,12 +381,22 @@ impl reth_primitives_traits::Receipt for OpReceipt {}
 
 /// Trait for deposit receipt.
 pub trait DepositReceipt: reth_primitives_traits::Receipt {
-    /// Returns deposit receipt if it is a deposit transaction.
+    /// Converts a `Receipt` into a mutable Optimism deposit receipt.
     fn as_deposit_receipt_mut(&mut self) -> Option<&mut OpDepositReceipt>;
+
+    /// Extracts an Optimism deposit receipt from `Receipt`.
+    fn as_deposit_receipt(&self) -> Option<&OpDepositReceipt>;
 }
 
 impl DepositReceipt for OpReceipt {
     fn as_deposit_receipt_mut(&mut self) -> Option<&mut OpDepositReceipt> {
+        match self {
+            Self::Deposit(receipt) => Some(receipt),
+            _ => None,
+        }
+    }
+
+    fn as_deposit_receipt(&self) -> Option<&OpDepositReceipt> {
         match self {
             Self::Deposit(receipt) => Some(receipt),
             _ => None,
@@ -592,17 +602,17 @@ pub(super) mod serde_bincode_compat {
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::OpReceipt<'_>")]
-                reseipt: OpReceipt,
+                receipt: OpReceipt,
             }
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
             let mut data = Data {
-                reseipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+                receipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
             };
-            let success = data.reseipt.as_receipt_mut().status.coerce_status();
+            let success = data.receipt.as_receipt_mut().status.coerce_status();
             // // ensure we don't have an invalid poststate variant
-            data.reseipt.as_receipt_mut().status = success.into();
+            data.receipt.as_receipt_mut().status = success.into();
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();

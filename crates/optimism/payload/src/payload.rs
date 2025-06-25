@@ -17,13 +17,13 @@ use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_optimism_primitives::OpPrimitives;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction, WithEncoded};
 
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
+use reth_optimism_primitives::OpPrimitives;
 
 /// Optimism Payload Builder Attributes
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -327,7 +327,7 @@ where
 /// Generates the payload id for the configured payload from the [`OpPayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id_optimism(
+pub fn payload_id_optimism(
     parent: &B256,
     attributes: &OpPayloadAttributes,
     payload_version: u8,

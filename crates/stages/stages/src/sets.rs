@@ -38,9 +38,10 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
-        PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
+        AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
+        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
+        PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage, StorageHashingStage,
+        TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -115,6 +116,7 @@ where
         evm_config: E,
         stages_config: StageConfig,
         prune_modes: PruneModes,
+        era_import_source: Option<EraImportSource>,
     ) -> Self {
         Self {
             online: OnlineStages::new(
@@ -123,6 +125,7 @@ where
                 header_downloader,
                 body_downloader,
                 stages_config.clone(),
+                era_import_source,
             ),
             evm_config,
             consensus,
@@ -197,6 +200,8 @@ where
     body_downloader: B,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
+    /// Optional source of ERA1 files. The `EraStage` does nothing unless this is specified.
+    era_import_source: Option<EraImportSource>,
 }
 
 impl<Provider, H, B> OnlineStages<Provider, H, B>
@@ -211,8 +216,9 @@ where
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
+        era_import_source: Option<EraImportSource>,
     ) -> Self {
-        Self { provider, tip, header_downloader, body_downloader, stages_config }
+        Self { provider, tip, header_downloader, body_downloader, stages_config, era_import_source }
     }
 }
 
@@ -259,9 +265,12 @@ where
     B: BodyDownloader + 'static,
     HeaderStage<P, H>: Stage<Provider>,
     BodyStage<B>: Stage<Provider>,
+    EraStage<<B::Block as Block>::Header, <B::Block as Block>::Body, EraImportSource>:
+        Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
+            .add_stage(EraStage::new(self.era_import_source, self.stages_config.etl.clone()))
             .add_stage(HeaderStage::new(
                 self.provider,
                 self.header_downloader,
@@ -402,7 +411,10 @@ where
                 self.stages_config.storage_hashing,
                 self.stages_config.etl.clone(),
             ))
-            .add_stage(MerkleStage::new_execution(self.stages_config.merkle.clean_threshold))
+            .add_stage(MerkleStage::new_execution(
+                self.stages_config.merkle.rebuild_threshold,
+                self.stages_config.merkle.incremental_threshold,
+            ))
     }
 }
 

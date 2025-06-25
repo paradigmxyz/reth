@@ -10,9 +10,10 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc_eth_api::{
-    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcNodeCoreExt,
-    RpcTransaction, TransactionCompat,
+    EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
+    RpcNodeCore, RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -21,7 +22,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt,
+    ProviderReceipt, TransactionsProvider,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -291,7 +292,13 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes + RpcNodeCoreExt<Provider: BlockIdReader> + 'static,
+    Eth: FullEthApiTypes
+        + RpcNodeCoreExt<
+            Provider: BlockIdReader,
+            Primitives: NodePrimitives<
+                SignedTx = <<Eth as RpcNodeCore>::Provider as TransactionsProvider>::Transaction,
+            >,
+        > + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -408,7 +415,9 @@ struct EthFilterInner<Eth: EthApiTypes> {
 
 impl<Eth> EthFilterInner<Eth>
 where
-    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
+    Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool>
+        + EthApiTypes<NetworkTypes: reth_rpc_eth_api::types::RpcTypes>
+        + 'static,
 {
     /// Access the underlying provider.
     fn provider(&self) -> &Eth::Provider {
@@ -677,7 +686,7 @@ struct FullTransactionsReceiver<T: PoolTransaction, TxCompat> {
 impl<T, TxCompat> FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat<T::Consensus>,
+    TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>>,
 {
     /// Creates a new `FullTransactionsReceiver` encapsulating the provided transaction stream.
     fn new(stream: NewSubpoolTransactionStream<T>, tx_resp_builder: TxCompat) -> Self {
@@ -685,7 +694,7 @@ where
     }
 
     /// Returns all new pending transactions received since the last poll.
-    async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
+    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         let mut pending_txs = Vec::new();
         let mut prepared_stream = self.txs_stream.lock().await;
 
@@ -704,20 +713,20 @@ where
     }
 }
 
-/// Helper trait for [FullTransactionsReceiver] to erase the `Transaction` type.
+/// Helper trait for [`FullTransactionsReceiver`] to erase the `Transaction` type.
 #[async_trait]
 trait FullTransactionsFilter<T>: fmt::Debug + Send + Sync + Unpin + 'static {
     async fn drain(&self) -> FilterChanges<T>;
 }
 
 #[async_trait]
-impl<T, TxCompat> FullTransactionsFilter<TxCompat::Transaction>
+impl<T, TxCompat> FullTransactionsFilter<RpcTransaction<TxCompat::Network>>
     for FullTransactionsReceiver<T, TxCompat>
 where
     T: PoolTransaction + 'static,
-    TxCompat: TransactionCompat<T::Consensus> + 'static,
+    TxCompat: RpcConvert<Primitives: NodePrimitives<SignedTx = T::Consensus>> + 'static,
 {
-    async fn drain(&self) -> FilterChanges<TxCompat::Transaction> {
+    async fn drain(&self) -> FilterChanges<RpcTransaction<TxCompat::Network>> {
         Self::drain(self).await
     }
 }

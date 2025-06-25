@@ -37,7 +37,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
 use secp256k1::SecretKey;
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 use tracing::{info, trace, warn};
 
 pub mod add_ons;
@@ -160,6 +160,48 @@ impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
         Self { config, database: () }
     }
+}
+
+impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
+    /// Returns a reference to the node builder's config.
+    pub const fn config(&self) -> &NodeConfig<ChainSpec> {
+        &self.config
+    }
+
+    /// Returns a mutable reference to the node builder's config.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+        &mut self.config
+    }
+
+    /// Returns a reference to the node's database
+    pub const fn db(&self) -> &DB {
+        &self.database
+    }
+
+    /// Returns a mutable reference to the node's database
+    pub const fn db_mut(&mut self) -> &mut DB {
+        &mut self.database
+    }
+
+    /// Applies a fallible function to the builder.
+    pub fn try_apply<F, R>(self, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        f(self)
+    }
+
+    /// Applies a fallible function to the builder, if the condition is `true`.
+    pub fn try_apply_if<F, R>(self, cond: bool, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        if cond {
+            f(self)
+        } else {
+            Ok(self)
+        }
+    }
 
     /// Apply a function to the builder
     pub fn apply<F>(self, f: F) -> Self
@@ -179,18 +221,6 @@ impl<ChainSpec> NodeBuilder<(), ChainSpec> {
         } else {
             self
         }
-    }
-}
-
-impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
-    /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig<ChainSpec> {
-        &self.config
-    }
-
-    /// Returns a mutable reference to the node builder's config.
-    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
-        &mut self.config
     }
 }
 
@@ -413,6 +443,36 @@ where
         &self.builder.config
     }
 
+    /// Returns a reference to node's database.
+    pub const fn db(&self) -> &T::DB {
+        &self.builder.adapter.database
+    }
+
+    /// Returns a mutable reference to node's database.
+    pub const fn db_mut(&mut self) -> &mut T::DB {
+        &mut self.builder.adapter.database
+    }
+
+    /// Applies a fallible function to the builder.
+    pub fn try_apply<F, R>(self, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        f(self)
+    }
+
+    /// Applies a fallible function to the builder, if the condition is `true`.
+    pub fn try_apply_if<F, R>(self, cond: bool, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        if cond {
+            f(self)
+        } else {
+            Ok(self)
+        }
+    }
+
     /// Apply a function to the builder
     pub fn apply<F>(self, f: F) -> Self
     where
@@ -550,13 +610,8 @@ where
     where
         EngineNodeLauncher: LaunchNode<NodeBuilderWithComponents<T, CB, AO>>,
     {
-        let Self { builder, task_executor } = self;
-
-        let engine_tree_config = builder.config.engine.tree_config();
-
-        let launcher =
-            EngineNodeLauncher::new(task_executor, builder.config.datadir(), engine_tree_config);
-        builder.launch_with(launcher).await
+        let launcher = self.engine_api_launcher();
+        self.builder.launch_with(launcher).await
     }
 
     /// Launches the node with the [`DebugNodeLauncher`].
@@ -580,6 +635,17 @@ where
             engine_tree_config,
         ));
         builder.launch_with(launcher).await
+    }
+
+    /// Returns an [`EngineNodeLauncher`] that can be used to launch the node with engine API
+    /// support.
+    pub fn engine_api_launcher(&self) -> EngineNodeLauncher {
+        let engine_tree_config = self.builder.config.engine.tree_config();
+        EngineNodeLauncher::new(
+            self.task_executor.clone(),
+            self.builder.config.datadir(),
+            engine_tree_config,
+        )
     }
 }
 
@@ -709,7 +775,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             > + Unpin
             + 'static,
         Node::Provider: BlockReaderFor<N>,
-        Policy: TransactionPropagationPolicy,
+        Policy: TransactionPropagationPolicy + Debug,
     {
         let (handle, network, txpool, eth) = builder
             .transactions_with_policy(pool, tx_config, propagation_policy)

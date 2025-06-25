@@ -1,0 +1,162 @@
+---
+content:
+    width: 100%
+layout: landing
+showLogo: false
+title: Reth
+description: Secure, performant and modular node implementation that supports both Ethereum and OP-Stack chains.
+---
+
+import { HomePage, Sponsors } from "vocs/components";
+import { SdkShowcase } from "../components/SdkShowcase";
+import { TrustedBy } from "../components/TrustedBy";
+
+<div className="max-w-[1120px] mx-auto vp-doc relative px-[24px] mb-[64px] mt-[32px] md:px-0 md:mb-[32px]">
+  <div className="pt-[48px] max-sm:pt-0">
+    <div className="max-sm:px-0 space-x-2 flex justify-between z-0 max-md:justify-center max-md:flex-col max-md:items-center max-md:space-y-6">
+      <div className="space-y-4 max-w-[500px] flex flex-col justify-between items-start max-md:items-center">
+        <div className="space-y-4 w-full lg:mb-[40px]">
+          <img
+          src="/reth-prod.png"
+          alt="Reth"
+          className="w-full h-auto rounded-xl"
+          />
+          <div className="font-regular text-[21px] max-sm:text-[18px] text-[#919193] max-md:text-center"><span className="text-black dark:text-white">Secure</span>, <span className="text-black dark:text-white">performant</span>, and <span className="text-black dark:text-white">modular</span> blockchain SDK and node.</div>
+        </div>
+        <div className="flex justify-center space-x-2">
+          <HomePage.Button href="/run/ethereum" variant="accent">Run a Node</HomePage.Button>
+          <HomePage.Button href="/sdk/overview" variant="accent">Build a Node</HomePage.Button>
+          <HomePage.Button href="/introduction/why-reth">Why Reth?</HomePage.Button>
+        </div>
+      </div>
+        <div className="flex flex-col justify-between space-y-4 w-full max-w-[500px]">
+          <div id="home-install">
+            :::code-group
+
+            ```bash [Run a Node]
+            # Install the binary
+            brew install paradigmxyz/brew/reth
+
+            # Run the node with JSON-RPC enabled
+            reth node --http --http.api eth,trace
+            ```
+
+            ```rust [Build a Node]
+            // .. snip ..
+            let handle = node_builder
+              .with_types::<EthereumNode>()
+              .with_components(EthereumNode::components())
+              .with_add_ons(EthereumAddOns::default())
+              .launch()
+              .await?;
+            ```
+
+            :::
+          </div>
+          <div className="flex justify-between space-x-2">
+                <a href="https://github.com/paradigmxyz/reth/stargazers" className="cursor-pointer h-[36px] max-w-[120px] flex-1 relative rounded-lg overflow-hidden border border-black/10 dark:border-white/20" style={{ color: 'inherit' }} rel="noreferrer noopener" target="_blank">
+      <div className="absolute flex z-[1] p-[6px] h-full w-full">
+        <div className="bg-white/60 dark:bg-black/40 flex items-center justify-center rounded-md px-3 py-1">
+          <span className="font-medium text-[15px] opacity-80 leading-none text-center">stars</span>
+        </div>
+        <div className="flex items-center h-full px-2 ml-1">
+          <span className="font-medium text-[15px] text-center leading-none w-full text-black dark:text-white">4.7K</span>
+        </div>
+      </div>
+      <div className="absolute left-0 right-0 top-0 bottom-0 bg-black/5 dark:bg-white/5 z-[0]" />
+      <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-blur-[2px] backdrop-filter z-0" />
+    </a>
+    <a href="https://github.com/paradigmxyz/reth/graphs/contributors" className="cursor-pointer h-[36px] max-w-[160px] flex-1 relative rounded-lg overflow-hidden border border-green-400/50" style={{ color: 'inherit' }} rel="noreferrer noopener" target="_blank">
+      <div className="absolute flex z-[1] p-[6px] h-full w-full">
+        <div className="flex-1 bg-white/60 dark:bg-black/40 flex items-center w-full h-full rounded-md">
+          <span className="font-medium text-[15px] leading-none opacity-80 w-full text-center">contributors</span>
+        </div>
+        <div className="flex items-center h-full px-2">
+          <span className="font-medium text-[15px] leading-none text-center w-full text-green-400">580+</span>
+        </div>
+      </div>
+      <div className="absolute left-0 right-0 top-0 bottom-0 bg-green-400 opacity-10 z-[0]" />
+      <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-blur-[2px] backdrop-filter z-[0]" />
+    </a>
+    <a href="https://github.com/paradigmxyz/reth/blob/main/LICENSE-MIT" className="cursor-pointer h-[36px] max-w-[130px] flex-1 relative rounded-lg overflow-hidden border border-black/10 dark:border-white/20 max-lg:hidden" style={{ color: 'inherit' }} rel="noreferrer noopener" target="_blank">
+      <div className="absolute flex z-[1] p-[6px] h-full w-full">
+        <div className="flex-1 bg-white/60 dark:bg-black/40 flex items-center w-full h-full rounded-md">
+          <span className="font-medium text-[15px] leading-none opacity-80 w-full text-center">license</span>
+        </div>
+        <div className="flex items-center h-full px-2">
+          <span className="font-medium text-[15px] leading-none text-center w-full text-black dark:text-white">MIT</span>
+        </div>
+      </div>
+      <div className="absolute left-0 right-0 top-0 bottom-0 bg-black/5 dark:bg-white/5 z-[0]" />
+      <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-blur-[2px] backdrop-filter z-[0]" />
+    </a>
+          </div>
+        </div>
+
+  </div>
+  <div className="flex justify-between flex-wrap mt-10 lg:mt-30">
+      <div className="pr-2 w-1/4 max-lg:pb-3 max-sm:px-0 max-lg:w-1/2 max-sm:w-full z-0">
+        <div className="relative w-full h-[168px] max-lg:h-[142px] overflow-hidden">
+          <a href="/run/ethereum" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg h-full px-5 py-6 absolute z-10 flex flex-col justify-between w-full vocs_Link vocs_Link_styleless">
+            <div className="text-xl font-medium text-black dark:text-white">Institutional Security</div>
+            <div className="text-[17px] text-[#919193]">Run reliable staking nodes trusted by Coinbase Staking</div>
+          </a>
+          <div className="absolute left-0 right-0 top-0 bottom-0 dark:bg-[#313136] opacity-20 z-0" />
+          <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-filter backdrop-blur-[2px] z-0" />
+        </div>
+      </div>
+      <div className="pl-2 pr-2 max-sm:px-0 max-lg:pb-3 max-lg:pr-0 w-1/4 max-lg:w-1/2 max-sm:w-full z-0">
+        <div className="relative w-full h-[168px] max-lg:h-[142px]">
+          <a href="#" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg h-full px-5 py-6 absolute z-10 flex flex-col justify-between w-full vocs_Link vocs_Link_styleless">
+            <div className="text-xl font-medium text-black dark:text-white">Performant</div>
+            <div className="text-[17px] text-[#919193]">Sync faster with optimal transaction processing</div>
+          </a>
+          <div className="absolute left-0 right-0 top-0 bottom-0 dark:bg-[#313136] opacity-20 z-0" />
+          <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-filter backdrop-blur-[2px] z-0" />
+        </div>
+      </div>
+      <div className="pl-2 pr-2 max-lg:pb-3 max-sm:px-0 max-lg:pl-0 w-1/4 max-lg:w-1/2 max-sm:w-full z-0">
+        <div className="relative w-full h-[168px] max-lg:h-[142px]">
+          <a href="/sdk/overview" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg h-full px-5 py-6 absolute z-10 flex flex-col justify-between w-full vocs_Link vocs_Link_styleless">
+            <div className="text-xl font-medium text-black dark:text-white">Customizable</div>
+            <div className="text-[17px] text-[#919193]">Build custom nodes with tailored transaction handling</div>
+          </a>
+          <div className="absolute left-0 right-0 top-0 bottom-0 dark:bg-[#313136] opacity-20 z-0" />
+          <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-filter backdrop-blur-[2px] z-0" />
+        </div>
+      </div>
+      <div className="pl-2 w-1/4 max-sm:px-0 max-lg:w-1/2 max-sm:w-full z-0">
+        <div className="relative w-full h-[168px] max-lg:h-[142px]">
+          <a href="/exex/overview" className="hover:bg-black/2 dark:hover:bg-white/2 border-black/10 dark:border-white/10 border border-solid rounded-lg h-full px-5 py-6 absolute z-10 flex flex-col justify-between w-full vocs_Link vocs_Link_styleless">
+            <div className="text-xl font-medium text-black dark:text-white">Extensible</div>
+            <div className="text-[17px] text-[#919193]">Build indexers and offchain services with ExExs</div>
+          </a>
+          <div className="absolute left-0 right-0 top-0 bottom-0 dark:bg-[#313136] opacity-20 z-0" />
+          <div className="absolute left-0 right-0 top-0 bottom-0 backdrop-filter backdrop-blur-[2px] z-0" />
+        </div>
+      </div>
+    </div>
+    </div>
+</div>
+<article className="vocs_Content max-w-5xl mx-auto">
+
+## Trusted by the Best
+
+Leading infra companies use Reth for MEV applications, staking, RPC services and generating zero-knowledge proofs.
+
+<div className="mb-12">
+    <TrustedBy />
+</div>
+
+## Built with Reth SDK
+
+Production chains and networks powered by Reth's modular architecture. These nodes are built using existing components without forking, saving several engineering hours while improving maintainability.
+
+<div className="mb-12">
+    <SdkShowcase />
+</div>
+
+## Supporters
+
+<Sponsors />
+</article>

@@ -33,6 +33,9 @@ impl EthVersion {
     /// The latest known eth version
     pub const LATEST: Self = Self::Eth68;
 
+    /// All known eth versions
+    pub const ALL_VERSIONS: &'static [Self] = &[Self::Eth69, Self::Eth68, Self::Eth67, Self::Eth66];
+
     /// Returns the total number of messages the protocol version supports.
     pub const fn total_messages(&self) -> u8 {
         match self {
@@ -163,7 +166,7 @@ impl From<EthVersion> for &'static str {
     }
 }
 
-/// RLPx `p2p` protocol version
+/// `RLPx` `p2p` protocol version
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]

@@ -41,10 +41,19 @@ use revm::{
 
 mod config;
 use alloy_eips::{eip1559::INITIAL_BASE_FEE, eip7840::BlobParams};
+use alloy_evm::eth::spec::EthExecutorSpec;
 pub use config::{revm_spec, revm_spec_by_timestamp_and_block_number};
-use reth_ethereum_forks::EthereumHardfork;
+use reth_ethereum_forks::{EthereumHardfork, Hardforks};
 
-pub mod execute;
+/// Helper type with backwards compatible methods to obtain Ethereum executor
+/// providers.
+#[doc(hidden)]
+pub mod execute {
+    use crate::EthEvmConfig;
+
+    #[deprecated(note = "Use `EthEvmConfig` instead")]
+    pub type EthExecutorProvider = EthEvmConfig;
+}
 
 mod build;
 pub use build::EthBlockAssembler;
@@ -59,11 +68,11 @@ pub use test_utils::*;
 
 /// Ethereum-related EVM configuration.
 #[derive(Debug, Clone)]
-pub struct EthEvmConfig<EvmFactory = EthEvmFactory> {
+pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
     /// Inner [`EthBlockExecutorFactory`].
-    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<ChainSpec>, EvmFactory>,
+    pub executor_factory: EthBlockExecutorFactory<RethReceiptBuilder, Arc<C>, EvmFactory>,
     /// Ethereum block assembler.
-    pub block_assembler: EthBlockAssembler<ChainSpec>,
+    pub block_assembler: EthBlockAssembler<C>,
 }
 
 impl EthEvmConfig {
@@ -83,7 +92,7 @@ impl EthEvmConfig {
     }
 }
 
-impl<EvmFactory> EthEvmConfig<EvmFactory> {
+impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     /// Creates a new Ethereum EVM configuration with the given chain spec and EVM factory.
     pub fn new_with_evm_factory(chain_spec: Arc<ChainSpec>, evm_factory: EvmFactory) -> Self {
         Self {
@@ -108,8 +117,9 @@ impl<EvmFactory> EthEvmConfig<EvmFactory> {
     }
 }
 
-impl<EvmF> ConfigureEvm for EthEvmConfig<EvmF>
+impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
+    ChainSpec: EthExecutorSpec + EthChainSpec + Hardforks + 'static,
     EvmF: EvmFactory<
             Tx: TransactionEnv
                     + FromRecoveredTx<TransactionSigned>
@@ -146,7 +156,7 @@ where
             CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 
         if let Some(blob_params) = &blob_params {
-            cfg_env.set_blob_max_count(blob_params.max_blob_count);
+            cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
@@ -158,9 +168,9 @@ where
             });
 
         let block_env = BlockEnv {
-            number: header.number(),
+            number: U256::from(header.number()),
             beneficiary: header.beneficiary(),
-            timestamp: header.timestamp(),
+            timestamp: U256::from(header.timestamp()),
             difficulty: if spec >= SpecId::MERGE { U256::ZERO } else { header.difficulty() },
             prevrandao: if spec >= SpecId::MERGE { header.mix_hash() } else { None },
             gas_limit: header.gas_limit(),
@@ -190,7 +200,7 @@ where
             CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec_id);
 
         if let Some(blob_params) = &blob_params {
-            cfg.set_blob_max_count(blob_params.max_blob_count);
+            cfg.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
         // if the parent block did not have excess blob gas (i.e. it was pre-cancun), but it is
@@ -227,9 +237,9 @@ where
         }
 
         let block_env = BlockEnv {
-            number: parent.number + 1,
+            number: U256::from(parent.number + 1),
             beneficiary: attributes.suggested_fee_recipient,
-            timestamp: attributes.timestamp,
+            timestamp: U256::from(attributes.timestamp),
             difficulty: U256::ZERO,
             prevrandao: Some(attributes.prev_randao),
             gas_limit,
@@ -343,8 +353,12 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create customs block and tx env
-        let block =
-            BlockEnv { basefee: 1000, gas_limit: 10_000_000, number: 42, ..Default::default() };
+        let block = BlockEnv {
+            basefee: 1000,
+            gas_limit: 10_000_000,
+            number: U256::from(42),
+            ..Default::default()
+        };
 
         let evm_env = EvmEnv { block_env: block, ..Default::default() };
 
@@ -410,8 +424,12 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create custom block and tx environment
-        let block =
-            BlockEnv { basefee: 1000, gas_limit: 10_000_000, number: 42, ..Default::default() };
+        let block = BlockEnv {
+            basefee: 1000,
+            gas_limit: 10_000_000,
+            number: U256::from(42),
+            ..Default::default()
+        };
         let evm_env = EvmEnv { block_env: block, ..Default::default() };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});

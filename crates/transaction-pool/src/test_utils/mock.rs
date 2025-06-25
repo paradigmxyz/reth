@@ -374,7 +374,7 @@ impl MockTransaction {
         if let Self::Eip4844 { sidecar: existing_sidecar, blob_versioned_hashes, .. } =
             &mut transaction
         {
-            *blob_versioned_hashes = sidecar.versioned_hashes();
+            *blob_versioned_hashes = sidecar.versioned_hashes().collect();
             *existing_sidecar = sidecar;
         }
         transaction
@@ -389,15 +389,12 @@ impl MockTransaction {
     /// * [`MockTransaction::eip1559`]
     /// * [`MockTransaction::eip4844`]
     pub fn new_from_type(tx_type: TxType) -> Self {
-        #[expect(unreachable_patterns)]
         match tx_type {
             TxType::Legacy => Self::legacy(),
             TxType::Eip2930 => Self::eip2930(),
             TxType::Eip1559 => Self::eip1559(),
             TxType::Eip4844 => Self::eip4844(),
             TxType::Eip7702 => Self::eip7702(),
-
-            _ => unreachable!("Invalid transaction type"),
         }
     }
 
@@ -656,7 +653,7 @@ impl MockTransaction {
         matches!(self, Self::Eip2930 { .. })
     }
 
-    /// Checks if the transaction is of the EIP-2930 type.
+    /// Checks if the transaction is of the EIP-7702 type.
     pub const fn is_eip7702(&self) -> bool {
         matches!(self, Self::Eip7702 { .. })
     }
@@ -1267,7 +1264,7 @@ impl From<MockTransaction> for Transaction {
                 to,
                 value,
                 access_list,
-                blob_versioned_hashes: sidecar.versioned_hashes(),
+                blob_versioned_hashes: sidecar.versioned_hashes().collect(),
                 max_fee_per_blob_gas,
                 input,
             }),

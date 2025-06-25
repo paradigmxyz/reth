@@ -12,12 +12,12 @@ reth-codecs.workspace = true
 reth-network-peers.workspace = true
 reth-node-builder.workspace = true
 reth-optimism-forks.workspace = true
-reth-optimism-consensus.workspace = true
+reth-db-api.workspace = true
 reth-op = { workspace = true, features = ["node", "pool"] }
 reth-payload-builder.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-engine-api.workspace = true
-reth-ethereum = { workspace = true, features = ["node-api", "network", "evm", "pool"] }
+reth-ethereum = { workspace = true, features = ["node-api", "network", "evm", "pool", "trie", "storage-api"] }
 
 # revm
 revm.workspace = true
@@ -43,7 +43,7 @@ derive_more.workspace = true
 eyre.workspace = true
 jsonrpsee.workspace = true
 serde.workspace = true
-
+thiserror.workspace = true
 modular-bitfield.workspace = true
 
 [dev-dependencies]
@@ -63,5 +63,6 @@ arbitrary = [
     "revm/arbitrary",
     "reth-ethereum/arbitrary",
     "alloy-rpc-types-engine/arbitrary",
+    "reth-db-api/arbitrary",
 ]
 default = []

@@ -8,10 +8,10 @@
 
 use clap::Parser;
 use futures::TryStreamExt;
-use reth::rpc::eth::core::EthApiFor;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, EthereumNode},
+    rpc::eth::EthApiFor,
 };
 use reth_tracing::tracing::info;
 use tokio::sync::oneshot;
@@ -82,7 +82,7 @@ fn main() -> eyre::Result<()> {
             })
         })
     } else {
-        reth::cli::Cli::parse_args().run(|builder, _| {
+        reth_ethereum::cli::Cli::parse_args().run(|builder, _| {
             Box::pin(async move {
                 let (ethapi_tx, ethapi_rx) = oneshot::channel();
                 let handle = builder

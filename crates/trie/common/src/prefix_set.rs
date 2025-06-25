@@ -15,6 +15,13 @@ pub struct TriePrefixSetsMut {
 }
 
 impl TriePrefixSetsMut {
+    /// Returns `true` if all prefix sets are empty.
+    pub fn is_empty(&self) -> bool {
+        self.account_prefix_set.is_empty() &&
+            self.storage_prefix_sets.is_empty() &&
+            self.destroyed_accounts.is_empty()
+    }
+
     /// Extends prefix sets with contents of another prefix set.
     pub fn extend(&mut self, other: Self) {
         self.account_prefix_set.extend(other.account_prefix_set);
@@ -76,8 +83,8 @@ pub struct TriePrefixSets {
 /// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb]));
 /// prefix_set_mut.insert(Nibbles::from_nibbles_unchecked(&[0xa, 0xb, 0xc]));
 /// let mut prefix_set = prefix_set_mut.freeze();
-/// assert!(prefix_set.contains(&[0xa, 0xb]));
-/// assert!(prefix_set.contains(&[0xa, 0xb, 0xc]));
+/// assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb])));
+/// assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([0xa, 0xb, 0xc])));
 /// ```
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct PrefixSetMut {
@@ -186,7 +193,7 @@ impl PrefixSet {
     /// incremental state root calculation performance
     /// ([see PR #2417](https://github.com/paradigmxyz/reth/pull/2417)).
     #[inline]
-    pub fn contains(&mut self, prefix: &[u8]) -> bool {
+    pub fn contains(&mut self, prefix: &Nibbles) -> bool {
         if self.all {
             return true
         }
@@ -196,7 +203,7 @@ impl PrefixSet {
         }
 
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
-            if key.has_prefix(prefix) {
+            if key.starts_with(prefix) {
                 self.index += idx;
                 return true
             }
@@ -213,6 +220,11 @@ impl PrefixSet {
     /// Returns an iterator over reference to _all_ nibbles regardless of cursor position.
     pub fn iter(&self) -> core::slice::Iter<'_, Nibbles> {
         self.keys.iter()
+    }
+
+    /// Returns true if every entry should be considered changed.
+    pub const fn all(&self) -> bool {
+        self.all
     }
 
     /// Returns the number of elements in the set.
@@ -247,9 +259,9 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
         let mut prefix_set = prefix_set_mut.freeze();
-        assert!(prefix_set.contains(&[1, 2]));
-        assert!(prefix_set.contains(&[4, 5]));
-        assert!(!prefix_set.contains(&[7, 8]));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.len(), 3); // Length should be 3 (excluding duplicate)
     }
 
@@ -265,9 +277,9 @@ mod tests {
         assert_eq!(prefix_set_mut.keys.capacity(), 4); // Capacity should be 4 (including duplicate)
 
         let mut prefix_set = prefix_set_mut.freeze();
-        assert!(prefix_set.contains(&[1, 2]));
-        assert!(prefix_set.contains(&[4, 5]));
-        assert!(!prefix_set.contains(&[7, 8]));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
         assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
     }
@@ -285,9 +297,9 @@ mod tests {
         assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity should be 101 (including duplicate)
 
         let mut prefix_set = prefix_set_mut.freeze();
-        assert!(prefix_set.contains(&[1, 2]));
-        assert!(prefix_set.contains(&[4, 5]));
-        assert!(!prefix_set.contains(&[7, 8]));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
+        assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([4, 5])));
+        assert!(!prefix_set.contains(&Nibbles::from_nibbles_unchecked([7, 8])));
         assert_eq!(prefix_set.keys.len(), 3); // Length should be 3 (excluding duplicate)
         assert_eq!(prefix_set.keys.capacity(), 3); // Capacity should be 3 after shrinking
     }

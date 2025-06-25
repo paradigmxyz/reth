@@ -65,8 +65,8 @@ pub trait BlockWriter: Send + Sync {
     /// Insert full block and make it canonical. Parent tx num and transition id is taken from
     /// parent block in database.
     ///
-    /// Return [StoredBlockBodyIndices] that contains indices of the first and last transactions and
-    /// transition in the block.
+    /// Return [`StoredBlockBodyIndices`] that contains indices of the first and last transactions
+    /// and transition in the block.
     ///
     /// Accepts [`StorageLocation`] value which specifies where transactions and headers should be
     /// written.

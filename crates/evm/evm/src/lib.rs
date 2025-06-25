@@ -17,7 +17,7 @@
 
 extern crate alloc;
 
-use crate::execute::BasicBlockBuilder;
+use crate::execute::{BasicBlockBuilder, Executor};
 use alloc::vec::Vec;
 use alloy_eips::{
     eip2718::{EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
@@ -31,6 +31,7 @@ use alloy_evm::{
 use alloy_primitives::{Address, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
+use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
@@ -60,37 +61,118 @@ pub use alloy_evm::block::state_changes as state_change;
 /// A complete configuration of EVM for Reth.
 ///
 /// This trait encapsulates complete configuration required for transaction execution and block
-/// execution/building.
+/// execution/building, providing a unified interface for EVM operations.
+///
+/// # Architecture Overview
 ///
 /// The EVM abstraction consists of the following layers:
-///     - [`Evm`] produced by [`EvmFactory`]: The EVM implementation responsilble for executing
-///       individual transactions and producing output for them including state changes, logs, gas
-///       usage, etc.
-///     - [`BlockExecutor`] produced by [`BlockExecutorFactory`]: Executor operates on top of
-///       [`Evm`] and is responsible for executing entire blocks. This is different from simply
-///       aggregating outputs of transactions execution as it also involves higher level state
-///       changes such as receipt building, applying block rewards, system calls, etc.
-///     - [`BlockAssembler`]: Encapsulates logic for assembling blocks. It operates on context and
-///       output of [`BlockExecutor`], and is required to know how to assemble a next block to
-///       include in the chain.
 ///
-/// All of the above components need configuration environment which we are abstracting over to
-/// allow plugging EVM implementation into Reth SDK.
+/// 1. **[`Evm`] (produced by [`EvmFactory`])**: The core EVM implementation responsible for
+///    executing individual transactions and producing outputs including state changes, logs, gas
+///    usage, etc.
 ///
-/// The abstraction is designed to serve 2 codepaths:
-///     1. Externally provided complete block (e.g received while syncing).
-///     2. Block building when we know parent block and some additional context obtained from
-///       payload attributes or alike.
+/// 2. **[`BlockExecutor`] (produced by [`BlockExecutorFactory`])**: A higher-level component that
+///    operates on top of [`Evm`] to execute entire blocks. This involves:
+///    - Executing all transactions in sequence
+///    - Building receipts from transaction outputs
+///    - Applying block rewards to the beneficiary
+///    - Executing system calls (e.g., EIP-4788 beacon root updates)
+///    - Managing state changes and bundle accumulation
 ///
-/// First case is handled by [`ConfigureEvm::evm_env`] and [`ConfigureEvm::context_for_block`]
-/// which implement a conversion from [`NodePrimitives::Block`] to [`EvmEnv`] and [`ExecutionCtx`],
-/// and allow configuring EVM and block execution environment at a given block.
+/// 3. **[`BlockAssembler`]**: Responsible for assembling valid blocks from executed transactions.
+///    It takes the output from [`BlockExecutor`] along with execution context and produces a
+///    complete block ready for inclusion in the chain.
 ///
-/// Second case is handled by similar [`ConfigureEvm::next_evm_env`] and
-/// [`ConfigureEvm::context_for_next_block`] which take parent [`NodePrimitives::BlockHeader`]
-/// along with [`NextBlockEnvCtx`]. [`NextBlockEnvCtx`] is very similar to payload attributes and
-/// simply contains context for next block that is generally received from a CL node (timestamp,
-/// beneficiary, withdrawals, etc.).
+/// # Usage Patterns
+///
+/// The abstraction supports two primary use cases:
+///
+/// ## 1. Executing Externally Provided Blocks (e.g., during sync)
+///
+/// ```rust,ignore
+/// use reth_evm::ConfigureEvm;
+///
+/// // Execute a received block
+/// let mut executor = evm_config.executor(state_db);
+/// let output = executor.execute(&block)?;
+///
+/// // Access the execution results
+/// println!("Gas used: {}", output.result.gas_used);
+/// println!("Receipts: {:?}", output.result.receipts);
+/// ```
+///
+/// ## 2. Building New Blocks (e.g., payload building)
+///
+/// Payload building is slightly different as it doesn't have the block's header yet, but rather
+/// attributes for the block's environment, such as timestamp, fee recipient, and randomness value.
+/// The block's header will be the outcome of the block building process.
+///
+/// ```rust,ignore
+/// use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+///
+/// // Create attributes for the next block
+/// let attributes = NextBlockEnvAttributes {
+///     timestamp: current_time + 12,
+///     suggested_fee_recipient: beneficiary_address,
+///     prev_randao: randomness_value,
+///     gas_limit: 30_000_000,
+///     withdrawals: Some(withdrawals),
+///     parent_beacon_block_root: Some(beacon_root),
+/// };
+///
+/// // Build a new block on top of parent
+/// let mut builder = evm_config.builder_for_next_block(
+///     &mut state_db,
+///     &parent_header,
+///     attributes
+/// )?;
+///
+/// // Apply pre-execution changes (e.g., beacon root update)
+/// builder.apply_pre_execution_changes()?;
+///
+/// // Execute transactions
+/// for tx in pending_transactions {
+///     match builder.execute_transaction(tx) {
+///         Ok(gas_used) => {
+///             println!("Transaction executed, gas used: {}", gas_used);
+///         }
+///         Err(e) => {
+///             println!("Transaction failed: {:?}", e);
+///         }
+///     }
+/// }
+///
+/// // Finish block building and get the outcome (block)
+/// let outcome = builder.finish(state_provider)?;
+/// let block = outcome.block;
+/// ```
+///
+/// # Key Components
+///
+/// ## [`NextBlockEnvCtx`]
+///
+/// Contains attributes needed to configure the next block that cannot be derived from the
+/// parent block alone. This includes data typically provided by the consensus layer:
+/// - `timestamp`: Block timestamp
+/// - `suggested_fee_recipient`: Beneficiary address
+/// - `prev_randao`: Randomness value
+/// - `gas_limit`: Block gas limit
+/// - `withdrawals`: Consensus layer withdrawals
+/// - `parent_beacon_block_root`: EIP-4788 beacon root
+///
+/// ## [`BlockAssembler`]
+///
+/// Takes the execution output and produces a complete block. It receives:
+/// - Transaction execution results (receipts, gas used)
+/// - Final state root after all executions
+/// - Bundle state with all changes
+/// - Execution context and environment
+///
+/// The assembler is responsible for:
+/// - Setting the correct block header fields
+/// - Including executed transactions
+/// - Setting gas used and receipts root
+/// - Applying any chain-specific rules
 ///
 /// [`ExecutionCtx`]: BlockExecutorFactory::ExecutionCtx
 /// [`NextBlockEnvCtx`]: ConfigureEvm::NextBlockEnvCtx
@@ -140,6 +222,16 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// This is intended for usage in block building after the merge and requires additional
     /// attributes that can't be derived from the parent block: attributes that are determined by
     /// the CL, such as the timestamp, suggested fee recipient, and randomness value.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let evm_env = evm_config.next_evm_env(&parent_header, &attributes)?;
+    /// // evm_env now contains:
+    /// // - Correct spec ID based on timestamp and block number
+    /// // - Block environment with next block's parameters
+    /// // - Configuration like chain ID and blob parameters
+    /// ```
     fn next_evm_env(
         &self,
         parent: &HeaderTy<Self::Primitives>,
@@ -243,6 +335,15 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// interface. Builder collects all of the executed transactions, and once
     /// [`BlockBuilder::finish`] is called, it invokes the configured [`BlockAssembler`] to
     /// create a block.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Create a builder with specific EVM configuration
+    /// let evm = evm_config.evm_with_env(&mut state_db, evm_env);
+    /// let ctx = evm_config.context_for_next_block(&parent, attributes);
+    /// let builder = evm_config.create_block_builder(evm, &parent, ctx);
+    /// ```
     fn create_block_builder<'a, DB, I>(
         &'a self,
         evm: EvmFor<Self, &'a mut State<DB>, I>,
@@ -267,6 +368,33 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
 
     /// Creates a [`BlockBuilder`] for building of a new block. This is a helper to invoke
     /// [`ConfigureEvm::create_block_builder`].
+    ///
+    /// This is the primary method for building new blocks. It combines:
+    /// 1. Creating the EVM environment for the next block
+    /// 2. Setting up the execution context from attributes
+    /// 3. Initializing the block builder with proper configuration
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Build a block with specific attributes
+    /// let mut builder = evm_config.builder_for_next_block(
+    ///     &mut state_db,
+    ///     &parent_header,
+    ///     attributes
+    /// )?;
+    ///
+    /// // Execute system calls (e.g., beacon root update)
+    /// builder.apply_pre_execution_changes()?;
+    ///
+    /// // Execute transactions
+    /// for tx in transactions {
+    ///     builder.execute_transaction(tx)?;
+    /// }
+    ///
+    /// // Complete block building
+    /// let outcome = builder.finish(state_provider)?;
+    /// ```
     fn builder_for_next_block<'a, DB: Database>(
         &'a self,
         db: &'a mut State<DB>,
@@ -279,23 +407,76 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Ok(self.create_block_builder(evm, parent, ctx))
     }
 
-    /// Returns a new [`BasicBlockExecutor`].
+    /// Returns a new [`Executor`] for executing blocks.
+    ///
+    /// The executor processes complete blocks including:
+    /// - All transactions in order
+    /// - Block rewards and fees
+    /// - Block level system calls
+    /// - State transitions
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// // Create an executor
+    /// let mut executor = evm_config.executor(state_db);
+    ///
+    /// // Execute a single block
+    /// let output = executor.execute(&block)?;
+    ///
+    /// // Execute multiple blocks
+    /// let batch_output = executor.execute_batch(&blocks)?;
+    /// ```
     #[auto_impl(keep_default_for(&, Arc))]
-    fn executor<DB: Database>(&self, db: DB) -> BasicBlockExecutor<&Self, DB> {
+    fn executor<DB: Database>(
+        &self,
+        db: DB,
+    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
     }
 
     /// Returns a new [`BasicBlockExecutor`].
     #[auto_impl(keep_default_for(&, Arc))]
-    fn batch_executor<DB: Database>(&self, db: DB) -> BasicBlockExecutor<&Self, DB> {
+    fn batch_executor<DB: Database>(
+        &self,
+        db: DB,
+    ) -> impl Executor<DB, Primitives = Self::Primitives, Error = BlockExecutionError> {
         BasicBlockExecutor::new(self, db)
     }
 }
 
 /// Represents additional attributes required to configure the next block.
-/// This is used to configure the next block's environment
-/// [`ConfigureEvm::next_evm_env`] and contains fields that can't be derived from the
-/// parent header alone (attributes that are determined by the CL.)
+///
+/// This struct contains all the information needed to build a new block that cannot be
+/// derived from the parent block header alone. These attributes are typically provided
+/// by the consensus layer (CL) through the Engine API during payload building.
+///
+/// # Relationship with [`ConfigureEvm`] and [`BlockAssembler`]
+///
+/// The flow for building a new block involves:
+///
+/// 1. **Receive attributes** from the consensus layer containing:
+///    - Timestamp for the new block
+///    - Fee recipient (coinbase/beneficiary)
+///    - Randomness value (prevRandao)
+///    - Withdrawals to process
+///    - Parent beacon block root for EIP-4788
+///
+/// 2. **Configure EVM environment** using these attributes: ```rust,ignore let evm_env =
+///    evm_config.next_evm_env(&parent, &attributes)?; ```
+///
+/// 3. **Build the block** with transactions: ```rust,ignore let mut builder =
+///    evm_config.builder_for_next_block( &mut state, &parent, attributes )?; ```
+///
+/// 4. **Assemble the final block** using [`BlockAssembler`] which takes:
+///    - Execution results from all transactions
+///    - The attributes used during execution
+///    - Final state root after all changes
+///
+/// This design cleanly separates:
+/// - **Configuration** (what parameters to use) - handled by `NextBlockEnvAttributes`
+/// - **Execution** (running transactions) - handled by `BlockExecutor`
+/// - **Assembly** (creating the final block) - handled by `BlockAssembler`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NextBlockEnvAttributes {
     /// The timestamp of the next block.

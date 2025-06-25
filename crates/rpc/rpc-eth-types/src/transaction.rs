@@ -5,8 +5,8 @@
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::TransactionInfo;
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::{Recovered, SignedTransaction};
-use reth_rpc_types_compat::TransactionCompat;
+use reth_primitives_traits::{NodePrimitives, Recovered, SignedTransaction};
+use reth_rpc_convert::{RpcConvert, RpcTransaction};
 
 /// Represents from where a transaction was fetched.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -39,10 +39,13 @@ impl<T: SignedTransaction> TransactionSource<T> {
     }
 
     /// Conversion into network specific transaction type.
-    pub fn into_transaction<Builder: TransactionCompat<T>>(
+    pub fn into_transaction<Builder>(
         self,
         resp_builder: &Builder,
-    ) -> Result<Builder::Transaction, Builder::Error> {
+    ) -> Result<RpcTransaction<Builder::Network>, Builder::Error>
+    where
+        Builder: RpcConvert<Primitives: NodePrimitives<SignedTx = T>>,
+    {
         match self {
             Self::Pool(tx) => resp_builder.fill_pending(tx),
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {

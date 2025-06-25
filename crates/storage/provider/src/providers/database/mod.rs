@@ -5,10 +5,10 @@ use crate::{
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider, ProviderError,
     PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StaticFileProviderFactory,
-    TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
-use alloy_eips::{eip4895::Withdrawals, BlockHashOrNumber};
+use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256};
 use core::fmt;
 use reth_chainspec::ChainInfo;
@@ -23,7 +23,7 @@ use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, NodePrimitivesProvider, OmmersProvider, StateCommitmentProvider,
+    BlockBodyIndicesProvider, NodePrimitivesProvider, StateCommitmentProvider,
     TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
@@ -345,6 +345,17 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
         self.provider()?.last_block_number()
     }
 
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        // expired height tracks the lowest block number that has been expired, therefore the
+        // earliest block number is one more than that.
+        let mut earliest = self.static_file_provider.expired_history_height();
+        if earliest > 0 {
+            // If the expired history height is 0, then the earliest block number is still 0.
+            earliest += 1;
+        }
+        Ok(earliest)
+    }
+
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         self.provider()?.block_number(hash)
     }
@@ -365,12 +376,8 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.pending_block()
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.provider()?.pending_block_with_senders()
     }
 
     fn pending_block_and_receipts(
@@ -524,21 +531,12 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ProviderFactory<N> {
             |_| true,
         )
     }
-}
 
-impl<N: ProviderNodeTypes> WithdrawalsProvider for ProviderFactory<N> {
-    fn withdrawals_by_block(
+    fn receipts_by_block_range(
         &self,
-        id: BlockHashOrNumber,
-        timestamp: u64,
-    ) -> ProviderResult<Option<Withdrawals>> {
-        self.provider()?.withdrawals_by_block(id, timestamp)
-    }
-}
-
-impl<N: ProviderNodeTypes> OmmersProvider for ProviderFactory<N> {
-    fn ommers(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.provider()?.ommers(id)
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
+        self.provider()?.receipts_by_block_range(block_range)
     }
 }
 
