@@ -530,9 +530,7 @@ impl ComparisonGenerator {
         };
 
         // Create the chart
-        let root = BitMapBackend::new(&chart_path, (1200, 1200))
-            .map_err(|e| eyre!("Failed to create bitmap backend: {}", e))?
-            .into_drawing_area();
+        let root = BitMapBackend::new(&chart_path, (1200, 1200)).into_drawing_area();
         root.fill(&WHITE)?;
         let (upper, lower) = root.split_evenly((2, 1));
 
@@ -542,6 +540,19 @@ impl ComparisonGenerator {
         let range = (max_diff - min_diff).max(1.0);
         let bin_count = (range as usize).min(100).max(10); // Limit bins to reasonable range
 
+        // Create histogram bins first
+        let bin_width = range / bin_count as f64;
+        let mut bins = vec![0u32; bin_count];
+        for &diff in &percent_diffs {
+            let bin_idx = ((diff - min_diff) / bin_width) as usize;
+            if bin_idx < bins.len() {
+                bins[bin_idx] += 1;
+            }
+        }
+
+        let max_bin_count = *bins.iter().max().unwrap_or(&1);
+
+        // Now create the chart with proper y-axis range
         let mut chart = ChartBuilder::on(&upper)
             .caption(
                 &format!(
@@ -553,7 +564,7 @@ impl ComparisonGenerator {
             .margin(10)
             .x_label_area_size(60)
             .y_label_area_size(80)
-            .build_cartesian_2d(min_diff as i32..max_diff as i32, 0u32..100u32)?;
+            .build_cartesian_2d(min_diff as i32..max_diff as i32, 0u32..max_bin_count)?;
 
         chart
             .configure_mesh()
@@ -561,21 +572,8 @@ impl ComparisonGenerator {
             .y_desc("Number of Blocks")
             .draw()?;
 
-        // Create histogram bins
-        let bin_width = range / bin_count as f64;
-        let mut bins = vec![0u32; bin_count];
-        for &diff in &percent_diffs {
-            let bin_idx = ((diff - min_diff) / bin_width) as usize;
-            if bin_idx < bins.len() {
-                bins[bin_idx] += 1;
-            }
-        }
-
-        let max_bin_count = *bins.iter().max().unwrap_or(&1);
-        chart = chart.set_secondary_coord(min_diff as i32..max_diff as i32, 0u32..max_bin_count);
-
         // Draw histogram bars
-        chart.draw_secondary_series(bins.iter().enumerate().map(|(i, &count)| {
+        chart.draw_series(bins.iter().enumerate().map(|(i, &count)| {
             let x = min_diff + (i as f64 + 0.5) * bin_width;
             Rectangle::new(
                 [(x as i32 - bin_width as i32 / 2, 0), (x as i32 + bin_width as i32 / 2, count)],
@@ -584,11 +582,11 @@ impl ComparisonGenerator {
         }))?;
 
         // Add mean and median lines
-        chart.draw_secondary_series(std::iter::once(PathElement::new(
+        chart.draw_series(std::iter::once(PathElement::new(
             vec![(mean_diff as i32, 0), (mean_diff as i32, max_bin_count)],
             RED.stroke_width(2),
         )))?;
-        chart.draw_secondary_series(std::iter::once(PathElement::new(
+        chart.draw_series(std::iter::once(PathElement::new(
             vec![(median_diff as i32, 0), (median_diff as i32, max_bin_count)],
             MAGENTA.stroke_width(2),
         )))?;
