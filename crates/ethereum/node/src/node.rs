@@ -174,6 +174,7 @@ where
                 EthereumEthApiBuilder,
                 EthereumEngineValidatorBuilder::default(),
                 BasicEngineApiBuilder::default(),
+                Default::default(),
             ),
         }
     }

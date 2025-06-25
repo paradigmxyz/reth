@@ -77,7 +77,9 @@ pub trait DebugApiExt {
 
 impl<T> DebugApiExt for T
 where
-    T: EthApiClient<Transaction, Block, Receipt, Header> + DebugApiClient + Sync,
+    T: EthApiClient<TransactionRequest, Transaction, Block, Receipt, Header>
+        + DebugApiClient
+        + Sync,
 {
     type Provider = T;
 

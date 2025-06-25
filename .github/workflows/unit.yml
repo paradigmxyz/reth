@@ -42,10 +42,6 @@ jobs:
             args: --features "asm-keccak" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
             partition: 2
             total_partitions: 2
-          - type: book
-            args: --manifest-path book/sources/Cargo.toml
-            partition: 1
-            total_partitions: 1
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -54,9 +50,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: nextest@0.9.98
+      - uses: taiki-e/install-action@nextest
       - if: "${{ matrix.type == 'book' }}"
         uses: arduino/setup-protoc@v3
         with:
@@ -89,9 +83,7 @@ jobs:
           fetch-depth: 1
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: nextest@0.9.98
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
