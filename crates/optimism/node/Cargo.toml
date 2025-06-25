@@ -14,7 +14,7 @@ workspace = true
 # reth
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
-reth-engine-local.workspace = true
+reth-engine-local = { workspace = true, features = ["op"] }
 reth-evm.workspace = true
 reth-network.workspace = true
 reth-node-api.workspace = true
@@ -79,7 +79,6 @@ reth-tasks.workspace = true
 reth-payload-util.workspace = true
 reth-payload-validator.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
-reth-engine-local = { workspace = true, features = ["op"] }
 
 alloy-primitives.workspace = true
 op-alloy-consensus.workspace = true
