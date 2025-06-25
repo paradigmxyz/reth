@@ -1,6 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
-    LeafLookup, RevealedSparseTrie, SparseTrie, SparseTrieState, TrieMasks,
+    LeafLookup, RevealedSparseTrie, SerialSparseTrie, SparseTrie, SparseTrieState, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -21,14 +21,26 @@ use reth_trie_common::{
 };
 use tracing::trace;
 
+/// Convenience type for a [`SerialSparseTrie`] which uses the factory's `AccountNodeProvider`.
+pub type SerialAccountSparseTrie<F> =
+    SerialSparseTrie<<F as BlindedProviderFactory>::AccountNodeProvider>;
+
+/// Convenience type for a [`SerialSparseTrie`] which uses the factory's `StorageNodeProvider`.
+pub type SerialStorageSparseTrie<F> =
+    SerialSparseTrie<<F as BlindedProviderFactory>::StorageNodeProvider>;
+
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
-pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFactory> {
+pub struct SparseStateTrie<
+    F = DefaultBlindedProviderFactory,
+    R = SerialSparseTrie, // State root trie type
+    S = SerialSparseTrie, // Storage root trie type
+> {
     /// Blinded node provider factory.
     provider_factory: F,
     /// Sparse account trie.
-    state: SparseTrie<F::AccountNodeProvider>,
+    state: SparseTrie<R>,
     /// Sparse storage tries.
-    storages: B256Map<SparseTrie<F::StorageNodeProvider>>,
+    storages: B256Map<SparseTrie<S>>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// Collection of revealed storage trie paths, per account.
@@ -59,7 +71,11 @@ impl Default for SparseStateTrie {
     }
 }
 
-impl<P: BlindedProviderFactory> fmt::Debug for SparseStateTrie<P> {
+impl<F, R, S> fmt::Debug for SparseStateTrie<F, R, S>
+where
+    R: fmt::Debug,
+    S: fmt::Debug,
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SparseStateTrie")
             .field("state", &self.state)
@@ -80,10 +96,19 @@ impl SparseStateTrie {
     }
 }
 
-impl<F: BlindedProviderFactory> SparseStateTrie<F> {
+impl SparseStateTrie {
     /// Create new [`SparseStateTrie`] with blinded node provider factory.
-    pub fn new(provider_factory: F) -> Self {
-        Self {
+    pub fn new<F>(
+        provider_factory: F,
+    ) -> SparseStateTrie<
+        F,
+        SerialSparseTrie<F::AccountNodeProvider>,
+        SerialSparseTrie<F::StorageNodeProvider>,
+    >
+    where
+        F: BlindedProviderFactory,
+    {
+        SparseStateTrie {
             provider_factory,
             state: Default::default(),
             storages: Default::default(),
@@ -95,7 +120,14 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
             metrics: Default::default(),
         }
     }
+}
 
+impl<F, R, S> SparseStateTrie<F, R, S>
+where
+    F: BlindedProviderFactory,
+    R: RevealedSparseTrie<Provider = F::AccountNodeProvider>,
+    S: RevealedSparseTrie<Provider = F::StorageNodeProvider>,
+{
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.retain_updates = retain_updates;
@@ -163,40 +195,27 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Returns reference to state trie if it was revealed.
-    pub const fn state_trie_ref(&self) -> Option<&RevealedSparseTrie<F::AccountNodeProvider>> {
+    pub const fn state_trie_ref(&self) -> Option<&R> {
         self.state.as_revealed_ref()
     }
 
     /// Returns reference to storage trie if it was revealed.
-    pub fn storage_trie_ref(
-        &self,
-        address: &B256,
-    ) -> Option<&RevealedSparseTrie<F::StorageNodeProvider>> {
+    pub fn storage_trie_ref(&self, address: &B256) -> Option<&S> {
         self.storages.get(address).and_then(|e| e.as_revealed_ref())
     }
 
     /// Returns mutable reference to storage sparse trie if it was revealed.
-    pub fn storage_trie_mut(
-        &mut self,
-        address: &B256,
-    ) -> Option<&mut RevealedSparseTrie<F::StorageNodeProvider>> {
+    pub fn storage_trie_mut(&mut self, address: &B256) -> Option<&mut S> {
         self.storages.get_mut(address).and_then(|e| e.as_revealed_mut())
     }
 
     /// Takes the storage trie for the provided address.
-    pub fn take_storage_trie(
-        &mut self,
-        address: &B256,
-    ) -> Option<SparseTrie<F::StorageNodeProvider>> {
+    pub fn take_storage_trie(&mut self, address: &B256) -> Option<SparseTrie<S>> {
         self.storages.remove(address)
     }
 
     /// Inserts storage trie for the provided address.
-    pub fn insert_storage_trie(
-        &mut self,
-        address: B256,
-        storage_trie: SparseTrie<F::StorageNodeProvider>,
-    ) {
+    pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie<S>) {
         self.storages.insert(address, storage_trie);
     }
 
@@ -653,9 +672,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// Returns mutable reference to the revealed sparse trie.
     ///
     /// If the trie is not revealed yet, its root will be revealed using the blinded node provider.
-    fn revealed_trie_mut(
-        &mut self,
-    ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
+    fn revealed_trie_mut(&mut self) -> SparseStateTrieResult<&mut R> {
         match self.state {
             SparseTrie::Blind | SparseTrie::AllocatedEmpty { .. } => {
                 let (root_node, hash_mask, tree_mask) = self
