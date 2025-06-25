@@ -3691,7 +3691,7 @@ public:
   /// `SIGSEGV`. The environment handle will be freed and must not be used again
   /// after this call.
   ///
-  /// \param [in] dont_sync  A dont'sync flag, if non-zero the last checkpoint
+  /// \param [in] dont_sync  A don't sync flag, if non-zero the last checkpoint
   /// will be kept "as is" and may be still "weak" in the \ref lazy_weak_tail
   /// or \ref whole_fragile modes. Such "weak" checkpoint will be ignored
   /// on opening next time, and transactions since the last non-weak checkpoint
