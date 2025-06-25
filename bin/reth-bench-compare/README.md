@@ -21,7 +21,8 @@ This tool automates the complete workflow you described:
 reth-bench-compare \
   --baseline-branch main \
   --feature-branch my-optimization \
-  --blocks 100
+  --blocks 100 \
+  --chain mainnet
 ```
 
 ### Full Command with Options
@@ -30,6 +31,7 @@ reth-bench-compare \
 reth-bench-compare \
   --baseline-branch main \
   --feature-branch my-optimization \
+  --chain mainnet \
   --datadir ~/.local/share/reth/mainnet \
   --blocks 100 \
   --rpc-url https://reth-ethereum.ithaca.xyz/rpc \
@@ -44,7 +46,8 @@ reth-bench-compare \
 |----------|-------------|---------|
 | `--baseline-branch` | Git branch to use as baseline | Required |
 | `--feature-branch` | Git branch to compare against baseline | Required |
-| `--datadir` | Reth datadir path | `~/.local/share/reth/mainnet` |
+| `--chain` | Chain to use for reth operations | `mainnet` |
+| `--datadir` | Reth datadir path | `~/.local/share/reth/{chain}` |
 | `--blocks` | Number of blocks to benchmark | `100` |
 | `--rpc-url` | RPC endpoint for fetching block data | `https://reth-ethereum.ithaca.xyz/rpc` |
 | `--jwt-secret` | JWT secret file path | `{datadir}/jwt.hex` |
@@ -151,6 +154,7 @@ git checkout main
 reth-bench-compare \
   --baseline-branch main \
   --feature-branch performance-optimization \
+  --chain mainnet \
   --blocks 50 \
   --output-dir ./perf-comparison
 
