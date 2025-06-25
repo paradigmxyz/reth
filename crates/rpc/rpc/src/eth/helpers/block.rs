@@ -17,7 +17,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> EthBlocks for EthApi<N>
 where
     Self: LoadBlock<
         Error = EthApiError,
@@ -28,7 +28,7 @@ where
             Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
-    Provider: BlockReader + ChainSpecProvider,
+    N: RpcNodeCore<Provider: BlockReader + ChainSpecProvider>,
 {
     async fn block_receipts(
         &self,
@@ -72,7 +72,7 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> LoadBlock for EthApi<N>
 where
     Self: LoadPendingBlock
         + SpawnBlocking
@@ -81,9 +81,11 @@ where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
             Primitives: NodePrimitives<SignedTx = ProviderTx<Self::Provider>>,
-            Evm = EvmConfig,
+            Evm = N::Evm,
         >,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
+    N: RpcNodeCore<
+        Provider: BlockReader,
+        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
+    >,
 {
 }

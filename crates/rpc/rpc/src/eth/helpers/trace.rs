@@ -4,13 +4,13 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_rpc_eth_api::{
     helpers::{LoadState, Trace},
-    FromEvmError,
+    FromEvmError, RpcNodeCore,
 };
 use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> Trace for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> Trace for EthApi<N>
 where
     Self: LoadState<
         Provider: BlockReader,
@@ -22,6 +22,6 @@ where
         >,
         Error: FromEvmError<Self::Evm>,
     >,
-    Provider: BlockReader,
+    N: RpcNodeCore<Provider: BlockReader>,
 {
 }

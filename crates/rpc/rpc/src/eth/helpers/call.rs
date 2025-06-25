@@ -15,8 +15,9 @@ use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::context::TxEnv;
 
-impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> EthCall for EthApi<N>
 where
+    N: RpcNodeCore<Provider: BlockReader>,
     Self: EstimateCall
         + LoadPendingBlock
         + FullEthApiTypes
@@ -25,15 +26,15 @@ where
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
             Primitives: NodePrimitives<SignedTx = ProviderTx<Self::Provider>>,
-            Evm = EvmConfig,
+            Evm = N::Evm,
         >,
-    EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
-    Provider: BlockReader,
+    N::Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
 {
 }
 
-impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> Call for EthApi<N>
 where
+    N: RpcNodeCore<Provider: BlockReader>,
     Self: LoadState<
             Evm: ConfigureEvm<
                 BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
@@ -48,7 +49,6 @@ where
                        + From<<Self::RpcConvert as RpcConvert>::Error>
                        + From<ProviderError>,
         > + SpawnBlocking,
-    Provider: BlockReader,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -61,9 +61,9 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EstimateCall for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> EstimateCall for EthApi<N>
 where
+    N: RpcNodeCore<Provider: BlockReader>,
     Self: Call,
-    Provider: BlockReader,
 {
 }

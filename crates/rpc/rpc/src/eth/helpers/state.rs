@@ -6,22 +6,22 @@ use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::{
     helpers::{EthState, LoadState, SpawnBlocking},
-    RpcNodeCoreExt,
+    RpcNodeCore, RpcNodeCoreExt,
 };
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> EthState for EthApi<N>
 where
     Self: LoadState + SpawnBlocking,
-    Provider: BlockReader,
+    N: RpcNodeCore<Provider: BlockReader>,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> LoadState for EthApi<N>
 where
     Self: RpcNodeCoreExt<
         Provider: BlockReader
@@ -29,7 +29,7 @@ where
                       + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
     >,
-    Provider: BlockReader,
+    N: RpcNodeCore<Provider: BlockReader>,
 {
 }
 

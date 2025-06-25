@@ -4,6 +4,7 @@ use crate::{eth::core::EthApiInner, EthApi};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
+use reth_rpc_eth_api::RpcNodeCore;
 use reth_rpc_eth_types::{
     fee_history::fee_history_cache_new_blocks_task, EthStateCache, EthStateCacheConfig,
     FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
@@ -11,44 +12,57 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
-use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, StateProviderFactory,
+};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use std::sync::Arc;
+
+// Type alias to simplify complex type
+type EthStateCacheType<N> = EthStateCache<
+    ProviderBlock<<N as RpcNodeCore>::Provider>,
+    ProviderReceipt<<N as RpcNodeCore>::Provider>,
+>;
 
 /// A helper to build the `EthApi` handler instance.
 ///
 /// This builder type contains all settings to create an [`EthApiInner`] or an [`EthApi`] instance
 /// directly.
 #[derive(Debug)]
-pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig>
+pub struct EthApiBuilder<N: RpcNodeCore<Provider: BlockReader>>
 where
-    Provider: BlockReaderIdExt,
+    N::Provider: BlockReaderIdExt,
 {
-    provider: Provider,
-    pool: Pool,
-    network: Network,
-    evm_config: EvmConfig,
+    provider: N::Provider,
+    pool: N::Pool,
+    network: N::Network,
+    evm_config: N::Evm,
     gas_cap: GasCap,
     max_simulate_blocks: u64,
     eth_proof_window: u64,
     fee_history_cache_config: FeeHistoryCacheConfig,
     proof_permits: usize,
     eth_state_cache_config: EthStateCacheConfig,
-    eth_cache: Option<EthStateCache<Provider::Block, Provider::Receipt>>,
+    eth_cache: Option<EthStateCacheType<N>>,
     gas_oracle_config: GasPriceOracleConfig,
-    gas_oracle: Option<GasPriceOracle<Provider>>,
+    gas_oracle: Option<GasPriceOracle<N::Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+impl<N: RpcNodeCore<Provider: BlockReader>> EthApiBuilder<N>
 where
-    Provider: BlockReaderIdExt,
+    N::Provider: BlockReaderIdExt,
 {
     /// Creates a new `EthApiBuilder` instance.
-    pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: EvmConfig) -> Self
+    pub fn new(
+        provider: N::Provider,
+        pool: N::Pool,
+        network: N::Network,
+        evm_config: N::Evm,
+    ) -> Self
     where
-        Provider: BlockReaderIdExt,
+        N::Provider: BlockReaderIdExt,
     {
         Self {
             provider,
@@ -88,7 +102,7 @@ where
     /// Sets `eth_cache` instance
     pub fn eth_cache(
         mut self,
-        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
+        eth_cache: EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>>,
     ) -> Self {
         self.eth_cache = Some(eth_cache);
         self
@@ -102,7 +116,7 @@ where
     }
 
     /// Sets `gas_oracle` instance
-    pub fn gas_oracle(mut self, gas_oracle: GasPriceOracle<Provider>) -> Self {
+    pub fn gas_oracle(mut self, gas_oracle: GasPriceOracle<N::Provider>) -> Self {
         self.gas_oracle = Some(gas_oracle);
         self
     }
@@ -154,13 +168,16 @@ where
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build_inner(self) -> EthApiInner<Provider, Pool, Network, EvmConfig>
+    pub fn build_inner(self) -> EthApiInner<N>
     where
-        Provider: BlockReaderIdExt
+        N::Provider: BlockReaderIdExt
             + StateProviderFactory
             + ChainSpecProvider
             + CanonStateSubscriptions<
-                Primitives: NodePrimitives<Block = Provider::Block, Receipt = Provider::Receipt>,
+                Primitives: NodePrimitives<
+                    Block = ProviderBlock<N::Provider>,
+                    Receipt = ProviderReceipt<N::Provider>,
+                >,
             > + Clone
             + Unpin
             + 'static,
@@ -227,12 +244,15 @@ where
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    pub fn build(self) -> EthApi<N>
     where
-        Provider: BlockReaderIdExt
+        N::Provider: BlockReaderIdExt
             + StateProviderFactory
             + CanonStateSubscriptions<
-                Primitives: NodePrimitives<Block = Provider::Block, Receipt = Provider::Receipt>,
+                Primitives: NodePrimitives<
+                    Block = ProviderBlock<N::Provider>,
+                    Receipt = ProviderReceipt<N::Provider>,
+                >,
             > + ChainSpecProvider
             + Clone
             + Unpin
