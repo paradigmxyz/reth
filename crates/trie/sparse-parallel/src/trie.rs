@@ -1241,14 +1241,13 @@ mod tests {
             .lower_subtries
             .iter()
             .filter_map(Option::as_ref)
-            .map(|subtrie| subtrie.nodes.iter().collect::<Vec<_>>())
-            .flatten()
-            .collect::<Vec<_>>();
+            .flat_map(|subtrie| subtrie.nodes.iter())
+            .sorted_by_key(|(path, _)| *path);
         let upper_sparse_nodes = sparse_trie.upper_subtrie.nodes.iter().collect::<Vec<_>>();
 
         let sparse_nodes = lower_sparse_nodes
             .into_iter()
-            .chain(upper_sparse_nodes.into_iter())
+            .chain(upper_sparse_nodes)
             .sorted_by_key(|(path, _)| *path);
 
         for ((proof_node_path, proof_node), (sparse_node_path, sparse_node)) in
