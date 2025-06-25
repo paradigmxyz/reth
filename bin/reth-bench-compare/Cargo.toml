@@ -44,7 +44,7 @@ shellexpand.workspace = true
 csv.workspace = true
 
 # Chart generation
-plotters = { version = "0.3", default-features = false, features = ["chrono", "png"] }
+plotters = { version = "0.3", default-features = false, features = ["bitmap_backend", "chrono"] }
 
 # Reth dependencies for shared types and utilities
 reth-tracing.workspace = true

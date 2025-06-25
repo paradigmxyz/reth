@@ -6470,8 +6470,10 @@ version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5aeb6f403d7a4911efb1e33402027fc44f29b5bf6def3effcc22d7bb75f2b747"
 dependencies = [
+ "chrono",
  "num-traits",
  "plotters-backend",
+ "plotters-bitmap",
  "plotters-svg",
  "wasm-bindgen",
  "web-sys",
@@ -6482,6 +6484,15 @@ name = "plotters-backend"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df42e13c12958a16b3f7f4386b9ab1f3e7933914ecea48da7139435263a4172a"
+
+[[package]]
+name = "plotters-bitmap"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72ce181e3f6bf82d6c1dc569103ca7b1bd964c60ba03d7e6cdfbb3e3eb7f7405"
+dependencies = [
+ "plotters-backend",
+]
 
 [[package]]
 name = "plotters-svg"
@@ -7312,6 +7323,7 @@ dependencies = [
  "dirs-next",
  "eyre",
  "libc",
+ "plotters",
  "reqwest",
  "reth-cli-runner",
  "reth-cli-util",
