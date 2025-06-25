@@ -734,6 +734,8 @@ alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", rev = "08fa0
 alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", rev = "08fa016ed950b6e65f810fc9cdef7cf38fbc63f6" }
 alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", rev = "08fa016ed950b6e65f810fc9cdef7cf38fbc63f6" }
 
+nybbles = { git = "https://github.com/alloy-rs/nybbles", branch = "u8-length-benchmark-rebased" }
+
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
