@@ -15,7 +15,7 @@ use reth_trie_sparse::{
 };
 use smallvec::SmallVec;
 use std::sync::mpsc;
-use tracing::trace;
+use tracing::{instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
 /// [`ParallelSparseTrie`]. All longer paths belong to a lower subtrie.
@@ -622,7 +622,7 @@ impl ParallelSparseTrie {
     ///
     /// This function first identifies all nodes that have changed (based on the prefix set) below
     /// level [`UPPER_TRIE_MAX_DEPTH`] of the trie, then recalculates their RLP representation.
-    pub fn update_subtrie_hashes(&mut self) {
+    pub fn update_lower_subtrie_hashes(&mut self) {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
         // Take changed subtries according to the prefix set
@@ -635,8 +635,9 @@ impl ParallelSparseTrie {
         // Update subtrie hashes in parallel
         // TODO: call `update_hashes` on each subtrie in parallel
         let (tx, rx) = mpsc::channel();
-        for subtrie in subtries {
-            tx.send((subtrie.index, subtrie.subtrie)).unwrap();
+        for ChangedSubtrie { index, mut subtrie, mut prefix_set } in subtries {
+            subtrie.update_hashes(&mut prefix_set);
+            tx.send((index, subtrie)).unwrap();
         }
         drop(tx);
 
@@ -644,6 +645,43 @@ impl ParallelSparseTrie {
         for (index, subtrie) in rx {
             self.lower_subtries[index] = Some(subtrie);
         }
+    }
+
+    /// Updates hashes for the upper subtrie, using nodes from both upper and lower subtries.
+    #[instrument(level = "trace", target = "engine::tree", skip_all, ret)]
+    fn update_upper_subtrie_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
+        trace!(target: "trie::parallel_sparse", "Updating upper subtrie hashes");
+
+        debug_assert!(self.upper_subtrie.inner.buffers.path_stack.is_empty());
+        self.upper_subtrie.inner.buffers.path_stack.push(RlpNodePathStackItem {
+            path: Nibbles::default(), // Start from root
+            is_in_prefix_set: None,
+        });
+
+        while let Some(stack_item) = self.upper_subtrie.inner.buffers.path_stack.pop() {
+            let path = stack_item.path;
+            let node = if path.len() < UPPER_TRIE_MAX_DEPTH {
+                self.upper_subtrie.nodes.get_mut(&path).expect("upper subtrie node must exist")
+            } else {
+                let index = path_subtrie_index_unchecked(&path);
+                let node = self.lower_subtries[index]
+                    .as_mut()
+                    .expect("lower subtrie must exist")
+                    .nodes
+                    .get_mut(&path)
+                    .expect("lower subtrie node must exist");
+                // Lower subtrie root node hashes must be computed before updating upper subtrie
+                // hashes
+                debug_assert!(node.hash().is_some());
+                node
+            };
+
+            // Calculate the RLP node for the current node using upper subtrie
+            self.upper_subtrie.inner.rlp_node(prefix_set, stack_item, node);
+        }
+
+        debug_assert_eq!(self.upper_subtrie.inner.buffers.rlp_node_stack.len(), 1);
+        self.upper_subtrie.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
     }
 
     /// Calculates and returns the root hash of the trie.
@@ -654,7 +692,17 @@ impl ParallelSparseTrie {
     /// 2. The keccak256 hash of the root node's RLP representation
     pub fn root(&mut self) -> B256 {
         trace!(target: "trie::parallel_sparse", "Calculating trie root hash");
-        todo!()
+
+        // Update all lower subtrie hashes
+        self.update_lower_subtrie_hashes();
+
+        // Update hashes for the upper subtrie using our specialized function
+        // that can access both upper and lower subtrie nodes
+        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
+        let root_rlp = self.update_upper_subtrie_hashes(&mut prefix_set);
+
+        // Return the root hash
+        root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
     }
 
     /// Configures the trie to retain information about updates.
@@ -1007,9 +1055,9 @@ impl SparseSubtrie {
     /// # Panics
     ///
     /// If the node at the root path does not exist.
-    #[allow(unused)]
+    #[instrument(level = "trace", target = "engine::tree", skip_all, fields(root = ?self.path), ret)]
     pub fn update_hashes(&mut self, prefix_set: &mut PrefixSet) -> RlpNode {
-        trace!(target: "trie::parallel_sparse", root=?self.path, "Updating subtrie hashes");
+        trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
         debug_assert!(prefix_set.iter().all(|path| path.starts_with(&self.path)));
 
@@ -1019,29 +1067,14 @@ impl SparseSubtrie {
             .path_stack
             .push(RlpNodePathStackItem { path: self.path, is_in_prefix_set: None });
 
-        while let Some(RlpNodePathStackItem { path, mut is_in_prefix_set }) =
-            self.inner.buffers.path_stack.pop()
-        {
+        while let Some(stack_item) = self.inner.buffers.path_stack.pop() {
+            let path = stack_item.path;
             let node = self
                 .nodes
                 .get_mut(&path)
                 .unwrap_or_else(|| panic!("node at path {path:?} does not exist"));
-            trace!(
-                target: "trie::parallel_sparse",
-                root = ?self.path,
-                ?path,
-                ?is_in_prefix_set,
-                ?node,
-                "Popped node from path stack"
-            );
 
-            // Check if the path is in the prefix set.
-            // First, check the cached value. If it's `None`, then check the prefix set, and update
-            // the cached value.
-            let mut prefix_set_contains =
-                |path: &Nibbles| *is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path));
-
-            self.inner.rlp_node(prefix_set_contains, path, node);
+            self.inner.rlp_node(prefix_set, stack_item, node);
         }
 
         debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
@@ -1075,21 +1108,69 @@ struct SparseSubtrieInner {
 }
 
 impl SparseSubtrieInner {
+    /// Computes the RLP encoding and its hash for a single (trie node)[`SparseNode`].
+    ///
+    /// # Deferred Processing
+    ///
+    /// When an extension or a branch node depends on child nodes that haven't been computed yet,
+    /// the function pushes the current node back onto the path stack along with its children,
+    /// then returns early. This allows the iterative algorithm to process children first before
+    /// retrying the parent.
+    ///
+    /// # Parameters
+    ///
+    /// - `prefix_set`: Set of prefixes (key paths) that have been marked as updated
+    /// - `stack_item`: The stack item to process
+    /// - `node`: The sparse node to process (will be mutated to update hash)
+    ///
+    /// # Side Effects
+    ///
+    /// - Updates the node's hash field after computing RLP
+    /// - Pushes nodes to [`SparseSubtrieBuffers::path_stack`] to manage traversal
+    /// - Updates the (trie updates)[`SparseTrieUpdates`] accumulator when tracking changes, if
+    ///   [`Some`]
+    /// - May push items onto the path stack for deferred processing
+    ///
+    /// # Exit condition
+    ///
+    /// Once all nodes have been processed and all RLPs and hashes calculated, pushes the root node
+    /// onto the [`SparseSubtrieBuffers::rlp_node_stack`] and exits.
     fn rlp_node(
         &mut self,
-        mut prefix_set_contains: impl FnMut(&Nibbles) -> bool,
-        path: Nibbles,
+        prefix_set: &mut PrefixSet,
+        mut stack_item: RlpNodePathStackItem,
         node: &mut SparseNode,
     ) {
+        let path = stack_item.path;
+        trace!(
+            target: "trie::parallel_sparse",
+            ?path,
+            ?node,
+            "Calculating node RLP"
+        );
+
+        // Check if the path is in the prefix set.
+        // First, check the cached value. If it's `None`, then check the prefix set, and update
+        // the cached value.
+        let mut prefix_set_contains = |path: &Nibbles| {
+            *stack_item.is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path))
+        };
+
         let (rlp_node, node_type) = match node {
             SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
-            SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
+            SparseNode::Hash(hash) => {
+                // Return pre-computed hash of a blinded node immediately
+                (RlpNode::word_rlp(hash), SparseNodeType::Hash)
+            }
             SparseNode::Leaf { key, hash } => {
                 let mut path = path;
                 path.extend(key);
                 if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
+                    // If the node hash is already computed, and the node path is not in
+                    // the prefix set, return the pre-computed hash
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 } else {
+                    // Encode the leaf node and update its hash
                     let value = self.values.get(&path).unwrap();
                     self.buffers.rlp_buf.clear();
                     let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
@@ -1103,11 +1184,15 @@ impl SparseSubtrieInner {
                 if let Some((hash, store_in_db_trie)) =
                     hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                 {
+                    // If the node hash is already computed, and the node path is not in
+                    // the prefix set, return the pre-computed hash
                     (
                         RlpNode::word_rlp(&hash),
                         SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
                     )
                 } else if self.buffers.rlp_node_stack.last().is_some_and(|e| e.path == child_path) {
+                    // Top of the stack has the child node, we can encode the extension node and
+                    // update its hash
                     let RlpNodeStackItem { path: _, rlp_node: child, node_type: child_node_type } =
                         self.buffers.rlp_node_stack.pop().unwrap();
                     self.buffers.rlp_buf.clear();
@@ -1136,7 +1221,8 @@ impl SparseSubtrieInner {
                         },
                     )
                 } else {
-                    // need to get rlp node for child first
+                    // Need to defer processing until child is computed, on the next
+                    // invocation update the node's hash.
                     self.buffers.path_stack.extend([
                         RlpNodePathStackItem {
                             path,
@@ -1151,6 +1237,8 @@ impl SparseSubtrieInner {
                 if let Some((hash, store_in_db_trie)) =
                     hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                 {
+                    // If the node hash is already computed, and the node path is not in
+                    // the prefix set, return the pre-computed hash
                     self.buffers.rlp_node_stack.push(RlpNodeStackItem {
                         path,
                         rlp_node: RlpNode::word_rlp(&hash),
@@ -1160,6 +1248,7 @@ impl SparseSubtrieInner {
                     });
                     return
                 }
+
                 let retain_updates = self.updates.is_some() && prefix_set_contains(&path);
 
                 self.buffers.branch_child_buf.clear();
@@ -1235,6 +1324,8 @@ impl SparseSubtrieInner {
                         self.buffers.branch_value_stack_buf[original_idx] = child;
                         added_children = true;
                     } else {
+                        // Need to defer processing until children are computed, on the next
+                        // invocation update the node's hash.
                         debug_assert!(!added_children);
                         self.buffers.path_stack.push(RlpNodePathStackItem {
                             path,
@@ -1258,6 +1349,8 @@ impl SparseSubtrieInner {
                     "Branch node masks"
                 );
 
+                // Top of the stack has all children node, we can encode the branch node and
+                // update its hash
                 self.buffers.rlp_buf.clear();
                 let branch_node_ref =
                     BranchNodeRef::new(&self.buffers.branch_value_stack_buf, *state_mask);
@@ -1319,15 +1412,13 @@ impl SparseSubtrieInner {
             }
         };
 
+        self.buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
         trace!(
             target: "trie::parallel_sparse",
             ?path,
-            ?node,
             ?node_type,
-            "Added node to rlp node stack"
+            "Added node to RLP node stack"
         );
-
-        self.buffers.rlp_node_stack.push(RlpNodeStackItem { path, rlp_node, node_type });
     }
 }
 
@@ -1962,12 +2053,30 @@ mod tests {
     fn test_update_subtrie_hashes() {
         // Create a trie with three subtries
         let mut trie = ParallelSparseTrie::default();
-        let subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
+        let mut subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
         let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
+        let mut subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
         let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
+        let mut subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
+
+        // Reveal dummy leaf nodes that form an incorrect trie structure but enough to test the
+        // method
+        let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
+        let leaf_1_path = leaf_1_full_path.slice(..2);
+        let leaf_1_key = leaf_1_full_path.slice(2..);
+        let leaf_2_full_path = Nibbles::from_nibbles([vec![1, 0], vec![0; 62]].concat());
+        let leaf_2_path = leaf_2_full_path.slice(..2);
+        let leaf_2_key = leaf_2_full_path.slice(2..);
+        let leaf_3_full_path = Nibbles::from_nibbles([vec![3, 0], vec![0; 62]].concat());
+        let leaf_3_path = leaf_3_full_path.slice(..2);
+        let leaf_3_key = leaf_3_full_path.slice(2..);
+        let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), 1);
+        let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), 2);
+        let leaf_3 = create_leaf_node(leaf_3_key.to_vec(), 3);
+        subtrie_1.reveal_node(leaf_1_path, &leaf_1, TrieMasks::none()).unwrap();
+        subtrie_2.reveal_node(leaf_2_path, &leaf_2, TrieMasks::none()).unwrap();
+        subtrie_3.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
 
         // Add subtries at specific positions
         trie.lower_subtries[subtrie_1_index] = Some(subtrie_1);
@@ -1988,7 +2097,7 @@ mod tests {
         trie.prefix_set = prefix_set;
 
         // Update subtrie hashes
-        trie.update_subtrie_hashes();
+        trie.update_lower_subtrie_hashes();
 
         // Check that the prefix set was updated
         assert_eq!(trie.prefix_set, unchanged_prefix_set);
@@ -2565,5 +2674,106 @@ mod tests {
             lower_subtrie_10.nodes.get(&Nibbles::from_nibbles([0x0, 0x1, 0x4])),
             Some(SparseNode::Leaf { hash: Some(_), .. })
         );
+    }
+
+    #[test]
+    fn test_parallel_sparse_trie_root() {
+        let mut trie = ParallelSparseTrie::default().with_updates(true);
+
+        // Step 1: Create the trie structure
+        // Extension node at 0x with key 0x2 (goes to upper subtrie)
+        let extension_path = Nibbles::new();
+        let extension_key = Nibbles::from_nibbles([0x2]);
+
+        // Branch node at 0x2 with children 0 and 1 (goes to upper subtrie)
+        let branch_path = Nibbles::from_nibbles([0x2]);
+
+        // Leaf nodes at 0x20 and 0x21 (go to lower subtries)
+        let leaf_1_path = Nibbles::from_nibbles([0x2, 0x0]);
+        let leaf_1_key = Nibbles::from_nibbles(vec![0; 62]); // Remaining key
+        let leaf_1_full_path = Nibbles::from_nibbles([vec![0x2, 0x0], vec![0; 62]].concat());
+
+        let leaf_2_path = Nibbles::from_nibbles([0x2, 0x1]);
+        let leaf_2_key = Nibbles::from_nibbles(vec![0; 62]); // Remaining key
+        let leaf_2_full_path = Nibbles::from_nibbles([vec![0x2, 0x1], vec![0; 62]].concat());
+
+        // Create accounts
+        let account_1 = create_account(1);
+        let account_2 = create_account(2);
+
+        // Create leaf nodes
+        let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), account_1.nonce);
+        let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), account_2.nonce);
+
+        // Create branch node with children at indices 0 and 1
+        let branch = create_branch_node_with_children(
+            &[0, 1],
+            vec![
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_1)),
+                RlpNode::from_rlp(&alloy_rlp::encode(&leaf_2)),
+            ],
+        );
+
+        // Create extension node pointing to branch
+        let extension = create_extension_node(
+            extension_key.to_vec(),
+            RlpNode::from_rlp(&alloy_rlp::encode(&branch)).as_hash().unwrap(),
+        );
+
+        // Step 2: Reveal nodes in the trie
+        trie.reveal_node(extension_path, extension, TrieMasks::none()).unwrap();
+        trie.reveal_node(branch_path, branch, TrieMasks::none()).unwrap();
+        trie.reveal_node(leaf_1_path, leaf_1, TrieMasks::none()).unwrap();
+        trie.reveal_node(leaf_2_path, leaf_2, TrieMasks::none()).unwrap();
+
+        // Step 3: Reset hashes for all revealed nodes to test actual hash calculation
+        // Reset upper subtrie node hashes
+        trie.upper_subtrie.nodes.get_mut(&extension_path).unwrap().set_hash(None);
+        trie.upper_subtrie.nodes.get_mut(&branch_path).unwrap().set_hash(None);
+
+        // Reset lower subtrie node hashes
+        let leaf_1_subtrie_idx = path_subtrie_index_unchecked(&leaf_1_path);
+        let leaf_2_subtrie_idx = path_subtrie_index_unchecked(&leaf_2_path);
+
+        trie.lower_subtries[leaf_1_subtrie_idx]
+            .as_mut()
+            .unwrap()
+            .nodes
+            .get_mut(&leaf_1_path)
+            .unwrap()
+            .set_hash(None);
+        trie.lower_subtries[leaf_2_subtrie_idx]
+            .as_mut()
+            .unwrap()
+            .nodes
+            .get_mut(&leaf_2_path)
+            .unwrap()
+            .set_hash(None);
+
+        // Step 4: Add changed leaf node paths to prefix set
+        trie.prefix_set.insert(leaf_1_full_path);
+        trie.prefix_set.insert(leaf_2_full_path);
+
+        // Step 5: Calculate root using our implementation
+        let root = trie.root();
+
+        // Step 6: Calculate root using HashBuilder for comparison
+        let (hash_builder_root, _, _proof_nodes, _, _) = run_hash_builder(
+            [(leaf_1_full_path, account_1), (leaf_2_full_path, account_2)],
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            [extension_path, branch_path, leaf_1_full_path, leaf_2_full_path],
+        );
+
+        // Step 7: Verify the roots match
+        assert_eq!(root, hash_builder_root);
+
+        // Verify hashes were computed
+        let leaf_1_subtrie = trie.lower_subtries[leaf_1_subtrie_idx].as_ref().unwrap();
+        let leaf_2_subtrie = trie.lower_subtries[leaf_2_subtrie_idx].as_ref().unwrap();
+        assert!(trie.upper_subtrie.nodes.get(&extension_path).unwrap().hash().is_some());
+        assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_some());
+        assert!(leaf_1_subtrie.nodes.get(&leaf_1_path).unwrap().hash().is_some());
+        assert!(leaf_2_subtrie.nodes.get(&leaf_2_path).unwrap().hash().is_some());
     }
 }

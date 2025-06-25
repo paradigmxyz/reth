@@ -8028,7 +8028,9 @@ dependencies = [
 name = "reth-era-utils"
 version = "1.4.8"
 dependencies = [
+ "alloy-consensus",
  "alloy-primitives",
+ "alloy-rlp",
  "bytes",
  "eyre",
  "futures",
@@ -8038,6 +8040,7 @@ dependencies = [
  "reth-db-common",
  "reth-era",
  "reth-era-downloader",
+ "reth-ethereum-primitives",
  "reth-etl",
  "reth-fs-util",
  "reth-primitives-traits",
@@ -8856,7 +8859,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-stream",
- "tower",
  "tracing",
 ]
 
@@ -9384,6 +9386,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.12",
  "tokio",
+ "tower",
  "tracing",
 ]
 

@@ -358,7 +358,7 @@ mod serde_bincode_compat {
 
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Debug)]
-    pub enum ExtendedTxEnvelopeRepr<'a, B: SerdeBincodeCompat, T: SerdeBincodeCompat> {
+    pub enum ExtendedRepr<'a, B: SerdeBincodeCompat, T: SerdeBincodeCompat> {
         BuiltIn(B::BincodeRepr<'a>),
         Other(T::BincodeRepr<'a>),
     }
@@ -368,19 +368,19 @@ mod serde_bincode_compat {
         B: SerdeBincodeCompat + core::fmt::Debug,
         T: SerdeBincodeCompat + core::fmt::Debug,
     {
-        type BincodeRepr<'a> = ExtendedTxEnvelopeRepr<'a, B, T>;
+        type BincodeRepr<'a> = ExtendedRepr<'a, B, T>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             match self {
-                Self::BuiltIn(tx) => ExtendedTxEnvelopeRepr::BuiltIn(tx.as_repr()),
-                Self::Other(tx) => ExtendedTxEnvelopeRepr::Other(tx.as_repr()),
+                Self::BuiltIn(tx) => ExtendedRepr::BuiltIn(tx.as_repr()),
+                Self::Other(tx) => ExtendedRepr::Other(tx.as_repr()),
             }
         }
 
         fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
             match repr {
-                ExtendedTxEnvelopeRepr::BuiltIn(tx_repr) => Self::BuiltIn(B::from_repr(tx_repr)),
-                ExtendedTxEnvelopeRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
+                ExtendedRepr::BuiltIn(tx_repr) => Self::BuiltIn(B::from_repr(tx_repr)),
+                ExtendedRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
             }
         }
     }
