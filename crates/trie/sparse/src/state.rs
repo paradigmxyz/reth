@@ -1,6 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
-    LeafLookup, SerialSparseTrie, SparseTrie, SparseTrieState, TrieMasks,
+    LeafLookup, RevealedSparseTrie, SerialSparseTrie, SparseTrie, SparseTrieState, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -26,9 +26,9 @@ pub struct SparseStateTrie<F: BlindedProviderFactory = DefaultBlindedProviderFac
     /// Blinded node provider factory.
     provider_factory: F,
     /// Sparse account trie.
-    state: SparseTrie<F::AccountNodeProvider>,
+    state: SparseTrie<SerialSparseTrie<F::AccountNodeProvider>>,
     /// Sparse storage tries.
-    storages: B256Map<SparseTrie<F::StorageNodeProvider>>,
+    storages: B256Map<SparseTrie<SerialSparseTrie<F::StorageNodeProvider>>>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// Collection of revealed storage trie paths, per account.
@@ -187,7 +187,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn take_storage_trie(
         &mut self,
         address: &B256,
-    ) -> Option<SparseTrie<F::StorageNodeProvider>> {
+    ) -> Option<SparseTrie<SerialSparseTrie<F::StorageNodeProvider>>> {
         self.storages.remove(address)
     }
 
@@ -195,7 +195,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn insert_storage_trie(
         &mut self,
         address: B256,
-        storage_trie: SparseTrie<F::StorageNodeProvider>,
+        storage_trie: SparseTrie<SerialSparseTrie<F::StorageNodeProvider>>,
     ) {
         self.storages.insert(address, storage_trie);
     }

@@ -4,24 +4,22 @@ use crate::{
     proof::{Proof, ProofBlindedProviderFactory},
     trie_cursor::TrieCursorFactory,
 };
-use alloy_rlp::EMPTY_STRING_CODE;
-use alloy_trie::EMPTY_ROOT_HASH;
-use reth_trie_common::HashedPostState;
-
 use alloy_primitives::{
     keccak256,
     map::{B256Map, B256Set, Entry, HashMap},
     Bytes, B256,
 };
+use alloy_rlp::EMPTY_STRING_CODE;
+use alloy_trie::EMPTY_ROOT_HASH;
 use itertools::Itertools;
 use reth_execution_errors::{
     SparseStateTrieErrorKind, SparseTrieError, SparseTrieErrorKind, StateProofError,
     TrieWitnessError,
 };
-use reth_trie_common::{MultiProofTargets, Nibbles};
+use reth_trie_common::{HashedPostState, MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
-    SparseStateTrie,
+    RevealedSparseTrie, SparseStateTrie,
 };
 use std::sync::{mpsc, Arc};
 
