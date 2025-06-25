@@ -1,0 +1,193 @@
+//! Benchmark execution using reth-bench.
+
+use crate::cli::Args;
+use eyre::{eyre, Result, WrapErr};
+use std::{
+    path::Path,
+    process::{Command, Stdio},
+};
+use tracing::{info, warn};
+
+/// Manages benchmark execution using reth-bench
+pub struct BenchmarkRunner {
+    rpc_url: String,
+    jwt_secret: String,
+}
+
+impl BenchmarkRunner {
+    /// Create a new BenchmarkRunner from CLI arguments
+    pub fn new(args: &Args) -> Self {
+        Self {
+            rpc_url: args.rpc_url.clone(),
+            jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
+        }
+    }
+
+    /// Run a benchmark for the specified block range
+    pub async fn run_benchmark(
+        &self,
+        from_block: u64,
+        to_block: u64,
+        output_dir: &Path,
+    ) -> Result<()> {
+        info!(
+            "Running benchmark from block {} to {} (output: {:?})",
+            from_block, to_block, output_dir
+        );
+
+        // Ensure output directory exists
+        std::fs::create_dir_all(output_dir)
+            .wrap_err_with(|| format!("Failed to create output directory: {:?}", output_dir))?;
+
+        // Build the reth-bench command
+        let mut cmd = Command::new("./target/profiling/reth-bench");
+        cmd.args([
+            "new-payload-fcu",
+            "--rpc-url",
+            &self.rpc_url,
+            "--jwt-secret",
+            &self.jwt_secret,
+            "--from",
+            &from_block.to_string(),
+            "--to",
+            &to_block.to_string(),
+            "--output",
+            &output_dir.to_string_lossy(),
+        ]);
+
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        info!("Executing: {:?}", cmd);
+
+        // Execute the benchmark
+        let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
+
+        let status = child.wait().wrap_err("Failed to wait for reth-bench")?;
+
+        if !status.success() {
+            // Try to get stderr output for debugging
+            if let Ok(output) = child.wait_with_output() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!("reth-bench stderr: {}", stderr);
+            }
+            return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
+        }
+
+        // Verify that expected output files were created
+        self.verify_benchmark_output(output_dir)?;
+
+        info!("Benchmark completed successfully");
+        Ok(())
+    }
+
+    /// Verify that the benchmark produced expected output files
+    fn verify_benchmark_output(&self, output_dir: &Path) -> Result<()> {
+        let expected_files = ["combined_latency.csv", "total_gas.csv"];
+
+        for filename in &expected_files {
+            let file_path = output_dir.join(filename);
+            if !file_path.exists() {
+                return Err(eyre!("Expected benchmark output file not found: {:?}", file_path));
+            }
+
+            // Check that the file is not empty
+            let metadata = std::fs::metadata(&file_path)
+                .wrap_err_with(|| format!("Failed to read metadata for {:?}", file_path))?;
+
+            if metadata.len() == 0 {
+                return Err(eyre!("Benchmark output file is empty: {:?}", file_path));
+            }
+        }
+
+        info!("Verified benchmark output files");
+        Ok(())
+    }
+
+    /// Run a benchmark with baseline comparison
+    pub async fn run_benchmark_with_baseline(
+        &self,
+        from_block: u64,
+        to_block: u64,
+        output_dir: &Path,
+        baseline_csv: &Path,
+    ) -> Result<()> {
+        info!(
+            "Running benchmark with baseline comparison from block {} to {} (output: {:?}, baseline: {:?})",
+            from_block, to_block, output_dir, baseline_csv
+        );
+
+        // Ensure output directory exists
+        std::fs::create_dir_all(output_dir)
+            .wrap_err_with(|| format!("Failed to create output directory: {:?}", output_dir))?;
+
+        // Verify baseline file exists
+        if !baseline_csv.exists() {
+            return Err(eyre!("Baseline CSV file not found: {:?}", baseline_csv));
+        }
+
+        // Build the reth-bench command with baseline
+        let mut cmd = Command::new("./target/profiling/reth-bench");
+        cmd.args([
+            "new-payload-fcu",
+            "--rpc-url",
+            &self.rpc_url,
+            "--jwt-secret",
+            &self.jwt_secret,
+            "--from",
+            &from_block.to_string(),
+            "--to",
+            &to_block.to_string(),
+            "--output",
+            &output_dir.to_string_lossy(),
+            "--baseline",
+            &baseline_csv.to_string_lossy(),
+        ]);
+
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+
+        info!("Executing: {:?}", cmd);
+
+        // Execute the benchmark
+        let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
+
+        let status = child.wait().wrap_err("Failed to wait for reth-bench")?;
+
+        if !status.success() {
+            // Try to get stderr output for debugging
+            if let Ok(output) = child.wait_with_output() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn!("reth-bench stderr: {}", stderr);
+            }
+            return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
+        }
+
+        // Verify that expected output files were created (including baseline comparison)
+        self.verify_benchmark_output_with_baseline(output_dir)?;
+
+        info!("Benchmark with baseline comparison completed successfully");
+        Ok(())
+    }
+
+    /// Verify benchmark output including baseline comparison file
+    fn verify_benchmark_output_with_baseline(&self, output_dir: &Path) -> Result<()> {
+        let expected_files = ["combined_latency.csv", "total_gas.csv", "baseline_comparison.csv"];
+
+        for filename in &expected_files {
+            let file_path = output_dir.join(filename);
+            if !file_path.exists() {
+                return Err(eyre!("Expected benchmark output file not found: {:?}", file_path));
+            }
+
+            // Check that the file is not empty
+            let metadata = std::fs::metadata(&file_path)
+                .wrap_err_with(|| format!("Failed to read metadata for {:?}", file_path))?;
+
+            if metadata.len() == 0 {
+                return Err(eyre!("Benchmark output file is empty: {:?}", file_path));
+            }
+        }
+
+        info!("Verified benchmark output files including baseline comparison");
+        Ok(())
+    }
+}

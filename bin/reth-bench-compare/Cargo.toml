@@ -1,0 +1,50 @@
+[package]
+name = "reth-bench-compare"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "reth-bench-compare"
+path = "src/main.rs"
+
+[dependencies]
+# CLI and argument parsing
+clap = { workspace = true, features = ["derive", "env"] }
+eyre.workspace = true
+
+# Async runtime
+tokio = { workspace = true, features = ["full"] }
+tracing.workspace = true
+
+# HTTP client for RPC calls
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+# File system operations
+tempfile.workspace = true
+dirs-next.workspace = true
+
+# Process management
+signal-hook = "0.3"
+ctrlc = "3.4"
+libc = "0.2"
+
+# Time handling
+chrono = "0.4"
+
+# Path manipulation
+shellexpand.workspace = true
+
+# CSV handling for results comparison
+csv.workspace = true
+
+# Reth dependencies for shared types and utilities
+reth-tracing.workspace = true
+reth-cli-runner.workspace = true
+reth-node-core.workspace = true
+reth-cli-util.workspace = true
