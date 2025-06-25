@@ -231,7 +231,7 @@ impl CachedPrecompileMetrics {
     /// Adds address as an `address` label padded with zeros to at least two hex symbols, prefixed
     /// by `0x`.
     pub(crate) fn new_with_address(address: Address) -> Self {
-        Self::new_with_labels(&[("address", format!("0x{:02x}", address))])
+        Self::new_with_labels(&[("address", format!("0x{address:02x}"))])
     }
 }
 
