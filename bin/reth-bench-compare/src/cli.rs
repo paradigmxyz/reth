@@ -1,7 +1,7 @@
 //! CLI argument parsing and main command orchestration.
 
 use clap::Parser;
-use eyre::Result;
+use eyre::{eyre, Result};
 use reth_cli_runner::CliContext;
 use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
@@ -40,9 +40,9 @@ pub struct Args {
     #[arg(long, value_name = "URL", default_value = "https://reth-ethereum.ithaca.xyz/rpc")]
     pub rpc_url: String,
 
-    /// JWT secret file path (defaults to {datadir}/jwt.hex)
+    /// JWT secret file path
     #[arg(long, value_name = "PATH")]
-    pub jwt_secret: Option<PathBuf>,
+    pub jwt_secret: PathBuf,
 
     /// Output directory for benchmark results
     #[arg(long, value_name = "PATH", default_value = "./benchmark-comparison")]
@@ -75,24 +75,19 @@ impl Args {
         Ok(guard)
     }
 
-    /// Get the JWT secret path, using default if not specified
+    /// Get the JWT secret path
     pub fn jwt_secret_path(&self) -> PathBuf {
-        if let Some(ref path) = self.jwt_secret {
-            path.clone()
-        } else {
-            self.datadir_path().join("jwt.hex")
-        }
+        let jwt_secret_str = self.jwt_secret.to_string_lossy();
+        let expanded = shellexpand::tilde(&jwt_secret_str);
+        PathBuf::from(expanded.as_ref())
     }
 
-    /// Get the expanded datadir path, defaulting based on chain
-    pub fn datadir_path(&self) -> PathBuf {
-        let datadir = if let Some(ref path) = self.datadir {
-            path.clone()
-        } else {
-            format!("~/.local/share/reth/{}", self.chain)
-        };
-        let expanded = shellexpand::tilde(&datadir);
-        PathBuf::from(expanded.as_ref())
+    /// Get the expanded datadir path if specified
+    pub fn datadir_path(&self) -> Option<PathBuf> {
+        self.datadir.as_ref().map(|path| {
+            let expanded = shellexpand::tilde(path);
+            PathBuf::from(expanded.as_ref())
+        })
     }
 
     /// Get the expanded output directory path
@@ -166,6 +161,7 @@ async fn run_benchmark_workflow(
 ) -> Result<()> {
     let branches = [&args.baseline_branch, &args.feature_branch];
     let branch_names = ["baseline", "feature"];
+    let mut baseline_csv_path: Option<PathBuf> = None;
 
     for (i, &branch) in branches.iter().enumerate() {
         let branch_type = branch_names[i];
@@ -174,21 +170,21 @@ async fn run_benchmark_workflow(
         // Switch to target branch
         git_manager.switch_branch(branch)?;
 
-        // Compile reth
+        // Compile reth and reth-bench
         if !args.skip_compilation {
             git_manager.compile_reth()?;
+            // git_manager.compile_reth_bench()?;
         }
-
-        // Get current chain tip before starting
-        let original_tip = node_manager.get_chain_tip().await?;
-        info!("Chain tip before benchmark: {}", original_tip);
 
         // Start reth node
         let mut node_process = node_manager.start_node().await?;
 
-        // Wait for node to be ready and get current tip
-        let current_tip = node_manager.wait_for_sync_and_get_tip().await?;
-        info!("Node synced to tip: {}", current_tip);
+        // Wait for node to be ready and get its current tip (wherever it is)
+        let current_tip = node_manager.wait_for_node_ready_and_get_tip().await?;
+        info!("Node is ready at tip: {}", current_tip);
+
+        // Store the tip we'll unwind back to
+        let original_tip = current_tip;
 
         // Calculate benchmark range
         let from_block = current_tip;
@@ -196,7 +192,21 @@ async fn run_benchmark_workflow(
 
         // Run benchmark
         let output_dir = comparison_generator.get_branch_output_dir(branch_type);
-        benchmark_runner.run_benchmark(from_block, to_block, &output_dir).await?;
+
+        if branch_type == "baseline" {
+            // Run baseline benchmark without comparison
+            benchmark_runner.run_benchmark(from_block, to_block, &output_dir).await?;
+            baseline_csv_path = Some(output_dir.join("combined_latency.csv"));
+        } else {
+            // Run feature benchmark with baseline comparison
+            if let Some(ref baseline_csv) = baseline_csv_path {
+                benchmark_runner
+                    .run_benchmark_with_baseline(from_block, to_block, &output_dir, baseline_csv)
+                    .await?;
+            } else {
+                return Err(eyre!("Baseline CSV not available for feature branch comparison"));
+            }
+        }
 
         // Stop node
         node_manager.stop_node(&mut node_process).await?;

@@ -134,21 +134,70 @@ impl GitManager {
     pub fn compile_reth(&self) -> Result<()> {
         info!("Compiling reth with profiling configuration...");
 
-        let mut child = Command::new("make")
+        let output = Command::new("make")
             .arg("profiling")
             .current_dir(&self.repo_root)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .wrap_err("Failed to start make profiling command")?;
+            .output()
+            .wrap_err("Failed to execute make profiling command")?;
 
-        let status = child.wait().wrap_err("Failed to wait for compilation")?;
+        // Print stdout and stderr with prefixes
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
 
-        if !status.success() {
-            return Err(eyre!("Compilation failed with exit code: {:?}", status.code()));
+        for line in stdout.lines() {
+            if !line.trim().is_empty() {
+                println!("[MAKE] {}", line);
+            }
+        }
+
+        for line in stderr.lines() {
+            if !line.trim().is_empty() {
+                eprintln!("[MAKE] {}", line);
+            }
+        }
+
+        if !output.status.success() {
+            return Err(eyre!("Compilation failed with exit code: {:?}", output.status.code()));
         }
 
         info!("Reth compilation completed successfully");
+        Ok(())
+    }
+
+    /// Compile and install reth-bench using `make install-reth-bench`
+    pub fn compile_reth_bench(&self) -> Result<()> {
+        info!("Compiling and installing reth-bench...");
+
+        let output = Command::new("make")
+            .arg("install-reth-bench")
+            .current_dir(&self.repo_root)
+            .output()
+            .wrap_err("Failed to execute make install-reth-bench command")?;
+
+        // Print stdout and stderr with prefixes
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        for line in stdout.lines() {
+            if !line.trim().is_empty() {
+                println!("[MAKE-BENCH] {}", line);
+            }
+        }
+
+        for line in stderr.lines() {
+            if !line.trim().is_empty() {
+                eprintln!("[MAKE-BENCH] {}", line);
+            }
+        }
+
+        if !output.status.success() {
+            return Err(eyre!(
+                "reth-bench compilation failed with exit code: {:?}",
+                output.status.code()
+            ));
+        }
+
+        info!("reth-bench compilation completed successfully");
         Ok(())
     }
 
