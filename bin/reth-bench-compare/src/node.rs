@@ -58,6 +58,9 @@ impl NodeManager {
                 "--engine.accept-execution-requests-hash",
                 "--metrics",
                 &format!("0.0.0.0:{}", self.metrics_port),
+                "--http",
+                "--http.api",
+                "eth",
                 "--datadir",
                 &self.datadir,
             ])
