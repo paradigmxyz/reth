@@ -18,7 +18,7 @@ use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
-use precompile_cache::{precompile_address_label, CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap};
+use precompile_cache::{create_precompile_metrics_with_address, CachedPrecompile, PrecompileCacheMap};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -2439,9 +2439,7 @@ where
 
         if !self.config.precompile_cache_disabled() {
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
-                let precompile_metrics = CachedPrecompileMetrics::new_with_labels(&[
-                    ("address", precompile_address_label(*address))
-                ]);
+                let precompile_metrics = create_precompile_metrics_with_address(*address);
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),

@@ -5,7 +5,7 @@ use crate::tree::{
     payload_processor::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
     },
-    precompile_cache::{precompile_address_label, CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    precompile_cache::{create_precompile_metrics_with_address, CachedPrecompile, PrecompileCacheMap},
     StateProviderBuilder,
 };
 use alloy_consensus::transaction::Recovered;
@@ -271,9 +271,7 @@ where
 
         if !precompile_cache_disabled {
             evm.precompiles_mut().map_precompiles(|address, precompile| {
-                let precompile_metrics = CachedPrecompileMetrics::new_with_labels(&[
-                    ("address", precompile_address_label(*address))
-                ]);
+                let precompile_metrics = create_precompile_metrics_with_address(*address);
                 CachedPrecompile::wrap(
                     precompile,
                     precompile_cache_map.cache_for_address(*address),

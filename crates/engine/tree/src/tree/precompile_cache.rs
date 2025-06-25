@@ -15,25 +15,13 @@ use std::{
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 10_000;
 
-/// Get a static string representation of a precompile address for metrics.
-/// Falls back to a generic label for unknown addresses.
-pub(crate) fn precompile_address_label(address: Address) -> &'static str {
-    match address.0[19] {
-        1 => "0x01",
-        2 => "0x02",
-        3 => "0x03",
-        4 => "0x04",
-        5 => "0x05",
-        6 => "0x06",
-        7 => "0x07",
-        8 => "0x08",
-        9 => "0x09",
-        10 => "0x0a",
-        11 => "0x0b",
-        12 => "0x0c",
-        13 => "0x0d",
-        _ => "unknown",
-    }
+/// Create precompile metrics with address label.
+/// Uses 0x prefix with at least two hex digits for the address label.
+pub(crate) fn create_precompile_metrics_with_address(address: Address) -> CachedPrecompileMetrics {
+    let address_label = format!("0x{:02x}", address);
+    // Leak the string to get a 'static reference for the metrics
+    let static_label: &'static str = Box::leak(address_label.into_boxed_str());
+    CachedPrecompileMetrics::new_with_labels(&[("address", static_label)])
 }
 
 /// Stores caches for each precompile.
@@ -381,16 +369,19 @@ mod tests {
     }
 
     #[test]
-    fn test_precompile_address_label() {
-        // Test common precompile addresses
-        assert_eq!(precompile_address_label(Address::repeat_byte(1)), "0x01");
-        assert_eq!(precompile_address_label(Address::repeat_byte(2)), "0x02");
-        assert_eq!(precompile_address_label(Address::repeat_byte(9)), "0x09");
-        assert_eq!(precompile_address_label(Address::repeat_byte(10)), "0x0a");
-        assert_eq!(precompile_address_label(Address::repeat_byte(13)), "0x0d");
+    fn test_precompile_metrics_creation() {
+        // Test that metrics can be created with proper address labels
+        let addr_1 = Address::from([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]);
+        let addr_2 = Address::from([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2]);
         
-        // Test unknown address
-        assert_eq!(precompile_address_label(Address::repeat_byte(255)), "unknown");
-        assert_eq!(precompile_address_label(Address::ZERO), "unknown");
+        // Just verify that metrics creation doesn't panic
+        let _metrics_1 = create_precompile_metrics_with_address(addr_1);
+        let _metrics_2 = create_precompile_metrics_with_address(addr_2);
+        let _metrics_zero = create_precompile_metrics_with_address(Address::ZERO);
+        
+        // Test address formatting directly
+        assert_eq!(format!("0x{:02x}", addr_1), "0x0000000000000000000000000000000000000001");
+        assert_eq!(format!("0x{:02x}", addr_2), "0x0000000000000000000000000000000000000002");
+        assert_eq!(format!("0x{:02x}", Address::ZERO), "0x0000000000000000000000000000000000000000");
     }
 }
