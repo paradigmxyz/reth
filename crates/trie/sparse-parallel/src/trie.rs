@@ -269,12 +269,9 @@ impl ParallelSparseTrie {
         }
 
         if let SparseNode::Leaf { key, .. } = new_parent_node {
-            let prev_child_subtrie =
-                if let Some(subtrie) = self.lower_subtrie_for_path(prev_child_path) {
-                    subtrie
-                } else {
-                    return;
-                };
+            let Some(prev_child_subtrie) = self.lower_subtrie_for_path(prev_child_path) else {
+                return;
+            };
 
             let mut leaf_full_path = *parent_path;
             leaf_full_path.extend(key);
@@ -525,46 +522,41 @@ impl ParallelSparseTrie {
 
                 // If the remaining child node is not yet revealed then we have to reveal it here,
                 // otherwise it's not possible to know how to collapse the branch.
-                let remaining_child_node = match remaining_child_subtrie
-                    .nodes
-                    .get(&remaining_child_path)
-                    .unwrap()
-                {
-                    SparseNode::Hash(_) => {
-                        trace!(
-                            target: "trie::parallel_sparse",
-                            ?remaining_child_path,
-                            "Retrieving remaining blinded branch child",
-                        );
-                        if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                            provider.blinded_node(&remaining_child_path)?
-                        {
-                            let decoded = TrieNode::decode(&mut &node[..])?;
+                let remaining_child_node =
+                    match remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap() {
+                        SparseNode::Hash(_) => {
                             trace!(
                                 target: "trie::parallel_sparse",
                                 ?remaining_child_path,
-                                ?decoded,
-                                ?tree_mask,
-                                ?hash_mask,
-                                "Revealing remaining blinded branch child"
+                                "Retrieving remaining blinded branch child",
                             );
-                            remaining_child_subtrie.reveal_node(
-                                remaining_child_path,
-                                &decoded,
-                                TrieMasks { hash_mask, tree_mask },
-                            )?;
-                            remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap()
-                        } else {
-                            return Err(SparseTrieErrorKind::Other(Box::<
-                                dyn core::error::Error + Send + Sync,
-                            >::from(
-                                format!("remaining child node {remaining_child_path:?} not found in provider")
-                            ))
-                            .into())
+                            if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                                provider.blinded_node(&remaining_child_path)?
+                            {
+                                let decoded = TrieNode::decode(&mut &node[..])?;
+                                trace!(
+                                    target: "trie::parallel_sparse",
+                                    ?remaining_child_path,
+                                    ?decoded,
+                                    ?tree_mask,
+                                    ?hash_mask,
+                                    "Revealing remaining blinded branch child"
+                                );
+                                remaining_child_subtrie.reveal_node(
+                                    remaining_child_path,
+                                    &decoded,
+                                    TrieMasks { hash_mask, tree_mask },
+                                )?;
+                                remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap()
+                            } else {
+                                return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
+                                    path: remaining_child_path,
+                                }
+                                .into())
+                            }
                         }
-                    }
-                    node => node,
-                };
+                        node => node,
+                    };
 
                 let (new_branch_node, remove_child) = Self::branch_changes_on_leaf_removal(
                     branch_path,
