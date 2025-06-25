@@ -80,9 +80,7 @@ impl<N: RpcNodeCore<Provider: BlockReader>> Clone for EthApi<N> {
     }
 }
 
-impl<N: RpcNodeCore<Provider: BlockReader>> EthApi<N>
-where
-    N::Provider: BlockReaderIdExt,
+impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApi<N>
 {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
     ///
@@ -273,9 +271,7 @@ pub struct EthApiInner<N: RpcNodeCore<Provider: BlockReader>> {
     raw_tx_sender: broadcast::Sender<Bytes>,
 }
 
-impl<N: RpcNodeCore<Provider: BlockReader>> EthApiInner<N>
-where
-    N::Provider: BlockReaderIdExt,
+impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N>
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]

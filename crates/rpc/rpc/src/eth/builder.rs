@@ -13,7 +13,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, StateProviderFactory,
+    BlockReaderIdExt, ProviderBlock, ProviderReceipt, StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use std::sync::Arc;
@@ -29,9 +29,7 @@ type EthStateCacheType<N> = EthStateCache<
 /// This builder type contains all settings to create an [`EthApiInner`] or an [`EthApi`] instance
 /// directly.
 #[derive(Debug)]
-pub struct EthApiBuilder<N: RpcNodeCore<Provider: BlockReader>>
-where
-    N::Provider: BlockReaderIdExt,
+pub struct EthApiBuilder<N: RpcNodeCore<Provider: BlockReaderIdExt>>
 {
     provider: N::Provider,
     pool: N::Pool,
@@ -50,9 +48,7 @@ where
     task_spawner: Box<dyn TaskSpawner + 'static>,
 }
 
-impl<N: RpcNodeCore<Provider: BlockReader>> EthApiBuilder<N>
-where
-    N::Provider: BlockReaderIdExt,
+impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N>
 {
     /// Creates a new `EthApiBuilder` instance.
     pub fn new(
@@ -60,10 +56,7 @@ where
         pool: N::Pool,
         network: N::Network,
         evm_config: N::Evm,
-    ) -> Self
-    where
-        N::Provider: BlockReaderIdExt,
-    {
+    ) -> Self {
         Self {
             provider,
             pool,
@@ -170,8 +163,7 @@ where
     /// This will panic if called outside the context of a Tokio runtime.
     pub fn build_inner(self) -> EthApiInner<N>
     where
-        N::Provider: BlockReaderIdExt
-            + StateProviderFactory
+        N::Provider: StateProviderFactory
             + ChainSpecProvider
             + CanonStateSubscriptions<
                 Primitives: NodePrimitives<
@@ -244,8 +236,7 @@ where
     /// This will panic if called outside the context of a Tokio runtime.
     pub fn build(self) -> EthApi<N>
     where
-        N::Provider: BlockReaderIdExt
-            + StateProviderFactory
+        N::Provider: StateProviderFactory
             + CanonStateSubscriptions<
                 Primitives: NodePrimitives<
                     Block = ProviderBlock<N::Provider>,

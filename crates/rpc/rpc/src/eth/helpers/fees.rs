@@ -19,11 +19,12 @@ where
 
 impl<N> LoadFee for EthApi<N>
 where
-    N: RpcNodeCore<Provider: BlockReader>,
+    N: RpcNodeCore<
+        Provider: BlockReaderIdExt
+            + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+            + StateProviderFactory,
+    >,
     Self: LoadBlock<Provider = N::Provider>,
-    N::Provider: BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + StateProviderFactory,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
