@@ -16,6 +16,8 @@ use tracing::{info, warn};
 pub struct ComparisonGenerator {
     output_dir: PathBuf,
     timestamp: String,
+    baseline_branch_name: String,
+    feature_branch_name: String,
     baseline_results: Option<BenchmarkResults>,
     feature_results: Option<BenchmarkResults>,
 }
@@ -109,6 +111,8 @@ impl ComparisonGenerator {
         Self {
             output_dir: args.output_dir_path(),
             timestamp,
+            baseline_branch_name: args.baseline_branch.clone(),
+            feature_branch_name: args.feature_branch.clone(),
             baseline_results: None,
             feature_results: None,
         }
@@ -123,7 +127,13 @@ impl ComparisonGenerator {
     pub fn add_branch_results(&mut self, branch_type: &str, output_path: &Path) -> Result<()> {
         info!("Loading benchmark results for {} branch", branch_type);
 
-        let results = self.load_benchmark_results(branch_type, output_path)?;
+        let branch_name = match branch_type {
+            "baseline" => &self.baseline_branch_name,
+            "feature" => &self.feature_branch_name,
+            _ => return Err(eyre!("Unknown branch type: {}", branch_type)),
+        };
+
+        let results = self.load_benchmark_results(branch_name, output_path)?;
 
         match branch_type {
             "baseline" => self.baseline_results = Some(results),
@@ -398,8 +408,19 @@ impl ComparisonGenerator {
 
     /// Print comparison summary to console
     fn print_comparison_summary(&self, report: &ComparisonReport) {
+        // Parse and format timestamp nicely
+        let formatted_timestamp = if let Ok(dt) = chrono::DateTime::parse_from_str(
+            &format!("{} +0000", report.timestamp.replace('_', " ")),
+            "%Y%m%d %H%M%S %z",
+        ) {
+            dt.format("%Y-%m-%d %H:%M:%S UTC").to_string()
+        } else {
+            // Fallback to original if parsing fails
+            report.timestamp.clone()
+        };
+
         println!("\n=== BENCHMARK COMPARISON SUMMARY ===");
-        println!("Timestamp: {}", report.timestamp);
+        println!("Timestamp: {}", formatted_timestamp);
         println!("Baseline: {}", report.baseline.branch_name);
         println!("Feature:  {}", report.feature.branch_name);
         println!();

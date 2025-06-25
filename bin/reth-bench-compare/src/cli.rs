@@ -173,7 +173,7 @@ async fn run_benchmark_workflow(
         // Compile reth and reth-bench
         if !args.skip_compilation {
             git_manager.compile_reth()?;
-            // git_manager.compile_reth_bench()?;
+            git_manager.compile_reth_bench()?;
         }
 
         // Start reth node
