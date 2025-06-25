@@ -1019,6 +1019,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// The earliest block that is still available in the static files is `expired_history_height +
     /// 1`.
+    ///
+    /// Returns `0` if no history has been expired.
     pub fn expired_history_height(&self) -> BlockNumber {
         self.expired_history_height.load(std::sync::atomic::Ordering::Relaxed)
     }
