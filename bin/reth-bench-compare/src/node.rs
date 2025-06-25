@@ -16,6 +16,7 @@ pub struct NodeManager {
     datadir: String,
     jwt_secret: String,
     metrics_port: u16,
+    chain: String,
     http_client: Client,
 }
 
@@ -23,9 +24,10 @@ impl NodeManager {
     /// Create a new NodeManager with configuration from CLI args
     pub fn new(args: &Args) -> Self {
         Self {
-            datadir: args.datadir.clone(),
+            datadir: args.datadir_path().to_string_lossy().to_string(),
             jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
             metrics_port: args.metrics_port,
+            chain: args.chain.clone(),
             http_client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
@@ -51,6 +53,8 @@ impl NodeManager {
         let child = Command::new("./target/profiling/reth")
             .args([
                 "node",
+                "--chain",
+                &self.chain,
                 "--engine.accept-execution-requests-hash",
                 "--metrics",
                 &format!("0.0.0.0:{}", self.metrics_port),
@@ -151,6 +155,8 @@ impl NodeManager {
                 "unwind",
                 "to-block",
                 &block_number.to_string(),
+                "--chain",
+                &self.chain,
                 "--datadir",
                 &self.datadir,
             ])

@@ -29,8 +29,8 @@ pub struct Args {
     pub feature_branch: String,
 
     /// Reth datadir path
-    #[arg(long, value_name = "PATH", default_value = "~/.local/share/reth/mainnet")]
-    pub datadir: String,
+    #[arg(long, value_name = "PATH")]
+    pub datadir: Option<String>,
 
     /// Number of blocks to benchmark
     #[arg(long, value_name = "N", default_value = "100")]
@@ -60,6 +60,10 @@ pub struct Args {
     #[arg(long, value_name = "PORT", default_value = "5005")]
     pub metrics_port: u16,
 
+    /// Chain to use for reth operations (mainnet, sepolia, holesky, etc.)
+    #[arg(long, value_name = "CHAIN", default_value = "mainnet")]
+    pub chain: String,
+
     #[command(flatten)]
     pub logs: LogArgs,
 }
@@ -76,14 +80,18 @@ impl Args {
         if let Some(ref path) = self.jwt_secret {
             path.clone()
         } else {
-            let expanded_datadir = shellexpand::tilde(&self.datadir);
-            PathBuf::from(expanded_datadir.as_ref()).join("jwt.hex")
+            self.datadir_path().join("jwt.hex")
         }
     }
 
-    /// Get the expanded datadir path
+    /// Get the expanded datadir path, defaulting based on chain
     pub fn datadir_path(&self) -> PathBuf {
-        let expanded = shellexpand::tilde(&self.datadir);
+        let datadir = if let Some(ref path) = self.datadir {
+            path.clone()
+        } else {
+            format!("~/.local/share/reth/{}", self.chain)
+        };
+        let expanded = shellexpand::tilde(&datadir);
         PathBuf::from(expanded.as_ref())
     }
 
