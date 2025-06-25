@@ -1,4 +1,4 @@
-use crate::{trie::StatelessTrie, witness_db::WitnessDatabase, ExecutionWitness};
+use crate::{track_cycles, trie::StatelessTrie, witness_db::WitnessDatabase, ExecutionWitness};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
