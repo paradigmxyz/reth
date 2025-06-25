@@ -15,15 +15,6 @@ use std::{
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 10_000;
 
-/// Create precompile metrics with address label.
-/// Uses 0x prefix with at least two hex digits for the address label.
-pub(crate) fn create_precompile_metrics_with_address(address: Address) -> CachedPrecompileMetrics {
-    let address_label = format!("0x{:02x}", address);
-    // Leak the string to get a 'static reference for the metrics
-    let static_label: &'static str = Box::leak(address_label.into_boxed_str());
-    CachedPrecompileMetrics::new_with_labels(&[("address", static_label)])
-}
-
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(HashMap<Address, PrecompileCache<S>>)
@@ -369,17 +360,11 @@ mod tests {
     }
 
     #[test]
-    fn test_precompile_metrics_creation() {
-        // Test that metrics can be created with proper address labels
+    fn test_precompile_address_formatting() {
+        // Test address formatting
         let addr_1 = Address::from([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]);
         let addr_2 = Address::from([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2]);
         
-        // Just verify that metrics creation doesn't panic
-        let _metrics_1 = create_precompile_metrics_with_address(addr_1);
-        let _metrics_2 = create_precompile_metrics_with_address(addr_2);
-        let _metrics_zero = create_precompile_metrics_with_address(Address::ZERO);
-        
-        // Test address formatting directly
         assert_eq!(format!("0x{:02x}", addr_1), "0x0000000000000000000000000000000000000001");
         assert_eq!(format!("0x{:02x}", addr_2), "0x0000000000000000000000000000000000000002");
         assert_eq!(format!("0x{:02x}", Address::ZERO), "0x0000000000000000000000000000000000000000");
