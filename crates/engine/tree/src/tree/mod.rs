@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_evm::block::BlockExecutor;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -18,7 +18,7 @@ use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
-use precompile_cache::{create_precompile_metrics_with_address, CachedPrecompile, PrecompileCacheMap};
+use precompile_cache::{create_precompile_metrics_with_address, CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -50,6 +50,7 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use state::TreeState;
 use std::{
     borrow::Cow,
+    collections::HashMap,
     fmt::Debug,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -276,6 +277,8 @@ where
     evm_config: C,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
+    /// Metrics for precompile cache, stored per address to avoid re-allocation.
+    precompile_cache_metrics: HashMap<Address, CachedPrecompileMetrics>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -370,6 +373,7 @@ where
             payload_processor,
             evm_config,
             precompile_cache_map,
+            precompile_cache_metrics: HashMap::new(),
         }
     }
 
@@ -2438,15 +2442,24 @@ where
         let mut executor = self.evm_config.executor_for_block(&mut db, block);
 
         if !self.config.precompile_cache_disabled() {
+            // Move out the metrics map temporarily to use in closure
+            let mut precompile_cache_metrics = std::mem::take(&mut self.precompile_cache_metrics);
+            
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
-                let precompile_metrics = create_precompile_metrics_with_address(*address);
+                let metrics = precompile_cache_metrics
+                    .entry(*address)
+                    .or_insert_with(|| create_precompile_metrics_with_address(*address))
+                    .clone();
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
                     *self.evm_config.evm_env(block.header()).spec_id(),
-                    Some(precompile_metrics),
+                    Some(metrics),
                 )
             });
+            
+            // Move the metrics map back
+            self.precompile_cache_metrics = precompile_cache_metrics;
         }
 
         let execution_start = Instant::now();
