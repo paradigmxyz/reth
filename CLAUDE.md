@@ -162,6 +162,7 @@ Based on PR patterns, avoid:
 2. **Mixing unrelated changes**: One logical change per PR
 3. **Ignoring CI failures**: All checks must pass
 4. **Incomplete implementations**: Finish features before submitting
+5. **Modifying libmdbx sources**: Never modify files in `crates/storage/libmdbx-rs/mdbx-sys/libmdbx/` - this is vendored third-party code
 
 ### CI Requirements
 
