@@ -2442,17 +2442,11 @@ where
         let mut executor = self.evm_config.executor_for_block(&mut db, block);
 
         if !self.config.precompile_cache_disabled() {
-            // Move out the metrics map temporarily to use in closure
-            let mut precompile_cache_metrics = std::mem::take(&mut self.precompile_cache_metrics);
-            
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
-                let metrics = precompile_cache_metrics
+                let metrics = self
+                    .precompile_cache_metrics
                     .entry(*address)
-                    .or_insert_with(|| {
-                        CachedPrecompileMetrics::new_with_labels(&[
-                            ("address", format!("0x{:02x}", address))
-                        ])
-                    })
+                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
                     .clone();
                 CachedPrecompile::wrap(
                     precompile,
@@ -2461,9 +2455,6 @@ where
                     Some(metrics),
                 )
             });
-            
-            // Move the metrics map back
-            self.precompile_cache_metrics = precompile_cache_metrics;
         }
 
         let execution_start = Instant::now();
