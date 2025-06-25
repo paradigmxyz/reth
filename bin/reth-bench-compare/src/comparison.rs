@@ -556,23 +556,10 @@ impl ComparisonGenerator {
 
         // Now create the chart with proper y-axis range
         let mut chart = ChartBuilder::on(&upper)
-            .caption(
-                &format!(
-                    "NewPayload Latency Percent Difference Histogram\n({} vs {})",
-                    self.baseline_branch_name, self.feature_branch_name
-                ),
-                ("sans-serif", 30),
-            )
             .margin(10)
-            .x_label_area_size(60)
-            .y_label_area_size(80)
             .build_cartesian_2d(min_diff as i32..max_diff as i32, 0u32..max_bin_count)?;
 
-        chart
-            .configure_mesh()
-            .x_desc("Percent Difference (%)")
-            .y_desc("Number of Blocks")
-            .draw()?;
+        chart.configure_mesh().draw()?;
 
         // Draw histogram bars
         chart.draw_series(bins.iter().enumerate().map(|(i, &count)| {
@@ -600,13 +587,10 @@ impl ComparisonGenerator {
             valid_baseline.iter().chain(valid_feature.iter()).fold(0.0f64, |a, &b| a.max(b)) * 1.1;
 
         let mut chart = ChartBuilder::on(&lower)
-            .caption("NewPayload Latency vs Block Number", ("sans-serif", 30))
             .margin(10)
-            .x_label_area_size(60)
-            .y_label_area_size(80)
             .build_cartesian_2d(min_block..max_block, 0.0..max_latency)?;
 
-        chart.configure_mesh().x_desc("Block Number").y_desc("NewPayload Latency (ns)").draw()?;
+        chart.configure_mesh().draw()?;
 
         // Draw baseline line using individual points connected with lines
         let baseline_points: Vec<_> = block_numbers
@@ -614,14 +598,11 @@ impl ComparisonGenerator {
             .zip(valid_baseline.iter())
             .map(|(&block, &latency)| (block, latency))
             .collect();
-        
-        chart
-            .draw_series(std::iter::once(PathElement::new(
-                baseline_points.clone(),
-                BLUE.stroke_width(2),
-            )))?
-            .label(&format!("Baseline ({})", self.baseline_branch_name))
-            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], BLUE.stroke_width(2)));
+
+        chart.draw_series(std::iter::once(PathElement::new(
+            baseline_points.clone(),
+            BLUE.stroke_width(2),
+        )))?;
 
         // Draw feature line using individual points connected with lines
         let feature_points: Vec<_> = block_numbers
@@ -629,16 +610,11 @@ impl ComparisonGenerator {
             .zip(valid_feature.iter())
             .map(|(&block, &latency)| (block, latency))
             .collect();
-            
-        chart
-            .draw_series(std::iter::once(PathElement::new(
-                feature_points,
-                RED.stroke_width(2),
-            )))?
-            .label(&format!("Feature ({})", self.feature_branch_name))
-            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], RED.stroke_width(2)));
 
-        chart.configure_series_labels().draw()?;
+        chart
+            .draw_series(std::iter::once(PathElement::new(feature_points, RED.stroke_width(2))))?;
+
+        // Legend configuration removed to avoid font rendering issues
 
         root.present()?;
         info!("Chart saved to: {:?}", chart_path);
