@@ -7380,7 +7380,6 @@ dependencies = [
  "clap",
  "csv",
  "ctrlc",
- "dirs-next",
  "eyre",
  "libc",
  "plotters",
@@ -7393,8 +7392,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
- "signal-hook",
- "tempfile",
  "tokio",
  "tracing",
 ]

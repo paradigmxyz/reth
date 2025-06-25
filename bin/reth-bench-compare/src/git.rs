@@ -1,8 +1,8 @@
 //! Git operations for branch management and compilation.
 
 use eyre::{eyre, Result, WrapErr};
-use std::process::{Command, Stdio};
-use tracing::{debug, info, warn};
+use std::process::Command;
+use tracing::{info, warn};
 
 /// Manages git operations for branch switching and compilation
 #[derive(Debug, Clone)]

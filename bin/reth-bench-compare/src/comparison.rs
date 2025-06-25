@@ -473,8 +473,8 @@ impl ComparisonGenerator {
         println!();
     }
 
-    /// Generate comparison charts similar to the Python script
-    async fn generate_comparison_charts(&self, report: &ComparisonReport) -> Result<()> {
+    /// Generate comparison charts with histogram and latency plots
+    async fn generate_comparison_charts(&self, _report: &ComparisonReport) -> Result<()> {
         info!("Generating comparison charts...");
 
         let output_dir = self.output_dir.join(&self.timestamp);
@@ -491,7 +491,7 @@ impl ComparisonGenerator {
         let baseline_data = &baseline_results.combined_latency_data;
         let feature_data = &feature_results.combined_latency_data;
 
-        // Calculate percent differences - using new_payload_latency like Python script uses total_latency
+        // Calculate percent differences using new_payload_latency
         let mut percent_diffs = Vec::new();
         let mut valid_baseline = Vec::new();
         let mut valid_feature = Vec::new();
@@ -529,18 +529,18 @@ impl ComparisonGenerator {
             sorted_diffs[sorted_diffs.len() / 2]
         };
 
-        // Create the chart with high resolution like Python script (dpi=300)
+        // Create the chart with high resolution
         let root = BitMapBackend::new(&chart_path, (1200, 1200)).into_drawing_area();
         root.fill(&WHITE)?;
         let areas = root.split_evenly((2, 1));
         let upper = &areas[0];
         let lower = &areas[1];
 
-        // Top chart: Histogram of percent differences with 1% buckets like Python script
+        // Top chart: Histogram of percent differences with 1% buckets
         let min_diff = percent_diffs.iter().fold(f64::INFINITY, |a, &b| a.min(b)).floor();
         let max_diff = percent_diffs.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)).ceil();
         
-        // Use 1% buckets like Python script: bins = np.arange(min_diff, max_diff + 1, 1)
+        // Use 1% buckets for histogram bins
         let bins_range = ((max_diff - min_diff) as i32).max(1);
         let bin_edges: Vec<f64> = (0..=bins_range).map(|i| min_diff + i as f64).collect();
         let bin_count = bin_edges.len() - 1;
@@ -563,13 +563,13 @@ impl ComparisonGenerator {
             .margin(20)
             .build_cartesian_2d(min_diff..max_diff, 0u32..max_bin_count)?;
 
-        // Configure mesh with grid (alpha=0.3 like Python script)
+        // Configure mesh with grid (alpha=0.3 transparency)
         chart.configure_mesh()
             .light_line_style(TRANSPARENT)
             .bold_line_style(&WHITE.mix(0.3))
             .draw()?;
 
-        // Draw histogram bars with black edges and alpha=0.7 like Python script
+        // Draw histogram bars with black edges and alpha=0.7 transparency
         chart.draw_series(bins.iter().enumerate().map(|(i, &count)| {
             let left = bin_edges[i];
             let right = bin_edges[i + 1];
@@ -579,13 +579,13 @@ impl ComparisonGenerator {
             )
         }))?;
 
-        // Add mean line (red dashed like Python script)
+        // Add mean line (red)
         chart.draw_series(std::iter::once(PathElement::new(
             vec![(mean_diff, 0u32), (mean_diff, max_bin_count)],
             RED.stroke_width(2),
         )))?;
 
-        // Add median line (orange dashed like Python script)  
+        // Add median line (orange)  
         chart.draw_series(std::iter::once(PathElement::new(
             vec![(median_diff, 0u32), (median_diff, max_bin_count)],
             RGBColor(255, 165, 0).stroke_width(2), // Orange color
@@ -601,13 +601,13 @@ impl ComparisonGenerator {
             .margin(20)
             .build_cartesian_2d(min_block..max_block, 0.0..max_latency)?;
 
-        // Configure mesh with grid (alpha=0.3 like Python script)
+        // Configure mesh with grid (alpha=0.3 transparency)
         chart.configure_mesh()
             .light_line_style(TRANSPARENT)
             .bold_line_style(&WHITE.mix(0.3))
             .draw()?;
 
-        // Draw baseline line (blue with alpha=0.7 like Python script)
+        // Draw baseline line (blue with alpha=0.7 transparency)
         let baseline_points: Vec<_> = block_numbers
             .iter()
             .zip(valid_baseline.iter())
@@ -619,7 +619,7 @@ impl ComparisonGenerator {
             BLUE.mix(0.7).stroke_width(2),
         )))?;
 
-        // Draw feature line (red with alpha=0.7 like Python script)
+        // Draw feature line (red with alpha=0.7 transparency)
         let feature_points: Vec<_> = block_numbers
             .iter()
             .zip(valid_feature.iter())
@@ -634,7 +634,7 @@ impl ComparisonGenerator {
         root.present()?;
         info!("Chart saved to: {:?}", chart_path);
 
-        // Print statistics like Python script
+        // Print statistics
         println!("\nChart Statistics:");
         println!("  Mean percent difference: {:.2}%", mean_diff);
         println!("  Median percent difference: {:.2}%", median_diff);

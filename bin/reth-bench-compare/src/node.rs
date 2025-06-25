@@ -4,7 +4,7 @@ use crate::cli::Args;
 use eyre::{eyre, Result, WrapErr};
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::{process::Stdio, time::Duration};
+use std::time::Duration;
 use tokio::{
     io::{AsyncBufReadExt, BufReader as AsyncBufReader},
     time::{sleep, timeout},
