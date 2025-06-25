@@ -679,22 +679,12 @@ struct SparseSubtrieInner {
 impl SparseSubtrieInner {
     /// Computes the RLP encoding and its hash for a single (trie node)[`SparseNode`].
     ///
-    /// # Node Processing Details
-    ///
-    /// - **Empty/Hash nodes**: Return pre-computed or cached RLP immediately
-    /// - **Pre-computed nodes**: If the node hash is already computed, and the node path is not in
-    ///   the prefix set, return the pre-computed RLP
-    /// - **Leaf nodes**: Encode the key-value pair and update the node's hash
-    /// - **Extension nodes**: May need to defer processing until child is computed, on the next
-    ///   invocation update the node's hash.
-    /// - **Branch nodes**: May need to defer processing until all children are computed, on the
-    ///   next invocation update the node's hash.
-    ///
     /// # Deferred Processing
     ///
-    /// When a node depends on child nodes that haven't been computed yet, the function pushes
-    /// the current node back onto the path stack along with its children, then returns early.
-    /// This allows the iterative algorithm to process children first before retrying the parent.
+    /// When an extension or a branch node depends on child nodes that haven't been computed yet,
+    /// the function pushes the current node back onto the path stack along with its children,
+    /// then returns early. This allows the iterative algorithm to process children first before
+    /// retrying the parent.
     ///
     /// # Parameters
     ///
@@ -730,20 +720,26 @@ impl SparseSubtrieInner {
 
         // Check if the path is in the prefix set.
         // First, check the cached value. If it's `None`, then check the prefix set, and update
-        // the cached value.        let prefix_set_contains =
+        // the cached value.
         let mut prefix_set_contains = |path: &Nibbles| {
             *stack_item.is_in_prefix_set.get_or_insert_with(|| prefix_set.contains(path))
         };
 
         let (rlp_node, node_type) = match node {
             SparseNode::Empty => (RlpNode::word_rlp(&EMPTY_ROOT_HASH), SparseNodeType::Empty),
-            SparseNode::Hash(hash) => (RlpNode::word_rlp(hash), SparseNodeType::Hash),
+            SparseNode::Hash(hash) => {
+                // Return pre-computed hash of a blinded node immediately
+                (RlpNode::word_rlp(hash), SparseNodeType::Hash)
+            }
             SparseNode::Leaf { key, hash } => {
                 let mut path = path;
                 path.extend(key);
                 if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
+                    // If the node hash is already computed, and the node path is not in
+                    // the prefix set, return the pre-computed hash
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 } else {
+                    // Encode the leaf node and update its hash
                     let value = self.values.get(&path).unwrap();
                     self.buffers.rlp_buf.clear();
                     let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
@@ -757,11 +753,15 @@ impl SparseSubtrieInner {
                 if let Some((hash, store_in_db_trie)) =
                     hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                 {
+                    // If the node hash is already computed, and the node path is not in
+                    // the prefix set, return the pre-computed hash
                     (
                         RlpNode::word_rlp(&hash),
                         SparseNodeType::Extension { store_in_db_trie: Some(store_in_db_trie) },
                     )
                 } else if self.buffers.rlp_node_stack.last().is_some_and(|e| e.path == child_path) {
+                    // Top of the stack has the child node, we can encode the extension node and
+                    // update its hash
                     let RlpNodeStackItem { path: _, rlp_node: child, node_type: child_node_type } =
                         self.buffers.rlp_node_stack.pop().unwrap();
                     self.buffers.rlp_buf.clear();
@@ -790,7 +790,8 @@ impl SparseSubtrieInner {
                         },
                     )
                 } else {
-                    // need to get rlp node for child first
+                    // Need to defer processing until child is computed, on the next
+                    // invocation update the node's hash.
                     self.buffers.path_stack.extend([
                         RlpNodePathStackItem {
                             path,
@@ -805,6 +806,8 @@ impl SparseSubtrieInner {
                 if let Some((hash, store_in_db_trie)) =
                     hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                 {
+                    // If the node hash is already computed, and the node path is not in
+                    // the prefix set, return the pre-computed hash
                     self.buffers.rlp_node_stack.push(RlpNodeStackItem {
                         path,
                         rlp_node: RlpNode::word_rlp(&hash),
@@ -814,6 +817,7 @@ impl SparseSubtrieInner {
                     });
                     return
                 }
+
                 let retain_updates = self.updates.is_some() && prefix_set_contains(&path);
 
                 self.buffers.branch_child_buf.clear();
@@ -889,6 +893,8 @@ impl SparseSubtrieInner {
                         self.buffers.branch_value_stack_buf[original_idx] = child;
                         added_children = true;
                     } else {
+                        // Need to defer processing until children are computed, on the next
+                        // invocation update the node's hash.
                         debug_assert!(!added_children);
                         self.buffers.path_stack.push(RlpNodePathStackItem {
                             path,
@@ -912,6 +918,8 @@ impl SparseSubtrieInner {
                     "Branch node masks"
                 );
 
+                // Top of the stack has all children node, we can encode the branch node and
+                // update its hash
                 self.buffers.rlp_buf.clear();
                 let branch_node_ref =
                     BranchNodeRef::new(&self.buffers.branch_value_stack_buf, *state_mask);
