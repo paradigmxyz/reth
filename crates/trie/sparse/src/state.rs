@@ -1,6 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory, DefaultBlindedProviderFactory},
-    LeafLookup, RevealedSparseTrie, SparseTrie, SparseTrieState, TrieMasks,
+    LeafLookup, SerialSparseTrie, SparseTrie, SparseTrieState, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -163,7 +163,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     }
 
     /// Returns reference to state trie if it was revealed.
-    pub const fn state_trie_ref(&self) -> Option<&RevealedSparseTrie<F::AccountNodeProvider>> {
+    pub const fn state_trie_ref(&self) -> Option<&SerialSparseTrie<F::AccountNodeProvider>> {
         self.state.as_revealed_ref()
     }
 
@@ -171,7 +171,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn storage_trie_ref(
         &self,
         address: &B256,
-    ) -> Option<&RevealedSparseTrie<F::StorageNodeProvider>> {
+    ) -> Option<&SerialSparseTrie<F::StorageNodeProvider>> {
         self.storages.get(address).and_then(|e| e.as_revealed_ref())
     }
 
@@ -179,7 +179,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     pub fn storage_trie_mut(
         &mut self,
         address: &B256,
-    ) -> Option<&mut RevealedSparseTrie<F::StorageNodeProvider>> {
+    ) -> Option<&mut SerialSparseTrie<F::StorageNodeProvider>> {
         self.storages.get_mut(address).and_then(|e| e.as_revealed_mut())
     }
 
@@ -655,7 +655,7 @@ impl<F: BlindedProviderFactory> SparseStateTrie<F> {
     /// If the trie is not revealed yet, its root will be revealed using the blinded node provider.
     fn revealed_trie_mut(
         &mut self,
-    ) -> SparseStateTrieResult<&mut RevealedSparseTrie<F::AccountNodeProvider>> {
+    ) -> SparseStateTrieResult<&mut SerialSparseTrie<F::AccountNodeProvider>> {
         match self.state {
             SparseTrie::Blind | SparseTrie::AllocatedEmpty { .. } => {
                 let (root_node, hash_mask, tree_mask) = self
