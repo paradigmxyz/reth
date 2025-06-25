@@ -6,7 +6,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
 use reth_node_api::{AddOnsContext, FullNodeComponents};
 use reth_payload_primitives::PayloadAttributesBuilder;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// The attributes builder for local Ethereum payload.
 #[derive(Debug)]
@@ -97,5 +97,24 @@ impl<N: FullNodeComponents> LocalPayloadAttributesAddOn<N>
     ) -> eyre::Result<impl PayloadAttributesBuilder<Self::PayloadAttributes>> {
         Err(eyre::eyre!("Not supported"))
             .map(|_: ()| LocalPayloadAttributesBuilder::new(Arc::new(())))
+    }
+}
+
+/// Generic payload attributes builder that always returns an error
+///
+/// Helpful for use cases where local payload building is not supported
+/// or not implemented.
+#[derive(Debug, Clone)]
+pub struct UnsupportedPayloadAttributesBuilder<T> {
+    _phantom: PhantomData<T>,
+}
+
+impl<T: Send + Sync + 'static> PayloadAttributesBuilder<T>
+    for UnsupportedPayloadAttributesBuilder<T>
+{
+    fn build(&self, _timestamp: u64) -> T {
+        unreachable!(
+            "UnsupportedPayloadAttributesBuilder should never be used to build payload attributes"
+        )
     }
 }
