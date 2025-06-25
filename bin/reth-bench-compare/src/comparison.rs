@@ -491,7 +491,7 @@ impl ComparisonGenerator {
         let baseline_data = &baseline_results.combined_latency_data;
         let feature_data = &feature_results.combined_latency_data;
 
-        // Calculate percent differences
+        // Calculate percent differences - using new_payload_latency like Python script uses total_latency
         let mut percent_diffs = Vec::new();
         let mut valid_baseline = Vec::new();
         let mut valid_feature = Vec::new();
@@ -499,8 +499,8 @@ impl ComparisonGenerator {
 
         let min_len = baseline_data.len().min(feature_data.len());
         for i in 0..min_len {
-            let baseline_latency = baseline_data[i].new_payload_latency as f64;
-            let feature_latency = feature_data[i].new_payload_latency as f64;
+            let baseline_latency = baseline_data[i].new_payload_latency as f64 / 1000.0; // Convert to ms
+            let feature_latency = feature_data[i].new_payload_latency as f64 / 1000.0; // Convert to ms
 
             if baseline_latency > 0.0 {
                 let percent_diff =
@@ -529,55 +529,66 @@ impl ComparisonGenerator {
             sorted_diffs[sorted_diffs.len() / 2]
         };
 
-        // Create the chart
+        // Create the chart with high resolution like Python script (dpi=300)
         let root = BitMapBackend::new(&chart_path, (1200, 1200)).into_drawing_area();
         root.fill(&WHITE)?;
         let areas = root.split_evenly((2, 1));
         let upper = &areas[0];
         let lower = &areas[1];
 
-        // Top chart: Histogram of percent differences
+        // Top chart: Histogram of percent differences with 1% buckets like Python script
         let min_diff = percent_diffs.iter().fold(f64::INFINITY, |a, &b| a.min(b)).floor();
         let max_diff = percent_diffs.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)).ceil();
-        let range = (max_diff - min_diff).max(1.0);
-        let bin_count = (range as usize).min(100).max(10); // Limit bins to reasonable range
+        
+        // Use 1% buckets like Python script: bins = np.arange(min_diff, max_diff + 1, 1)
+        let bins_range = ((max_diff - min_diff) as i32).max(1);
+        let bin_edges: Vec<f64> = (0..=bins_range).map(|i| min_diff + i as f64).collect();
+        let bin_count = bin_edges.len() - 1;
 
-        // Create histogram bins first
-        let bin_width = range / bin_count as f64;
+        // Create histogram bins with 1% width
         let mut bins = vec![0u32; bin_count];
         for &diff in &percent_diffs {
-            let bin_idx = ((diff - min_diff) / bin_width) as usize;
-            if bin_idx < bins.len() {
-                bins[bin_idx] += 1;
+            for i in 0..bin_count {
+                if diff >= bin_edges[i] && diff < bin_edges[i + 1] {
+                    bins[i] += 1;
+                    break;
+                }
             }
         }
 
         let max_bin_count = *bins.iter().max().unwrap_or(&1);
 
-        // Now create the chart with proper y-axis range
+        // Create histogram chart
         let mut chart = ChartBuilder::on(&upper)
-            .margin(10)
-            .build_cartesian_2d(min_diff as i32..max_diff as i32, 0u32..max_bin_count)?;
+            .margin(20)
+            .build_cartesian_2d(min_diff..max_diff, 0u32..max_bin_count)?;
 
-        chart.configure_mesh().draw()?;
+        // Configure mesh with grid (alpha=0.3 like Python script)
+        chart.configure_mesh()
+            .light_line_style(TRANSPARENT)
+            .bold_line_style(&WHITE.mix(0.3))
+            .draw()?;
 
-        // Draw histogram bars
+        // Draw histogram bars with black edges and alpha=0.7 like Python script
         chart.draw_series(bins.iter().enumerate().map(|(i, &count)| {
-            let x = min_diff + (i as f64 + 0.5) * bin_width;
+            let left = bin_edges[i];
+            let right = bin_edges[i + 1];
             Rectangle::new(
-                [(x as i32 - bin_width as i32 / 2, 0), (x as i32 + bin_width as i32 / 2, count)],
-                BLUE.filled(),
+                [(left, 0), (right, count)],
+                BLUE.mix(0.7).filled().stroke_width(1),
             )
         }))?;
 
-        // Add mean and median lines
+        // Add mean line (red dashed like Python script)
         chart.draw_series(std::iter::once(PathElement::new(
-            vec![(mean_diff as i32, 0), (mean_diff as i32, max_bin_count)],
+            vec![(mean_diff, 0u32), (mean_diff, max_bin_count)],
             RED.stroke_width(2),
         )))?;
+
+        // Add median line (orange dashed like Python script)  
         chart.draw_series(std::iter::once(PathElement::new(
-            vec![(median_diff as i32, 0), (median_diff as i32, max_bin_count)],
-            MAGENTA.stroke_width(2),
+            vec![(median_diff, 0u32), (median_diff, max_bin_count)],
+            RGBColor(255, 165, 0).stroke_width(2), // Orange color
         )))?;
 
         // Bottom chart: Latency vs Block Number
@@ -587,12 +598,16 @@ impl ComparisonGenerator {
             valid_baseline.iter().chain(valid_feature.iter()).fold(0.0f64, |a, &b| a.max(b)) * 1.1;
 
         let mut chart = ChartBuilder::on(&lower)
-            .margin(10)
+            .margin(20)
             .build_cartesian_2d(min_block..max_block, 0.0..max_latency)?;
 
-        chart.configure_mesh().draw()?;
+        // Configure mesh with grid (alpha=0.3 like Python script)
+        chart.configure_mesh()
+            .light_line_style(TRANSPARENT)
+            .bold_line_style(&WHITE.mix(0.3))
+            .draw()?;
 
-        // Draw baseline line using individual points connected with lines
+        // Draw baseline line (blue with alpha=0.7 like Python script)
         let baseline_points: Vec<_> = block_numbers
             .iter()
             .zip(valid_baseline.iter())
@@ -600,26 +615,26 @@ impl ComparisonGenerator {
             .collect();
 
         chart.draw_series(std::iter::once(PathElement::new(
-            baseline_points.clone(),
-            BLUE.stroke_width(2),
+            baseline_points,
+            BLUE.mix(0.7).stroke_width(2),
         )))?;
 
-        // Draw feature line using individual points connected with lines
+        // Draw feature line (red with alpha=0.7 like Python script)
         let feature_points: Vec<_> = block_numbers
             .iter()
             .zip(valid_feature.iter())
             .map(|(&block, &latency)| (block, latency))
             .collect();
 
-        chart
-            .draw_series(std::iter::once(PathElement::new(feature_points, RED.stroke_width(2))))?;
-
-        // Legend configuration removed to avoid font rendering issues
+        chart.draw_series(std::iter::once(PathElement::new(
+            feature_points,
+            RED.mix(0.7).stroke_width(2),
+        )))?;
 
         root.present()?;
         info!("Chart saved to: {:?}", chart_path);
 
-        // Print statistics
+        // Print statistics like Python script
         println!("\nChart Statistics:");
         println!("  Mean percent difference: {:.2}%", mean_diff);
         println!("  Median percent difference: {:.2}%", median_diff);
