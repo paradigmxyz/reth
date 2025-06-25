@@ -274,6 +274,21 @@ jobs:
   deny:
     uses: ithacaxyz/ci/.github/workflows/deny.yml@main
 
+  openvm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-02-14
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - run: cargo install --locked --git http://github.com/openvm-org/openvm.git --tag v1.2.0 cargo-openvm
+      - name: verify openvm compatibility
+        run: cargo openvm build --manifest-dir crates/scroll/openvm-compat
+
   lint-success:
     name: lint success
     runs-on: ubuntu-latest

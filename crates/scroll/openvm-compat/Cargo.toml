@@ -1,0 +1,31 @@
+[package]
+name = "openvm-compat"
+version = "0.0.1"
+edition = "2024"
+
+[workspace]
+
+[dependencies]
+openvm = { git = "https://github.com/openvm-org/openvm.git", tag = "v1.2.0", default-features = false }
+
+reth-chainspec = { path = "../../chainspec", default-features = false }
+reth-evm = { path = "../../evm/evm", default-features = false }
+reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false }
+reth-ethereum-forks = { path = "../../ethereum/hardforks", default-features = false }
+reth-execution-types = { path = "../../evm/execution-types", default-features = false }
+reth-primitives = { path = "../../primitives", default-features = false }
+reth-primitives-traits = { path = "../../primitives-traits", default-features = false }
+reth-storage-errors = { path = "../../storage/errors", default-features = false }
+reth-trie = { path = "../../trie/trie", default-features = false }
+reth-trie-sparse = { path = "../../trie/sparse", default-features = false }
+
+reth-scroll-chainspec = { path = "../chainspec", default-features = false }
+reth-scroll-evm = { path = "../evm", default-features = false }
+reth-scroll-forks = { path = "../hardforks", default-features = false }
+reth-scroll-primitives = { path = "../primitives", default-features = false }
+
+scroll-alloy-consensus = { path = "../alloy/consensus", default-features = false }
+scroll-alloy-rpc-types = { path = "../alloy/rpc-types", default-features = false }
+
+[patch.crates-io]
+revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth-v74" }

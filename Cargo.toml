@@ -455,7 +455,7 @@ reth-testing-utils = { path = "testing/testing-utils" }
 reth-tokio-util = { path = "crates/tokio-util" }
 reth-tracing = { path = "crates/tracing" }
 reth-transaction-pool = { path = "crates/transaction-pool" }
-reth-trie = { path = "crates/trie/trie" }
+reth-trie = { path = "crates/trie/trie", default-features = false }
 reth-trie-common = { path = "crates/trie/common", default-features = false }
 reth-trie-db = { path = "crates/trie/db" }
 reth-trie-parallel = { path = "crates/trie/parallel" }
@@ -531,7 +531,7 @@ scroll-alloy-provider = { path = "crates/scroll/alloy/provider" }
 reth-scroll-chainspec = { path = "crates/scroll/chainspec", default-features = false }
 reth-scroll-cli = { path = "crates/scroll/cli" }
 reth-scroll-consensus = { path = "crates/scroll/consensus" }
-reth-scroll-evm = { path = "crates/scroll/evm" }
+reth-scroll-evm = { path = "crates/scroll/evm", default-features = false }
 reth-scroll-engine-primitives = { path = "crates/scroll/engine-primitives" }
 reth-scroll-forks = { path = "crates/scroll/hardforks", default-features = false }
 reth-scroll-node = { path = "crates/scroll/node" }
