@@ -4,7 +4,8 @@ use crate::cli::Args;
 use chrono::{DateTime, Utc};
 use csv::Reader;
 use eyre::{eyre, Result, WrapErr};
-use plotters::prelude::*;
+use plotters::{prelude::*, series::LineSeries};
+use plotters_bitmap::BitMapBackend;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -479,9 +480,16 @@ impl ComparisonGenerator {
         let output_dir = self.output_dir.join(&self.timestamp);
         let chart_path = output_dir.join("latency_comparison.png");
 
-        // Prepare data for chart generation
-        let baseline_data = &report.baseline.combined_latency_data;
-        let feature_data = &report.feature.combined_latency_data;
+        // Get access to the stored benchmark results to access raw latency data
+        let baseline_results = self
+            .baseline_results
+            .as_ref()
+            .ok_or_else(|| eyre!("Baseline results not available"))?;
+        let feature_results =
+            self.feature_results.as_ref().ok_or_else(|| eyre!("Feature results not available"))?;
+
+        let baseline_data = &baseline_results.combined_latency_data;
+        let feature_data = &feature_results.combined_latency_data;
 
         // Calculate percent differences
         let mut percent_diffs = Vec::new();
@@ -522,7 +530,9 @@ impl ComparisonGenerator {
         };
 
         // Create the chart
-        let root = BitMapBackend::new(&chart_path, (1200, 1200)).into_drawing_area();
+        let root = BitMapBackend::new(&chart_path, (1200, 1200))
+            .map_err(|e| eyre!("Failed to create bitmap backend: {}", e))?
+            .into_drawing_area();
         root.fill(&WHITE)?;
         let (upper, lower) = root.split_evenly((2, 1));
 
