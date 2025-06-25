@@ -15,6 +15,27 @@ use std::{
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 10_000;
 
+/// Get a static string representation of a precompile address for metrics.
+/// Falls back to a generic label for unknown addresses.
+pub(crate) fn precompile_address_label(address: Address) -> &'static str {
+    match address.0[19] {
+        1 => "0x01",
+        2 => "0x02",
+        3 => "0x03",
+        4 => "0x04",
+        5 => "0x05",
+        6 => "0x06",
+        7 => "0x07",
+        8 => "0x08",
+        9 => "0x09",
+        10 => "0x0a",
+        11 => "0x0b",
+        12 => "0x0c",
+        13 => "0x0d",
+        _ => "unknown",
+    }
+}
+
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(HashMap<Address, PrecompileCache<S>>)
@@ -357,5 +378,19 @@ mod tests {
             })
             .unwrap();
         assert_eq!(result3.bytes.as_ref(), b"output_from_precompile_1");
+    }
+
+    #[test]
+    fn test_precompile_address_label() {
+        // Test common precompile addresses
+        assert_eq!(precompile_address_label(Address::repeat_byte(1)), "0x01");
+        assert_eq!(precompile_address_label(Address::repeat_byte(2)), "0x02");
+        assert_eq!(precompile_address_label(Address::repeat_byte(9)), "0x09");
+        assert_eq!(precompile_address_label(Address::repeat_byte(10)), "0x0a");
+        assert_eq!(precompile_address_label(Address::repeat_byte(13)), "0x0d");
+        
+        // Test unknown address
+        assert_eq!(precompile_address_label(Address::repeat_byte(255)), "unknown");
+        assert_eq!(precompile_address_label(Address::ZERO), "unknown");
     }
 }
