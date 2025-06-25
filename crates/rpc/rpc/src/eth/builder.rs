@@ -178,9 +178,7 @@ where
                     Block = ProviderBlock<N::Provider>,
                     Receipt = ProviderReceipt<N::Provider>,
                 >,
-            > + Clone
-            + Unpin
-            + 'static,
+            > + 'static,
     {
         let Self {
             provider,
@@ -254,8 +252,6 @@ where
                     Receipt = ProviderReceipt<N::Provider>,
                 >,
             > + ChainSpecProvider
-            + Clone
-            + Unpin
             + 'static,
     {
         EthApi { inner: Arc::new(self.build_inner()), tx_resp_builder: Default::default() }

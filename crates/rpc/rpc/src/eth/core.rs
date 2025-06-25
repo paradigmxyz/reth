@@ -154,11 +154,7 @@ where
     }
 }
 
-impl<N: RpcNodeCore<Provider: BlockReader>> EthApiTypes for EthApi<N>
-where
-    Self: Send + Sync,
-    N::Provider: BlockReader,
-{
+impl<N: RpcNodeCore<Provider: BlockReader>> EthApiTypes for EthApi<N> {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
     type RpcConvert = EthRpcConverter;
@@ -170,10 +166,7 @@ where
 
 impl<N: RpcNodeCore<Provider: BlockReader>> RpcNodeCore for EthApi<N>
 where
-    N::Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
-    N::Pool: Send + Sync + Clone + Unpin,
-    N::Network: Send + Sync + Clone,
-    N::Evm: Send + Sync + Clone + Unpin,
+    N::Provider: BlockReader + NodePrimitivesProvider,
 {
     type Primitives = N::Primitives;
     type Provider = N::Provider;
@@ -205,10 +198,7 @@ where
 
 impl<N: RpcNodeCore<Provider: BlockReader>> RpcNodeCoreExt for EthApi<N>
 where
-    N::Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
-    N::Pool: Send + Sync + Clone + Unpin,
-    N::Network: Send + Sync + Clone,
-    N::Evm: Send + Sync + Clone + Unpin,
+    N::Provider: BlockReader + NodePrimitivesProvider,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>> {
@@ -216,10 +206,7 @@ where
     }
 }
 
-impl<N: RpcNodeCore<Provider: BlockReader>> std::fmt::Debug for EthApi<N>
-where
-    N::Provider: BlockReader,
-{
+impl<N: RpcNodeCore<Provider: BlockReader>> std::fmt::Debug for EthApi<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
     }
@@ -227,8 +214,7 @@ where
 
 impl<N: RpcNodeCore<Provider: BlockReader>> SpawnBlocking for EthApi<N>
 where
-    Self: Clone + Send + Sync + 'static,
-    N::Provider: BlockReader,
+    Self: 'static,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
