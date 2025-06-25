@@ -3080,7 +3080,7 @@ LIBMDBX_INLINE_API(int, mdbx_env_get_syncperiod, (const MDBX_env *env, unsigned 
  * \param [in] env        An environment handle returned by
  *                        \ref mdbx_env_create().
  *
- * \param [in] dont_sync  A dont'sync flag, if non-zero the last checkpoint
+ * \param [in] dont_sync  A don't sync flag, if non-zero the last checkpoint
  *                        will be kept "as is" and may be still "weak" in the
  *                        \ref MDBX_SAFE_NOSYNC or \ref MDBX_UTTERLY_NOSYNC
  *                        modes. Such "weak" checkpoint will be ignored on
