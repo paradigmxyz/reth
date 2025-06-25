@@ -279,7 +279,7 @@ where
                 hashed_address = ?input.hashed_address,
                 ?error,
                 task_time = ?proof_start.elapsed(),
-                "Failed to send proof result"
+                "Storage proof receiver is dropped, discarding the result"
             );
         }
 

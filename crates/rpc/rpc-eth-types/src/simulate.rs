@@ -22,7 +22,7 @@ use reth_evm::{
 use reth_primitives_traits::{
     block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
 };
-use reth_rpc_convert::{RpcConvert, RpcTransaction};
+use reth_rpc_convert::{RpcConvert, RpcTransaction, RpcTypes};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
 use revm::{
@@ -77,7 +77,10 @@ pub fn execute_transactions<S, T>(
 >
 where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
-    T: RpcConvert<Primitives = S::Primitives>,
+    T: RpcConvert<
+        Primitives = S::Primitives,
+        Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+    >,
 {
     builder.apply_pre_execution_changes()?;
 
@@ -121,7 +124,10 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
 ) -> Result<Recovered<Tx>, EthApiError>
 where
     DB::Error: Into<EthApiError>,
-    T: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx>>,
+    T: RpcConvert<
+        Primitives: NodePrimitives<SignedTx = Tx>,
+        Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+    >,
 {
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
@@ -178,7 +184,7 @@ where
     }
 
     let tx = tx_resp_builder
-        .build_simulate_v1_transaction(tx)
+        .build_simulate_v1_transaction(tx.into())
         .map_err(|e| EthApiError::other(e.into()))?;
 
     Ok(Recovered::new_unchecked(tx, from))

@@ -30,6 +30,7 @@ smallvec.workspace = true
 # reth
 reth-primitives-traits.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-trie.workspace = true
 
 arbitrary.workspace = true
 assert_matches.workspace = true

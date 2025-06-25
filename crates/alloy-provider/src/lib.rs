@@ -143,7 +143,7 @@ impl<P, Node: NodeTypes, N> AlloyRethProvider<P, Node, N> {
         tokio::task::block_in_place(move || Handle::current().block_on(fut))
     }
 
-    /// Get a reference to the conon state notification sender
+    /// Get a reference to the canon state notification sender
     pub const fn canon_state_notification(
         &self,
     ) -> &broadcast::Sender<CanonStateNotification<PrimitivesTy<Node>>> {

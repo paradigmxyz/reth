@@ -8131,6 +8131,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "reth-chainspec",
  "reth-cli-util",
+ "reth-codecs",
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
@@ -9027,6 +9028,7 @@ version = "1.4.8"
 dependencies = [
  "reth-chainspec",
  "reth-cli-util",
+ "reth-codecs",
  "reth-consensus",
  "reth-consensus-common",
  "reth-db",
@@ -9382,6 +9384,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.12",
  "tokio",
+ "tower",
  "tracing",
 ]
 
@@ -10574,6 +10577,7 @@ dependencies = [
  "rand 0.9.1",
  "reth-execution-errors",
  "reth-primitives-traits",
+ "reth-trie",
  "reth-trie-common",
  "reth-trie-sparse",
  "smallvec",

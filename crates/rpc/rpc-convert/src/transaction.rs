@@ -2,7 +2,7 @@
 
 use crate::{
     fees::{CallFees, CallFeesError},
-    RpcTransaction, RpcTypes,
+    RpcTransaction, RpcTxReq, RpcTypes,
 };
 use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
 use alloy_primitives::{Address, TxKind, U256};
@@ -67,14 +67,14 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
     /// `eth_simulateV1`.
     fn build_simulate_v1_transaction(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<Self::Network>,
     ) -> Result<TxTy<Self::Primitives>, Self::Error>;
 
     /// Creates a transaction environment for execution based on `request` with corresponding
     /// `cfg_env` and `block_env`.
     fn tx_env<Spec>(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<Self::Network>,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error>;
@@ -378,9 +378,9 @@ where
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
     Evm: ConfigureEvm<Primitives = N>,
     TxTy<N>: IntoRpcTx<E::TransactionResponse> + Clone + Debug,
-    TransactionRequest: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
+    RpcTxReq<E>: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Err: From<TransactionConversionError>
-        + From<<TransactionRequest as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
+        + From<<RpcTxReq<E> as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
         + for<'a> From<<Map as TxInfoMapper<&'a TxTy<N>>>::Err>
         + Error
         + Unpin
@@ -412,16 +412,13 @@ where
         Ok(tx.into_rpc_tx(signer, tx_info))
     }
 
-    fn build_simulate_v1_transaction(
-        &self,
-        request: TransactionRequest,
-    ) -> Result<TxTy<N>, Self::Error> {
+    fn build_simulate_v1_transaction(&self, request: RpcTxReq<E>) -> Result<TxTy<N>, Self::Error> {
         Ok(request.try_into_sim_tx().map_err(|e| TransactionConversionError(e.to_string()))?)
     }
 
     fn tx_env<Spec>(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<E>,
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error> {
@@ -476,12 +473,11 @@ pub mod op {
         }
     }
 
-    impl TryIntoSimTx<OpTxEnvelope> for TransactionRequest {
+    impl TryIntoSimTx<OpTxEnvelope> for OpTransactionRequest {
         fn try_into_sim_tx(self) -> Result<OpTxEnvelope, ValueError<Self>> {
-            let request: OpTransactionRequest = self.into();
-            let tx = request.build_typed_tx().map_err(|request| {
-                ValueError::new(request.as_ref().clone(), "Required fields missing")
-            })?;
+            let tx = self
+                .build_typed_tx()
+                .map_err(|request| ValueError::new(request, "Required fields missing"))?;
 
             // Create an empty signature for the transaction.
             let signature = Signature::new(Default::default(), Default::default(), false);
@@ -490,7 +486,7 @@ pub mod op {
         }
     }
 
-    impl TryIntoTxEnv<OpTransaction<TxEnv>> for TransactionRequest {
+    impl TryIntoTxEnv<OpTransaction<TxEnv>> for OpTransactionRequest {
         type Err = EthTxEnvError;
 
         fn try_into_tx_env<Spec>(
@@ -499,7 +495,7 @@ pub mod op {
             block_env: &BlockEnv,
         ) -> Result<OpTransaction<TxEnv>, Self::Err> {
             Ok(OpTransaction {
-                base: self.try_into_tx_env(cfg_env, block_env)?,
+                base: self.as_ref().clone().try_into_tx_env(cfg_env, block_env)?,
                 enveloped_tx: Some(Bytes::new()),
                 deposit: Default::default(),
             })

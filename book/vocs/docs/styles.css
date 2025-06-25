@@ -1,0 +1,31 @@
+@import "tailwindcss" important;
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+[data-layout="landing"] .vocs_Button_button {
+  border-radius: 4px !important;
+  height: 36px !important;
+  padding: 0 16px !important;
+}
+
+[data-layout="landing"] .vocs_Content {
+  position: inherit;
+}
+
+#home-install .vocs_CodeGroup {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+#home-install .vocs_Tabs_content {
+  flex: 1;
+}
+
+#home-install .vocs_Code {
+  font-size: 18px;
+}
+
+.border-accent {
+  border: 1px solid var(--vocs-color_borderAccent) !important;
+}
