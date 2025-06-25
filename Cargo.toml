@@ -524,8 +524,8 @@ alloy-transport-ws = { version = "1.0.9", default-features = false }
 scroll-alloy-consensus = { path = "crates/scroll/alloy/consensus", default-features = false }
 scroll-alloy-evm = { path = "crates/scroll/alloy/evm" }
 scroll-alloy-hardforks = { path = "crates/scroll/alloy/hardforks", default-features = false }
-scroll-alloy-network = { path = "crates/scroll/alloy/network" }
-scroll-alloy-rpc-types = { path = "crates/scroll/alloy/rpc-types" }
+scroll-alloy-network = { path = "crates/scroll/alloy/network", default-features = false }
+scroll-alloy-rpc-types = { path = "crates/scroll/alloy/rpc-types", default-features = false }
 scroll-alloy-rpc-types-engine = { path = "crates/scroll/alloy/rpc-types-engine", default-features = false }
 scroll-alloy-provider = { path = "crates/scroll/alloy/provider" }
 reth-scroll-chainspec = { path = "crates/scroll/chainspec", default-features = false }
@@ -536,7 +536,7 @@ reth-scroll-engine-primitives = { path = "crates/scroll/engine-primitives" }
 reth-scroll-forks = { path = "crates/scroll/hardforks", default-features = false }
 reth-scroll-node = { path = "crates/scroll/node" }
 reth-scroll-payload = { path = "crates/scroll/payload" }
-reth-scroll-primitives = { path = "crates/scroll/primitives" }
+reth-scroll-primitives = { path = "crates/scroll/primitives", default-features = false }
 reth-scroll-rpc = { path = "crates/scroll/rpc" }
 reth-scroll-trie = { path = "crates/scroll/trie" }
 reth-scroll-txpool = { path = "crates/scroll/txpool" }

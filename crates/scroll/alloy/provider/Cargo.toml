@@ -73,4 +73,5 @@ std = [
     "futures-util/std",
     "reth-scroll-chainspec/std",
     "thiserror/std",
+    "scroll-alloy-network/std",
 ]

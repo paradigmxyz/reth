@@ -61,4 +61,5 @@ std = [
     "reth-scroll-chainspec/std",
     "scroll-alloy-hardforks/std",
     "scroll-alloy-rpc-types-engine/std",
+    "reth-scroll-primitives/std",
 ]

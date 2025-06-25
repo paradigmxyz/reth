@@ -18,7 +18,7 @@ reth-primitives-traits.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
 reth-trie-sparse.workspace = true
-reth-trie-common = { workspace = true, features = ["rayon"] }
+reth-trie-common.workspace = true
 
 revm-database.workspace = true
 
@@ -64,6 +64,8 @@ proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 
 [features]
+default = ["rayon"]
+rayon = ["reth-trie-common/rayon"]
 metrics = ["reth-metrics", "dep:metrics"]
 serde = [
     "alloy-primitives/serde",

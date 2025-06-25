@@ -1096,12 +1096,14 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
     // TODO(scroll): SpecId is starting to leak from revm to reth. Find a solution to avoid
     // having to add `is_eip_7702_enabled` everywhere.
     let is_eip7702_enabled = true;
+    let is_eip7623_enabled = true;
 
     let gas = revm_interpreter::gas::calculate_initial_tx_gas(
         spec_id,
         transaction.input(),
         transaction.is_create(),
         is_eip7702_enabled,
+        is_eip7623_enabled,
         transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
         transaction
             .access_list()

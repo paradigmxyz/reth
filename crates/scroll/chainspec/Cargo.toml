@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec = { workspace = true, features = ["scroll"] }
+reth-chainspec = { workspace = true, default-features = false }
 reth-ethereum-forks = { workspace = true, default-features = false }
 reth-network-peers = { workspace = true, default-features = false }
 reth-primitives-traits = { workspace = true, default-features = false }

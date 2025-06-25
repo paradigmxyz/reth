@@ -11,9 +11,6 @@
 
 use once_cell as _;
 
-#[cfg(not(feature = "std"))]
-extern crate alloc as std;
-
 pub mod transaction;
 pub use transaction::{tx_type::ScrollTxType, ScrollTransactionSigned};
 

@@ -3167,7 +3167,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cea14ef9355e3beab063703aa9dab15afd25f0667c341310c1e5274bb1d0da18"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4446,7 +4446,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.57.0",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -4891,7 +4891,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi 0.5.1",
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6845,7 +6845,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -10207,7 +10207,6 @@ dependencies = [
  "reth-consensus-common",
  "reth-ethereum-consensus",
  "reth-execution-types",
- "reth-primitives",
  "reth-primitives-traits",
  "reth-scroll-primitives",
  "scroll-alloy-hardforks",
@@ -10935,7 +10934,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "24.0.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10953,7 +10952,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "4.0.1"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "bitvec",
  "once_cell",
@@ -10965,7 +10964,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "5.0.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "cfg-if",
  "derive-where",
@@ -10980,7 +10979,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "5.0.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10995,7 +10994,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "4.0.1"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -11008,7 +11007,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "4.0.1"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "auto_impl",
  "revm-primitives",
@@ -11019,7 +11018,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "5.0.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "auto_impl",
  "revm-bytecode",
@@ -11036,7 +11035,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "5.0.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "auto_impl",
  "revm-context",
@@ -11072,7 +11071,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "20.0.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11083,7 +11082,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "21.0.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11107,7 +11106,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "19.1.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11117,7 +11116,7 @@ dependencies = [
 [[package]]
 name = "revm-scroll"
 version = "0.1.0"
-source = "git+https://github.com/scroll-tech/scroll-revm#54e4e90105d95f14c0d055f0e37bd689b6f22306"
+source = "git+https://github.com/scroll-tech/scroll-revm#0195a04190cef78901ed67c7bc3048114034f366"
 dependencies = [
  "auto_impl",
  "enumn",
@@ -11131,7 +11130,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "4.0.1"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "bitflags 2.9.1",
  "revm-bytecode",
@@ -11363,7 +11362,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11376,7 +11375,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -11443,7 +11442,7 @@ dependencies = [
  "security-framework 3.2.0",
  "security-framework-sys",
  "webpki-root-certs 0.26.11",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12354,7 +12353,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

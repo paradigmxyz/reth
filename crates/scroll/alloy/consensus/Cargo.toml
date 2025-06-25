@@ -47,10 +47,7 @@ proptest.workspace = true
 test-fuzz.workspace = true
 
 [features]
-default = [
-    "reth-codec",
-    "std",
-]
+default = ["std"]
 std = [
     "serde/std",
     "alloy-primitives/std",

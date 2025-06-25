@@ -66,4 +66,3 @@ arbitrary = [
 test-utils = [
     "reth-primitives-traits/test-utils",
 ]
-scroll = []

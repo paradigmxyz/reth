@@ -22,12 +22,10 @@ reth-consensus.workspace = true
 reth-consensus-common.workspace = true
 reth-ethereum-consensus.workspace = true
 reth-execution-types.workspace = true
-# imported in order to pull in the reth-codec feature for reth-ethereum-primitives
-reth-primitives = { workspace = true, features = ["reth-codec"] }
 reth-primitives-traits.workspace = true
 
 # scroll
-reth-scroll-primitives = { workspace = true, features = ["serde", "reth-codec"] }
+reth-scroll-primitives = { workspace = true, default-features = false }
 scroll-alloy-hardforks.workspace = true
 
 # misc

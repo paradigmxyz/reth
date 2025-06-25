@@ -12,14 +12,23 @@ exclude.workspace = true
 workspace = true
 
 [dependencies]
-alloy-provider.workspace = true
+alloy-provider = { workspace = true, default-features = false }
 
-scroll-alloy-consensus.workspace = true
-scroll-alloy-rpc-types.workspace = true
+scroll-alloy-consensus = { workspace = true, default-features = false }
+scroll-alloy-rpc-types = { workspace = true, default-features = false }
 
 # alloy
-alloy-consensus.workspace = true
-alloy-network.workspace = true
-alloy-primitives.workspace = true
-alloy-rpc-types-eth.workspace = true
-alloy-signer.workspace = true
+alloy-consensus = { workspace = true, default-features = false }
+alloy-network = { workspace = true, default-features = false }
+alloy-primitives = { workspace = true, default-features = false }
+alloy-rpc-types-eth = { workspace = true, default-features = false }
+alloy-signer = { workspace = true, default-features = false }
+
+[features]
+std = [
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
+    "scroll-alloy-consensus/std",
+    "scroll-alloy-rpc-types/std",
+]
