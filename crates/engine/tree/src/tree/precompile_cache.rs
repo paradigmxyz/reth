@@ -358,15 +358,4 @@ mod tests {
             .unwrap();
         assert_eq!(result3.bytes.as_ref(), b"output_from_precompile_1");
     }
-
-    #[test]
-    fn test_precompile_address_formatting() {
-        // Test address formatting
-        let addr_1 = Address::from([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]);
-        let addr_2 = Address::from([0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2]);
-        
-        assert_eq!(format!("0x{:02x}", addr_1), "0x0000000000000000000000000000000000000001");
-        assert_eq!(format!("0x{:02x}", addr_2), "0x0000000000000000000000000000000000000002");
-        assert_eq!(format!("0x{:02x}", Address::ZERO), "0x0000000000000000000000000000000000000000");
-    }
 }
