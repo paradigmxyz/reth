@@ -2,9 +2,10 @@
 
 use crate::cli::Args;
 use eyre::{eyre, Result, WrapErr};
-use std::{
-    path::Path,
-    process::{Command, Stdio},
+use std::path::Path;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::Command,
 };
 use tracing::{info, warn};
 
@@ -40,7 +41,7 @@ impl BenchmarkRunner {
             .wrap_err_with(|| format!("Failed to create output directory: {:?}", output_dir))?;
 
         // Build the reth-bench command
-        let mut cmd = Command::new("./target/profiling/reth-bench");
+        let mut cmd = Command::new("reth-bench");
         cmd.args([
             "new-payload-fcu",
             "--rpc-url",
@@ -55,21 +56,40 @@ impl BenchmarkRunner {
             &output_dir.to_string_lossy(),
         ]);
 
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
 
         info!("Executing: {:?}", cmd);
 
         // Execute the benchmark
         let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
 
-        let status = child.wait().wrap_err("Failed to wait for reth-bench")?;
+        // Stream stdout with prefix
+        if let Some(stdout) = child.stdout.take() {
+            tokio::spawn(async move {
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    println!("[RETH-BENCH] {}", line);
+                }
+            });
+        }
+
+        // Stream stderr with prefix
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    eprintln!("[RETH-BENCH] {}", line);
+                }
+            });
+        }
+
+        let status = child.wait().await.wrap_err("Failed to wait for reth-bench")?;
 
         if !status.success() {
-            // Try to get stderr output for debugging
-            if let Ok(output) = child.wait_with_output() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                warn!("reth-bench stderr: {}", stderr);
-            }
             return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
         }
 
@@ -126,7 +146,7 @@ impl BenchmarkRunner {
         }
 
         // Build the reth-bench command with baseline
-        let mut cmd = Command::new("./target/profiling/reth-bench");
+        let mut cmd = Command::new("reth-bench");
         cmd.args([
             "new-payload-fcu",
             "--rpc-url",
@@ -143,21 +163,40 @@ impl BenchmarkRunner {
             &baseline_csv.to_string_lossy(),
         ]);
 
-        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
 
         info!("Executing: {:?}", cmd);
 
         // Execute the benchmark
         let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
 
-        let status = child.wait().wrap_err("Failed to wait for reth-bench")?;
+        // Stream stdout with prefix
+        if let Some(stdout) = child.stdout.take() {
+            tokio::spawn(async move {
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    println!("[RETH-BENCH-BASELINE] {}", line);
+                }
+            });
+        }
+
+        // Stream stderr with prefix
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    eprintln!("[RETH-BENCH-BASELINE] {}", line);
+                }
+            });
+        }
+
+        let status = child.wait().await.wrap_err("Failed to wait for reth-bench")?;
 
         if !status.success() {
-            // Try to get stderr output for debugging
-            if let Ok(output) = child.wait_with_output() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                warn!("reth-bench stderr: {}", stderr);
-            }
             return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
         }
 

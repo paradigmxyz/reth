@@ -4,19 +4,19 @@ use crate::cli::Args;
 use eyre::{eyre, Result, WrapErr};
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::{
-    process::{Child, Command, Stdio},
-    time::Duration,
+use std::{process::Stdio, time::Duration};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader as AsyncBufReader},
+    time::{sleep, timeout},
 };
-use tokio::time::{sleep, timeout};
 use tracing::{debug, info, warn};
 
 /// Manages reth node lifecycle and operations
 pub struct NodeManager {
-    datadir: String,
+    datadir: Option<String>,
     jwt_secret: String,
     metrics_port: u16,
-    chain: String,
+    chain: Option<String>,
     http_client: Client,
 }
 
@@ -24,10 +24,10 @@ impl NodeManager {
     /// Create a new NodeManager with configuration from CLI args
     pub fn new(args: &Args) -> Self {
         Self {
-            datadir: args.datadir_path().to_string_lossy().to_string(),
+            datadir: args.datadir_path().map(|p| p.to_string_lossy().to_string()),
             jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
             metrics_port: args.metrics_port,
-            chain: args.chain.clone(),
+            chain: if args.chain == "mainnet" { None } else { Some(args.chain.clone()) },
             http_client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
@@ -46,30 +46,67 @@ impl NodeManager {
         self.get_tip_from_rpc("http://localhost:8545").await
     }
 
+    /// Get the current chain tip from an external RPC endpoint
+    pub async fn get_tip_from_external_rpc(&self, rpc_url: &str) -> Result<u64> {
+        info!("Getting chain tip from external RPC: {}", rpc_url);
+        self.get_tip_from_rpc(rpc_url).await
+    }
+
     /// Start a reth node and return the process handle
-    pub async fn start_node(&self) -> Result<Child> {
+    pub async fn start_node(&self) -> Result<tokio::process::Child> {
         info!("Starting reth node...");
 
-        let child = Command::new("./target/profiling/reth")
-            .args([
-                "node",
-                "--chain",
-                &self.chain,
-                "--engine.accept-execution-requests-hash",
-                "--metrics",
-                &format!("0.0.0.0:{}", self.metrics_port),
-                "--http",
-                "--http.api",
-                "eth",
-                "--datadir",
-                &self.datadir,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+        let mut cmd = tokio::process::Command::new("./target/profiling/reth");
+        cmd.arg("node");
+
+        // Add chain if specified
+        if let Some(ref chain) = self.chain {
+            cmd.args(["--chain", chain]);
+        }
+
+        // Add datadir if specified
+        if let Some(ref datadir) = self.datadir {
+            cmd.args(["--datadir", datadir]);
+        }
+
+        cmd.args([
+            "--engine.accept-execution-requests-hash",
+            "--metrics",
+            &format!("0.0.0.0:{}", self.metrics_port),
+            "--http",
+            "--http.api",
+            "eth",
+        ]);
+
+        let mut child = cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true)
             .spawn()
             .wrap_err("Failed to start reth node")?;
 
-        info!("Reth node started with PID: {}", child.id());
+        info!("Reth node started with PID: {:?}", child.id());
+
+        // Stream stdout and stderr with prefixes
+        if let Some(stdout) = child.stdout.take() {
+            tokio::spawn(async move {
+                let reader = AsyncBufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    println!("[RETH] {}", line);
+                }
+            });
+        }
+
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let reader = AsyncBufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    eprintln!("[RETH] {}", line);
+                }
+            });
+        }
 
         // Give the node a moment to start up
         sleep(Duration::from_secs(5)).await;
@@ -101,48 +138,63 @@ impl NodeManager {
         result
     }
 
+    /// Wait for the node to be ready and return its current tip (doesn't wait for sync)
+    pub async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
+        info!("Waiting for node to be ready...");
+
+        let max_wait = Duration::from_secs(60); // 1 minute should be enough for RPC to come up
+        let check_interval = Duration::from_secs(2);
+
+        let result = timeout(max_wait, async {
+            loop {
+                // Try to get tip from local RPC first
+                if let Ok(tip) = self.get_tip_from_rpc("http://localhost:8545").await {
+                    info!("Node RPC is ready at block: {}", tip);
+                    return Ok(tip);
+                }
+
+                debug!("Node RPC not ready yet, waiting...");
+                sleep(check_interval).await;
+            }
+        })
+        .await
+        .wrap_err("Timed out waiting for node RPC to be ready")?;
+
+        result
+    }
+
     /// Stop the reth node gracefully
-    pub async fn stop_node(&self, child: &mut Child) -> Result<()> {
+    pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
         info!("Stopping reth node...");
 
         // Send SIGTERM for graceful shutdown
         #[cfg(unix)]
         {
-            use std::process;
-            unsafe {
-                libc::kill(child.id() as i32, libc::SIGTERM);
+            if let Some(pid) = child.id() {
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGTERM);
+                }
             }
         }
 
         #[cfg(windows)]
         {
-            child.kill().wrap_err("Failed to kill reth process")?;
+            child.kill().await.wrap_err("Failed to kill reth process")?;
         }
 
         // Wait for the process to exit
         let exit_timeout = Duration::from_secs(30);
-        let result = timeout(exit_timeout, async {
-            loop {
-                match child.try_wait() {
-                    Ok(Some(status)) => {
-                        info!("Reth node exited with status: {:?}", status);
-                        return Ok(());
-                    }
-                    Ok(None) => {
-                        sleep(Duration::from_millis(500)).await;
-                    }
-                    Err(e) => return Err(eyre!("Error waiting for process: {}", e)),
-                }
-            }
-        })
-        .await;
+        let result = timeout(exit_timeout, child.wait()).await;
 
         match result {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(e),
+            Ok(Ok(status)) => {
+                info!("Reth node exited with status: {:?}", status);
+                Ok(())
+            }
+            Ok(Err(e)) => Err(eyre!("Error waiting for process: {}", e)),
             Err(_) => {
                 warn!("Node didn't exit gracefully, force killing...");
-                child.kill().wrap_err("Failed to force kill reth process")?;
+                child.kill().await.wrap_err("Failed to force kill reth process")?;
                 Ok(())
             }
         }
@@ -152,23 +204,41 @@ impl NodeManager {
     pub async fn unwind_to_block(&self, block_number: u64) -> Result<()> {
         info!("Unwinding node to block: {}", block_number);
 
-        let output = Command::new("./target/profiling/reth")
-            .args([
-                "stage",
-                "unwind",
-                "to-block",
-                &block_number.to_string(),
-                "--chain",
-                &self.chain,
-                "--datadir",
-                &self.datadir,
-            ])
-            .output()
-            .wrap_err("Failed to execute unwind command")?;
+        let mut cmd = std::process::Command::new("./target/profiling/reth");
+        cmd.args(["stage", "unwind"]);
+
+        // Add chain if specified
+        if let Some(ref chain) = self.chain {
+            cmd.args(["--chain", chain]);
+        }
+
+        // Add datadir if specified
+        if let Some(ref datadir) = self.datadir {
+            cmd.args(["--datadir", datadir]);
+        }
+
+        cmd.args(["to-block", &block_number.to_string()]);
+
+        let output = cmd.output().wrap_err("Failed to execute unwind command")?;
+
+        // Print stdout and stderr with prefixes
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        for line in stdout.lines() {
+            if !line.trim().is_empty() {
+                println!("[RETH-UNWIND] {}", line);
+            }
+        }
+
+        for line in stderr.lines() {
+            if !line.trim().is_empty() {
+                eprintln!("[RETH-UNWIND] {}", line);
+            }
+        }
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(eyre!("Unwind command failed: {}", stderr));
+            return Err(eyre!("Unwind command failed with exit code: {:?}", output.status.code()));
         }
 
         info!("Successfully unwound to block: {}", block_number);
