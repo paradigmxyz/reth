@@ -345,6 +345,17 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
         self.provider()?.last_block_number()
     }
 
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        // expired height tracks the lowest block number that has been expired, therefore the
+        // earliest block number is one more than that.
+        let mut earliest = self.static_file_provider.expired_history_height();
+        if earliest > 0 {
+            // If the expired history height is 0, then the earliest block number is still 0.
+            earliest += 1;
+        }
+        Ok(earliest)
+    }
+
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         self.provider()?.block_number(hash)
     }
