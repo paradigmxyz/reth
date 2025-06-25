@@ -122,7 +122,7 @@ impl BlockchainTestCase {
                 ))),
 
                 // No failure expected at all - bubble up original error.
-                None => err,
+                None => Err(err.unwrap_err()),
             },
 
             // Non‑processing error – forward as‑is.
