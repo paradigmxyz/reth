@@ -2579,6 +2579,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ctrlc"
+version = "3.4.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46f93780a459b7d656ef7f071fe699c4d3d2cb201c4b24d085b6ddc505276e73"
+dependencies = [
+ "nix",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "curve25519-dalek"
 version = "4.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2690,7 +2700,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -5708,6 +5718,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags 2.9.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7233,6 +7255,31 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tower",
+ "tracing",
+]
+
+[[package]]
+name = "reth-bench-compare"
+version = "1.4.8"
+dependencies = [
+ "chrono",
+ "clap",
+ "csv",
+ "ctrlc",
+ "dirs-next",
+ "eyre",
+ "libc",
+ "reqwest",
+ "reth-cli-runner",
+ "reth-cli-util",
+ "reth-node-core",
+ "reth-tracing",
+ "serde",
+ "serde_json",
+ "shellexpand",
+ "signal-hook",
+ "tempfile",
+ "tokio",
  "tracing",
 ]
 
