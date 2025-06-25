@@ -1094,9 +1094,10 @@ mod tests {
         map::{B256Set, HashMap},
         B256,
     };
-    use alloy_rlp::Encodable;
+    use alloy_rlp::{Decodable, Encodable};
     use alloy_trie::Nibbles;
     use assert_matches::assert_matches;
+    use itertools::Itertools;
     use reth_primitives_traits::Account;
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
@@ -1222,6 +1223,66 @@ mod tests {
         trie_updates.finalize(hash_builder, removed_keys, destroyed_accounts);
 
         (root, trie_updates, proof_nodes, branch_node_hash_masks, branch_node_tree_masks)
+    }
+
+    /// Assert that the parallel sparse trie nodes and the proof nodes from the hash builder are
+    /// equal.
+    #[allow(unused)]
+    fn assert_eq_parallel_sparse_trie_proof_nodes(
+        sparse_trie: &ParallelSparseTrie,
+        proof_nodes: ProofNodes,
+    ) {
+        let proof_nodes = proof_nodes
+            .into_nodes_sorted()
+            .into_iter()
+            .map(|(path, node)| (path, TrieNode::decode(&mut node.as_ref()).unwrap()));
+
+        let lower_sparse_nodes = sparse_trie
+            .lower_subtries
+            .iter()
+            .filter_map(Option::as_ref)
+            .map(|subtrie| subtrie.nodes.iter().collect::<Vec<_>>())
+            .flatten()
+            .collect::<Vec<_>>();
+        let upper_sparse_nodes = sparse_trie.upper_subtrie.nodes.iter().collect::<Vec<_>>();
+
+        let sparse_nodes = lower_sparse_nodes
+            .into_iter()
+            .chain(upper_sparse_nodes.into_iter())
+            .sorted_by_key(|(path, _)| *path);
+
+        for ((proof_node_path, proof_node), (sparse_node_path, sparse_node)) in
+            proof_nodes.zip(sparse_nodes)
+        {
+            assert_eq!(&proof_node_path, sparse_node_path);
+
+            let equals = match (&proof_node, &sparse_node) {
+                // Both nodes are empty
+                (TrieNode::EmptyRoot, SparseNode::Empty) => true,
+                // Both nodes are branches and have the same state mask
+                (
+                    TrieNode::Branch(BranchNode { state_mask: proof_state_mask, .. }),
+                    SparseNode::Branch { state_mask: sparse_state_mask, .. },
+                ) => proof_state_mask == sparse_state_mask,
+                // Both nodes are extensions and have the same key
+                (
+                    TrieNode::Extension(ExtensionNode { key: proof_key, .. }),
+                    SparseNode::Extension { key: sparse_key, .. },
+                ) |
+                // Both nodes are leaves and have the same key
+                (
+                    TrieNode::Leaf(LeafNode { key: proof_key, .. }),
+                    SparseNode::Leaf { key: sparse_key, .. },
+                ) => proof_key == sparse_key,
+                // Empty and hash nodes are specific to the sparse trie, skip them
+                (_, SparseNode::Empty | SparseNode::Hash(_)) => continue,
+                _ => false,
+            };
+            assert!(
+                equals,
+                "path: {proof_node_path:?}\nproof node: {proof_node:?}\nsparse node: {sparse_node:?}"
+            );
+        }
     }
 
     #[test]
