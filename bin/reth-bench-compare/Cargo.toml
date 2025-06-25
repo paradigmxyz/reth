@@ -43,6 +43,9 @@ shellexpand.workspace = true
 # CSV handling for results comparison
 csv.workspace = true
 
+# Chart generation
+plotters = { version = "0.3", default-features = false, features = ["chrono", "png"] }
+
 # Reth dependencies for shared types and utilities
 reth-tracing.workspace = true
 reth-cli-runner.workspace = true

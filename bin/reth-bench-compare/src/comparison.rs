@@ -4,6 +4,7 @@ use crate::cli::Args;
 use chrono::{DateTime, Utc};
 use csv::Reader;
 use eyre::{eyre, Result, WrapErr};
+use plotters::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -175,6 +176,9 @@ impl ComparisonGenerator {
 
         // Write reports
         self.write_comparison_reports(&report).await?;
+
+        // Generate comparison charts
+        self.generate_comparison_charts(&report).await?;
 
         // Print summary to console
         self.print_comparison_summary(&report);
@@ -466,5 +470,178 @@ impl ComparisonGenerator {
             feature.avg_total_latency_ms
         );
         println!();
+    }
+
+    /// Generate comparison charts similar to the Python script
+    async fn generate_comparison_charts(&self, report: &ComparisonReport) -> Result<()> {
+        info!("Generating comparison charts...");
+
+        let output_dir = self.output_dir.join(&self.timestamp);
+        let chart_path = output_dir.join("latency_comparison.png");
+
+        // Prepare data for chart generation
+        let baseline_data = &report.baseline.combined_latency_data;
+        let feature_data = &report.feature.combined_latency_data;
+
+        // Calculate percent differences
+        let mut percent_diffs = Vec::new();
+        let mut valid_baseline = Vec::new();
+        let mut valid_feature = Vec::new();
+        let mut block_numbers = Vec::new();
+
+        let min_len = baseline_data.len().min(feature_data.len());
+        for i in 0..min_len {
+            let baseline_latency = baseline_data[i].new_payload_latency as f64;
+            let feature_latency = feature_data[i].new_payload_latency as f64;
+
+            if baseline_latency > 0.0 {
+                let percent_diff =
+                    ((feature_latency - baseline_latency) / baseline_latency) * 100.0;
+                if percent_diff.is_finite() {
+                    percent_diffs.push(percent_diff);
+                    valid_baseline.push(baseline_latency);
+                    valid_feature.push(feature_latency);
+                    block_numbers.push(baseline_data[i].block_number);
+                }
+            }
+        }
+
+        if percent_diffs.is_empty() {
+            warn!("No valid percent differences to plot");
+            return Ok(());
+        }
+
+        // Calculate statistics
+        let mean_diff = percent_diffs.iter().sum::<f64>() / percent_diffs.len() as f64;
+        let mut sorted_diffs = percent_diffs.clone();
+        sorted_diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let median_diff = if sorted_diffs.len() % 2 == 0 {
+            (sorted_diffs[sorted_diffs.len() / 2 - 1] + sorted_diffs[sorted_diffs.len() / 2]) / 2.0
+        } else {
+            sorted_diffs[sorted_diffs.len() / 2]
+        };
+
+        // Create the chart
+        let root = BitMapBackend::new(&chart_path, (1200, 1200)).into_drawing_area();
+        root.fill(&WHITE)?;
+        let (upper, lower) = root.split_evenly((2, 1));
+
+        // Top chart: Histogram of percent differences
+        let min_diff = percent_diffs.iter().fold(f64::INFINITY, |a, &b| a.min(b)).floor();
+        let max_diff = percent_diffs.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)).ceil();
+        let range = (max_diff - min_diff).max(1.0);
+        let bin_count = (range as usize).min(100).max(10); // Limit bins to reasonable range
+
+        let mut chart = ChartBuilder::on(&upper)
+            .caption(
+                &format!(
+                    "NewPayload Latency Percent Difference Histogram\n({} vs {})",
+                    self.baseline_branch_name, self.feature_branch_name
+                ),
+                ("sans-serif", 30),
+            )
+            .margin(10)
+            .x_label_area_size(60)
+            .y_label_area_size(80)
+            .build_cartesian_2d(min_diff as i32..max_diff as i32, 0u32..100u32)?;
+
+        chart
+            .configure_mesh()
+            .x_desc("Percent Difference (%)")
+            .y_desc("Number of Blocks")
+            .draw()?;
+
+        // Create histogram bins
+        let bin_width = range / bin_count as f64;
+        let mut bins = vec![0u32; bin_count];
+        for &diff in &percent_diffs {
+            let bin_idx = ((diff - min_diff) / bin_width) as usize;
+            if bin_idx < bins.len() {
+                bins[bin_idx] += 1;
+            }
+        }
+
+        let max_bin_count = *bins.iter().max().unwrap_or(&1);
+        chart = chart.set_secondary_coord(min_diff as i32..max_diff as i32, 0u32..max_bin_count);
+
+        // Draw histogram bars
+        chart.draw_secondary_series(bins.iter().enumerate().map(|(i, &count)| {
+            let x = min_diff + (i as f64 + 0.5) * bin_width;
+            Rectangle::new(
+                [(x as i32 - bin_width as i32 / 2, 0), (x as i32 + bin_width as i32 / 2, count)],
+                BLUE.filled(),
+            )
+        }))?;
+
+        // Add mean and median lines
+        chart.draw_secondary_series(std::iter::once(PathElement::new(
+            vec![(mean_diff as i32, 0), (mean_diff as i32, max_bin_count)],
+            RED.stroke_width(2),
+        )))?;
+        chart.draw_secondary_series(std::iter::once(PathElement::new(
+            vec![(median_diff as i32, 0), (median_diff as i32, max_bin_count)],
+            MAGENTA.stroke_width(2),
+        )))?;
+
+        // Bottom chart: Latency vs Block Number
+        let min_block = *block_numbers.iter().min().unwrap_or(&0);
+        let max_block = *block_numbers.iter().max().unwrap_or(&1);
+        let max_latency =
+            valid_baseline.iter().chain(valid_feature.iter()).fold(0.0f64, |a, &b| a.max(b)) * 1.1;
+
+        let mut chart = ChartBuilder::on(&lower)
+            .caption("NewPayload Latency vs Block Number", ("sans-serif", 30))
+            .margin(10)
+            .x_label_area_size(60)
+            .y_label_area_size(80)
+            .build_cartesian_2d(min_block..max_block, 0.0..max_latency)?;
+
+        chart.configure_mesh().x_desc("Block Number").y_desc("NewPayload Latency (ns)").draw()?;
+
+        // Draw baseline line
+        chart
+            .draw_series(LineSeries::new(
+                block_numbers
+                    .iter()
+                    .zip(valid_baseline.iter())
+                    .map(|(&block, &latency)| (block, latency)),
+                &BLUE.stroke_width(2),
+            ))?
+            .label(&format!("Baseline ({})", self.baseline_branch_name))
+            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], BLUE.stroke_width(2)));
+
+        // Draw feature line
+        chart
+            .draw_series(LineSeries::new(
+                block_numbers
+                    .iter()
+                    .zip(valid_feature.iter())
+                    .map(|(&block, &latency)| (block, latency)),
+                &RED.stroke_width(2),
+            ))?
+            .label(&format!("Feature ({})", self.feature_branch_name))
+            .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 10, y)], RED.stroke_width(2)));
+
+        chart.configure_series_labels().draw()?;
+
+        root.present()?;
+        info!("Chart saved to: {:?}", chart_path);
+
+        // Print statistics
+        println!("\nChart Statistics:");
+        println!("  Mean percent difference: {:.2}%", mean_diff);
+        println!("  Median percent difference: {:.2}%", median_diff);
+        let std_dev = {
+            let variance = percent_diffs.iter().map(|x| (x - mean_diff).powi(2)).sum::<f64>() /
+                percent_diffs.len() as f64;
+            variance.sqrt()
+        };
+        println!("  Standard deviation: {:.2}%", std_dev);
+        println!("  Min: {:.2}%", percent_diffs.iter().fold(f64::INFINITY, |a, &b| a.min(b)));
+        println!("  Max: {:.2}%", percent_diffs.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)));
+        println!("  Total blocks analyzed: {}", percent_diffs.len());
+        println!("  Chart saved to: {}", chart_path.display());
+
+        Ok(())
     }
 }
