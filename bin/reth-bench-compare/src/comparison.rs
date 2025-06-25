@@ -532,7 +532,9 @@ impl ComparisonGenerator {
         // Create the chart
         let root = BitMapBackend::new(&chart_path, (1200, 1200)).into_drawing_area();
         root.fill(&WHITE)?;
-        let (upper, lower) = root.split_evenly((2, 1));
+        let areas = root.split_evenly((2, 1));
+        let upper = &areas[0];
+        let lower = &areas[1];
 
         // Top chart: Histogram of percent differences
         let min_diff = percent_diffs.iter().fold(f64::INFINITY, |a, &b| a.min(b)).floor();
