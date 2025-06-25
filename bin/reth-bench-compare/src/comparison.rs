@@ -4,7 +4,7 @@ use crate::cli::Args;
 use chrono::{DateTime, Utc};
 use csv::Reader;
 use eyre::{eyre, Result, WrapErr};
-use plotters::{prelude::*, series::LineSeries};
+use plotters::prelude::*;
 use plotters_bitmap::BitMapBackend;
 use serde::{Deserialize, Serialize};
 use std::{
