@@ -247,6 +247,10 @@ pub enum InvalidPoolTransactionError {
         /// Balance of account.
         balance: U256,
     },
+    /// EIP-2681 error thrown if the nonce is higher or equal than `U64::max`
+    /// `<https://eips.ethereum.org/EIPS/eip-2681>`
+    #[error("nonce exceeds u64 limit")]
+    Eip2681,
     /// EIP-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
@@ -326,6 +330,7 @@ impl InvalidPoolTransactionError {
             Self::IntrinsicGasTooLow => true,
             Self::Overdraft { .. } => false,
             Self::Other(err) => err.is_bad_transaction(),
+            Self::Eip2681 => true,
             Self::Eip4844(eip4844_err) => {
                 match eip4844_err {
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar => {

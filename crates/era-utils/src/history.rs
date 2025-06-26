@@ -17,10 +17,16 @@ use reth_etl::Collector;
 use reth_fs_util as fs;
 use reth_primitives_traits::{Block, FullBlockBody, FullBlockHeader, NodePrimitives};
 use reth_provider::{
-    providers::StaticFileProviderRWRefMut, BlockWriter, ProviderError, StaticFileProviderFactory,
-    StaticFileSegment, StaticFileWriter,
+    providers::StaticFileProviderRWRefMut, writer::UnifiedStorageWriter, BlockWriter,
+    ProviderError, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
-use reth_storage_api::{DBProvider, HeaderProvider, NodePrimitivesProvider, StorageLocation};
+use reth_stages_types::{
+    CheckpointBlockRange, EntitiesCheckpoint, HeadersCheckpoint, StageCheckpoint, StageId,
+};
+use reth_storage_api::{
+    errors::ProviderResult, DBProvider, DatabaseProviderFactory, HeaderProvider,
+    NodePrimitivesProvider, StageCheckpointWriter, StorageLocation,
+};
 use std::{
     collections::Bound,
     error::Error,
@@ -35,22 +41,26 @@ use tracing::info;
 /// Imports blocks from `downloader` using `provider`.
 ///
 /// Returns current block height.
-pub fn import<Downloader, Era, P, B, BB, BH>(
+pub fn import<Downloader, Era, PF, B, BB, BH>(
     mut downloader: Downloader,
-    provider: &P,
+    provider_factory: &PF,
     hash_collector: &mut Collector<BlockHash, BlockNumber>,
 ) -> eyre::Result<BlockNumber>
 where
     B: Block<Header = BH, Body = BB>,
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<
-        Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
+        Transaction = <<<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
     Downloader: Stream<Item = eyre::Result<Era>> + Send + 'static + Unpin,
     Era: EraMeta + Send + 'static,
-    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
-    <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
+    PF: DatabaseProviderFactory<
+        ProviderRW: BlockWriter<Block = B>
+            + DBProvider
+            + StaticFileProviderFactory<Primitives: NodePrimitives<Block = B, BlockHeader = BH, BlockBody = BB>>
+            + StageCheckpointWriter,
+    > + StaticFileProviderFactory<Primitives = <<PF as DatabaseProviderFactory>::ProviderRW as NodePrimitivesProvider>::Primitives>,
 {
     let (tx, rx) = mpsc::channel();
 
@@ -62,31 +72,74 @@ where
         tx.send(None)
     });
 
-    let static_file_provider = provider.static_file_provider();
+    let static_file_provider = provider_factory.static_file_provider();
 
     // Consistency check of expected headers in static files vs DB is done on provider::sync_gap
     // when poll_execute_ready is polled.
-    let mut last_header_number = static_file_provider
+    let mut height = static_file_provider
         .get_highest_static_file_block(StaticFileSegment::Headers)
         .unwrap_or_default();
 
     // Find the latest total difficulty
     let mut td = static_file_provider
-        .header_td_by_number(last_header_number)?
-        .ok_or(ProviderError::TotalDifficultyNotFound(last_header_number))?;
-
-    // Although headers were downloaded in reverse order, the collector iterates it in ascending
-    // order
-    let mut writer = static_file_provider.latest_writer(StaticFileSegment::Headers)?;
+        .header_td_by_number(height)?
+        .ok_or(ProviderError::TotalDifficultyNotFound(height))?;
 
     while let Some(meta) = rx.recv()? {
-        last_header_number =
-            process(&meta?, &mut writer, provider, hash_collector, &mut td, last_header_number..)?;
+        let from = height;
+        let provider = provider_factory.database_provider_rw()?;
+
+        height = process(
+            &meta?,
+            &mut static_file_provider.latest_writer(StaticFileSegment::Headers)?,
+            &provider,
+            hash_collector,
+            &mut td,
+            height..,
+        )?;
+
+        save_stage_checkpoints(&provider, from, height, height, height)?;
+
+        UnifiedStorageWriter::commit(provider)?;
     }
 
-    build_index(provider, hash_collector)?;
+    let provider = provider_factory.database_provider_rw()?;
 
-    Ok(last_header_number)
+    build_index(&provider, hash_collector)?;
+
+    UnifiedStorageWriter::commit(provider)?;
+
+    Ok(height)
+}
+
+/// Saves progress of ERA import into stages sync.
+///
+/// Since the ERA import does the same work as `HeaderStage` and `BodyStage`, it needs to inform
+/// these stages that this work has already been done. Otherwise, there might be some conflict with
+/// database integrity.
+pub fn save_stage_checkpoints<P>(
+    provider: &P,
+    from: BlockNumber,
+    to: BlockNumber,
+    processed: u64,
+    total: u64,
+) -> ProviderResult<()>
+where
+    P: StageCheckpointWriter,
+{
+    provider.save_stage_checkpoint(
+        StageId::Headers,
+        StageCheckpoint::new(to).with_headers_stage_checkpoint(HeadersCheckpoint {
+            block_range: CheckpointBlockRange { from, to },
+            progress: EntitiesCheckpoint { processed, total },
+        }),
+    )?;
+    provider.save_stage_checkpoint(
+        StageId::Bodies,
+        StageCheckpoint::new(to)
+            .with_entities_stage_checkpoint(EntitiesCheckpoint { processed, total }),
+    )?;
+    Ok(())
 }
 
 /// Extracts block headers and bodies from `meta` and appends them using `writer` and `provider`.
@@ -116,7 +169,7 @@ where
         OmmerHeader = BH,
     >,
     Era: EraMeta + ?Sized,
-    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
+    P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
     let reader = open(meta)?;
@@ -226,7 +279,7 @@ where
         Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
-    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
+    P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
     let mut last_header_number = match block_numbers.start_bound() {
@@ -287,7 +340,7 @@ where
         Transaction = <<P as NodePrimitivesProvider>::Primitives as NodePrimitives>::SignedTx,
         OmmerHeader = BH,
     >,
-    P: DBProvider<Tx: DbTxMut> + StaticFileProviderFactory + BlockWriter<Block = B>,
+    P: DBProvider<Tx: DbTxMut> + NodePrimitivesProvider + BlockWriter<Block = B>,
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
     let total_headers = hash_collector.len();

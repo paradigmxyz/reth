@@ -65,10 +65,8 @@ impl<T> OpNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
 pub struct OpEthApi<N: OpNodeCore, NetworkT = Optimism> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
-    /// Marker for the network types.
-    _nt: PhantomData<NetworkT>,
-    tx_resp_builder:
-        RpcConverter<N::Primitives, NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>,
+    /// Converter for RPC types.
+    tx_resp_builder: RpcConverter<NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>,
 }
 
 impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
@@ -82,7 +80,6 @@ impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
             Arc::new(OpEthApiInner { eth_api, sequencer_client, min_suggested_priority_fee });
         Self {
             inner: inner.clone(),
-            _nt: PhantomData,
             tx_resp_builder: RpcConverter::with_mapper(OpTxInfoMapper::new(inner)),
         }
     }
@@ -120,10 +117,9 @@ where
 {
     type Error = OpEthApiError;
     type NetworkTypes = NetworkT;
-    type TransactionCompat =
-        RpcConverter<N::Primitives, NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>;
+    type RpcConvert = RpcConverter<NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>;
 
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+    fn tx_resp_builder(&self) -> &Self::RpcConvert {
         &self.tx_resp_builder
     }
 }
@@ -244,9 +240,8 @@ where
     }
 
     async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
-        let base_tip = self.inner.eth_api.gas_oracle().suggest_tip_cap().await?;
         let min_tip = U256::from(self.inner.min_suggested_priority_fee);
-        Ok(base_tip.max(min_tip))
+        self.inner.eth_api.gas_oracle().op_suggest_tip_cap(min_tip).await.map_err(Into::into)
     }
 }
 

@@ -2,7 +2,7 @@ use crate::primitives::alloy_primitives::{BlockNumber, StorageKey, StorageValue}
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_primitives_traits::Account;
-use reth_storage_api::{AccountReader, BlockHashReader, StateProvider};
+use reth_storage_api::{AccountReader, BlockHashReader, BytecodeReader, StateProvider};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 
@@ -47,7 +47,7 @@ impl<T: StateProvider> EvmStateProvider for T {
         &self,
         code_hash: &B256,
     ) -> ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        <T as StateProvider>::bytecode_by_hash(self, code_hash)
+        <T as BytecodeReader>::bytecode_by_hash(self, code_hash)
     }
 
     fn storage(
