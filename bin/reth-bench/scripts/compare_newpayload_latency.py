@@ -6,6 +6,7 @@
 #     "matplotlib", 
 #     "numpy",
 #     "seaborn",
+#     "scipy",
 # ]
 # ///
 
@@ -26,6 +27,7 @@ import numpy as np
 import sys
 import seaborn as sns
 from matplotlib.ticker import FuncFormatter
+from scipy.interpolate import make_interp_spline
 
 # Set seaborn style for better aesthetics
 sns.set_style("whitegrid")
@@ -114,6 +116,20 @@ def main():
             return data
         return np.convolve(data, np.ones(window)/window, mode='valid')
     
+    def smooth_line(x, y, smooth_factor=3):
+        """Smooth line using spline interpolation"""
+        if len(x) < 4:  # Need at least 4 points for cubic spline
+            return x, y
+        try:
+            # Create smooth spline
+            x_smooth = np.linspace(x.min(), x.max(), len(x) * smooth_factor)
+            spline = make_interp_spline(x, y, k=3)  # Cubic spline
+            y_smooth = spline(x_smooth)
+            return x_smooth, y_smooth
+        except:
+            # Fallback to original data if smoothing fails
+            return x, y
+    
     if 'block_number' in df1.columns and 'block_number' in df2.columns:
         block_numbers = df1['block_number'].values[:len(percent_diff)]
         
@@ -122,8 +138,12 @@ def main():
         latency2_smooth = rolling_average(latency2[:len(percent_diff)], window_size)
         block_numbers_smooth = rolling_average(block_numbers, window_size)
         
-        ax2.plot(block_numbers_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
-        ax2.plot(block_numbers_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        # Apply line smoothing
+        x1_smooth, y1_smooth = smooth_line(block_numbers_smooth, latency1_smooth)
+        x2_smooth, y2_smooth = smooth_line(block_numbers_smooth, latency2_smooth)
+        
+        ax2.plot(x1_smooth, y1_smooth, 'b-', alpha=0.8, linewidth=2, label=baseline_name)
+        ax2.plot(x2_smooth, y2_smooth, 'r-', alpha=0.8, linewidth=2, label=comparison_name)
         ax2.set_xlabel('Block Number', fontsize=12)
         ax2.set_ylabel('Total Latency (ms)', fontsize=12)
         ax2.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})', fontsize=14)
@@ -139,8 +159,12 @@ def main():
         latency2_smooth = rolling_average(latency2[:len(percent_diff)], window_size)
         indices_smooth = rolling_average(indices, window_size)
         
-        ax2.plot(indices_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
-        ax2.plot(indices_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        # Apply line smoothing
+        x1_smooth, y1_smooth = smooth_line(indices_smooth, latency1_smooth)
+        x2_smooth, y2_smooth = smooth_line(indices_smooth, latency2_smooth)
+        
+        ax2.plot(x1_smooth, y1_smooth, 'b-', alpha=0.8, linewidth=2, label=baseline_name)
+        ax2.plot(x2_smooth, y2_smooth, 'r-', alpha=0.8, linewidth=2, label=comparison_name)
         ax2.set_xlabel('Block Index', fontsize=12)
         ax2.set_ylabel('Total Latency (ms)', fontsize=12)
         ax2.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})', fontsize=14)
@@ -171,16 +195,16 @@ def main():
     # Save latency chart only
     fig2, ax2_only = plt.subplots(1, 1, figsize=(12, 6))
     if 'block_number' in df1.columns and 'block_number' in df2.columns:
-        ax2_only.plot(block_numbers_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
-        ax2_only.plot(block_numbers_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        ax2_only.plot(x1_smooth, y1_smooth, 'b-', alpha=0.8, linewidth=2, label=baseline_name)
+        ax2_only.plot(x2_smooth, y2_smooth, 'r-', alpha=0.8, linewidth=2, label=comparison_name)
         ax2_only.set_xlabel('Block Number', fontsize=12)
         ax2_only.set_ylabel('Total Latency (ms)', fontsize=12)
         ax2_only.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})', fontsize=14)
         ax2_only.legend(fontsize=11)
         ax2_only.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
     else:
-        ax2_only.plot(indices_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
-        ax2_only.plot(indices_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        ax2_only.plot(x1_smooth, y1_smooth, 'b-', alpha=0.8, linewidth=2, label=baseline_name)
+        ax2_only.plot(x2_smooth, y2_smooth, 'r-', alpha=0.8, linewidth=2, label=comparison_name)
         ax2_only.set_xlabel('Block Index', fontsize=12)
         ax2_only.set_ylabel('Total Latency (ms)', fontsize=12)
         ax2_only.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})', fontsize=14)
