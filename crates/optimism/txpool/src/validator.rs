@@ -8,7 +8,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
-use reth_storage_api::{BlockReaderIdExt, StateProvider, StateProviderFactory};
+use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -181,7 +181,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn StateProvider>>,
+        state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
@@ -213,37 +213,6 @@ where
         let outcome = self.inner.validate_one_with_state(origin, transaction, state);
 
         self.apply_op_checks(outcome)
-    }
-
-    /// Validates all given transactions.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub async fn validate_all(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
-        )
-        .await
-    }
-
-    /// Validates all given transactions with the specified origin parameter.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub async fn validate_all_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Tx> + Send,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|tx| self.validate_one(origin, tx)),
-        )
-        .await
     }
 
     /// Performs the necessary opstack specific checks based on top of the regular eth outcome.
@@ -341,7 +310,10 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions).await
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
+        )
+        .await
     }
 
     async fn validate_transactions_with_origin(
@@ -349,7 +321,10 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all_with_origin(origin, transactions).await
+        futures_util::future::join_all(
+            transactions.into_iter().map(|tx| self.validate_one(origin, tx)),
+        )
+        .await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)

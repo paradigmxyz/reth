@@ -40,7 +40,13 @@ Once you have this information, please submit a github issue at https://github.c
 
 /// The default threshold (in number of blocks) for switching from incremental trie building
 /// of changes to whole rebuild.
-pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 5_000;
+pub const MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD: u64 = 100_000;
+
+/// The default threshold (in number of blocks) to run the stage in incremental mode. The
+/// incremental mode will calculate the state root for a large range of blocks by calculating the
+/// new state root for this many blocks, in batches, repeating until we reach the desired block
+/// number.
+pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
 
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
@@ -67,9 +73,15 @@ pub const MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD: u64 = 5_000;
 pub enum MerkleStage {
     /// The execution portion of the merkle stage.
     Execution {
+        // TODO: make struct for holding incremental settings, for code reuse between `Execution`
+        // variant and `Both`
         /// The threshold (in number of blocks) for switching from incremental trie building
         /// of changes to whole rebuild.
-        clean_threshold: u64,
+        rebuild_threshold: u64,
+        /// The threshold (in number of blocks) to run the stage in incremental mode. The
+        /// incremental mode will calculate the state root by calculating the new state root for
+        /// some number of blocks, repeating until we reach the desired block number.
+        incremental_threshold: u64,
     },
     /// The unwind portion of the merkle stage.
     Unwind,
@@ -78,14 +90,21 @@ pub enum MerkleStage {
     Both {
         /// The threshold (in number of blocks) for switching from incremental trie building
         /// of changes to whole rebuild.
-        clean_threshold: u64,
+        rebuild_threshold: u64,
+        /// The threshold (in number of blocks) to run the stage in incremental mode. The
+        /// incremental mode will calculate the state root by calculating the new state root for
+        /// some number of blocks, repeating until we reach the desired block number.
+        incremental_threshold: u64,
     },
 }
 
 impl MerkleStage {
     /// Stage default for the [`MerkleStage::Execution`].
     pub const fn default_execution() -> Self {
-        Self::Execution { clean_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD }
+        Self::Execution {
+            rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
+            incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
+        }
     }
 
     /// Stage default for the [`MerkleStage::Unwind`].
@@ -94,8 +113,8 @@ impl MerkleStage {
     }
 
     /// Create new instance of [`MerkleStage::Execution`].
-    pub const fn new_execution(clean_threshold: u64) -> Self {
-        Self::Execution { clean_threshold }
+    pub const fn new_execution(rebuild_threshold: u64, incremental_threshold: u64) -> Self {
+        Self::Execution { rebuild_threshold, incremental_threshold }
     }
 
     /// Gets the hashing progress
@@ -154,14 +173,18 @@ where
 
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        let threshold = match self {
+        let (threshold, incremental_threshold) = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
-            Self::Execution { clean_threshold } => *clean_threshold,
+            Self::Execution { rebuild_threshold, incremental_threshold } => {
+                (*rebuild_threshold, *incremental_threshold)
+            }
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { clean_threshold } => *clean_threshold,
+            Self::Both { rebuild_threshold, incremental_threshold } => {
+                (*rebuild_threshold, *incremental_threshold)
+            }
         };
 
         let range = input.next_block_range();
@@ -251,15 +274,33 @@ where
                 }
             }
         } else {
-            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie");
-            let (root, updates) =
-                StateRoot::incremental_root_with_updates(provider.tx_ref(), range)
+            debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
+            let mut final_root = None;
+            for start_block in range.step_by(incremental_threshold as usize) {
+                let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
+                let chunk_range = start_block..=chunk_to;
+                debug!(
+                    target: "sync::stages::merkle::exec",
+                    current = ?current_block_number,
+                    target = ?to_block,
+                    incremental_threshold,
+                    chunk_range = ?chunk_range,
+                    "Processing chunk"
+                );
+                let (root, updates) =
+                StateRoot::incremental_root_with_updates(provider.tx_ref(), chunk_range)
                     .map_err(|e| {
                         error!(target: "sync::stages::merkle", %e, ?current_block_number, ?to_block, "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                         StageError::Fatal(Box::new(e))
                     })?;
+                provider.write_trie_updates(&updates)?;
+                final_root = Some(root);
+            }
 
-            provider.write_trie_updates(&updates)?;
+            // if we had no final root, we must have not looped above, which should not be possible
+            let final_root = final_root.ok_or(StageError::Fatal(
+                "Incremental merkle hashing did not produce a final root".into(),
+            ))?;
 
             let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
                 provider.count_entries::<tables::HashedStorages>()?)
@@ -272,8 +313,8 @@ where
                 processed: total_hashed_entries,
                 total: total_hashed_entries,
             };
-
-            (root, entities_checkpoint)
+            // Save the checkpoint
+            (final_root, entities_checkpoint)
         };
 
         // Reset the checkpoint
@@ -468,14 +509,79 @@ mod tests {
         assert!(runner.validate_execution(input, result.ok()).is_ok(), "execution validation");
     }
 
+    #[tokio::test]
+    async fn execute_chunked_merkle() {
+        let (previous_stage, stage_progress) = (200, 100);
+        let clean_threshold = 100;
+        let incremental_threshold = 10;
+
+        // Set up the runner
+        let mut runner =
+            MerkleTestRunner { db: TestStageDB::default(), clean_threshold, incremental_threshold };
+
+        let input = ExecInput {
+            target: Some(previous_stage),
+            checkpoint: Some(StageCheckpoint::new(stage_progress)),
+        };
+
+        runner.seed_execution(input).expect("failed to seed execution");
+        let rx = runner.execute(input);
+
+        // Assert the successful result
+        let result = rx.await.unwrap();
+        assert_matches!(
+            result,
+            Ok(ExecOutput {
+                checkpoint: StageCheckpoint {
+                    block_number,
+                    stage_checkpoint: Some(StageUnitCheckpoint::Entities(EntitiesCheckpoint {
+                        processed,
+                        total
+                    }))
+                },
+                done: true
+            }) if block_number == previous_stage && processed == total &&
+                total == (
+                    runner.db.table::<tables::HashedAccounts>().unwrap().len() +
+                    runner.db.table::<tables::HashedStorages>().unwrap().len()
+                ) as u64
+        );
+
+        // Validate the stage execution
+        let provider = runner.db.factory.provider().unwrap();
+        let header = provider.header_by_number(previous_stage).unwrap().unwrap();
+        let expected_root = header.state_root;
+
+        let actual_root = runner
+            .db
+            .query(|tx| {
+                Ok(StateRoot::incremental_root_with_updates(
+                    tx,
+                    stage_progress + 1..=previous_stage,
+                ))
+            })
+            .unwrap();
+
+        assert_eq!(
+            actual_root.unwrap().0,
+            expected_root,
+            "State root mismatch after chunked processing"
+        );
+    }
+
     struct MerkleTestRunner {
         db: TestStageDB,
         clean_threshold: u64,
+        incremental_threshold: u64,
     }
 
     impl Default for MerkleTestRunner {
         fn default() -> Self {
-            Self { db: TestStageDB::default(), clean_threshold: 10000 }
+            Self {
+                db: TestStageDB::default(),
+                clean_threshold: 10000,
+                incremental_threshold: 10000,
+            }
         }
     }
 
@@ -487,7 +593,10 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S::Both { clean_threshold: self.clean_threshold }
+            Self::S::Both {
+                rebuild_threshold: self.clean_threshold,
+                incremental_threshold: self.incremental_threshold,
+            }
         }
     }
 

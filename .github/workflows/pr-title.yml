@@ -30,6 +30,7 @@ jobs:
             fix
             chore
             test
+            bench
             perf
             refactor
             docs
@@ -55,23 +56,24 @@ jobs:
             - `fix`: Patches a bug
             - `chore`: General maintenance tasks or updates
             - `test`: Adding new tests or modifying existing tests
+            - `bench`: Adding new benchmarks or modifying existing benchmarks
             - `perf`: Performance improvements
             - `refactor`: Changes to improve code structure
             - `docs`: Documentation updates
             - `ci`: Changes to CI/CD configurations
             - `revert`: Reverts a previously merged PR
             - `deps`: Updates dependencies
-            
+
             **Breaking Changes**
 
             Breaking changes are noted by using an exclamation mark. For example:
             - `feat!: changed the API`
             - `chore(node)!: Removed unused public function`
-            
+
             **Help**
 
             For more information, follow the guidelines here: https://www.conventionalcommits.org/en/v1.0.0/
-      
+
       - name: Remove Comment for Valid Title
         if: steps.lint_pr_title.outcome == 'success'
         uses: marocchino/sticky-pull-request-comment@v2

@@ -79,9 +79,6 @@ mod stats;
 #[cfg(feature = "db-api")]
 pub use stats::*;
 
-mod legacy;
-pub use legacy::*;
-
 mod primitives;
 pub use primitives::*;
 

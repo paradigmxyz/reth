@@ -42,7 +42,7 @@ use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    DedupPayload, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
@@ -861,19 +861,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
     }
 
-    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
-    /// have capacity for w.r.t. the given version of the protocol.
-    pub const fn approx_capacity_get_pooled_transactions_req(
-        &self,
-        announcement_version: EthVersion,
-    ) -> usize {
-        if announcement_version.is_eth68() {
-            approx_capacity_get_pooled_transactions_req_eth68(&self.info)
-        } else {
-            approx_capacity_get_pooled_transactions_req_eth66()
-        }
-    }
-
     /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
     /// [`FetchEvent`], which will then be streamed by
     /// [`TransactionsManager`](super::TransactionsManager).
@@ -1328,6 +1315,7 @@ mod test {
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
+    use reth_eth_wire_types::EthVersion;
     use reth_ethereum_primitives::TransactionSigned;
     use std::{collections::HashSet, str::FromStr};
 

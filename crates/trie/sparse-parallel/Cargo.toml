@@ -1,0 +1,42 @@
+[package]
+name = "reth-trie-sparse-parallel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Parallel Sparse MPT implementation"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-execution-errors.workspace = true
+reth-trie-common.workspace = true
+reth-trie-sparse.workspace = true
+tracing = { workspace = true, features = ["attributes"] }
+alloy-trie.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+
+# misc
+smallvec.workspace = true
+
+[dev-dependencies]
+# reth
+reth-primitives-traits.workspace = true
+reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-trie.workspace = true
+reth-trie-sparse = { workspace = true, features = ["test-utils"] }
+
+arbitrary.workspace = true
+assert_matches.workspace = true
+itertools.workspace = true
+proptest-arbitrary-interop.workspace = true
+proptest.workspace = true
+rand.workspace = true
+rand_08.workspace = true

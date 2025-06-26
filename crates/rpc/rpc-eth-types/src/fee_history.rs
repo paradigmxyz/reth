@@ -132,7 +132,7 @@ impl FeeHistoryCache {
         self.inner.lower_bound.load(SeqCst)
     }
 
-    /// Collect fee history for given range.
+    /// Collect fee history for the given range (inclusive `start_block..=end_block`).
     ///
     /// This function retrieves fee history entries from the cache for the specified range.
     /// If the requested range (`start_block` to `end_block`) is within the cache bounds,
@@ -143,6 +143,10 @@ impl FeeHistoryCache {
         start_block: u64,
         end_block: u64,
     ) -> Option<Vec<FeeHistoryEntry>> {
+        if end_block < start_block {
+            // invalid range, return None
+            return None
+        }
         let lower_bound = self.lower_bound();
         let upper_bound = self.upper_bound();
         if start_block >= lower_bound && end_block <= upper_bound {

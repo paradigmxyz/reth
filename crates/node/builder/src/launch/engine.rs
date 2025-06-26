@@ -20,7 +20,7 @@ use reth_engine_tree::{
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{NetworkSyncUpdater, SyncState};
+use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
@@ -33,7 +33,10 @@ use reth_node_core::{
     primitives::Head,
 };
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_provider::{
+    providers::{BlockchainProvider, NodeTypesForProvider},
+    BlockNumReader,
+};
 use reth_stages::stages::EraImportSource;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -126,6 +129,9 @@ where
                 Ok(BlockchainProvider::new(provider_factory)?)
             })?
             .with_components(components_builder, on_component_initialized).await?;
+
+        // Try to expire pre-merge transaction history if configured
+        ctx.expire_pre_merge_transactions()?;
 
         // spawn exexs
         let exex_manager_handle = ExExLauncher::new(
@@ -301,7 +307,9 @@ where
             .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
             .into_built_payload_stream()
             .fuse();
+
         let chainspec = ctx.chain_spec();
+        let provider = ctx.blockchain_db().clone();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
@@ -345,7 +353,7 @@ where
                                 if let Some(head) = ev.canonical_header() {
                                     // Once we're progressing via live sync, we can consider the node is not syncing anymore
                                     network_handle.update_sync_state(SyncState::Idle);
-                                    let head_block = Head {
+                                                                        let head_block = Head {
                                         number: head.number(),
                                         hash: head.hash(),
                                         difficulty: head.difficulty(),
@@ -353,6 +361,13 @@ where
                                         total_difficulty: chainspec.final_paris_total_difficulty().filter(|_| chainspec.is_paris_active_at_block(head.number())).unwrap_or_default(),
                                     };
                                     network_handle.update_status(head_block);
+
+                                    let updated = BlockRangeUpdate {
+                                        earliest: provider.earliest_block_number().unwrap_or_default(),
+                                        latest:head.number(),
+                                        latest_hash:head.hash()
+                                    };
+                                    network_handle.update_block_range(updated);
                                 }
                                 event_sender.notify(ev);
                             }

@@ -261,6 +261,10 @@ impl<N: ProviderNodeTypes> BlockNumReader for BlockchainProvider<N> {
         self.database.last_block_number()
     }
 
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        self.database.earliest_block_number()
+    }
+
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         self.consistent_provider()?.block_number(hash)
     }
@@ -526,20 +530,12 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         let hash = provider
             .block_hash(block_number)?
             .ok_or_else(|| ProviderError::HeaderNotFound(block_number.into()))?;
-        self.history_by_block_hash(hash)
+        provider.into_state_provider_at_block_hash(hash)
     }
 
     fn history_by_block_hash(&self, block_hash: BlockHash) -> ProviderResult<StateProviderBox> {
         trace!(target: "providers::blockchain", ?block_hash, "Getting history by block hash");
-
-        self.consistent_provider()?.get_in_memory_or_storage_by_block(
-            block_hash.into(),
-            |_| self.database.history_by_block_hash(block_hash),
-            |block_state| {
-                let state_provider = self.block_state_provider(block_state)?;
-                Ok(Box::new(state_provider))
-            },
-        )
+        self.consistent_provider()?.into_state_provider_at_block_hash(block_hash)
     }
 
     fn state_by_block_hash(&self, hash: BlockHash) -> ProviderResult<StateProviderBox> {
@@ -599,7 +595,9 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
                 let hash = self.safe_block_hash()?.ok_or(ProviderError::SafeBlockNotFound)?;
                 self.state_by_block_hash(hash)
             }
-            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Earliest => {
+                self.history_by_block_number(self.earliest_block_number()?)
+            }
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => {
                 let hash = self

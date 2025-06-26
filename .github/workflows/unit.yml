@@ -42,10 +42,6 @@ jobs:
             args: --features "asm-keccak" --locked --exclude reth --exclude reth-bench --exclude "example-*" --exclude "reth-ethereum-*" --exclude "*-ethereum"
             partition: 2
             total_partitions: 2
-          - type: book
-            args: --manifest-path book/sources/Cargo.toml
-            partition: 1
-            total_partitions: 1
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
