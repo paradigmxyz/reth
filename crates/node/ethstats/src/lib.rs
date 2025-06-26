@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-pub mod ethstats;
-pub mod events;
 pub mod connection;
 pub mod error;
+pub mod ethstats;
+pub mod events;

@@ -11,8 +11,6 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
-reth-storage-api.workspace = true
-
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 
@@ -25,5 +23,4 @@ serde_json.workspace = true
 
 tracing.workspace = true
 url.workspace = true
-http.workspace = true
 thiserror = { workspace = true, features = ["std"] }

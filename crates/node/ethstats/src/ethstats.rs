@@ -1,163 +1,370 @@
-//! Support ethstats, the network stats reporting service
-
-use crate::{connection::ConnWrapper, error::Error};
-use tokio::{select, time};
+use crate::{
+    connection::ConnWrapper,
+    error::EthStatsError,
+    events::{AuthMsg, BlockStats, HistoryMsg, LatencyMsg, NodeInfo, StatsMsg},
+};
 
 use serde_json::{json, Value};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
-use tokio::time::{timeout, Duration, interval};
-use tokio_tungstenite::{connect_async, tungstenite::protocol::Message, WebSocketStream};
+use std::{
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use tokio::{
+    sync::{mpsc, Mutex, RwLock},
+    time::{interval, sleep, timeout},
+};
+use tokio_tungstenite::connect_async;
 use url::Url;
-use tokio::net::TcpStream;
-use tokio_tungstenite::MaybeTlsStream;
 
-use ethstats_events::{AuthMsg, NodeInfo, StatsMsg};
+const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
+const PING_INTERVAL: Duration = Duration::from_secs(15);
+const STATS_INTERVAL: Duration = Duration::from_secs(15);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-pub fn parse_ethstats_url(url: &str) -> Result<(String, String, String), String> {
-    if let Some((pre_host, host)) = url.rsplit_once('@') {
-        if let Some((nodename, pass)) = pre_host.rsplit_once(':') {
-            return Ok((nodename.to_string(), pass.to_string(), host.to_string()));
-        } else {
-            return Ok((pre_host.to_string(), "".to_string(), host.to_string()));
+#[derive(Debug, Clone)]
+pub struct EthstatsCredentials {
+    pub node_id: String,
+    pub secret: String,
+    pub host: String,
+}
+
+impl FromStr for EthstatsCredentials {
+    type Err = EthStatsError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Expecting format: node_id:secret@host
+        let parts: Vec<&str> = s.split('@').collect();
+        if parts.len() != 2 {
+            return Err(EthStatsError::InvalidUrl("Missing '@' separator".to_string()));
         }
+        let creds = parts[0];
+        let host = parts[1].to_string();
+        let creds_parts: Vec<&str> = creds.split(':').collect();
+        if creds_parts.len() != 2 {
+            return Err(EthStatsError::InvalidUrl(
+                "Missing ':' separator in credentials".to_string(),
+            ));
+        }
+        let node_id = creds_parts[0].to_string();
+        let secret = creds_parts[1].to_string();
+
+        Ok(EthstatsCredentials { node_id, secret, host })
     }
-    Err(format!("Invalid ethstats URL: {}", url))
 }
 
 pub struct EthStatsService {
-    node_id: String,
-    secret: String,
-    host: String,
-    conn: Option<ConnWrapper>,
-    shutdown_rx: mpsc::Receiver<()>,
+    credentials: EthstatsCredentials,
+    conn: Arc<RwLock<Option<ConnWrapper>>>,
+    last_ping: Arc<Mutex<Option<Instant>>>,
+    latency: Arc<Mutex<u64>>,
+    // Add Reth-specific data sources here:
+    // network: NetworkHandle,
+    // blockchain: Blockchain,
 }
 
 impl EthStatsService {
-    pub async fn new(url: &str, shutdown_rx: mpsc::Receiver<()>) -> Result<Self, String> {
-        let (node, secret, host) = parse_ethstats_url(url)?;
-        let full_url = format!("ws://{}/api", host);
-        let url = Url::parse(&full_url).map_err(|e| e.to_string())?;
+    pub async fn new(url: &str) -> Result<Self, EthStatsError> {
+        let credentials = EthstatsCredentials::from_str(url)?;
+        let service = EthStatsService {
+            credentials,
+            conn: Arc::new(RwLock::new(None)),
+            last_ping: Arc::new(Mutex::new(None)),
+            latency: Arc::new(Mutex::new(0)),
+        };
+        service.connect().await?;
 
-        match connect_async(url).await {
-            Ok((ws_stream, _)) => {
-                let conn = ConnWrapper::new(ws_stream);
-                let mut service = EthStatsService {
-                    node_id: node,
-                    secret,
-                    host,
-                    conn: Some(conn),
-                    shutdown_rx,
-                };
-                service.login().await?;
-                Ok(service)
+        Ok(service)
+    }
+
+    async fn connect(&self) -> Result<(), EthStatsError> {
+        let full_url = format!("ws://{}/api", self.credentials.host);
+        let url = Url::parse(&full_url)
+            .map_err(|e| EthStatsError::InvalidUrl(format!("Invalid URL: {} - {}", full_url, e)))?;
+
+        match timeout(CONNECT_TIMEOUT, connect_async(url.to_string())).await {
+            Ok(Ok((ws_stream, _))) => {
+                let conn: ConnWrapper = ConnWrapper::new(ws_stream);
+                *self.conn.write().await = Some(conn.clone());
+                self.login().await?;
+                Ok(())
             }
-            Err(e) => Err(format!("Connection failed: {}", e)),
+            Ok(Err(e)) => Err(EthStatsError::InvalidUrl(e.to_string())),
+            Err(_) => Err(EthStatsError::Timeout),
         }
     }
 
-    async fn login(&mut self) -> Result<(), String> {
-        let conn = self.conn.as_ref().unwrap();
+    async fn login(&self) -> Result<(), EthStatsError> {
+        let conn = self.conn.read().await;
+        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
         let auth = AuthMsg {
-            id: self.node_id.clone(),
-            secret: self.secret.clone(),
+            id: self.credentials.node_id.clone(),
+            secret: self.credentials.secret.clone(),
             info: NodeInfo {
-                name: self.node_id.clone(),
-                node: "rust-client".into(),
+                name: self.credentials.node_id.clone(),
+                node: "reth".into(),
                 port: 30303,
                 network: "1".into(),
-                protocol: "eth/66".into(),
+                protocol: "eth/68".into(),
                 api: "No".into(),
                 os: std::env::consts::OS.into(),
-                os_ver: std::env::consts::ARCH.into(),
-                client: "0.1.0".into(),
+                os_ver: std::env::consts::OS.into(),
+                client: env!("CARGO_PKG_VERSION").into(),
                 history: true,
             },
         };
 
         let message = auth.generate_login_message();
-        conn.write_json(&message).await.map_err(|e| e.to_string())?;
+        conn.write_json(&message).await?;
 
-        let response = timeout(Duration::from_secs(5), conn.read_json()).await
-            .map_err(|_| "Timeout waiting for login ack".to_string())?
-            .map_err(|e| e.to_string())?;
+        let response =
+            timeout(READ_TIMEOUT, conn.read_json()).await.map_err(|_| EthStatsError::Timeout)??;
 
         if let Some(ack) = response.get("emit") {
             if ack.get(0) == Some(&Value::String("ready".to_string())) {
+                tracing::info!("Login successful to ethstats server");
                 return Ok(());
             }
         }
 
-        Err("Unauthorized or unexpected login response".to_string())
+        Err(EthStatsError::AuthError("Unauthorized or unexpected login response".into()))
     }
 
-    async fn report_stats(&self) {
-        if let Some(conn) = &self.conn {
-            let stats_msg = StatsMsg {
-                id: self.node_id.clone(),
-                active: true,
-                syncing: false,
-                peers: 5,
-                gas_price: 123456,
-                uptime: 100,
-            };
-            let payload = stats_msg.to_message();
-            if let Err(e) = conn.write_json(&payload).await {
-                eprintln!("Failed to send stats: {}", e);
+    async fn report_stats(&self) -> Result<(), EthStatsError> {
+        let conn = self.conn.read().await;
+        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+
+        // In a real implementation, these would come from Reth components
+        let stats_msg = StatsMsg {
+            // id: self.credentials.node_id.clone(),
+            // active: true,
+            // syncing: false,
+            // mining: false,
+            // hashrate: 0,
+            // peers: 10, // Replace with actual peer count
+            // gas_price: 123456789,
+            // uptime: 100,
+            // block: BlockStats {
+            //     number: 123456, // Replace with latest block
+            //     hash: "0x123...".into(),
+            //     parent: "0xabc...".into(),
+            //     timestamp: 1678900000,
+            //     gas_used: 15000000,
+            //     gas_limit: 30000000,
+            //     miner: "0xminer...".into(),
+            //     txs: vec!["0xtx1...".into(), "0xtx2...".into()],
+            // },
+        };
+
+        let message = stats_msg.generate_stats_message();
+        conn.write_json(&message).await?;
+
+        Ok(())
+    }
+
+    async fn handle_message(&self, msg: Value) -> Result<(), EthStatsError> {
+        if let Some(emit) = msg.get("emit") {
+            if let Some(Value::String(command)) = emit.get(0) {
+                match command.as_str() {
+                    "node-ping" => {
+                        self.handle_ping().await?;
+                    }
+                    "history" => {
+                        self.handle_history_request().await?;
+                    }
+                    "block" => {
+                        // In a real implementation, this would update internal state
+                        tracing::debug!("Block update received");
+                    }
+                    "pending" => {
+                        // In a real implementation, this would update internal state
+                        tracing::debug!("Pending update received");
+                    }
+                    other => tracing::warn!("Unhandled command: {}", other),
+                }
             }
         }
+
+        Ok(())
     }
 
-    pub async fn run_loop(&mut self) {
-        let mut tick = interval(Duration::from_secs(15));
-        let conn_clone = self.conn.clone();
+    async fn handle_ping(&self) -> Result<(), EthStatsError> {
+        let conn: tokio::sync::RwLockReadGuard<'_, Option<ConnWrapper>> = self.conn.read().await;
+        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
-        // Spawn goroutine equivalent: async reader
-        if let Some(conn) = conn_clone {
-            let node_id = self.node_id.clone();
-            let conn_write = conn.clone();
+        let ping_time = Instant::now();
+        *self.last_ping.lock().await = Some(ping_time);
+
+        let pong = json!({"emit": ["node-pong", 1]});
+        conn.write_json(&pong.to_string()).await?;
+
+        // Calculate latency when we get the response
+        let latency = ping_time.elapsed().as_millis() as u64;
+        *self.latency.lock().await = latency;
+
+        let latency_msg = LatencyMsg { id: self.credentials.node_id.clone(), latency };
+
+        let message = latency_msg.generate_latency_message();
+        conn.write_json(&message).await?;
+
+        tracing::debug!("Ping handled, latency: {}ms", latency);
+
+        Ok(())
+    }
+
+    async fn handle_history_request(&self) -> Result<(), EthStatsError> {
+        let conn = self.conn.read().await;
+        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+
+        // In a real implementation, this would fetch actual block history
+        let history = HistoryMsg {
+            id: self.credentials.node_id.clone(),
+            history: vec![
+                // BlockStats {
+                //     number: 123455,
+                //     hash: "0x123...".into(),
+                //     parent: "0xabc...".into(),
+                //     timestamp: 1678899990,
+                //     gas_used: 14900000,
+                //     gas_limit: 30000000,
+                //     miner: "0xminer...".into(),
+                //     txs: vec!["0xtx1...".into()],
+                // },
+                // BlockStats {
+                //     number: 123454,
+                //     hash: "0x456...".into(),
+                //     parent: "0xdef...".into(),
+                //     timestamp: 1678899980,
+                //     gas_used: 14800000,
+                //     gas_limit: 30000000,
+                //     miner: "0xminer...".into(),
+                //     txs: vec!["0xtx3...".into(), "0xtx4...".into()],
+                // },
+            ],
+        };
+
+        let message = history.generate_history_message();
+        conn.write_json(&message).await?;
+        tracing::debug!("History request handled");
+
+        Ok(())
+    }
+
+    pub async fn run(self) {
+        // Create channels for internal communication
+        let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
+        let (message_tx, mut message_rx) = mpsc::channel(32);
+        let (ping_tx, mut ping_rx) = mpsc::channel(1);
+
+        // Start the read loop in a separate task
+        let read_handle = {
+            let conn = self.conn.clone();
+            let message_tx = message_tx.clone();
+            let shutdown_tx = shutdown_tx.clone();
 
             tokio::spawn(async move {
                 loop {
-                    match conn.read_json().await {
-                        Ok(msg) => {
-                            if let Some(emit) = msg.get("emit") {
-                                if let Some(Value::String(command)) = emit.get(0) {
-                                    match command.as_str() {
-                                        "node-pong" => {
-                                            println!("[{}] pong received", node_id);
-                                        },
-                                        "history" => {
-                                            println!("[{}] history requested", node_id);
-                                            let dummy = json!({"emit": ["history", {"id": node_id, "history": []}]});
-                                            if let Err(e) = conn_write.write_json(&dummy.to_string()).await {
-                                                eprintln!("[{}] failed to respond to history: {}", node_id, e);
-                                            }
-                                        },
-                                        other => println!("[{}] unhandled: {}", node_id, other),
-                                    }
+                    let conn = conn.read().await;
+                    if let Some(conn) = conn.as_ref() {
+                        match timeout(READ_TIMEOUT, conn.read_json()).await {
+                            Ok(Ok(msg)) => {
+                                if message_tx.send(msg).await.is_err() {
+                                    break;
                                 }
                             }
-                        },
-                        Err(e) => {
-                            eprintln!("[{}] read error: {}", node_id, e);
-                            break;
+                            Ok(Err(e)) => {
+                                tracing::error!("Read error: {}", e);
+                                break;
+                            }
+                            Err(_) => {
+                                tracing::warn!("Read timeout");
+                                break;
+                            }
+                        }
+                    } else {
+                        sleep(RECONNECT_INTERVAL).await;
+                    }
+                }
+
+                shutdown_tx.send(()).await;
+            })
+        };
+
+        // Start the ping monitor in a separate task
+        let ping_handle = {
+            let last_ping = self.last_ping.clone();
+            tokio::spawn(async move {
+                let mut interval = interval(PING_INTERVAL);
+                loop {
+                    interval.tick().await;
+                    if let Some(last_ping) = *last_ping.lock().await {
+                        if last_ping.elapsed() > PING_INTERVAL * 2 {
+                            ping_tx.send(()).await;
                         }
                     }
                 }
-            });
-        }
+            })
+        };
 
+        // Set up intervals
+        let mut stats_interval = interval(STATS_INTERVAL);
+        let mut reconnect_interval = interval(RECONNECT_INTERVAL);
+
+        // Main event loop using select!
         loop {
             tokio::select! {
-                _ = tick.tick() => {
-                    self.report_stats().await;
-                },
-                Some(_) = self.shutdown_rx.recv() => {
-                    println!("Received shutdown signal");
+                // Handle shutdown signal
+                _ = shutdown_rx.recv() => {
+                    tracing::info!("Shutting down ethstats service");
                     break;
                 }
+
+                // Handle messages from the read loop
+                Some(msg) = message_rx.recv() => {
+                    if let Err(e) = self.handle_message(msg).await {
+                        tracing::error!("Error handling message: {}", e);
+                        self.disconnect().await;
+                    }
+                }
+
+                // Handle ping timeout
+                _ = ping_rx.recv() => {
+                    tracing::warn!("Ping timeout, reconnecting");
+                    self.disconnect().await;
+                }
+
+                // Handle stats reporting
+                _ = stats_interval.tick() => {
+                    if let Err(e) = self.report_stats().await {
+                        tracing::error!("Failed to report stats: {}", e);
+                        self.disconnect().await;
+                    }
+                }
+
+                // Handle reconnection
+                _ = reconnect_interval.tick(), if self.conn.read().await.is_none() => {
+                    match self.connect().await {
+                        Ok(_) => tracing::info!("Reconnected successfully"),
+                        Err(e) => tracing::error!("Reconnect failed: {}", e),
+                    }
+                }
+            }
+        }
+
+        // Cleanup
+        self.disconnect().await;
+
+        // Cancel background tasks
+        read_handle.abort();
+        ping_handle.abort();
+    }
+
+    async fn disconnect(&self) {
+        if let Some(conn) = self.conn.write().await.take() {
+            if let Err(e) = conn.close().await {
+                tracing::error!("Error closing connection: {}", e);
             }
         }
     }

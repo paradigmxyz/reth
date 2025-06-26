@@ -7,12 +7,13 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 
 /// Collection of meta information about a node that is displayed on the monitoring page.
-/// This information is used to identify and display node details in the ethstats monitoring interface.
+/// This information is used to identify and display node details in the ethstats monitoring
+/// interface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInfo {
     /// The display name of the node in the monitoring interface
     pub name: String,
-    
+
     /// The node's unique identifier
     pub node: String,
 
@@ -60,7 +61,8 @@ impl AuthMsg {
     pub fn generate_login_message(&self) -> String {
         serde_json::json!({
             "emit": ["hello", self]
-        }).to_string()
+        })
+        .to_string()
     }
 }
 
@@ -143,7 +145,8 @@ impl BlockMsg {
     pub fn generate_block_message(&self) -> String {
         serde_json::json!({
             "emit": ["block", self]
-        }).to_string()
+        })
+        .to_string()
     }
 }
 
@@ -162,18 +165,21 @@ impl HistoryMsg {
     pub fn generate_history_message(&self) -> String {
         serde_json::json!({
             "emit": ["history", self]
-        }).to_string()
+        })
+        .to_string()
     }
 }
 
-/// Message containing pending transaction statistics to be reported to the ethstats monitoring server.
+/// Message containing pending transaction statistics to be reported to the ethstats monitoring
+/// server.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PendingStats {
     /// Number of pending transactions
     pub pending: i32,
 }
 
-/// Message containing pending transaction statistics to be reported to the ethstats monitoring server.
+/// Message containing pending transaction statistics to be reported to the ethstats monitoring
+/// server.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PendingMsg {
     /// The node's unique identifier
@@ -188,7 +194,8 @@ impl PendingMsg {
     pub fn generate_pending_message(&self) -> String {
         serde_json::json!({
             "emit": ["pending", self]
-        }).to_string()
+        })
+        .to_string()
     }
 }
 
@@ -198,19 +205,19 @@ pub struct NodeStats {
     /// Whether the node is active
     #[serde(rename = "active")]
     pub active: bool,
-    
+
     /// Whether the node is currently syncing
     #[serde(rename = "syncing")]
     pub syncing: bool,
-    
+
     /// Number of connected peers
     #[serde(rename = "peers")]
     pub peers: i32,
-    
+
     /// Current gas price in wei
     #[serde(rename = "gasPrice")]
     pub gas_price: i32,
-    
+
     /// Node uptime percentage
     #[serde(rename = "uptime")]
     pub uptime: i32,
@@ -231,6 +238,27 @@ impl StatsMsg {
     pub fn generate_stats_message(&self) -> String {
         serde_json::json!({
             "emit": ["stats", self]
-        }).to_string()
+        })
+        .to_string()
+    }
+}
+
+/// Latency report message
+#[derive(Serialize, Debug)]
+pub struct LatencyMsg {
+    /// The node's unique identifier
+    pub id: String,
+
+    /// The latency to report
+    pub latency: u64,
+}
+
+impl LatencyMsg {
+    /// Generate a latency message.
+    pub fn generate_latency_message(&self) -> String {
+        serde_json::json!({
+            "emit": ["latency", self]
+        })
+        .to_string()
     }
 }

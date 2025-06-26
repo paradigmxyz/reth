@@ -8974,8 +8974,6 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "futures-util",
- "http",
- "reth-storage-api",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
