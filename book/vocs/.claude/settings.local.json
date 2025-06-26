@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chmod:*)",
+      "Bash(bun install:*)",
+      "Bash(./scripts/build-cargo-docs.sh:*)",
+      "Bash(ls:*)",
+      "Bash(bun run:*)",
+      "Bash(find:*)",
+      "Bash(rm:*)",
+      "Bash(grep:*)",
+      "Bash(bun scripts/inject-cargo-docs.ts:*)",
+      "Bash(git add:*)"
+    ],
+    "deny": []
+  }
+}

@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vocs dev",
-    "build": "vocs build && bun generate-redirects.ts",
+    "build": "./scripts/build-cargo-docs.sh && vocs build && bun generate-redirects.ts && bun scripts/inject-cargo-docs.ts",
     "preview": "vocs preview",
     "check-links": "bun check-links.ts",
-    "generate-redirects": "bun generate-redirects.ts"
+    "generate-redirects": "bun generate-redirects.ts",
+    "build-cargo-docs": "./scripts/build-cargo-docs.sh",
+    "inject-cargo-docs": "bun scripts/inject-cargo-docs.ts"
   },
   "dependencies": {
     "react": "latest",
@@ -16,7 +18,9 @@
     "vocs": "latest"
   },
   "devDependencies": {
+    "@types/node": "latest",
     "@types/react": "latest",
+    "glob": "^10.3.10",
     "typescript": "latest"
   }
 }
