@@ -47,6 +47,7 @@ use revm::{
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
+use std::cmp::Ordering;
 use tracing::trace;
 
 /// Result type for `eth_simulateV1` RPC method.
@@ -68,7 +69,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
     /// The transactions are packed into individual blocks. Overrides can be provided.
     ///
-    /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
+    /// See also: <https://github.com/ethereum/go-ethereum/pull/27720> and <https://github.com/ethereum/execution-apis/blob/main/docs/ethsimulatev1-notes.md>
     fn simulate_v1(
         &self,
         payload: SimulatePayload,
@@ -104,50 +105,43 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     Vec::with_capacity(block_state_calls.len());
 
                 let mut block_iter = block_state_calls.into_iter().peekable();
-                let mut previous_block_number: Option<U256> = None;
 
-                while block_iter.peek().is_some() {
-                    let block = if let Some(prev_num) = previous_block_number {
-                        // Peek at the next block's number
-                        if let Some(next_block_number) = block_iter
-                            .peek()
-                            .and_then(|b| b.block_overrides.as_ref())
-                            .and_then(|bo| bo.number)
-                        {
-                            // Ensure only-increasing block number
-                            if prev_num >= next_block_number {
-                                return Err(EthApiError::InvalidParams(format!(
-                                    "Block number must be strictly increasing. Attempted to simulate from {prev_num} to {next_block_number}",
-                                ))
-                                .into())
-                            }
+                // yields the next simulated block to execute, if the user provided overrides, this ensures that gaps are filled with empty simulated blocks with the correct block number
+                let mut next_sim_block = |last_block_number: Option<u64>| {
+                    // ensure we still have blocks to process
+                    let Some(next_sim) = block_iter.peek() else { return Ok(None)};
+                    // ensure that if the next sim block has an override it is gapless, if not we ned to inject empty blocks in between
+                    if let Some(number_override) = next_sim.block_number_override() {
+                        if let Some(last) = last_block_number {
+                            let next_expected_block_number = U256::from(last.saturating_add(1));
+                            match number_override.cmp(&next_expected_block_number) {
+                                Ordering::Less => {
+                                    return  Err(EthApiError::InvalidParams(format!(
+                                        "block numbers must be in order: {number_override} <= {next_expected_block_number}",
+                                    )))
+                                }
+                                Ordering::Equal => {
+                                    // gapless
+                                }
+                                Ordering::Greater => {
 
-                            // Check if there's a gap
-                            let expected_next = prev_num + U256::ONE;
-                            if next_block_number > expected_next {
-                                // Create a gap block
-                                SimBlock::default().with_block_overrides(
-                                    BlockOverrides {
-                                        number: Some(expected_next),
-                                        ..Default::default()
-                                    },
-                                )
-                            } else {
-                                // No gap, consume the next block
-                                block_iter.next().unwrap()
+                                    // the user configured override would create a gap
+                                    return
+                                        Ok(Some(SimBlock::default().with_block_overrides(
+                                            BlockOverrides::default().with_number(next_expected_block_number)
+                                        )))
+                                }
                             }
-                        } else {
-                            // Next block has no number, just consume it
-                            block_iter.next().unwrap()
                         }
-                    } else {
-                        // First block, just consume it
-                        block_iter.next().unwrap()
-                    };
+                    }
+                    // return next block
+                    Ok(block_iter.next())
+                };
 
-                    // Update previous block number for next iteration
-                    if let Some(block_number) = block.block_overrides.as_ref().and_then(|b| b.number) {
-                        previous_block_number = Some(block_number);
+                while let Some(block) = next_sim_block(blocks.last().map(|b|b.inner.number()))? {
+                    // we need to check this here because user input can create gaps that need to be filled with empty blocks
+                    if blocks.len() > this.max_simulate_blocks() as usize {
+                        return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
                     }
 
                     let mut evm_env = this
