@@ -191,7 +191,7 @@ where
             }
         }
 
-        let result = self.precompile.call(input.clone());
+        let result = self.precompile.call(input);
 
         match &result {
             Ok(output) => {

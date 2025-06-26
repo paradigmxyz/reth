@@ -2,6 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
+use alloy_evm::overrides::apply_block_overrides;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
@@ -17,9 +18,7 @@ use reth_rpc_eth_api::{
     helpers::{block::LoadBlock, Call, EthTransactions},
     FromEthApiError, FromEvmError,
 };
-use reth_rpc_eth_types::{
-    revm_utils::apply_block_overrides, utils::recover_raw_transaction, EthApiError,
-};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::ProviderTx;
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};

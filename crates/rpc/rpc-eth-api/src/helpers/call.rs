@@ -7,6 +7,10 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip2930::AccessListResult;
+use alloy_evm::{
+    call::caller_gas_allowance,
+    overrides::{apply_block_overrides, apply_state_overrides},
+};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -31,7 +35,6 @@ use reth_rpc_convert::{RpcConvert, RpcTypes};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
-    revm_utils::{apply_block_overrides, apply_state_overrides, caller_gas_allowance},
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
@@ -132,7 +135,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
                     }
                     if let Some(state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides, &mut db)?;
+                        apply_state_overrides(state_overrides, &mut db)
+                            .map_err(Self::Error::from_eth_err)?;
                     }
 
                     let block_gas_limit = evm_env.block_env.gas_limit;
@@ -381,7 +385,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         if let Some(state_overrides) = state_override {
-            apply_state_overrides(state_overrides, &mut db)?;
+            apply_state_overrides(state_overrides, &mut db).map_err(Self::Error::from_eth_err)?;
         }
 
         let mut tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
@@ -399,7 +403,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         evm_env.cfg_env.disable_eip3607 = true;
 
         if request.gas.is_none() && tx_env.gas_price() > 0 {
-            let cap = caller_gas_allowance(&mut db, &tx_env)?;
+            let cap = caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?;
             // no gas limit was provided in the request, so we need to cap the request's gas limit
             tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
         }
@@ -762,7 +766,8 @@ pub trait Call:
             apply_block_overrides(*block_overrides, db, &mut evm_env.block_env);
         }
         if let Some(state_overrides) = overrides.state {
-            apply_state_overrides(state_overrides, db)?;
+            apply_state_overrides(state_overrides, db)
+                .map_err(EthApiError::from_state_overrides_err)?;
         }
 
         let request_gas = request.gas;
@@ -773,7 +778,7 @@ pub trait Call:
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let cap = caller_gas_allowance(db, &tx_env)?;
+                let cap = caller_gas_allowance(db, &tx_env).map_err(EthApiError::from_call_err)?;
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
             }

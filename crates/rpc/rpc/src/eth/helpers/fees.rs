@@ -3,7 +3,7 @@
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_rpc_eth_api::helpers::{EthFees, LoadBlock, LoadFee};
 use reth_rpc_eth_types::{FeeHistoryCache, GasPriceOracle};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderHeader, StateProviderFactory};
 
 use crate::EthApi;
 
@@ -27,7 +27,7 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
         self.inner.fee_history_cache()
     }
 }

@@ -42,7 +42,7 @@ reth-node-api.workspace = true
 reth-trie-common.workspace = true
 
 # ethereum
-alloy-evm.workspace = true
+alloy-evm = { workspace = true, features = ["overrides"] }
 alloy-consensus.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true

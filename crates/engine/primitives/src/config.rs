@@ -11,7 +11,7 @@ pub const DEFAULT_MAX_PROOF_TASK_CONCURRENCY: u64 = 256;
 
 /// Default number of reserved CPU cores for non-reth processes.
 ///
-/// This will be deducated from the thread count of main reth global threadpool.
+/// This will be deducted from the thread count of main reth global threadpool.
 pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;

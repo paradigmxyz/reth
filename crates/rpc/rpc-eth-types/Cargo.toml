@@ -30,6 +30,7 @@ reth-trie.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-evm = { workspace = true, features = ["overrides", "call-util"] }
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-sol-types.workspace = true

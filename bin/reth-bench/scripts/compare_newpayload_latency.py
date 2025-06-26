@@ -1,4 +1,12 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
+# /// script
+# requires-python = ">=3.8"
+# dependencies = [
+#     "pandas",
+#     "matplotlib", 
+#     "numpy",
+# ]
+# ///
 
 # A simple script which plots graphs comparing two combined_latency.csv files
 # output by reth-bench. The graphs which are plotted are:

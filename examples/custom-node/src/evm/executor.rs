@@ -43,13 +43,11 @@ where
         f: impl FnOnce(&ExecutionResult<<Self::Evm as Evm>::HaltReason>) -> CommitChanges,
     ) -> Result<Option<u64>, BlockExecutionError> {
         match tx.tx() {
-            CustomTransaction::BuiltIn(op_tx) => {
-                self.inner.execute_transaction_with_commit_condition(
-                    Recovered::new_unchecked(op_tx, *tx.signer()),
-                    f,
-                )
-            }
-            CustomTransaction::Other(..) => todo!(),
+            CustomTransaction::Op(op_tx) => self.inner.execute_transaction_with_commit_condition(
+                Recovered::new_unchecked(op_tx, *tx.signer()),
+                f,
+            ),
+            CustomTransaction::Payment(..) => todo!(),
         }
     }
 

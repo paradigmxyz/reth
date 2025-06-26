@@ -28,6 +28,12 @@ jobs:
           bun i
           npx playwright install --with-deps chromium
 
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Build docs
+        run: cd book/vocs && bash scripts/build-cargo-docs.sh
+
       - name: Build Vocs
         run: |
           cd book/vocs/ && bun run build

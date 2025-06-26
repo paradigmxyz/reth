@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
-import { redirects, basePath } from './redirects.config'
+import { redirects, basePath } from '../redirects.config'
 // Base path for the site
 
 function generateRedirectHtml(targetPath: string): string {

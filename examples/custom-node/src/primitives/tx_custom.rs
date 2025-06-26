@@ -1,4 +1,4 @@
-use crate::primitives::{TxTypeCustom, TRANSFER_TX_TYPE_ID};
+use crate::primitives::PAYMENT_TX_TYPE_ID;
 use alloy_consensus::{
     transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx},
     SignableTransaction, Transaction,
@@ -71,8 +71,8 @@ pub struct TxPayment {
 impl TxPayment {
     /// Get the transaction type
     #[doc(alias = "transaction_type")]
-    pub const fn tx_type() -> TxTypeCustom {
-        TxTypeCustom::Custom
+    pub const fn tx_type() -> super::tx::TxTypeCustom {
+        super::tx::TxTypeCustom::Payment
     }
 
     /// Calculates a heuristic for the in-memory size of the [TxPayment]
@@ -115,7 +115,7 @@ impl RlpEcdsaEncodableTx for TxPayment {
 }
 
 impl RlpEcdsaDecodableTx for TxPayment {
-    const DEFAULT_TX_TYPE: u8 = { Self::tx_type() as u8 };
+    const DEFAULT_TX_TYPE: u8 = { PAYMENT_TX_TYPE_ID };
 
     /// Decodes the inner [TxPayment] fields from RLP bytes.
     ///
@@ -244,7 +244,7 @@ impl Transaction for TxPayment {
 
 impl Typed2718 for TxPayment {
     fn ty(&self) -> u8 {
-        TRANSFER_TX_TYPE_ID
+        PAYMENT_TX_TYPE_ID
     }
 }
 
@@ -254,7 +254,7 @@ impl SignableTransaction<Signature> for TxPayment {
     }
 
     fn encode_for_signing(&self, out: &mut dyn alloy_rlp::BufMut) {
-        out.put_u8(Self::tx_type() as u8);
+        out.put_u8(Self::tx_type().ty());
         self.encode(out)
     }
 
