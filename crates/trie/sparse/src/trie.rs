@@ -145,6 +145,9 @@ pub trait RevealedSparseTrie: Sized + fmt::Debug {
     /// and then start tracking a new set of updates.
     fn take_updates(&mut self) -> SparseTrieUpdates;
 
+    /// Reserves capacity in the nodes map for at least `additional` more nodes.
+    fn reserve_nodes(&mut self, additional: usize);
+
     /// Reveals a trie node if it has not been revealed before.
     ///
     /// This function decodes a trie node and stores it interanlly. It handles different node types
@@ -185,6 +188,19 @@ pub trait RevealedSparseTrie: Sized + fmt::Debug {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError>;
 
+    /// Retrieves a reference to the leaf value stored at the given key path, if it is revealed.
+    ///
+    /// This method efficiently retrieves values from the trie without traversing
+    /// the entire node structure, as values are stored in a separate map.
+    ///
+    /// Note: a value can exist in the full trie and this function still returns `None`
+    /// because the value has not been revealed.
+    /// Hence a `None` indicates two possibilities:
+    /// - The value does not exists in the trie, so it cannot be revealed
+    /// - The value has not yet been revealed. In order to determine which is true, one would need
+    ///   an exclusion proof.
+    fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>>;
+
     /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
     /// value.
     ///
@@ -218,6 +234,16 @@ pub trait RevealedSparseTrie: Sized + fmt::Debug {
     /// 1. The cached hash (if no dirty nodes were found)
     /// 2. The keccak256 hash of the root node's RLP representation
     fn root(&mut self) -> B256;
+
+    /// Recalculates and updates the RLP hashes of nodes deeper than or equal to the specified
+    /// `depth`.
+    ///
+    /// The root node is considered to be at level 0. This method is useful for optimizing
+    /// hash recalculations after localized changes to the trie structure:
+    ///
+    /// This function identifies all nodes that have changed (based on the prefix set) at the given
+    /// depth and recalculates their RLP representation.
+    fn update_rlp_node_level(&mut self, depth: usize);
 }
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
@@ -688,26 +714,6 @@ impl<P> SerialSparseTrie<P> {
         &self.nodes
     }
 
-    /// Retrieves a reference to the leaf value stored at the given key path, if it is revealed.
-    ///
-    /// This method efficiently retrieves values from the trie without traversing
-    /// the entire node structure, as values are stored in a separate map.
-    ///
-    /// Note: a value can exist in the full trie and this function still returns `None`
-    /// because the value has not been revealed.
-    /// Hence a `None` indicates two possibilities:
-    /// - The value does not exists in the trie, so it cannot be revealed
-    /// - The value has not yet been revealed. In order to determine which is true, one would need
-    ///   an exclusion proof.
-    pub fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
-        self.values.get(path)
-    }
-
-    /// Reserves capacity in the nodes map for at least `additional` more nodes.
-    pub fn reserve_nodes(&mut self, additional: usize) {
-        self.nodes.reserve(additional);
-    }
-
     /// Traverse the trie from the root down to the leaf at the given path,
     /// removing and collecting all nodes along that path.
     ///
@@ -818,38 +824,6 @@ impl<P> SerialSparseTrie<P> {
             updates.clear()
         }
         self.rlp_buf.clear();
-    }
-
-    /// Recalculates and updates the RLP hashes of nodes deeper than or equal to the specified
-    /// `depth`.
-    ///
-    /// The root node is considered to be at level 0. This method is useful for optimizing
-    /// hash recalculations after localized changes to the trie structure:
-    ///
-    /// This function identifies all nodes that have changed (based on the prefix set) at the given
-    /// depth and recalculates their RLP representation.
-    pub fn update_rlp_node_level(&mut self, depth: usize) {
-        // Take the current prefix set
-        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
-        let mut buffers = RlpNodeBuffers::default();
-
-        // Get the nodes that have changed at the given depth.
-        let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
-        // Update the prefix set to the prefix set of the nodes that still need to be updated.
-        self.prefix_set = new_prefix_set;
-
-        trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
-
-        let mut temp_rlp_buf = core::mem::take(&mut self.rlp_buf);
-        for (level, path) in targets {
-            buffers.path_stack.push(RlpNodePathStackItem {
-                level,
-                path,
-                is_in_prefix_set: Some(true),
-            });
-            self.rlp_node(&mut prefix_set, &mut buffers, &mut temp_rlp_buf);
-        }
-        self.rlp_buf = temp_rlp_buf;
     }
 
     /// Returns a list of (level, path) tuples identifying the nodes that have changed at the
@@ -1363,6 +1337,10 @@ impl<P: BlindedProvider> RevealedSparseTrie for SerialSparseTrie<P> {
         self.updates.take().unwrap_or_default()
     }
 
+    fn reserve_nodes(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
+    }
+
     fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -1633,6 +1611,10 @@ impl<P: BlindedProvider> RevealedSparseTrie for SerialSparseTrie<P> {
 
         // If we get here, there's no leaf at the target path
         Ok(LeafLookup::NonExistent { diverged_at: current })
+    }
+
+    fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>> {
+        self.values.get(path)
     }
 
     fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
@@ -1956,12 +1938,6 @@ impl<P: BlindedProvider> RevealedSparseTrie for SerialSparseTrie<P> {
         Ok(())
     }
 
-    /// Calculates and returns the root hash of the trie.
-    ///
-    /// Before computing the hash, this function processes any remaining (dirty) nodes by
-    /// updating their RLP encodings. The root hash is either:
-    /// 1. The cached hash (if no dirty nodes were found)
-    /// 2. The keccak256 hash of the root node's RLP representation
     fn root(&mut self) -> B256 {
         // Take the current prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
@@ -1971,6 +1947,30 @@ impl<P: BlindedProvider> RevealedSparseTrie for SerialSparseTrie<P> {
         } else {
             keccak256(rlp_node)
         }
+    }
+
+    fn update_rlp_node_level(&mut self, depth: usize) {
+        // Take the current prefix set
+        let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
+        let mut buffers = RlpNodeBuffers::default();
+
+        // Get the nodes that have changed at the given depth.
+        let (targets, new_prefix_set) = self.get_changed_nodes_at_depth(&mut prefix_set, depth);
+        // Update the prefix set to the prefix set of the nodes that still need to be updated.
+        self.prefix_set = new_prefix_set;
+
+        trace!(target: "trie::sparse", ?depth, ?targets, "Updating nodes at depth");
+
+        let mut temp_rlp_buf = core::mem::take(&mut self.rlp_buf);
+        for (level, path) in targets {
+            buffers.path_stack.push(RlpNodePathStackItem {
+                level,
+                path,
+                is_in_prefix_set: Some(true),
+            });
+            self.rlp_node(&mut prefix_set, &mut buffers, &mut temp_rlp_buf);
+        }
+        self.rlp_buf = temp_rlp_buf;
     }
 }
 /// Enum representing sparse trie node type.
