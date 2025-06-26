@@ -77,7 +77,7 @@ pub struct Args {
     pub draw: bool,
 
     /// Suppress output from child processes (compilation, reth node, etc.)
-    #[arg(long)]
+    #[arg(long, default_value = "false")]
     pub quiet: bool,
 
     #[command(flatten)]
