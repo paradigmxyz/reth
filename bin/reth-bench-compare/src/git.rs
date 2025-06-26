@@ -82,26 +82,78 @@ impl GitManager {
         Ok(())
     }
 
-    /// Validate that the specified branches exist
-    pub fn validate_branches(&self, branches: &[&str]) -> Result<()> {
-        for &branch in branches {
-            let output = Command::new("git")
-                .args(["rev-parse", "--verify", &format!("refs/heads/{}", branch)])
+    /// Validate that the specified git references exist (branches or tags)
+    pub fn validate_refs(&self, refs: &[&str]) -> Result<()> {
+        for &git_ref in refs {
+            // Try branch first, then tag
+            let branch_check = Command::new("git")
+                .args(["rev-parse", "--verify", &format!("refs/heads/{}", git_ref)])
                 .current_dir(&self.repo_root)
-                .output()
-                .wrap_err_with(|| format!("Failed to validate branch '{}'", branch))?;
-
-            if !output.status.success() {
-                return Err(eyre!("Branch '{}' does not exist", branch));
+                .output();
+                
+            let tag_check = Command::new("git")
+                .args(["rev-parse", "--verify", &format!("refs/tags/{}", git_ref)])
+                .current_dir(&self.repo_root)
+                .output();
+                
+            let mut found = false;
+            
+            if let Ok(output) = branch_check {
+                if output.status.success() {
+                    info!("Validated branch exists: {}", git_ref);
+                    found = true;
+                }
             }
-
-            info!("Validated branch exists: {}", branch);
+            
+            if !found {
+                if let Ok(output) = tag_check {
+                    if output.status.success() {
+                        info!("Validated tag exists: {}", git_ref);
+                        found = true;
+                    }
+                }
+            }
+            
+            if !found {
+                return Err(eyre!("Git reference '{}' does not exist as branch or tag", git_ref));
+            }
         }
 
         Ok(())
     }
 
-    /// Switch to the specified git branch
+    /// Switch to the specified git reference (branch or tag)
+    pub fn switch_ref(&self, git_ref: &str) -> Result<()> {
+        info!("Switching to git reference: {}", git_ref);
+
+        let output = Command::new("git")
+            .args(["checkout", git_ref])
+            .current_dir(&self.repo_root)
+            .output()
+            .wrap_err_with(|| format!("Failed to switch to reference '{}'", git_ref))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(eyre!("Failed to switch to reference '{}': {}", git_ref, stderr));
+        }
+
+        // For tags, we might be in detached HEAD state, which is fine for benchmarking
+        // Just verify the checkout succeeded by checking the current commit
+        let current_commit_output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&self.repo_root)
+            .output()
+            .wrap_err("Failed to get current commit")?;
+
+        if !current_commit_output.status.success() {
+            return Err(eyre!("Failed to verify git checkout"));
+        }
+
+        info!("Successfully switched to reference: {}", git_ref);
+        Ok(())
+    }
+
+    /// Switch to the specified git branch (for restoration after benchmarking)
     pub fn switch_branch(&self, branch: &str) -> Result<()> {
         info!("Switching to branch: {}", branch);
 

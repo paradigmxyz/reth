@@ -12,12 +12,12 @@ use std::{
 };
 use tracing::{info, warn};
 
-/// Manages comparison between baseline and feature branch results
+/// Manages comparison between baseline and feature reference results
 pub struct ComparisonGenerator {
     output_dir: PathBuf,
     timestamp: String,
-    baseline_branch_name: String,
-    feature_branch_name: String,
+    baseline_ref_name: String,
+    feature_ref_name: String,
     baseline_results: Option<BenchmarkResults>,
     feature_results: Option<BenchmarkResults>,
 }
@@ -25,7 +25,7 @@ pub struct ComparisonGenerator {
 /// Represents the results from a single benchmark run
 #[derive(Debug, Clone)]
 pub struct BenchmarkResults {
-    pub branch_name: String,
+    pub ref_name: String,
     pub combined_latency_data: Vec<CombinedLatencyRow>,
     pub summary: BenchmarkSummary,
 }
@@ -65,20 +65,20 @@ pub struct BenchmarkSummary {
 #[derive(Debug, Serialize)]
 pub struct ComparisonReport {
     pub timestamp: String,
-    pub baseline: BranchInfo,
-    pub feature: BranchInfo,
+    pub baseline: RefInfo,
+    pub feature: RefInfo,
     pub comparison_summary: ComparisonSummary,
     pub per_block_comparisons: Vec<BlockComparison>,
 }
 
-/// Information about a branch in the comparison
+/// Information about a reference in the comparison
 #[derive(Debug, Serialize)]
-pub struct BranchInfo {
-    pub branch_name: String,
+pub struct RefInfo {
+    pub ref_name: String,
     pub summary: BenchmarkSummary,
 }
 
-/// Summary of the comparison between branches
+/// Summary of the comparison between references
 #[derive(Debug, Serialize)]
 pub struct ComparisonSummary {
     pub new_payload_latency_change_percent: f64,
@@ -109,34 +109,34 @@ impl ComparisonGenerator {
         Self {
             output_dir: args.output_dir_path(),
             timestamp,
-            baseline_branch_name: args.baseline_branch.clone(),
-            feature_branch_name: args.feature_branch.clone(),
+            baseline_ref_name: args.baseline_ref.clone(),
+            feature_ref_name: args.feature_ref.clone(),
             baseline_results: None,
             feature_results: None,
         }
     }
 
-    /// Get the output directory for a specific branch
-    pub fn get_branch_output_dir(&self, branch_type: &str) -> PathBuf {
-        self.output_dir.join(&self.timestamp).join(format!("{}_branch", branch_type))
+    /// Get the output directory for a specific reference
+    pub fn get_ref_output_dir(&self, ref_type: &str) -> PathBuf {
+        self.output_dir.join(&self.timestamp).join(format!("{}_ref", ref_type))
     }
 
-    /// Add benchmark results for a branch
-    pub fn add_branch_results(&mut self, branch_type: &str, output_path: &Path) -> Result<()> {
-        info!("Loading benchmark results for {} branch", branch_type);
+    /// Add benchmark results for a reference
+    pub fn add_ref_results(&mut self, ref_type: &str, output_path: &Path) -> Result<()> {
+        info!("Loading benchmark results for {} reference", ref_type);
 
-        let branch_name = match branch_type {
-            "baseline" => &self.baseline_branch_name,
-            "feature" => &self.feature_branch_name,
-            _ => return Err(eyre!("Unknown branch type: {}", branch_type)),
+        let ref_name = match ref_type {
+            "baseline" => &self.baseline_ref_name,
+            "feature" => &self.feature_ref_name,
+            _ => return Err(eyre!("Unknown reference type: {}", ref_type)),
         };
 
-        let results = self.load_benchmark_results(branch_name, output_path)?;
+        let results = self.load_benchmark_results(ref_name, output_path)?;
 
-        match branch_type {
+        match ref_type {
             "baseline" => self.baseline_results = Some(results),
             "feature" => self.feature_results = Some(results),
-            _ => return Err(eyre!("Unknown branch type: {}", branch_type)),
+            _ => return Err(eyre!("Unknown reference type: {}", ref_type)),
         }
 
         Ok(())
@@ -159,12 +159,12 @@ impl ComparisonGenerator {
 
         let report = ComparisonReport {
             timestamp: self.timestamp.clone(),
-            baseline: BranchInfo {
-                branch_name: baseline.branch_name.clone(),
+            baseline: RefInfo {
+                ref_name: baseline.ref_name.clone(),
                 summary: baseline.summary.clone(),
             },
-            feature: BranchInfo {
-                branch_name: feature.branch_name.clone(),
+            feature: RefInfo {
+                ref_name: feature.ref_name.clone(),
                 summary: feature.summary.clone(),
             },
             comparison_summary,
@@ -183,7 +183,7 @@ impl ComparisonGenerator {
     /// Load benchmark results from CSV files
     fn load_benchmark_results(
         &self,
-        branch_name: &str,
+        ref_name: &str,
         output_path: &Path,
     ) -> Result<BenchmarkResults> {
         let combined_latency_path = output_path.join("combined_latency.csv");
@@ -195,7 +195,7 @@ impl ComparisonGenerator {
         let summary = self.calculate_summary(&combined_latency_data, &total_gas_data)?;
 
         Ok(BenchmarkResults {
-            branch_name: branch_name.to_string(),
+            ref_name: ref_name.to_string(),
             combined_latency_data,
             summary,
         })
@@ -417,8 +417,8 @@ impl ComparisonGenerator {
 
         println!("\n=== BENCHMARK COMPARISON SUMMARY ===");
         println!("Timestamp: {}", formatted_timestamp);
-        println!("Baseline: {}", report.baseline.branch_name);
-        println!("Feature:  {}", report.feature.branch_name);
+        println!("Baseline: {}", report.baseline.ref_name);
+        println!("Feature:  {}", report.feature.ref_name);
         println!();
 
         let summary = &report.comparison_summary;
