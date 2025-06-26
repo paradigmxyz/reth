@@ -122,8 +122,8 @@ def main():
         latency2_smooth = rolling_average(latency2[:len(percent_diff)], window_size)
         block_numbers_smooth = rolling_average(block_numbers, window_size)
         
-        ax2.plot(block_numbers_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
-        ax2.plot(block_numbers_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        ax2.plot(block_numbers_smooth, latency1_smooth, color='orange', alpha=0.7, label=baseline_name)
+        ax2.plot(block_numbers_smooth, latency2_smooth, color='green', alpha=0.7, label=comparison_name)
         ax2.set_xlabel('Block Number', fontsize=12)
         ax2.set_ylabel('Total Latency (ms)', fontsize=12)
         ax2.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})', fontsize=14)
@@ -139,8 +139,8 @@ def main():
         latency2_smooth = rolling_average(latency2[:len(percent_diff)], window_size)
         indices_smooth = rolling_average(indices, window_size)
         
-        ax2.plot(indices_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
-        ax2.plot(indices_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        ax2.plot(indices_smooth, latency1_smooth, color='orange', alpha=0.7, label=baseline_name)
+        ax2.plot(indices_smooth, latency2_smooth, color='green', alpha=0.7, label=comparison_name)
         ax2.set_xlabel('Block Index', fontsize=12)
         ax2.set_ylabel('Total Latency (ms)', fontsize=12)
         ax2.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})', fontsize=14)
@@ -171,16 +171,16 @@ def main():
     # Save latency chart only
     fig2, ax2_only = plt.subplots(1, 1, figsize=(12, 6))
     if 'block_number' in df1.columns and 'block_number' in df2.columns:
-        ax2_only.plot(block_numbers_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
-        ax2_only.plot(block_numbers_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        ax2_only.plot(block_numbers_smooth, latency1_smooth, color='orange', alpha=0.7, label=baseline_name)
+        ax2_only.plot(block_numbers_smooth, latency2_smooth, color='green', alpha=0.7, label=comparison_name)
         ax2_only.set_xlabel('Block Number', fontsize=12)
         ax2_only.set_ylabel('Total Latency (ms)', fontsize=12)
         ax2_only.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})', fontsize=14)
         ax2_only.legend(fontsize=11)
         ax2_only.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
     else:
-        ax2_only.plot(indices_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
-        ax2_only.plot(indices_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        ax2_only.plot(indices_smooth, latency1_smooth, color='orange', alpha=0.7, label=baseline_name)
+        ax2_only.plot(indices_smooth, latency2_smooth, color='green', alpha=0.7, label=comparison_name)
         ax2_only.set_xlabel('Block Index', fontsize=12)
         ax2_only.set_ylabel('Total Latency (ms)', fontsize=12)
         ax2_only.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})', fontsize=14)
