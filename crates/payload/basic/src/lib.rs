@@ -333,7 +333,9 @@ where
     ///
     /// See [`PayloadBuilder`]
     builder: Builder,
-    /// Flag indicating whether this payload job is currently resolving.
+    /// Flag indicating whether this payload job is currently being resolved.
+    ///
+    /// This way the spawned task can check whether it should conclude building because it needs to yield the payload as soon as possible.
     is_resolving: Arc<AtomicBool>,
 }
 
@@ -473,7 +475,9 @@ where
         kind: PayloadKind,
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
         let best_payload = self.best_payload.payload().cloned();
-        self.is_resolving.store(true, Ordering::SeqCst);
+        // mark this job as resolving
+        self.is_resolving.store(true, Ordering::Relaxed);
+
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();

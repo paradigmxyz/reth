@@ -149,7 +149,7 @@ where
         Txs:
             PayloadTransactions<Transaction: PoolTransaction<Consensus = N::SignedTx> + OpPooledTx>,
     {
-        let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving: _ } =
+        let BuildArguments { mut cached_reads, config, cancel, best_payload, is_resolving } =
             args;
         let ctx = OpPayloadBuilderCtx {
             evm_config: self.evm_config.clone(),
@@ -240,7 +240,7 @@ where
             cached_reads: Default::default(),
             cancel: Default::default(),
             best_payload: None,
-            is_resolving: Arc::new(AtomicBool::new(false)),
+            is_resolving: Arc::new(AtomicBool::new(true)),
         };
         self.build_payload(args, |_| NoopPayloadTransactions::<Pool::Transaction>::default())?
             .into_payload()
@@ -495,6 +495,10 @@ pub struct OpPayloadBuilderCtx<Evm: ConfigureEvm, ChainSpec> {
     pub cancel: CancelOnDrop,
     /// The currently best payload.
     pub best_payload: Option<OpBuiltPayload<Evm::Primitives>>,
+    /// Flag indicating whether the payload is being resolved
+    ///
+    /// This is only relevant for sequencing.
+    pub is_resolving: Arc<AtomicBool>,
 }
 
 impl<Evm, ChainSpec> OpPayloadBuilderCtx<Evm, ChainSpec>
