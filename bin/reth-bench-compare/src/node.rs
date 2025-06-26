@@ -9,7 +9,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader as AsyncBufReader},
     time::{sleep, timeout},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 
 /// Manages reth node lifecycle and operations
 pub struct NodeManager {
@@ -180,41 +180,11 @@ impl NodeManager {
         result
     }
 
-    /// Stop the reth node gracefully
+    /// Stop the reth node
     pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
         info!("Stopping reth node...");
-
-        // Send SIGTERM for graceful shutdown
-        #[cfg(unix)]
-        {
-            if let Some(pid) = child.id() {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGTERM);
-                }
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            child.kill().await.wrap_err("Failed to kill reth process")?;
-        }
-
-        // Wait for the process to exit
-        let exit_timeout = Duration::from_secs(30);
-        let result = timeout(exit_timeout, child.wait()).await;
-
-        match result {
-            Ok(Ok(status)) => {
-                info!("Reth node exited with status: {:?}", status);
-                Ok(())
-            }
-            Ok(Err(e)) => Err(eyre!("Error waiting for process: {}", e)),
-            Err(_) => {
-                warn!("Node didn't exit gracefully, force killing...");
-                child.kill().await.wrap_err("Failed to force kill reth process")?;
-                Ok(())
-            }
-        }
+        child.kill().await.wrap_err("Failed to kill reth process")?;
+        Ok(())
     }
 
     /// Unwind the node to a specific block

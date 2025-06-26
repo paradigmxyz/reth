@@ -27,7 +27,6 @@ serde_json.workspace = true
 
 # Process management
 ctrlc = "3.4"
-libc = "0.2"
 
 # Time handling
 chrono = "0.4"
