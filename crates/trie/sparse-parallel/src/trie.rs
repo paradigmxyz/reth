@@ -196,9 +196,10 @@ impl ParallelSparseTrie {
     /// Returns the next node in the traversal path from the given path towards the leaf for the
     /// given full leaf path, or an error if any node along the traversal path is not revealed.
     ///
-    /// ## Invariants
     ///
-    /// - `from_path` must be a prefix of `leaf_full_path`.
+    /// ## Panics
+    ///
+    /// If `from_path` is not a prefix of `leaf_full_path`.
     fn find_next_to_leaf(
         from_path: &Nibbles,
         from_node: &SparseNode,
@@ -285,10 +286,10 @@ impl ParallelSparseTrie {
     /// that branch after removing a leaf, returns a node to replace the parent branch node and a
     /// boolean indicating if the child should be deleted.
     ///
-    /// ## Invariants
+    /// ## Panics
     ///
-    /// - Both parent and child nodes must be already revealed.
-    /// - The parent's path must be a prefix of the child's path.
+    /// - If either parent or child node is not already revealed.
+    /// - If parent's path is not a prefix of the child's path.
     fn branch_changes_on_leaf_removal(
         parent_path: &Nibbles,
         remaining_child_path: &Nibbles,
@@ -303,7 +304,7 @@ impl ParallelSparseTrie {
         // what its remaining child is.
         match remaining_child_node {
             SparseNode::Empty | SparseNode::Hash(_) => {
-                unreachable!("remaining child must have been revealed already")
+                panic!("remaining child must have been revealed already")
             }
             // If the only child is a leaf node, we downgrade the branch node into a
             // leaf node, prepending the nibble to the key, and delete the old
@@ -334,10 +335,10 @@ impl ParallelSparseTrie {
     /// subtrie), returns an optional replacement parent node. If a replacement is returned then the
     /// child node should be deleted.
     ///
-    /// ## Invariants
+    /// ## Panics
     ///
-    /// - Both parent and child nodes must be already revealed.
-    /// - The parent's path must be a prefix of the child's path.
+    /// - If either parent or child node is not already revealed.
+    /// - If parent's path is not a prefix of the child's path.
     fn extension_changes_on_leaf_removal(
         parent_path: &Nibbles,
         parent_key: &Nibbles,
@@ -458,7 +459,7 @@ impl ParallelSparseTrie {
                             ext_grandparent_node = Some(curr_node.clone());
                         }
                         SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
-                            unreachable!()
+                            unreachable!("find_next_to_leaf errors on non-revealed node, and return Found or NotFound on Leaf")
                         }
                     }
 
