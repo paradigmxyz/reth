@@ -9,7 +9,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader as AsyncBufReader},
     time::{sleep, timeout},
 };
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 /// Manages reth node lifecycle and operations
 pub struct NodeManager {
@@ -182,28 +182,63 @@ impl NodeManager {
 
     /// Stop the reth node gracefully
     pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
-        info!("Stopping reth node gracefully with SIGINT...");
-        
-        // Send SIGINT (Ctrl+C) for graceful shutdown
-        #[cfg(unix)]
-        {
-            if let Some(pid) = child.id() {
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGINT);
+        let pid = child.id().expect("Child process ID should be available");
+        info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
+
+        // Use tokio's built-in kill for graceful shutdown
+        child.kill().await.wrap_err("Failed to kill reth process")?;
+
+        // Wait for the process to exit
+        let status = child.wait().await.wrap_err("Failed to wait for reth process to exit")?;
+        info!("Reth node (PID: {}) exited with status: {:?}", pid, status);
+
+        // Manually delete the storage lock files to ensure clean shutdown
+        if let Some(ref datadir) = self.datadir {
+            let lock_files = vec![
+                std::path::Path::new(datadir).join("db").join("lock"),
+                std::path::Path::new(datadir).join("static_files").join("lock"),
+            ];
+            
+            for lock_file in lock_files {
+                if lock_file.exists() {
+                    if self.use_sudo {
+                        // Use sudo to remove the lock file
+                        match tokio::process::Command::new("sudo")
+                            .args(["rm", "-f", &lock_file.to_string_lossy()])
+                            .spawn()
+                        {
+                            Ok(mut child) => {
+                                match child.wait().await {
+                                    Ok(status) if status.success() => {
+                                        info!("Removed storage lock file with sudo: {:?}", lock_file);
+                                    }
+                                    Ok(status) => {
+                                        warn!("Failed to remove storage lock file with sudo {:?}: exit status {:?}", lock_file, status);
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to wait for sudo rm process {:?}: {}", lock_file, e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Failed to spawn sudo rm for storage lock file {:?}: {}", lock_file, e);
+                            }
+                        }
+                    } else {
+                        // Remove without sudo
+                        match std::fs::remove_file(&lock_file) {
+                            Ok(()) => {
+                                info!("Removed storage lock file: {:?}", lock_file);
+                            }
+                            Err(e) => {
+                                warn!("Failed to remove storage lock file {:?}: {}", lock_file, e);
+                            }
+                        }
+                    }
                 }
             }
         }
-        
-        #[cfg(windows)]
-        {
-            // On Windows, we can't send SIGINT easily, so we use the built-in kill
-            child.start_kill().wrap_err("Failed to send kill signal to reth process")?;
-        }
-        
-        // Wait for the process to exit
-        let status = child.wait().await.wrap_err("Failed to wait for reth process to exit")?;
-        info!("Reth node exited with status: {:?}", status);
-        
+
         Ok(())
     }
 

@@ -7310,7 +7310,6 @@ dependencies = [
  "csv",
  "ctrlc",
  "eyre",
- "libc",
  "reqwest",
  "reth-cli-runner",
  "reth-cli-util",
