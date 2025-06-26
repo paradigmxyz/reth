@@ -5,6 +5,7 @@
 #     "pandas",
 #     "matplotlib", 
 #     "numpy",
+#     "seaborn",
 # ]
 # ///
 
@@ -23,7 +24,12 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import sys
+import seaborn as sns
 from matplotlib.ticker import FuncFormatter
+
+# Set seaborn style for better aesthetics
+sns.set_style("whitegrid")
+sns.set_palette("husl")
 
 def main():
     parser = argparse.ArgumentParser(description='Generate histogram of total_latency percent differences between two CSV files')
@@ -80,22 +86,22 @@ def main():
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 12))
 
-    # Top subplot: Histogram
-    ax1.hist(percent_diff, bins=bins, edgecolor='black', alpha=0.7)
-    ax1.set_xlabel('Percent Difference (%)')
-    ax1.set_ylabel('Number of Blocks')
     # Remove .csv extension from filenames for cleaner display
     baseline_name = args.baseline_csv.replace('.csv', '') if args.baseline_csv.endswith('.csv') else args.baseline_csv
     comparison_name = args.comparison_csv.replace('.csv', '') if args.comparison_csv.endswith('.csv') else args.comparison_csv
-    ax1.set_title(f'Total Latency Percent Difference Histogram\n({baseline_name} vs {comparison_name})')
-    ax1.grid(True, alpha=0.3)
+    
+    # Top subplot: Histogram
+    sns.histplot(data=percent_diff, bins=bins, edgecolor='black', alpha=0.7, ax=ax1)
+    ax1.set_xlabel('Percent Difference (%)', fontsize=12)
+    ax1.set_ylabel('Number of Blocks', fontsize=12)
+    ax1.set_title(f'Total Latency Percent Difference Histogram\n({baseline_name} vs {comparison_name})', fontsize=14)
 
     # Add statistics to the histogram
     mean_diff = np.mean(percent_diff)
     median_diff = np.median(percent_diff)
-    ax1.axvline(mean_diff, color='red', linestyle='--', label=f'Mean: {mean_diff:.2f}%')
-    ax1.axvline(median_diff, color='orange', linestyle='--', label=f'Median: {median_diff:.2f}%')
-    ax1.legend()
+    ax1.axvline(mean_diff, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_diff:.2f}%')
+    ax1.axvline(median_diff, color='orange', linestyle='--', linewidth=2, label=f'Median: {median_diff:.2f}%')
+    ax1.legend(fontsize=11)
 
     # Bottom subplot: Latency vs Block Number with rolling average
     target_points = 50
@@ -118,11 +124,10 @@ def main():
         
         ax2.plot(block_numbers_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
         ax2.plot(block_numbers_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
-        ax2.set_xlabel('Block Number')
-        ax2.set_ylabel('Total Latency (ms)')
-        ax2.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})')
-        ax2.grid(True, alpha=0.3)
-        ax2.legend()
+        ax2.set_xlabel('Block Number', fontsize=12)
+        ax2.set_ylabel('Total Latency (ms)', fontsize=12)
+        ax2.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})', fontsize=14)
+        ax2.legend(fontsize=11)
         # Format X axis to avoid scientific notation
         ax2.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
     else:
@@ -136,11 +141,10 @@ def main():
         
         ax2.plot(indices_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
         ax2.plot(indices_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
-        ax2.set_xlabel('Block Index')
-        ax2.set_ylabel('Total Latency (ms)')
-        ax2.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})')
-        ax2.grid(True, alpha=0.3)
-        ax2.legend()
+        ax2.set_xlabel('Block Index', fontsize=12)
+        ax2.set_ylabel('Total Latency (ms)', fontsize=12)
+        ax2.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})', fontsize=14)
+        ax2.legend(fontsize=11)
 
     plt.tight_layout()
     plt.savefig(args.output, dpi=300, bbox_inches='tight')
@@ -151,14 +155,13 @@ def main():
     
     # Save histogram only
     fig1, ax1_only = plt.subplots(1, 1, figsize=(12, 6))
-    ax1_only.hist(percent_diff, bins=bins, edgecolor='black', alpha=0.7)
-    ax1_only.set_xlabel('Percent Difference (%)')
-    ax1_only.set_ylabel('Number of Blocks')
-    ax1_only.set_title(f'Total Latency Percent Difference Histogram\n({baseline_name} vs {comparison_name})')
-    ax1_only.grid(True, alpha=0.3)
-    ax1_only.axvline(mean_diff, color='red', linestyle='--', label=f'Mean: {mean_diff:.2f}%')
-    ax1_only.axvline(median_diff, color='orange', linestyle='--', label=f'Median: {median_diff:.2f}%')
-    ax1_only.legend()
+    sns.histplot(data=percent_diff, bins=bins, edgecolor='black', alpha=0.7, ax=ax1_only)
+    ax1_only.set_xlabel('Percent Difference (%)', fontsize=12)
+    ax1_only.set_ylabel('Number of Blocks', fontsize=12)
+    ax1_only.set_title(f'Total Latency Percent Difference Histogram\n({baseline_name} vs {comparison_name})', fontsize=14)
+    ax1_only.axvline(mean_diff, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_diff:.2f}%')
+    ax1_only.axvline(median_diff, color='orange', linestyle='--', linewidth=2, label=f'Median: {median_diff:.2f}%')
+    ax1_only.legend(fontsize=11)
     plt.tight_layout()
     histogram_file = f"{output_base}_histogram.png"
     plt.savefig(histogram_file, dpi=300, bbox_inches='tight')
@@ -170,20 +173,18 @@ def main():
     if 'block_number' in df1.columns and 'block_number' in df2.columns:
         ax2_only.plot(block_numbers_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
         ax2_only.plot(block_numbers_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
-        ax2_only.set_xlabel('Block Number')
-        ax2_only.set_ylabel('Total Latency (ms)')
-        ax2_only.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})')
-        ax2_only.grid(True, alpha=0.3)
-        ax2_only.legend()
+        ax2_only.set_xlabel('Block Number', fontsize=12)
+        ax2_only.set_ylabel('Total Latency (ms)', fontsize=12)
+        ax2_only.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})', fontsize=14)
+        ax2_only.legend(fontsize=11)
         ax2_only.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
     else:
         ax2_only.plot(indices_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
         ax2_only.plot(indices_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
-        ax2_only.set_xlabel('Block Index')
-        ax2_only.set_ylabel('Total Latency (ms)')
-        ax2_only.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})')
-        ax2_only.grid(True, alpha=0.3)
-        ax2_only.legend()
+        ax2_only.set_xlabel('Block Index', fontsize=12)
+        ax2_only.set_ylabel('Total Latency (ms)', fontsize=12)
+        ax2_only.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})', fontsize=14)
+        ax2_only.legend(fontsize=11)
     plt.tight_layout()
     chart_file = f"{output_base}_chart.png"
     plt.savefig(chart_file, dpi=300, bbox_inches='tight')
