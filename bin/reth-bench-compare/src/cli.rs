@@ -12,21 +12,21 @@ use crate::{
     benchmark::BenchmarkRunner, comparison::ComparisonGenerator, git::GitManager, node::NodeManager,
 };
 
-/// Automated reth benchmark comparison between git branches
+/// Automated reth benchmark comparison between git references
 #[derive(Debug, Parser)]
 #[command(
     name = "reth-bench-compare",
-    about = "Compare reth performance between two git branches",
+    about = "Compare reth performance between two git references (branches or tags)",
     version
 )]
 pub struct Args {
-    /// Git branch to use as baseline for comparison
-    #[arg(long, value_name = "BRANCH")]
-    pub baseline_branch: String,
+    /// Git reference (branch or tag) to use as baseline for comparison
+    #[arg(long, value_name = "REF")]
+    pub baseline_ref: String,
 
-    /// Git branch to compare against the baseline
-    #[arg(long, value_name = "BRANCH")]
-    pub feature_branch: String,
+    /// Git reference (branch or tag) to compare against the baseline
+    #[arg(long, value_name = "REF")]
+    pub feature_ref: String,
 
     /// Reth datadir path
     #[arg(long, value_name = "PATH")]
@@ -101,7 +101,7 @@ impl Args {
 pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     info!(
         "Starting benchmark comparison between '{}' and '{}'",
-        args.baseline_branch, args.feature_branch
+        args.baseline_ref, args.feature_ref
     );
 
     // Initialize managers
@@ -117,7 +117,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     // Validate git state
     if !args.skip_git_validation {
         git_manager.validate_clean_state()?;
-        git_manager.validate_branches(&[&args.baseline_branch, &args.feature_branch])?;
+        git_manager.validate_refs(&[&args.baseline_ref, &args.feature_ref])?;
     }
 
     // Setup signal handling for cleanup
@@ -159,16 +159,16 @@ async fn run_benchmark_workflow(
     comparison_generator: &mut ComparisonGenerator,
     args: &Args,
 ) -> Result<()> {
-    let branches = [&args.baseline_branch, &args.feature_branch];
-    let branch_names = ["baseline", "feature"];
+    let refs = [&args.baseline_ref, &args.feature_ref];
+    let ref_types = ["baseline", "feature"];
     let mut baseline_csv_path: Option<PathBuf> = None;
 
-    for (i, &branch) in branches.iter().enumerate() {
-        let branch_type = branch_names[i];
-        info!("=== Processing {} branch: {} ===", branch_type, branch);
+    for (i, &git_ref) in refs.iter().enumerate() {
+        let ref_type = ref_types[i];
+        info!("=== Processing {} reference: {} ===", ref_type, git_ref);
 
-        // Switch to target branch
-        git_manager.switch_branch(branch)?;
+        // Switch to target reference
+        git_manager.switch_ref(git_ref)?;
 
         // Compile reth and reth-bench
         if !args.skip_compilation {
@@ -191,9 +191,9 @@ async fn run_benchmark_workflow(
         let to_block = current_tip + args.blocks - 1;
 
         // Run benchmark
-        let output_dir = comparison_generator.get_branch_output_dir(branch_type);
+        let output_dir = comparison_generator.get_ref_output_dir(ref_type);
 
-        if branch_type == "baseline" {
+        if ref_type == "baseline" {
             // Run baseline benchmark without comparison
             benchmark_runner.run_benchmark(from_block, to_block, &output_dir).await?;
             baseline_csv_path = Some(output_dir.join("combined_latency.csv"));
@@ -204,7 +204,7 @@ async fn run_benchmark_workflow(
                     .run_benchmark_with_baseline(from_block, to_block, &output_dir, baseline_csv)
                     .await?;
             } else {
-                return Err(eyre!("Baseline CSV not available for feature branch comparison"));
+                return Err(eyre!("Baseline CSV not available for feature reference comparison"));
             }
         }
 
@@ -215,9 +215,9 @@ async fn run_benchmark_workflow(
         node_manager.unwind_to_block(original_tip).await?;
 
         // Store results for comparison
-        comparison_generator.add_branch_results(branch_type, &output_dir)?;
+        comparison_generator.add_ref_results(ref_type, &output_dir)?;
 
-        info!("Completed {} branch benchmark", branch_type);
+        info!("Completed {} reference benchmark", ref_type);
     }
 
     // Generate comparison report
