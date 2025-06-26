@@ -186,6 +186,8 @@ impl NodeManager {
         info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
 
         // Use tokio's built-in kill for graceful shutdown
+        // TODO: Should use SIGINT instead of SIGKILL for graceful shutdown, but
+        // programmatic SIGINT doesn't work for some reason (manual `kill -2 PID` works fine)
         child.kill().await.wrap_err("Failed to kill reth process")?;
 
         // Wait for the process to exit
