@@ -97,14 +97,30 @@ def main():
     ax1.axvline(median_diff, color='orange', linestyle='--', label=f'Median: {median_diff:.2f}%')
     ax1.legend()
 
-    # Bottom subplot: Latency vs Block Number
+    # Bottom subplot: Latency vs Block Number with rolling average
+    target_points = 100
+    data_length = len(percent_diff)
+    window_size = max(1, data_length // target_points)
+    
+    def rolling_average(data, window):
+        """Calculate rolling average with given window size"""
+        if window == 1:
+            return data
+        return np.convolve(data, np.ones(window)/window, mode='valid')
+    
     if 'block_number' in df1.columns and 'block_number' in df2.columns:
         block_numbers = df1['block_number'].values[:len(percent_diff)]
-        ax2.plot(block_numbers, latency1[:len(percent_diff)], 'b-', alpha=0.7, label=f'Baseline ({baseline_name})')
-        ax2.plot(block_numbers, latency2[:len(percent_diff)], 'r-', alpha=0.7, label=f'Comparison ({comparison_name})')
+        
+        # Apply rolling average
+        latency1_smooth = rolling_average(latency1[:len(percent_diff)], window_size)
+        latency2_smooth = rolling_average(latency2[:len(percent_diff)], window_size)
+        block_numbers_smooth = rolling_average(block_numbers, window_size)
+        
+        ax2.plot(block_numbers_smooth, latency1_smooth, 'b-', alpha=0.7, label=f'Baseline ({baseline_name})')
+        ax2.plot(block_numbers_smooth, latency2_smooth, 'r-', alpha=0.7, label=f'Comparison ({comparison_name})')
         ax2.set_xlabel('Block Number')
         ax2.set_ylabel('Total Latency (ms)')
-        ax2.set_title('Total Latency vs Block Number')
+        ax2.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})')
         ax2.grid(True, alpha=0.3)
         ax2.legend()
         # Format X axis to avoid scientific notation
@@ -112,11 +128,17 @@ def main():
     else:
         # If no block_number column, use index
         indices = np.arange(len(percent_diff))
-        ax2.plot(indices, latency1[:len(percent_diff)], 'b-', alpha=0.7, label=f'Baseline ({baseline_name})')
-        ax2.plot(indices, latency2[:len(percent_diff)], 'r-', alpha=0.7, label=f'Comparison ({comparison_name})')
+        
+        # Apply rolling average
+        latency1_smooth = rolling_average(latency1[:len(percent_diff)], window_size)
+        latency2_smooth = rolling_average(latency2[:len(percent_diff)], window_size)
+        indices_smooth = rolling_average(indices, window_size)
+        
+        ax2.plot(indices_smooth, latency1_smooth, 'b-', alpha=0.7, label=f'Baseline ({baseline_name})')
+        ax2.plot(indices_smooth, latency2_smooth, 'r-', alpha=0.7, label=f'Comparison ({comparison_name})')
         ax2.set_xlabel('Block Index')
         ax2.set_ylabel('Total Latency (ms)')
-        ax2.set_title('Total Latency vs Block Index')
+        ax2.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})')
         ax2.grid(True, alpha=0.3)
         ax2.legend()
 
