@@ -23,6 +23,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import sys
+from matplotlib.ticker import FuncFormatter
 
 def main():
     parser = argparse.ArgumentParser(description='Generate histogram of total_latency percent differences between two CSV files')
@@ -106,6 +107,8 @@ def main():
         ax2.set_title('Total Latency vs Block Number')
         ax2.grid(True, alpha=0.3)
         ax2.legend()
+        # Format X axis to avoid scientific notation
+        ax2.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
     else:
         # If no block_number column, use index
         indices = np.arange(len(percent_diff))
