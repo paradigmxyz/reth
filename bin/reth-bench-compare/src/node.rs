@@ -14,6 +14,7 @@ use tracing::{debug, info, warn};
 /// Manages reth node lifecycle and operations
 pub struct NodeManager {
     datadir: Option<String>,
+    #[allow(dead_code)]
     jwt_secret: String,
     metrics_port: u16,
     chain: Option<String>,
@@ -36,6 +37,7 @@ impl NodeManager {
     }
 
     /// Get the current chain tip by querying an existing node or RPC endpoint
+    #[allow(dead_code)]
     pub async fn get_chain_tip(&self) -> Result<u64> {
         // Try to get tip from local metrics endpoint first (if node is running)
         if let Ok(tip) = self.get_tip_from_metrics().await {
@@ -47,6 +49,7 @@ impl NodeManager {
     }
 
     /// Get the current chain tip from an external RPC endpoint
+    #[allow(dead_code)]
     pub async fn get_tip_from_external_rpc(&self, rpc_url: &str) -> Result<u64> {
         info!("Getting chain tip from external RPC: {}", rpc_url);
         self.get_tip_from_rpc(rpc_url).await
@@ -115,6 +118,7 @@ impl NodeManager {
     }
 
     /// Wait for the node to sync and return the current tip
+    #[allow(dead_code)]
     pub async fn wait_for_sync_and_get_tip(&self) -> Result<u64> {
         info!("Waiting for node to sync...");
 
@@ -246,6 +250,7 @@ impl NodeManager {
     }
 
     /// Get chain tip from node metrics endpoint
+    #[allow(dead_code)]
     async fn get_tip_from_metrics(&self) -> Result<u64> {
         let url = format!("http://localhost:{}/metrics", self.metrics_port);
         let response = self.http_client.get(&url).send().await.wrap_err("Failed to get metrics")?;
