@@ -145,7 +145,7 @@ impl BenchmarkRunner {
             return Err(eyre!("Baseline CSV file not found: {:?}", baseline_csv));
         }
 
-        // Build the reth-bench command with baseline
+        // Build the reth-bench command (baseline comparison handled by reth-bench-compare)
         let mut cmd = Command::new("reth-bench");
         cmd.args([
             "new-payload-fcu",
@@ -159,8 +159,6 @@ impl BenchmarkRunner {
             &to_block.to_string(),
             "--output",
             &output_dir.to_string_lossy(),
-            "--baseline",
-            &baseline_csv.to_string_lossy(),
         ]);
 
         cmd.stdout(std::process::Stdio::piped())
@@ -200,33 +198,11 @@ impl BenchmarkRunner {
             return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
         }
 
-        // Verify that expected output files were created (including baseline comparison)
-        self.verify_benchmark_output_with_baseline(output_dir)?;
+        // Verify that expected output files were created
+        self.verify_benchmark_output(output_dir)?;
 
         info!("Benchmark with baseline comparison completed successfully");
         Ok(())
     }
 
-    /// Verify benchmark output including baseline comparison file
-    fn verify_benchmark_output_with_baseline(&self, output_dir: &Path) -> Result<()> {
-        let expected_files = ["combined_latency.csv", "total_gas.csv", "baseline_comparison.csv"];
-
-        for filename in &expected_files {
-            let file_path = output_dir.join(filename);
-            if !file_path.exists() {
-                return Err(eyre!("Expected benchmark output file not found: {:?}", file_path));
-            }
-
-            // Check that the file is not empty
-            let metadata = std::fs::metadata(&file_path)
-                .wrap_err_with(|| format!("Failed to read metadata for {:?}", file_path))?;
-
-            if metadata.len() == 0 {
-                return Err(eyre!("Benchmark output file is empty: {:?}", file_path));
-            }
-        }
-
-        info!("Verified benchmark output files including baseline comparison");
-        Ok(())
-    }
 }
