@@ -64,6 +64,7 @@ where
         }
     }
 }
+
 /// Provides local payload attributes builder functionality
 pub trait LocalPayloadAttributesAddOn<N: FullNodeComponents> {
     /// The payload attributes type this builder produces
@@ -82,7 +83,12 @@ impl PayloadAttributesBuilder<()> for LocalPayloadAttributesBuilder<()> {
     }
 }
 
-/// Default implementation that returns an error for unsupported payload types
+/// A default implementation for nodes that don't provide local payload building.
+///
+/// It returns an error when asked to build payload attributes,
+/// indicating that the feature is not available.
+///
+/// Useful as a fallback or when local building capabilities are not needed.
 #[derive(Debug)]
 pub struct UnsupportedLocalPayloadAttributesAddOn;
 
@@ -100,10 +106,9 @@ impl<N: FullNodeComponents> LocalPayloadAttributesAddOn<N>
     }
 }
 
-/// Generic payload attributes builder that always returns an error
+/// A builder implementation that indicates payload building is not configured.
 ///
-/// Helpful for use cases where local payload building is not supported
-/// or not implemented.
+/// Helpful for use cases where local payload building is not supported or not implemented.
 #[derive(Debug, Clone)]
 pub struct UnsupportedPayloadAttributesBuilder<T> {
     _phantom: PhantomData<T>,
