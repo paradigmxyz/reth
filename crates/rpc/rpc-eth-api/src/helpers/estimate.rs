@@ -3,13 +3,15 @@
 use super::{Call, LoadPendingBlock};
 use crate::{AsEthApiError, FromEthApiError, IntoEthApiError};
 use alloy_evm::{call::caller_gas_allowance, overrides::apply_state_overrides};
+use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
-use alloy_rpc_types_eth::{state::StateOverride, transaction::TransactionRequest, BlockId};
+use alloy_rpc_types_eth::{state::StateOverride, BlockId};
 use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
+use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     error::{api::FromEvmHalt, FromEvmError},
     EthApiError, RevertError, RpcInvalidTransactionError,
@@ -23,7 +25,7 @@ use tracing::trace;
 pub trait EstimateCall: Call {
     /// Estimates the gas usage of the `request` with the state.
     ///
-    /// This will execute the [`TransactionRequest`] and find the best gas limit via binary search.
+    /// This will execute the [`RpcTxReq`] and find the best gas limit via binary search.
     ///
     /// ## EVM settings
     ///
@@ -35,7 +37,7 @@ pub trait EstimateCall: Call {
     fn estimate_gas_with<S>(
         &self,
         mut evm_env: EvmEnvFor<Self::Evm>,
-        mut request: TransactionRequest,
+        mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         state: S,
         state_override: Option<StateOverride>,
     ) -> Result<U256, Self::Error>
@@ -52,11 +54,11 @@ pub trait EstimateCall: Call {
         evm_env.cfg_env.disable_base_fee = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
-        request.nonce = None;
+        request.take_nonce();
 
         // Keep a copy of gas related request values
-        let tx_request_gas_limit = request.gas;
-        let tx_request_gas_price = request.gas_price;
+        let tx_request_gas_limit = request.gas_limit();
+        let tx_request_gas_price = request.gas_price();
         // the gas limit of the corresponding block
         let block_env_gas_limit = evm_env.block_env.gas_limit;
 
@@ -268,7 +270,7 @@ pub trait EstimateCall: Call {
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].
     fn estimate_gas_at(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         at: BlockId,
         state_override: Option<StateOverride>,
     ) -> impl Future<Output = Result<U256, Self::Error>> + Send
