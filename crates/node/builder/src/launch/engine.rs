@@ -24,7 +24,7 @@ use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadTypes,
+    PayloadAttrTy,
 };
 use reth_node_core::{
     args::DefaultEraHost,
@@ -81,7 +81,7 @@ where
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>
         + LocalPayloadAttributesAddOn<
             NodeAdapter<T, CB::Components>,
-            PayloadAttributes = <<Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
+            PayloadAttributes = PayloadAttrTy<Types>,
         >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;

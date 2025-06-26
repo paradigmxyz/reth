@@ -261,7 +261,7 @@ where
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             > + LocalPayloadAttributesAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                PayloadAttributes = <Self::Payload as PayloadTypes>::PayloadAttributes,
+                PayloadAttributes = PayloadAttrTy<Self>,
             >,
             ChainSpec: From<ChainSpec> + Clone,
         >,
@@ -295,7 +295,7 @@ impl<T> NodeBuilderHelper for T where
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             > + LocalPayloadAttributesAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-                PayloadAttributes = <Self::Payload as PayloadTypes>::PayloadAttributes,
+                PayloadAttributes = PayloadAttrTy<Self>,
             >,
             ChainSpec: From<ChainSpec> + Clone,
         >
