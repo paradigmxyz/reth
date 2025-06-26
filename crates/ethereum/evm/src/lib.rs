@@ -214,9 +214,7 @@ where
                 BlobExcessGasAndPrice { excess_blob_gas, blob_gasprice }
             });
 
-        let mut basefee = parent.next_block_base_fee(
-            self.chain_spec().base_fee_params_at_timestamp(attributes.timestamp),
-        );
+        let mut basefee = chain_spec.next_block_base_fee(parent, attributes.timestamp);
 
         let mut gas_limit = attributes.gas_limit;
 
