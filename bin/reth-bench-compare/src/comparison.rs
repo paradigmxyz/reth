@@ -121,6 +121,11 @@ impl ComparisonGenerator {
         self.output_dir.join(&self.timestamp).join(format!("{}_ref", ref_type))
     }
 
+    /// Get the main output directory for this comparison run
+    pub fn get_output_dir(&self) -> PathBuf {
+        self.output_dir.join(&self.timestamp)
+    }
+
     /// Add benchmark results for a reference
     pub fn add_ref_results(&mut self, ref_type: &str, output_path: &Path) -> Result<()> {
         info!("Loading benchmark results for {} reference", ref_type);
