@@ -275,9 +275,10 @@ async fn generate_comparison_charts(
     
     let script_path = "bin/reth-bench/scripts/compare_newpayload_latency.py";
     
-    info!("Running Python comparison script...");
-    let mut cmd = tokio::process::Command::new("python3");
+    info!("Running Python comparison script with uv...");
+    let mut cmd = tokio::process::Command::new("uv");
     cmd.args([
+        "run",
         script_path,
         &baseline_csv.to_string_lossy(),
         &feature_csv.to_string_lossy(),
@@ -286,7 +287,7 @@ async fn generate_comparison_charts(
     ]);
     
     let output = cmd.output().await.map_err(|e| {
-        eyre!("Failed to execute Python script: {}. Make sure python3 and required packages (pandas, matplotlib, numpy) are installed.", e)
+        eyre!("Failed to execute Python script with uv: {}. Make sure uv is installed.", e)
     })?;
     
     if !output.status.success() {
