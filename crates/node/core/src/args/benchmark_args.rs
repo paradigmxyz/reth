@@ -42,14 +42,6 @@ pub struct BenchmarkArgs {
     /// The path to the output directory for granular benchmark results.
     #[arg(long, short, value_name = "BENCHMARK_OUTPUT", verbatim_doc_comment)]
     pub output: Option<PathBuf>,
-
-    /// Path to a CSV file from a previous benchmark run to use as a baseline for comparison.
-    ///
-    /// The baseline CSV should be a file generated with the --output flag from a previous
-    /// reth-bench run. This will generate additional CSV output comparing newPayload latencies
-    /// per block between the baseline and current benchmark.
-    #[arg(long, value_name = "BASELINE_CSV", verbatim_doc_comment)]
-    pub baseline: Option<PathBuf>,
 }
 
 #[cfg(test)]

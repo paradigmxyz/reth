@@ -539,7 +539,7 @@ impl ComparisonGenerator {
         // Top chart: Histogram of percent differences with 1% buckets
         let min_diff = percent_diffs.iter().fold(f64::INFINITY, |a, &b| a.min(b)).floor();
         let max_diff = percent_diffs.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b)).ceil();
-        
+
         // Use 1% buckets for histogram bins
         let bins_range = ((max_diff - min_diff) as i32).max(1);
         let bin_edges: Vec<f64> = (0..=bins_range).map(|i| min_diff + i as f64).collect();
@@ -564,7 +564,8 @@ impl ComparisonGenerator {
             .build_cartesian_2d(min_diff..max_diff, 0u32..max_bin_count)?;
 
         // Configure mesh with grid (alpha=0.3 transparency)
-        chart.configure_mesh()
+        chart
+            .configure_mesh()
             .light_line_style(TRANSPARENT)
             .bold_line_style(&WHITE.mix(0.3))
             .draw()?;
@@ -573,10 +574,7 @@ impl ComparisonGenerator {
         chart.draw_series(bins.iter().enumerate().map(|(i, &count)| {
             let left = bin_edges[i];
             let right = bin_edges[i + 1];
-            Rectangle::new(
-                [(left, 0), (right, count)],
-                BLUE.mix(0.7).filled().stroke_width(1),
-            )
+            Rectangle::new([(left, 0), (right, count)], BLUE.mix(0.7).filled().stroke_width(1))
         }))?;
 
         // Add mean line (red)
@@ -585,7 +583,7 @@ impl ComparisonGenerator {
             RED.stroke_width(2),
         )))?;
 
-        // Add median line (orange)  
+        // Add median line (orange)
         chart.draw_series(std::iter::once(PathElement::new(
             vec![(median_diff, 0u32), (median_diff, max_bin_count)],
             RGBColor(255, 165, 0).stroke_width(2), // Orange color
@@ -602,7 +600,8 @@ impl ComparisonGenerator {
             .build_cartesian_2d(min_block..max_block, 0.0..max_latency)?;
 
         // Configure mesh with grid (alpha=0.3 transparency)
-        chart.configure_mesh()
+        chart
+            .configure_mesh()
             .light_line_style(TRANSPARENT)
             .bold_line_style(&WHITE.mix(0.3))
             .draw()?;
