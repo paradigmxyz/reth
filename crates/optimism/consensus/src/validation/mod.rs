@@ -126,12 +126,12 @@ fn verify_receipts_optimism<R: DepositReceipt>(
     timestamp: u64,
 ) -> Result<(), ConsensusError> {
     // Calculate receipts root.
-    let receipts_with_bloom = receipts.iter().cloned().map(Into::into).collect::<Vec<_>>();
+    let receipts_with_bloom = receipts.iter().map(TxReceipt::with_bloom_ref).collect::<Vec<_>>();
     let receipts_root =
         calculate_receipt_root_optimism(&receipts_with_bloom, chain_spec, timestamp);
 
     // Calculate header logs bloom.
-    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom());
+    let logs_bloom = receipts_with_bloom.iter().fold(Bloom::ZERO, |bloom, r| bloom | r.bloom_ref());
 
     compare_receipts_root_and_logs_bloom(
         receipts_root,
@@ -200,9 +200,7 @@ pub fn next_block_base_fee(
     if chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
         Ok(decode_holocene_base_fee(chain_spec, parent, timestamp)?)
     } else {
-        Ok(parent
-            .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(timestamp))
-            .unwrap_or_default())
+        Ok(chain_spec.next_block_base_fee(&parent, timestamp).unwrap_or_default())
     }
 }
 
@@ -255,9 +253,7 @@ mod tests {
         let base_fee = next_block_base_fee(&op_chain_spec, &parent, 0);
         assert_eq!(
             base_fee.unwrap(),
-            parent
-                .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
-                .unwrap_or_default()
+            op_chain_spec.next_block_base_fee(&parent, 0).unwrap_or_default()
         );
     }
 
@@ -275,9 +271,7 @@ mod tests {
         let base_fee = next_block_base_fee(&op_chain_spec, &parent, 1800000005);
         assert_eq!(
             base_fee.unwrap(),
-            parent
-                .next_block_base_fee(op_chain_spec.base_fee_params_at_timestamp(0))
-                .unwrap_or_default()
+            op_chain_spec.next_block_base_fee(&parent, 0).unwrap_or_default()
         );
     }
 

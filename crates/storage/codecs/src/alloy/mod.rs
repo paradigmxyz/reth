@@ -19,11 +19,12 @@ cond_mod!(
     header,
     log,
     signature,
-    transaction,
     trie,
     txkind,
     withdrawal
 );
+
+pub mod transaction;
 
 #[cfg(test)]
 mod tests {

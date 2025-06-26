@@ -5,7 +5,7 @@ name: kurtosis-op
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 */12 * * *"
+    - cron: "0 */6 * * *"
 
   push:
     tags:
@@ -62,7 +62,9 @@ jobs:
           sudo apt update
           sudo apt install kurtosis-cli
           kurtosis engine start
-          kurtosis run --enclave op-devnet github.com/ethpandaops/optimism-package --args-file .github/assets/kurtosis_op_network_params.yaml
+          # TODO: unpin optimism-package when https://github.com/ethpandaops/optimism-package/issues/340 is fixed
+          # kurtosis run --enclave op-devnet github.com/ethpandaops/optimism-package --args-file .github/assets/kurtosis_op_network_params.yaml
+          kurtosis run --enclave op-devnet github.com/ethpandaops/optimism-package@452133367b693e3ba22214a6615c86c60a1efd5e --args-file .github/assets/kurtosis_op_network_params.yaml
           ENCLAVE_ID=$(curl http://127.0.0.1:9779/api/enclaves | jq --raw-output 'keys[0]')
           GETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2151908-1-op-geth-op-node-op-kurtosis".public_ports.rpc.number')
           RETH_PORT=$(curl "http://127.0.0.1:9779/api/enclaves/$ENCLAVE_ID/services" | jq '."op-el-2151908-2-op-reth-op-node-op-kurtosis".public_ports.rpc.number')

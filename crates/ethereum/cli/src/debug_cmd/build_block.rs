@@ -1,8 +1,8 @@
 //! Command for debugging block building.
 use alloy_consensus::BlockHeader;
 use alloy_eips::{
-    eip2718::Encodable2718,
-    eip4844::{env_settings::EnvKzgSettings, BlobTransactionSidecar},
+    eip2718::Encodable2718, eip4844::env_settings::EnvKzgSettings,
+    eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rlp::Decodable;
@@ -18,11 +18,11 @@ use reth_consensus::{Consensus, FullConsensus};
 use reth_errors::{ConsensusError, RethResult};
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_fs_util as fs;
 use reth_node_api::{BlockTy, EngineApiMessageVersion, PayloadBuilderAttributes};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthExecutorProvider};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig};
 use reth_primitives_traits::{Block as _, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::{
     providers::{BlockchainProvider, ProviderNodeTypes},
@@ -104,7 +104,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         Ok(EnvKzgSettings::Default)
     }
 
-    /// Execute `debug in-memory-merkle` command
+    /// Execute `debug build-block` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
         self,
         ctx: CliContext,
@@ -147,8 +147,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         for tx_bytes in &self.transactions {
             debug!(target: "reth::cli", bytes = ?tx_bytes, "Decoding transaction");
             let transaction = TransactionSigned::decode(&mut &Bytes::from_str(tx_bytes)?[..])?
-                .try_clone_into_recovered()
-                .map_err(|e| eyre::eyre!("failed to recover tx: {e}"))?;
+                .try_into_recovered()
+                .map_err(|tx| eyre::eyre!("failed to recover tx: {}", tx.tx_hash()))?;
 
             let encoded_length = match transaction.inner() {
                 TransactionSigned::Eip4844(tx) => {
@@ -156,8 +156,10 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                         eyre::eyre!("encountered a blob tx. `--blobs-bundle-path` must be provided")
                     })?;
 
-                    let sidecar: BlobTransactionSidecar =
-                        blobs_bundle.pop_sidecar(tx.tx().blob_versioned_hashes.len());
+                    let sidecar: BlobTransactionSidecarVariant =
+                        BlobTransactionSidecarVariant::Eip4844(
+                            blobs_bundle.pop_sidecar(tx.tx().blob_versioned_hashes.len()),
+                        );
 
                     let pooled = transaction
                         .clone()
@@ -230,8 +232,8 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
                 let state_provider = blockchain_db.latest()?;
                 let db = StateProviderDatabase::new(&state_provider);
-                let executor =
-                    EthExecutorProvider::ethereum(provider_factory.chain_spec()).executor(db);
+                let evm_config = EthEvmConfig::ethereum(provider_factory.chain_spec());
+                let executor = evm_config.batch_executor(db);
 
                 let block_execution_output = executor.execute(&block_with_senders)?;
                 let execution_outcome =
@@ -267,6 +269,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         Ok(())
     }
+}
+
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)

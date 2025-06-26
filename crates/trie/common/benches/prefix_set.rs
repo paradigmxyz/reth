@@ -97,7 +97,7 @@ fn prefix_set_bench<T>(
     let setup = || {
         let mut prefix_set = T::default();
         for key in &preload {
-            prefix_set.insert(key.clone());
+            prefix_set.insert(*key);
         }
         (prefix_set.freeze(), input.clone(), expected.clone())
     };
@@ -131,7 +131,7 @@ fn generate_test_data(size: usize) -> (Vec<Nibbles>, Vec<Nibbles>, Vec<bool>) {
 
     let expected = input
         .iter()
-        .map(|prefix| preload.iter().any(|key| key.has_prefix(prefix)))
+        .map(|prefix| preload.iter().any(|key| key.starts_with(prefix)))
         .collect::<Vec<_>>();
     (preload, input, expected)
 }
@@ -162,7 +162,7 @@ mod implementations {
 
     impl PrefixSetAbstraction for BTreeAnyPrefixSet {
         fn contains(&mut self, key: Nibbles) -> bool {
-            self.keys.iter().any(|k| k.has_prefix(&key))
+            self.keys.iter().any(|k| k.starts_with(&key))
         }
     }
 
@@ -193,7 +193,7 @@ mod implementations {
                 None => (Bound::Unbounded, Bound::Unbounded),
             };
             for key in self.keys.range::<Nibbles, _>(range) {
-                if key.has_prefix(&prefix) {
+                if key.starts_with(&prefix) {
                     self.last_checked = Some(prefix);
                     return true
                 }
@@ -237,7 +237,7 @@ mod implementations {
             match self.keys.binary_search(&prefix) {
                 Ok(_) => true,
                 Err(idx) => match self.keys.get(idx) {
-                    Some(key) => key.has_prefix(&prefix),
+                    Some(key) => key.starts_with(&prefix),
                     None => false, // prefix > last key
                 },
             }
@@ -271,14 +271,12 @@ mod implementations {
                 self.sorted = true;
             }
 
-            let prefix = prefix;
-
             while self.index > 0 && self.keys[self.index] > prefix {
                 self.index -= 1;
             }
 
             for (idx, key) in self.keys[self.index..].iter().enumerate() {
-                if key.has_prefix(&prefix) {
+                if key.starts_with(&prefix) {
                     self.index += idx;
                     return true
                 }
@@ -329,7 +327,7 @@ mod implementations {
                 Err(idx) => match self.keys.get(idx) {
                     Some(key) => {
                         self.last_found_idx = idx;
-                        key.has_prefix(&prefix)
+                        key.starts_with(&prefix)
                     }
                     None => false, // prefix > last key
                 },

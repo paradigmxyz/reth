@@ -11,6 +11,9 @@ pub use mock::*;
 
 mod pool;
 
+mod okvalidator;
+pub use okvalidator::*;
+
 /// A [Pool] used for testing
 pub type TestPool =
     Pool<MockTransactionValidator<MockTransaction>, MockOrdering, InMemoryBlobStore>;

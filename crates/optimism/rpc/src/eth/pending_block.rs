@@ -9,12 +9,11 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
-    EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{
@@ -31,24 +30,22 @@ where
                 Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
             Error: FromEvmError<Self::Evm>,
+            RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         >,
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt<
-            Transaction = OpTransactionSigned,
-            Block = OpBlock,
-            Receipt = OpReceipt,
-            Header = alloy_consensus::Header,
-        > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
+        Provider: BlockReaderIdExt
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
         Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                SignedTx = ProviderTx<Self::Provider>,
-                BlockHeader = ProviderHeader<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-                Block = ProviderBlock<Self::Provider>,
-            >,
-            NextBlockEnvCtx = OpNextBlockEnvAttributes,
+            Primitives = <Self as RpcNodeCore>::Primitives,
+            NextBlockEnvCtx: From<OpNextBlockEnvAttributes>,
+        >,
+        Primitives: NodePrimitives<
+            BlockHeader = ProviderHeader<Self::Provider>,
+            SignedTx = ProviderTx<Self::Provider>,
+            Receipt = ProviderReceipt<Self::Provider>,
+            Block = ProviderBlock<Self::Provider>,
         >,
     >,
 {
@@ -64,15 +61,16 @@ where
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as reth_evm::ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
+    ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
         Ok(OpNextBlockEnvAttributes {
             timestamp: parent.timestamp().saturating_add(12),
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root(),
-            extra_data: parent.extra_data.clone(),
-        })
+            extra_data: parent.extra_data().clone(),
+        }
+        .into())
     }
 
     /// Returns the locally built pending block

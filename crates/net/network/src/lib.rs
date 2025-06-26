@@ -107,7 +107,6 @@
 //!
 //! - `serde` (default): Enable serde support for configuration types.
 //! - `test-utils`: Various utilities helpful for writing tests
-//! - `geth-tests`: Runs tests that require Geth to be installed locally.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -147,9 +146,9 @@ mod swarm;
 mod trusted_peers_resolver;
 
 pub use reth_eth_wire::{DisconnectReason, HelloMessageWithProtocols};
-pub use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
+pub use reth_eth_wire_types::{primitives, EthNetworkPrimitives, NetworkPrimitives};
 pub use reth_network_api::{
-    BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
+    events, BlockDownloaderProvider, DiscoveredEvent, DiscoveryEvent, NetworkEvent,
     NetworkEventListenerProvider, NetworkInfo, PeerRequest, PeerRequestSender, Peers, PeersInfo,
 };
 pub use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
@@ -169,13 +168,15 @@ pub use manager::NetworkManager;
 pub use metrics::TxTypesCounter;
 pub use network::{NetworkHandle, NetworkProtocols};
 pub use swarm::NetworkConnectionState;
-pub use transactions::{FilterAnnouncement, MessageFilter};
 
 /// re-export p2p interfaces
 pub use reth_network_p2p as p2p;
 
-/// re-export types crate
-pub use reth_eth_wire_types as types;
+/// re-export types crates
+pub mod types {
+    pub use reth_eth_wire_types::*;
+    pub use reth_network_types::*;
+}
 
 use aquamarine as _;
 

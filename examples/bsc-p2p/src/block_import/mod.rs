@@ -1,6 +1,7 @@
 #![allow(unused)]
 use handle::ImportHandle;
 use reth_engine_primitives::EngineTypes;
+use reth_eth_wire::NewBlock;
 use reth_network::import::{BlockImport, BlockImportOutcome, NewBlockEvent};
 use reth_network_peers::PeerId;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
@@ -25,8 +26,12 @@ impl<T: PayloadTypes> BscBlockImport<T> {
     }
 }
 
-impl<T: PayloadTypes> BlockImport<BscBlock<T>> for BscBlockImport<T> {
-    fn on_new_block(&mut self, peer_id: PeerId, incoming_block: NewBlockEvent<BscBlock<T>>) {
+impl<T: PayloadTypes> BlockImport<NewBlock<BscBlock<T>>> for BscBlockImport<T> {
+    fn on_new_block(
+        &mut self,
+        peer_id: PeerId,
+        incoming_block: NewBlockEvent<NewBlock<BscBlock<T>>>,
+    ) {
         if let NewBlockEvent::Block(block) = incoming_block {
             let _ = self.handle.send_block(block, peer_id);
         }

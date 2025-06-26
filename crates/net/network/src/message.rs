@@ -3,18 +3,20 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
+use crate::types::Receipts69;
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    message::RequestPair, BlockBodies, BlockHeaders, EthMessage, EthNetworkPrimitives,
-    GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock, NewBlockHashes,
-    NewPooledTransactionHashes, NodeData, PooledTransactions, Receipts, SharedTransactions,
-    Transactions,
+    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
+    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
+    NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions,
+    Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_primitives_traits::Block;
 use std::{
     sync::Arc,
     task::{ready, Context, Poll},
@@ -23,19 +25,19 @@ use tokio::sync::oneshot;
 
 /// Internal form of a `NewBlock` message
 #[derive(Debug, Clone)]
-pub struct NewBlockMessage<B = reth_ethereum_primitives::Block> {
+pub struct NewBlockMessage<P = NewBlock<reth_ethereum_primitives::Block>> {
     /// Hash of the block
     pub hash: B256,
     /// Raw received message
-    pub block: Arc<NewBlock<B>>,
+    pub block: Arc<P>,
 }
 
 // === impl NewBlockMessage ===
 
-impl<B: reth_primitives_traits::Block> NewBlockMessage<B> {
+impl<P: NewBlockPayload> NewBlockMessage<P> {
     /// Returns the block number of the block
     pub fn number(&self) -> u64 {
-        self.block.block.header().number()
+        self.block.block().header().number()
     }
 }
 
@@ -46,7 +48,7 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Announce new block hashes
     NewBlockHashes(NewBlockHashes),
     /// Broadcast new block.
-    NewBlock(NewBlockMessage<N::Block>),
+    NewBlock(NewBlockMessage<N::NewBlockPayload>),
     /// Received transactions _from_ the peer
     ReceivedTransaction(Transactions<N::BroadcastedTransaction>),
     /// Broadcast transactions _from_ local _to_ a peer.
@@ -55,6 +57,8 @@ pub enum PeerMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     PooledTransactions(NewPooledTransactionHashes),
     /// All `eth` request variants.
     EthRequest(PeerRequest<N>),
+    /// Announces when `BlockRange` is updated.
+    BlockRangeUpdated(BlockRangeUpdate),
     /// Any other or manually crafted eth message.
     ///
     /// Caution: It is expected that this is a valid `eth_` capability message.
@@ -103,6 +107,11 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a receipts request.
         response: oneshot::Receiver<RequestResult<Receipts<N::Receipt>>>,
     },
+    /// Represents a response to a request for receipts.
+    Receipts69 {
+        /// The receiver channel for the response to a receipts request.
+        response: oneshot::Receiver<RequestResult<Receipts69<N::Receipt>>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -135,6 +144,9 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
             Self::Receipts { response } => {
                 poll_request!(response, Receipts, cx)
             }
+            Self::Receipts69 { response } => {
+                poll_request!(response, Receipts69, cx)
+            }
         };
         Poll::Ready(res)
     }
@@ -153,6 +165,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     NodeData(RequestResult<Vec<Bytes>>),
     /// Represents a result containing receipts or an error.
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<N::Receipt>>>>),
+    /// Represents a result containing receipts or an error for eth/69.
+    Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
 }
 
 // === impl PeerResponseResult ===
@@ -187,6 +201,9 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts(resp) => {
                 to_message!(resp, Receipts, id)
             }
+            Self::Receipts69(resp) => {
+                to_message!(resp, Receipts69, id)
+            }
         }
     }
 
@@ -198,6 +215,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::PooledTransactions(res) => res.as_ref().err(),
             Self::NodeData(res) => res.as_ref().err(),
             Self::Receipts(res) => res.as_ref().err(),
+            Self::Receipts69(res) => res.as_ref().err(),
         }
     }
 

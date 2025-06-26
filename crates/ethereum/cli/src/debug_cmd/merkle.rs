@@ -11,14 +11,14 @@ use reth_config::Config;
 use reth_consensus::{Consensus, ConsensusError};
 use reth_db_api::{cursor::DbCursorRO, tables, transaction::DbTx};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_evm::execute::{BlockExecutorProvider, Executor};
+use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
 use reth_network_p2p::full_block::FullBlockClient;
 use reth_node_api::{BlockTy, NodePrimitives};
 use reth_node_core::{args::NetworkArgs, utils::get_single_header};
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockNumReader, BlockWriter, ChainSpecProvider,
     DatabaseProviderFactory, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
@@ -109,7 +109,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             )
             .await?;
 
-        let executor_provider = EthExecutorProvider::ethereum(provider_factory.chain_spec());
+        let executor_provider = EthEvmConfig::ethereum(provider_factory.chain_spec());
 
         // Initialize the fetch client
         info!(target: "reth::cli", target_block_number = self.to, "Downloading tip of block range");
@@ -155,8 +155,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
             provider_rw.insert_block(sealed_block.clone(), StorageLocation::Database)?;
 
-            let executor = executor_provider
-                .executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider_rw)));
+            let executor = executor_provider.batch_executor(StateProviderDatabase::new(
+                LatestStateProviderRef::new(&provider_rw),
+            ));
             let output = executor.execute(&sealed_block)?;
 
             provider_rw.write_state(
@@ -303,6 +304,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
 
         Ok(())
     }
+}
+
+impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.env.chain)

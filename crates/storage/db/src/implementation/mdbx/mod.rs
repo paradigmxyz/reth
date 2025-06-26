@@ -519,7 +519,7 @@ mod tests {
     fn create_test_db(kind: DatabaseEnvKind) -> Arc<DatabaseEnv> {
         Arc::new(create_test_db_with_path(
             kind,
-            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).into_path(),
+            &tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
         ))
     }
 
@@ -884,9 +884,7 @@ mod tests {
         // Seek exact
         let exact = cursor.seek_exact(missing_key).unwrap();
         assert_eq!(exact, None);
-        assert_eq!(cursor.current(), Ok(Some((missing_key + 1, B256::ZERO))));
-        assert_eq!(cursor.prev(), Ok(Some((missing_key - 1, B256::ZERO))));
-        assert_eq!(cursor.prev(), Ok(Some((missing_key - 2, B256::ZERO))));
+        assert_eq!(cursor.current(), Ok(None));
     }
 
     #[test]
@@ -971,11 +969,14 @@ mod tests {
 
         // Seek & delete key2 again
         assert_eq!(cursor.seek_exact(key2), Ok(None));
-        assert_eq!(cursor.delete_current(), Ok(()));
+        assert_eq!(
+            cursor.delete_current(),
+            Err(DatabaseError::Delete(reth_libmdbx::Error::NoData.into()))
+        );
         // Assert that key1 is still there
         assert_eq!(cursor.seek_exact(key1), Ok(Some((key1, Account::default()))));
-        // Assert that key3 was deleted
-        assert_eq!(cursor.seek_exact(key3), Ok(None));
+        // Assert that key3 is still there
+        assert_eq!(cursor.seek_exact(key3), Ok(Some((key3, Account::default()))));
     }
 
     #[test]
@@ -1170,7 +1171,7 @@ mod tests {
 
     #[test]
     fn db_closure_put_get() {
-        let path = TempDir::new().expect(ERROR_TEMPDIR).into_path();
+        let path = TempDir::new().expect(ERROR_TEMPDIR).keep();
 
         let value = Account {
             nonce: 18446744073709551615,
@@ -1246,6 +1247,34 @@ mod tests {
                     .expect("element should exist.")
                     .expect("should be able to retrieve it.")
             );
+        }
+    }
+
+    #[test]
+    fn db_walk_dup_with_not_existing_key() {
+        let env = create_test_db(DatabaseEnvKind::RW);
+        let key = Address::from_str("0xa2c122be93b0074270ebee7f6b7292c7deb45047")
+            .expect(ERROR_ETH_ADDRESS);
+
+        // PUT (0,0)
+        let value00 = StorageEntry::default();
+        env.update(|tx| tx.put::<PlainStorageState>(key, value00).expect(ERROR_PUT)).unwrap();
+
+        // PUT (2,2)
+        let value22 = StorageEntry { key: B256::with_last_byte(2), value: U256::from(2) };
+        env.update(|tx| tx.put::<PlainStorageState>(key, value22).expect(ERROR_PUT)).unwrap();
+
+        // PUT (1,1)
+        let value11 = StorageEntry { key: B256::with_last_byte(1), value: U256::from(1) };
+        env.update(|tx| tx.put::<PlainStorageState>(key, value11).expect(ERROR_PUT)).unwrap();
+
+        // Try to walk_dup with not existing key should immediately return None
+        {
+            let tx = env.tx().expect(ERROR_INIT_TX);
+            let mut cursor = tx.cursor_dup_read::<PlainStorageState>().unwrap();
+            let not_existing_key = Address::ZERO;
+            let mut walker = cursor.walk_dup(Some(not_existing_key), None).unwrap();
+            assert_eq!(walker.next(), None);
         }
     }
 
@@ -1343,8 +1372,9 @@ mod tests {
         let db: Arc<DatabaseEnv> = create_test_db(DatabaseEnvKind::RW);
         let real_key = address!("0xa2c122be93b0074270ebee7f6b7292c7deb45047");
 
-        for i in 1..5 {
-            let key = ShardedKey::new(real_key, i * 100);
+        let shards = 5;
+        for i in 1..=shards {
+            let key = ShardedKey::new(real_key, if i == shards { u64::MAX } else { i * 100 });
             let list = IntegerList::new_pre_sorted([i * 100u64]);
 
             db.update(|tx| tx.put::<AccountsHistory>(key.clone(), list.clone()).expect(""))

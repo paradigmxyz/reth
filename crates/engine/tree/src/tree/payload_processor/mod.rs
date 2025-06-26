@@ -16,7 +16,7 @@ use executor::WorkloadExecutor;
 use multiproof::*;
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{ConfigureEvm, OnStateHook};
+use reth_evm::{ConfigureEvm, OnStateHook, SpecFor};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -28,14 +28,17 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
 };
+use reth_trie_sparse::SparseTrieState;
 use std::{
     collections::VecDeque,
     sync::{
-        mpsc,
-        mpsc::{channel, Sender},
+        atomic::AtomicBool,
+        mpsc::{self, channel, Sender},
         Arc,
     },
 };
+
+use super::precompile_cache::PrecompileCacheMap;
 
 pub mod executor;
 pub mod multiproof;
@@ -44,7 +47,11 @@ pub mod sparse_trie;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug, Clone)]
-pub struct PayloadProcessor<N, Evm> {
+pub struct PayloadProcessor<N, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
     /// The most recent cache used for execution.
@@ -57,12 +64,28 @@ pub struct PayloadProcessor<N, Evm> {
     disable_transaction_prewarming: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
+    /// Whether precompile cache should be disabled.
+    precompile_cache_disabled: bool,
+    /// Precompile cache map.
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// A sparse trie, kept around to be used for the state root computation so that allocations
+    /// can be minimized.
+    sparse_trie: Option<SparseTrieState>,
     _marker: std::marker::PhantomData<N>,
 }
 
-impl<N, Evm> PayloadProcessor<N, Evm> {
+impl<N, Evm> PayloadProcessor<N, Evm>
+where
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N>,
+{
     /// Creates a new payload processor.
-    pub fn new(executor: WorkloadExecutor, evm_config: Evm, config: &TreeConfig) -> Self {
+    pub fn new(
+        executor: WorkloadExecutor,
+        evm_config: Evm,
+        config: &TreeConfig,
+        precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    ) -> Self {
         Self {
             executor,
             execution_cache: Default::default(),
@@ -70,6 +93,9 @@ impl<N, Evm> PayloadProcessor<N, Evm> {
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_caching_and_prewarming(),
             evm_config,
+            precompile_cache_disabled: config.precompile_cache_disabled(),
+            precompile_cache_map,
+            sparse_trie: None,
             _marker: Default::default(),
         }
     }
@@ -113,7 +139,7 @@ where
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
     pub fn spawn<P>(
-        &self,
+        &mut self,
         header: SealedHeaderFor<N>,
         transactions: VecDeque<Recovered<N::SignedTx>>,
         provider_builder: StateProviderBuilder<N, P>,
@@ -170,11 +196,15 @@ where
             multi_proof_task.run();
         });
 
-        let sparse_trie_task = SparseTrieTask::new(
+        // take the sparse trie if it was set
+        let sparse_trie = self.sparse_trie.take();
+
+        let mut sparse_trie_task = SparseTrieTask::new_with_stored_trie(
             self.executor.clone(),
             sparse_trie_rx,
             proof_task.handle(),
             self.trie_metrics.clone(),
+            sparse_trie,
         );
 
         // wire the sparse trie to the state root response receiver
@@ -220,6 +250,11 @@ where
         PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
     }
 
+    /// Sets the sparse trie to be kept around for the state root computation.
+    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrieState) {
+        self.sparse_trie = Some(sparse_trie);
+    }
+
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
     fn spawn_caching_with<P>(
         &self,
@@ -251,6 +286,9 @@ where
             cache_metrics: cache_metrics.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
+            terminate_execution: Arc::new(AtomicBool::new(false)),
+            precompile_cache_disabled: self.precompile_cache_disabled,
+            precompile_cache_map: self.precompile_cache_map.clone(),
         };
 
         let prewarm_task = PrewarmCacheTask::new(
@@ -418,12 +456,11 @@ impl ExecutionCache {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use crate::tree::{
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
+        precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
     use alloy_evm::block::StateChangeSource;
@@ -443,6 +480,7 @@ mod tests {
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
+    use std::sync::Arc;
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
         let mut rng = generators::rng();
@@ -465,6 +503,7 @@ mod tests {
                             EvmStorageSlot::new_changed(
                                 U256::ZERO,
                                 U256::from(rng.random::<u64>()),
+                                0,
                             ),
                         );
                     }
@@ -479,6 +518,7 @@ mod tests {
                     },
                     storage,
                     status: AccountStatus::Touched,
+                    transaction_id: 0,
                 };
 
                 state_update.insert(address, account);
@@ -542,10 +582,11 @@ mod tests {
             }
         }
 
-        let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+        let mut payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
             WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
+            PrecompileCacheMap::default(),
         );
         let provider = BlockchainProvider::new(factory).unwrap();
         let mut handle = payload_processor.spawn(

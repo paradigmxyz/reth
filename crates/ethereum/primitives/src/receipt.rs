@@ -4,7 +4,7 @@ use alloy_consensus::{
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
 use alloy_eips::{
-    eip2718::{Eip2718Result, Encodable2718},
+    eip2718::{Eip2718Result, Encodable2718, IsTyped2718},
     Decodable2718,
 };
 use alloy_primitives::{Bloom, Log, B256};
@@ -268,6 +268,12 @@ impl Typed2718 for Receipt {
     }
 }
 
+impl IsTyped2718 for Receipt {
+    fn is_type(type_id: u8) -> bool {
+        <TxType as IsTyped2718>::is_type(type_id)
+    }
+}
+
 impl InMemorySize for Receipt {
     fn size(&self) -> usize {
         self.tx_type.size() +
@@ -277,7 +283,45 @@ impl InMemorySize for Receipt {
     }
 }
 
-impl reth_primitives_traits::Receipt for Receipt {}
+impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt
+where
+    T: Into<Log>,
+{
+    fn from(value: alloy_consensus::ReceiptEnvelope<T>) -> Self {
+        let value = value.into_primitives_receipt();
+        Self {
+            tx_type: value.tx_type(),
+            success: value.is_success(),
+            cumulative_gas_used: value.cumulative_gas_used(),
+            // TODO: remove after <https://github.com/alloy-rs/alloy/pull/2533>
+            logs: value.logs().to_vec(),
+        }
+    }
+}
+
+impl From<Receipt> for alloy_consensus::Receipt<Log> {
+    fn from(value: Receipt) -> Self {
+        Self {
+            status: value.success.into(),
+            cumulative_gas_used: value.cumulative_gas_used,
+            logs: value.logs,
+        }
+    }
+}
+
+impl From<Receipt> for alloy_consensus::ReceiptEnvelope<Log> {
+    fn from(value: Receipt) -> Self {
+        let tx_type = value.tx_type;
+        let receipt = value.into_with_bloom().map_receipt(Into::into);
+        match tx_type {
+            TxType::Legacy => Self::Legacy(receipt),
+            TxType::Eip2930 => Self::Eip2930(receipt),
+            TxType::Eip1559 => Self::Eip1559(receipt),
+            TxType::Eip4844 => Self::Eip4844(receipt),
+            TxType::Eip7702 => Self::Eip7702(receipt),
+        }
+    }
+}
 
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
@@ -392,13 +436,13 @@ pub(super) mod serde_bincode_compat {
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
-                reseipt: Receipt,
+                receipt: Receipt,
             }
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
-                reseipt: Receipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+                receipt: Receipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
             };
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();

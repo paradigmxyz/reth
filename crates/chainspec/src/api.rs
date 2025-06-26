@@ -1,8 +1,8 @@
 use crate::{ChainSpec, DepositContract};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::Header;
-use alloy_eips::{eip1559::BaseFeeParams, eip7840::BlobParams};
+use alloy_consensus::{BlockHeader, Header};
+use alloy_eips::{calc_next_block_base_fee, eip1559::BaseFeeParams, eip7840::BlobParams};
 use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 use core::fmt::{Debug, Display};
@@ -65,6 +65,20 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
 
     /// Returns the final total difficulty if the Paris hardfork is known.
     fn final_paris_total_difficulty(&self) -> Option<U256>;
+
+    /// See [`calc_next_block_base_fee`].
+    fn next_block_base_fee<H>(&self, parent: &H, target_timestamp: u64) -> Option<u64>
+    where
+        Self: Sized,
+        H: BlockHeader,
+    {
+        Some(calc_next_block_base_fee(
+            parent.gas_used(),
+            parent.gas_limit(),
+            parent.base_fee_per_gas()?,
+            self.base_fee_params_at_timestamp(target_timestamp),
+        ))
+    }
 }
 
 impl EthChainSpec for ChainSpec {
@@ -83,7 +97,11 @@ impl EthChainSpec for ChainSpec {
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {
-        if self.is_prague_active_at_timestamp(timestamp) {
+        if let Some(blob_param) = self.blob_params.active_scheduled_params_at_timestamp(timestamp) {
+            Some(*blob_param)
+        } else if self.is_osaka_active_at_timestamp(timestamp) {
+            Some(self.blob_params.osaka)
+        } else if self.is_prague_active_at_timestamp(timestamp) {
             Some(self.blob_params.prague)
         } else if self.is_cancun_active_at_timestamp(timestamp) {
             Some(self.blob_params.cancun)

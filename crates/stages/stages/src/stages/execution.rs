@@ -1,14 +1,11 @@
-use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
+use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
-use reth_evm::{
-    execute::{BlockExecutorProvider, Executor},
-    metrics::ExecutorMetrics,
-};
+use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
 use reth_execution_types::Chain;
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, Block, BlockBody, NodePrimitives};
@@ -68,13 +65,12 @@ use super::missing_static_data_error;
 #[derive(Debug)]
 pub struct ExecutionStage<E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// The stage's internal block executor
-    executor_provider: E,
+    evm_config: E,
     /// The consensus instance for validating blocks.
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
-    /// The consensu
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -98,11 +94,11 @@ where
 
 impl<E> ExecutionStage<E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
 {
     /// Create new execution stage with specified config.
     pub fn new(
-        executor_provider: E,
+        evm_config: E,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         thresholds: ExecutionStageThresholds,
         external_clean_threshold: u64,
@@ -110,7 +106,7 @@ where
     ) -> Self {
         Self {
             external_clean_threshold,
-            executor_provider,
+            evm_config,
             consensus,
             thresholds,
             post_execute_commit_input: None,
@@ -122,29 +118,29 @@ where
 
     /// Create an execution stage with the provided executor.
     ///
-    /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD`].
+    /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD`].
     pub fn new_with_executor(
-        executor_provider: E,
+        evm_config: E,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     ) -> Self {
         Self::new(
-            executor_provider,
+            evm_config,
             consensus,
             ExecutionStageThresholds::default(),
-            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
             ExExManagerHandle::empty(),
         )
     }
 
     /// Create new instance of [`ExecutionStage`] from configuration.
     pub fn from_config(
-        executor_provider: E,
+        evm_config: E,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
         config: ExecutionConfig,
         external_clean_threshold: u64,
     ) -> Self {
         Self::new(
-            executor_provider,
+            evm_config,
             consensus,
             config.into(),
             external_clean_threshold,
@@ -255,7 +251,7 @@ where
 
 impl<E, Provider> Stage<Provider> for ExecutionStage<E>
 where
-    E: BlockExecutorProvider,
+    E: ConfigureEvm,
     Provider: DBProvider
         + BlockReader<
             Block = <E::Primitives as NodePrimitives>::Block,
@@ -294,7 +290,7 @@ where
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
         let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
-        let mut executor = self.executor_provider.executor(db);
+        let mut executor = self.evm_config.batch_executor(db);
 
         // Progress tracking
         let mut stage_progress = start_block;
@@ -659,7 +655,7 @@ fn calculate_gas_used_from_headers<N: NodePrimitives>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestStageDB;
+    use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
     use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
@@ -670,7 +666,6 @@ mod tests {
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
-    use reth_evm::execute::BasicBlockExecutorProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock, StorageEntry};
     use reth_provider::{
@@ -682,15 +677,14 @@ mod tests {
     use reth_stages_api::StageUnitCheckpoint;
     use std::collections::BTreeMap;
 
-    fn stage() -> ExecutionStage<BasicBlockExecutorProvider<EthEvmConfig>> {
-        let strategy_factory =
+    fn stage() -> ExecutionStage<EthEvmConfig> {
+        let evm_config =
             EthEvmConfig::new(Arc::new(ChainSpecBuilder::mainnet().berlin_activated().build()));
-        let executor_provider = BasicBlockExecutorProvider::new(strategy_factory);
         let consensus = Arc::new(EthBeaconConsensus::new(Arc::new(
             ChainSpecBuilder::mainnet().berlin_activated().build(),
         )));
         ExecutionStage::new(
-            executor_provider,
+            evm_config,
             consensus,
             ExecutionStageThresholds {
                 max_blocks: Some(100),
@@ -698,7 +692,7 @@ mod tests {
                 max_cumulative_gas: None,
                 max_duration: None,
             },
-            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             ExExManagerHandle::empty(),
         )
     }

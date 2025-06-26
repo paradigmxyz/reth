@@ -20,7 +20,10 @@ use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
-use reth_rpc_eth_api::{helpers::TraceExt, FromEthApiError, RpcNodeCore};
+use reth_rpc_eth_api::{
+    helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
+    FromEthApiError, RpcNodeCore,
+};
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
@@ -73,11 +76,13 @@ impl<Eth: RpcNodeCore> TraceApi<Eth> {
     }
 }
 
-// === impl TraceApi ===
+// === impl TraceApi === //
 
 impl<Eth> TraceApi<Eth>
 where
-    Eth: TraceExt + 'static,
+    // tracing methods do _not_ read from mempool, hence no `LoadBlock` trait
+    // bound
+    Eth: Trace + Call + LoadPendingBlock + LoadTransaction + 'static,
 {
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
@@ -234,118 +239,6 @@ where
         Ok(self.trace_transaction(hash).await?.and_then(|traces| traces.into_iter().nth(index)))
     }
 
-    /// Returns all transaction traces that match the given filter.
-    ///
-    /// This is similar to [`Self::trace_block`] but only returns traces for transactions that match
-    /// the filter.
-    pub async fn trace_filter(
-        &self,
-        filter: TraceFilter,
-    ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
-        // We'll reuse the matcher across multiple blocks that are traced in parallel
-        let matcher = Arc::new(filter.matcher());
-        let TraceFilter { from_block, to_block, after, count, .. } = filter;
-        let start = from_block.unwrap_or(0);
-
-        let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
-        if start > latest_block {
-            // can't trace that range
-            return Err(EthApiError::HeaderNotFound(start.into()).into());
-        }
-        let end = to_block.unwrap_or(latest_block);
-
-        if start > end {
-            return Err(EthApiError::InvalidParams(
-                "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
-            )
-            .into())
-        }
-
-        // ensure that the range is not too large, since we need to fetch all blocks in the range
-        let distance = end.saturating_sub(start);
-        if distance > self.inner.eth_config.max_trace_filter_blocks {
-            return Err(EthApiError::InvalidParams(
-                "Block range too large; currently limited to 100 blocks".to_string(),
-            )
-            .into())
-        }
-
-        // fetch all blocks in that range
-        let blocks = self
-            .provider()
-            .recovered_block_range(start..=end)
-            .map_err(Eth::Error::from_eth_err)?
-            .into_iter()
-            .map(Arc::new)
-            .collect::<Vec<_>>();
-
-        // trace all blocks
-        let mut block_traces = Vec::with_capacity(blocks.len());
-        for block in &blocks {
-            let matcher = matcher.clone();
-            let traces = self.eth_api().trace_block_until(
-                block.hash().into(),
-                Some(block.clone()),
-                None,
-                TracingInspectorConfig::default_parity(),
-                move |tx_info, inspector, _, _, _| {
-                    let mut traces =
-                        inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                    traces.retain(|trace| matcher.matches(&trace.trace));
-                    Ok(Some(traces))
-                },
-            );
-            block_traces.push(traces);
-        }
-
-        let block_traces = futures::future::try_join_all(block_traces).await?;
-        let mut all_traces = block_traces
-            .into_iter()
-            .flatten()
-            .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
-            .collect::<Vec<_>>();
-
-        // add reward traces for all blocks
-        for block in &blocks {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                all_traces.extend(
-                    self.extract_reward_traces(
-                        block.header(),
-                        block.body().ommers(),
-                        base_block_reward,
-                    )
-                    .into_iter()
-                    .filter(|trace| matcher.matches(&trace.trace)),
-                );
-            } else {
-                // no block reward, means we're past the Paris hardfork and don't expect any rewards
-                // because the blocks in ascending order
-                break
-            }
-        }
-
-        // Skips the first `after` number of matching traces.
-        // If `after` is greater than or equal to the number of matched traces, it returns an empty
-        // array.
-        if let Some(after) = after.map(|a| a as usize) {
-            if after < all_traces.len() {
-                all_traces.drain(..after);
-            } else {
-                return Ok(vec![])
-            }
-        }
-
-        // Return at most `count` of traces
-        if let Some(count) = count {
-            let count = count as usize;
-            if count < all_traces.len() {
-                all_traces.truncate(count);
-            }
-        };
-
-        Ok(all_traces)
-    }
-
     /// Returns all traces for the given transaction hash
     pub async fn trace_transaction(
         &self,
@@ -359,73 +252,6 @@ where
                     let traces =
                         inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
                     Ok(traces)
-                },
-            )
-            .await
-    }
-
-    /// Returns traces created at given block.
-    pub async fn trace_block(
-        &self,
-        block_id: BlockId,
-    ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
-        let traces = self.eth_api().trace_block_with(
-            block_id,
-            None,
-            TracingInspectorConfig::default_parity(),
-            |tx_info, inspector, _, _, _| {
-                let traces =
-                    inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
-                Ok(traces)
-            },
-        );
-
-        let block = self.eth_api().recovered_block(block_id);
-        let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
-
-        let mut maybe_traces =
-            maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
-
-        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
-            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
-                traces.extend(self.extract_reward_traces(
-                    block.header(),
-                    block.body().ommers(),
-                    base_block_reward,
-                ));
-            }
-        }
-
-        Ok(maybe_traces)
-    }
-
-    /// Replays all transactions in a block
-    pub async fn replay_block_transactions(
-        &self,
-        block_id: BlockId,
-        trace_types: HashSet<TraceType>,
-    ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>, Eth::Error> {
-        self.eth_api()
-            .trace_block_with(
-                block_id,
-                None,
-                TracingInspectorConfig::from_parity_config(&trace_types),
-                move |tx_info, inspector, res, state, db| {
-                    let mut full_trace =
-                        inspector.into_parity_builder().into_trace_results(&res, &trace_types);
-
-                    // If statediffs were requested, populate them with the account balance and
-                    // nonce from pre-state
-                    if let Some(ref mut state_diff) = full_trace.state_diff {
-                        populate_state_diff(state_diff, db, state.iter())
-                            .map_err(Eth::Error::from_eth_err)?;
-                    }
-
-                    let trace = TraceResultsWithTransactionHash {
-                        transaction_hash: tx_info.hash.expect("tx hash is set"),
-                        full_trace,
-                    };
-                    Ok(trace)
                 },
             )
             .await
@@ -450,41 +276,6 @@ where
                 },
             )
             .await
-    }
-
-    /// Returns the opcodes of all transactions in the given block.
-    ///
-    /// This is the same as [`Self::trace_transaction_opcode_gas`] but for all transactions in a
-    /// block.
-    pub async fn trace_block_opcode_gas(
-        &self,
-        block_id: BlockId,
-    ) -> Result<Option<BlockOpcodeGas>, Eth::Error> {
-        let res = self
-            .eth_api()
-            .trace_block_inspector(
-                block_id,
-                None,
-                OpcodeGasInspector::default,
-                move |tx_info, inspector, _res, _, _| {
-                    let trace = TransactionOpcodeGas {
-                        transaction_hash: tx_info.hash.expect("tx hash is set"),
-                        opcode_gas: inspector.opcode_gas_iter().collect(),
-                    };
-                    Ok(trace)
-                },
-            )
-            .await?;
-
-        let Some(transactions) = res else { return Ok(None) };
-
-        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
-
-        Ok(Some(BlockOpcodeGas {
-            block_hash: block.hash(),
-            block_number: block.number(),
-            transactions,
-        }))
     }
 
     /// Calculates the base block reward for the given block:
@@ -548,6 +339,231 @@ where
             ));
         }
         traces
+    }
+}
+
+impl<Eth> TraceApi<Eth>
+where
+    // tracing methods read from mempool, hence `LoadBlock` trait bound via
+    // `TraceExt`
+    Eth: TraceExt + 'static,
+{
+    /// Returns all transaction traces that match the given filter.
+    ///
+    /// This is similar to [`Self::trace_block`] but only returns traces for transactions that match
+    /// the filter.
+    pub async fn trace_filter(
+        &self,
+        filter: TraceFilter,
+    ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
+        // We'll reuse the matcher across multiple blocks that are traced in parallel
+        let matcher = Arc::new(filter.matcher());
+        let TraceFilter { from_block, to_block, after, count, .. } = filter;
+        let start = from_block.unwrap_or(0);
+
+        let latest_block = self.provider().best_block_number().map_err(Eth::Error::from_eth_err)?;
+        if start > latest_block {
+            // can't trace that range
+            return Err(EthApiError::HeaderNotFound(start.into()).into());
+        }
+        let end = to_block.unwrap_or(latest_block);
+
+        if start > end {
+            return Err(EthApiError::InvalidParams(
+                "invalid parameters: fromBlock cannot be greater than toBlock".to_string(),
+            )
+            .into())
+        }
+
+        // ensure that the range is not too large, since we need to fetch all blocks in the range
+        let distance = end.saturating_sub(start);
+        if distance > self.inner.eth_config.max_trace_filter_blocks {
+            return Err(EthApiError::InvalidParams(
+                "Block range too large; currently limited to 100 blocks".to_string(),
+            )
+            .into())
+        }
+
+        // fetch all blocks in that range
+        let blocks = self
+            .provider()
+            .recovered_block_range(start..=end)
+            .map_err(Eth::Error::from_eth_err)?
+            .into_iter()
+            .map(Arc::new)
+            .collect::<Vec<_>>();
+
+        // trace all blocks
+        let mut block_traces = Vec::with_capacity(blocks.len());
+        for block in &blocks {
+            let matcher = matcher.clone();
+            let traces = self.eth_api().trace_block_until(
+                block.hash().into(),
+                Some(block.clone()),
+                None,
+                TracingInspectorConfig::default_parity(),
+                move |tx_info, ctx| {
+                    let mut traces = ctx
+                        .inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info);
+                    traces.retain(|trace| matcher.matches(&trace.trace));
+                    Ok(Some(traces))
+                },
+            );
+            block_traces.push(traces);
+        }
+
+        let block_traces = futures::future::try_join_all(block_traces).await?;
+        let mut all_traces = block_traces
+            .into_iter()
+            .flatten()
+            .flat_map(|traces| traces.into_iter().flatten().flat_map(|traces| traces.into_iter()))
+            .collect::<Vec<_>>();
+
+        // add reward traces for all blocks
+        for block in &blocks {
+            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
+                all_traces.extend(
+                    self.extract_reward_traces(
+                        block.header(),
+                        block.body().ommers(),
+                        base_block_reward,
+                    )
+                    .into_iter()
+                    .filter(|trace| matcher.matches(&trace.trace)),
+                );
+            } else {
+                // no block reward, means we're past the Paris hardfork and don't expect any rewards
+                // because the blocks in ascending order
+                break
+            }
+        }
+
+        // Skips the first `after` number of matching traces.
+        // If `after` is greater than or equal to the number of matched traces, it returns an empty
+        // array.
+        if let Some(after) = after.map(|a| a as usize) {
+            if after < all_traces.len() {
+                all_traces.drain(..after);
+            } else {
+                return Ok(vec![])
+            }
+        }
+
+        // Return at most `count` of traces
+        if let Some(count) = count {
+            let count = count as usize;
+            if count < all_traces.len() {
+                all_traces.truncate(count);
+            }
+        };
+
+        Ok(all_traces)
+    }
+
+    /// Returns traces created at given block.
+    pub async fn trace_block(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
+        let traces = self.eth_api().trace_block_with(
+            block_id,
+            None,
+            TracingInspectorConfig::default_parity(),
+            |tx_info, ctx| {
+                let traces =
+                    ctx.inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+                Ok(traces)
+            },
+        );
+
+        let block = self.eth_api().recovered_block(block_id);
+        let (maybe_traces, maybe_block) = futures::try_join!(traces, block)?;
+
+        let mut maybe_traces =
+            maybe_traces.map(|traces| traces.into_iter().flatten().collect::<Vec<_>>());
+
+        if let (Some(block), Some(traces)) = (maybe_block, maybe_traces.as_mut()) {
+            if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
+                traces.extend(self.extract_reward_traces(
+                    block.header(),
+                    block.body().ommers(),
+                    base_block_reward,
+                ));
+            }
+        }
+
+        Ok(maybe_traces)
+    }
+
+    /// Replays all transactions in a block
+    pub async fn replay_block_transactions(
+        &self,
+        block_id: BlockId,
+        trace_types: HashSet<TraceType>,
+    ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>, Eth::Error> {
+        self.eth_api()
+            .trace_block_with(
+                block_id,
+                None,
+                TracingInspectorConfig::from_parity_config(&trace_types),
+                move |tx_info, ctx| {
+                    let mut full_trace = ctx
+                        .inspector
+                        .into_parity_builder()
+                        .into_trace_results(&ctx.result, &trace_types);
+
+                    // If statediffs were requested, populate them with the account balance and
+                    // nonce from pre-state
+                    if let Some(ref mut state_diff) = full_trace.state_diff {
+                        populate_state_diff(state_diff, &ctx.db, ctx.state.iter())
+                            .map_err(Eth::Error::from_eth_err)?;
+                    }
+
+                    let trace = TraceResultsWithTransactionHash {
+                        transaction_hash: tx_info.hash.expect("tx hash is set"),
+                        full_trace,
+                    };
+                    Ok(trace)
+                },
+            )
+            .await
+    }
+
+    /// Returns the opcodes of all transactions in the given block.
+    ///
+    /// This is the same as [`Self::trace_transaction_opcode_gas`] but for all transactions in a
+    /// block.
+    pub async fn trace_block_opcode_gas(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Option<BlockOpcodeGas>, Eth::Error> {
+        let res = self
+            .eth_api()
+            .trace_block_inspector(
+                block_id,
+                None,
+                OpcodeGasInspector::default,
+                move |tx_info, ctx| {
+                    let trace = TransactionOpcodeGas {
+                        transaction_hash: tx_info.hash.expect("tx hash is set"),
+                        opcode_gas: ctx.inspector.opcode_gas_iter().collect(),
+                    };
+                    Ok(trace)
+                },
+            )
+            .await?;
+
+        let Some(transactions) = res else { return Ok(None) };
+
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
+
+        Ok(Some(BlockOpcodeGas {
+            block_hash: block.hash(),
+            block_number: block.number(),
+            transactions,
+        }))
     }
 }
 

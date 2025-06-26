@@ -9,11 +9,11 @@ use alloy_primitives::{
 use alloy_rlp::{
     Decodable, Encodable, RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper,
 };
-use core::mem;
+use core::{fmt::Debug, mem};
 use derive_more::{Constructor, Deref, DerefMut, From, IntoIterator};
 use reth_codecs_derive::{add_arbitrary_tests, generate_tests};
 use reth_ethereum_primitives::TransactionSigned;
-use reth_primitives_traits::SignedTransaction;
+use reth_primitives_traits::{Block, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
@@ -64,6 +64,17 @@ impl From<NewBlockHashes> for Vec<BlockHashNumber> {
     }
 }
 
+/// A trait for block payloads transmitted through p2p.
+pub trait NewBlockPayload:
+    Encodable + Decodable + Clone + Eq + Debug + Send + Sync + Unpin + 'static
+{
+    /// The block type.
+    type Block: Block;
+
+    /// Returns a reference to the block.
+    fn block(&self) -> &Self::Block;
+}
+
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
@@ -74,6 +85,14 @@ pub struct NewBlock<B = reth_ethereum_primitives::Block> {
     pub block: B,
     /// The current total difficulty.
     pub td: U128,
+}
+
+impl<B: Block + 'static> NewBlockPayload for NewBlock<B> {
+    type Block = B;
+
+    fn block(&self) -> &Self::Block {
+        &self.block
+    }
 }
 
 generate_tests!(#[rlp, 25] NewBlock<reth_ethereum_primitives::Block>, EthNewBlockTests);
@@ -150,7 +169,7 @@ impl NewPooledTransactionHashes {
                 matches!(version, EthVersion::Eth67 | EthVersion::Eth66)
             }
             Self::Eth68(_) => {
-                matches!(version, EthVersion::Eth68)
+                matches!(version, EthVersion::Eth68 | EthVersion::Eth69)
             }
         }
     }
@@ -763,6 +782,20 @@ impl FromIterator<(TxHash, Eth68TxMetadata)> for RequestTxHashes {
     fn from_iter<I: IntoIterator<Item = (TxHash, Eth68TxMetadata)>>(iter: I) -> Self {
         Self::new(iter.into_iter().map(|(hash, _)| hash).collect())
     }
+}
+
+/// The earliest block, the latest block and hash of the latest block which can be provided.
+/// See [BlockRangeUpdate](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#blockrangeupdate-0x11).
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+pub struct BlockRangeUpdate {
+    /// The earliest block which is available.
+    pub earliest: u64,
+    /// The latest block which is available.
+    pub latest: u64,
+    /// Latest available block's hash.
+    pub latest_hash: B256,
 }
 
 #[cfg(test)]

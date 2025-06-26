@@ -1,5 +1,6 @@
 [package]
 name = "reth-era"
+description = "e2store and era1 files core logic"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -33,6 +34,7 @@ reqwest.workspace = true
 reth-era-downloader.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+test-case.workspace = true
 
 [lints]
 workspace = true

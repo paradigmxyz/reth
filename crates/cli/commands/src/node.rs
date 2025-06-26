@@ -1,21 +1,22 @@
 //! Main node command for launching a node
 
+use crate::launcher::Launcher;
 use clap::{value_parser, Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::parse_socket_address;
-use reth_db::{init_db, DatabaseEnv};
-use reth_node_builder::{NodeBuilder, WithLaunchContext};
+use reth_db::init_db;
+use reth_node_builder::NodeBuilder;
 use reth_node_core::{
     args::{
-        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RpcServerArgs, TxPoolArgs,
+        DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, NetworkArgs,
+        PayloadBuilderArgs, PruningArgs, RpcServerArgs, TxPoolArgs,
     },
     node_config::NodeConfig,
     version,
 };
-use std::{ffi::OsString, fmt, future::Future, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{ffi::OsString, fmt, net::SocketAddr, path::PathBuf, sync::Arc};
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -108,6 +109,10 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[command(flatten, next_help_heading = "Engine")]
     pub engine: EngineArgs,
 
+    /// All ERA related arguments with --era prefix
+    #[command(flatten, next_help_heading = "ERA")]
+    pub era: EraArgs,
+
     /// Additional cli arguments
     #[command(flatten, next_help_heading = "Extension")]
     pub ext: Ext,
@@ -129,19 +134,19 @@ impl<C: ChainSpecParser> NodeCommand<C> {
     }
 }
 
-impl<
-        C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>,
-        Ext: clap::Args + fmt::Debug,
-    > NodeCommand<C, Ext>
+impl<C, Ext> NodeCommand<C, Ext>
+where
+    C: ChainSpecParser,
+    C::ChainSpec: EthChainSpec + EthereumHardforks,
+    Ext: clap::Args + fmt::Debug,
 {
     /// Launches the node
     ///
     /// This transforms the node command into a node config and launches the node using the given
-    /// closure.
-    pub async fn execute<L, Fut>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
+    /// launcher.
+    pub async fn execute<L>(self, ctx: CliContext, launcher: L) -> eyre::Result<()>
     where
-        L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
-        Fut: Future<Output = eyre::Result<()>>,
+        L: Launcher<C, Ext>,
     {
         tracing::info!(target: "reth::cli", version = ?version::SHORT_VERSION, "Starting reth");
 
@@ -162,6 +167,7 @@ impl<
             pruning,
             ext,
             engine,
+            era,
         } = self;
 
         // set up node config
@@ -180,6 +186,7 @@ impl<
             dev,
             pruning,
             engine,
+            era,
         };
 
         let data_dir = node_config.datadir();
@@ -196,14 +203,16 @@ impl<
             .with_database(database)
             .with_launch_context(ctx.task_executor);
 
-        launcher(builder, ext).await
+        launcher.entrypoint(builder, ext).await
     }
+}
+
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.chain)
     }
 }
-
 /// No Additional arguments
 #[derive(Debug, Clone, Copy, Default, Args)]
 #[non_exhaustive]

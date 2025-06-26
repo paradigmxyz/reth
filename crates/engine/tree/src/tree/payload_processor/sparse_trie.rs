@@ -11,7 +11,7 @@ use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie,
+    SparseStateTrie, SparseTrieState,
 };
 use std::{
     sync::mpsc,
@@ -24,13 +24,21 @@ use tracing::{debug, trace, trace_span};
 const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// A task responsible for populating the sparse trie.
-pub(super) struct SparseTrieTask<BPF> {
+pub(super) struct SparseTrieTask<BPF>
+where
+    BPF: BlindedProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
+    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+{
     /// Executor used to spawn subtasks.
     #[expect(unused)] // TODO use this for spawning trie tasks
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
-    pub(super) blinded_provider_factory: BPF,
+    /// Sparse Trie initialized with the blinded provider factory.
+    ///
+    /// It's kept as a field on the struct to prevent blocking on de-allocation in [`Self::run`].
+    pub(super) trie: SparseStateTrie<BPF>,
     pub(super) metrics: MultiProofTaskMetrics,
 }
 
@@ -41,13 +49,55 @@ where
     BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
 {
     /// Creates a new sparse trie task.
-    pub(super) const fn new(
+    pub(super) fn new(
         executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
     ) -> Self {
-        Self { executor, updates, blinded_provider_factory, metrics }
+        Self {
+            executor,
+            updates,
+            metrics,
+            trie: SparseStateTrie::new(blinded_provider_factory).with_updates(true),
+        }
+    }
+
+    /// Creates a new sparse trie, populating the accounts trie with the given cleared
+    /// `SparseTrieState` if it exists.
+    pub(super) fn new_with_stored_trie(
+        executor: WorkloadExecutor,
+        updates: mpsc::Receiver<SparseTrieUpdate>,
+        blinded_provider_factory: BPF,
+        trie_metrics: MultiProofTaskMetrics,
+        sparse_trie_state: Option<SparseTrieState>,
+    ) -> Self {
+        if let Some(sparse_trie_state) = sparse_trie_state {
+            Self::with_accounts_trie(
+                executor,
+                updates,
+                blinded_provider_factory,
+                trie_metrics,
+                sparse_trie_state,
+            )
+        } else {
+            Self::new(executor, updates, blinded_provider_factory, trie_metrics)
+        }
+    }
+
+    /// Creates a new sparse trie task, using the given cleared `SparseTrieState` for the accounts
+    /// trie.
+    pub(super) fn with_accounts_trie(
+        executor: WorkloadExecutor,
+        updates: mpsc::Receiver<SparseTrieUpdate>,
+        blinded_provider_factory: BPF,
+        metrics: MultiProofTaskMetrics,
+        sparse_trie_state: SparseTrieState,
+    ) -> Self {
+        let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
+        trie.populate_from(sparse_trie_state);
+
+        Self { executor, updates, metrics, trie }
     }
 
     /// Runs the sparse trie task to completion.
@@ -58,11 +108,10 @@ where
     ///
     /// NOTE: This function does not take `self` by value to prevent blocking on [`SparseStateTrie`]
     /// drop.
-    pub(super) fn run(&self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut num_iterations = 0;
-        let mut trie = SparseStateTrie::new(&self.blinded_provider_factory).with_updates(true);
 
         while let Ok(mut update) = self.updates.recv() {
             num_iterations += 1;
@@ -80,7 +129,7 @@ where
                 "Updating sparse trie"
             );
 
-            let elapsed = update_sparse_trie(&mut trie, update).map_err(|e| {
+            let elapsed = update_sparse_trie(&mut self.trie, update).map_err(|e| {
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
@@ -90,14 +139,17 @@ where
         debug!(target: "engine::root", num_iterations, "All proofs processed, ending calculation");
 
         let start = Instant::now();
-        let (state_root, trie_updates) = trie.root_with_updates().map_err(|e| {
+        let (state_root, trie_updates) = self.trie.root_with_updates().map_err(|e| {
             ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
         })?;
 
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        Ok(StateRootComputeOutcome { state_root, trie_updates })
+        // take the account trie
+        let trie = self.trie.take_cleared_account_trie_state();
+
+        Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
     }
 }
 
@@ -109,6 +161,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: TrieUpdates,
+    /// The account state trie.
+    pub trie: SparseTrieState,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
@@ -125,7 +179,7 @@ where
     let started_at = Instant::now();
 
     // Reveal new accounts and storage slots.
-    trie.reveal_multiproof(multiproof)?;
+    trie.reveal_decoded_multiproof(multiproof)?;
     let reveal_multiproof_elapsed = started_at.elapsed();
     trace!(
         target: "engine::root::sparse",
@@ -194,7 +248,7 @@ where
 
     let elapsed_before = started_at.elapsed();
     trace!(
-        target: "engine::root:sparse",
+        target: "engine::root::sparse",
         level=SPARSE_TRIE_INCREMENTAL_LEVEL,
         "Calculating intermediate nodes below trie level"
     );
@@ -203,7 +257,7 @@ where
     let elapsed = started_at.elapsed();
     let below_level_elapsed = elapsed - elapsed_before;
     trace!(
-        target: "engine::root:sparse",
+        target: "engine::root::sparse",
         level=SPARSE_TRIE_INCREMENTAL_LEVEL,
         ?below_level_elapsed,
         "Intermediate nodes calculated"

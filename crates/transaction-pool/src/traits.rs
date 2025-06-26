@@ -1,3 +1,55 @@
+//! Transaction Pool Traits and Types
+//!
+//! This module defines the core abstractions for transaction pool implementations,
+//! handling the complexity of different transaction representations across the
+//! network, mempool, and the chain itself.
+//!
+//! ## Key Concepts
+//!
+//! ### Transaction Representations
+//!
+//! Transactions exist in different formats throughout their lifecycle:
+//!
+//! 1. **Consensus Format** ([`PoolTransaction::Consensus`])
+//!    - The canonical format stored in blocks
+//!    - Minimal size for efficient storage
+//!    - Example: EIP-4844 transactions store only blob hashes: ([`TransactionSigned::Eip4844`])
+//!
+//! 2. **Pooled Format** ([`PoolTransaction::Pooled`])
+//!    - Extended format for network propagation
+//!    - Includes additional validation data
+//!    - Example: EIP-4844 transactions include full blob sidecars: ([`PooledTransactionVariant`])
+//!
+//! ### Type Relationships
+//!
+//! ```text
+//! NodePrimitives::SignedTx  ←──   NetworkPrimitives::BroadcastedTransaction
+//!        │                              │
+//!        │ (consensus format)           │ (announced to peers)
+//!        │                              │
+//!        └──────────┐  ┌────────────────┘
+//!                   ▼  ▼
+//!            PoolTransaction::Consensus
+//!                   │ ▲
+//!                   │ │ from pooled (always succeeds)
+//!                   │ │
+//!                   ▼ │ try_from consensus (may fail)
+//!            PoolTransaction::Pooled  ←──→  NetworkPrimitives::PooledTransaction
+//!                                             (sent on request)
+//! ```
+//!
+//! ### Special Cases
+//!
+//! #### EIP-4844 Blob Transactions
+//! - Consensus format: Only blob hashes (32 bytes each)
+//! - Pooled format: Full blobs + commitments + proofs (large data per blob)
+//! - Network behavior: Not broadcast automatically, only sent on explicit request
+//!
+//! #### Optimism Deposit Transactions
+//! - Only exist in consensus format
+//! - Never enter the mempool (system transactions)
+//! - Conversion from consensus to pooled always fails
+
 use crate::{
     blobstore::BlobStoreError,
     error::{InvalidPoolTransactionError, PoolResult},
@@ -8,22 +60,20 @@ use crate::{
     validate::ValidPoolTransaction,
     AllTransactionsEvents,
 };
-use alloy_consensus::{
-    error::ValueError, transaction::PooledTransaction, BlockHeader, Signed, Typed2718,
-};
+use alloy_consensus::{error::ValueError, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
-    eip2718::Encodable2718,
+    eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,
     eip4844::{
-        env_settings::KzgSettings, BlobAndProofV1, BlobTransactionSidecar,
-        BlobTransactionValidationError,
+        env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobTransactionValidationError,
     },
+    eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{Address, Bytes, TxHash, TxKind, B256, U256};
 use futures_util::{ready, Stream};
 use reth_eth_wire_types::HandleMempoolData;
-use reth_ethereum_primitives::TransactionSigned;
+use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Block, InMemorySize, Recovered, SealedBlock, SignedTransaction};
 #[cfg(feature = "serde")]
@@ -138,7 +188,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// inserted into the pool that are allowed to be propagated.
     ///
     /// Note: This is intended for networking and will __only__ yield transactions that are allowed
-    /// to be propagated over the network, see also [TransactionListenerKind].
+    /// to be propagated over the network, see also [`TransactionListenerKind`].
     ///
     /// Consumer: RPC/P2P
     fn pending_transactions_listener(&self) -> Receiver<TxHash> {
@@ -146,7 +196,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     }
 
     /// Returns a new [Receiver] that yields transactions hashes for new __pending__ transactions
-    /// inserted into the pending pool depending on the given [TransactionListenerKind] argument.
+    /// inserted into the pending pool depending on the given [`TransactionListenerKind`] argument.
     fn pending_transactions_listener_for(&self, kind: TransactionListenerKind) -> Receiver<TxHash>;
 
     /// Returns a new stream that yields new valid transactions added to the pool.
@@ -159,7 +209,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar>;
 
     /// Returns a new stream that yields new valid transactions added to the pool
-    /// depending on the given [TransactionListenerKind] argument.
+    /// depending on the given [`TransactionListenerKind`] argument.
     fn new_transactions_listener_for(
         &self,
         kind: TransactionListenerKind,
@@ -167,8 +217,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Returns a new Stream that yields new transactions added to the pending sub-pool.
     ///
-    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
-    /// [SubPool::Pending](crate::SubPool).
+    /// This is a convenience wrapper around [`Self::new_transactions_listener`] that filters for
+    /// [`SubPool::Pending`](crate::SubPool).
     fn new_pending_pool_transactions_listener(
         &self,
     ) -> NewSubpoolTransactionStream<Self::Transaction> {
@@ -180,8 +230,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Returns a new Stream that yields new transactions added to the basefee sub-pool.
     ///
-    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
-    /// [SubPool::BaseFee](crate::SubPool).
+    /// This is a convenience wrapper around [`Self::new_transactions_listener`] that filters for
+    /// [`SubPool::BaseFee`](crate::SubPool).
     fn new_basefee_pool_transactions_listener(
         &self,
     ) -> NewSubpoolTransactionStream<Self::Transaction> {
@@ -190,8 +240,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Returns a new Stream that yields new transactions added to the queued-pool.
     ///
-    /// This is a convenience wrapper around [Self::new_transactions_listener] that filters for
-    /// [SubPool::Queued](crate::SubPool).
+    /// This is a convenience wrapper around [`Self::new_transactions_listener`] that filters for
+    /// [`SubPool::Queued`](crate::SubPool).
     fn new_queued_transactions_listener(&self) -> NewSubpoolTransactionStream<Self::Transaction> {
         NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Queued)
     }
@@ -228,7 +278,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns converted [PooledTransaction] for the given transaction hashes.
+    /// Returns converted [`PooledTransactionVariant`] for the given transaction hashes.
     ///
     /// This adheres to the expected behavior of
     /// [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
@@ -300,7 +350,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Returns all transactions that can be included in _future_ blocks.
     ///
-    /// This and [Self::pending_transactions] are mutually exclusive.
+    /// This and [`Self::pending_transactions`] are mutually exclusive.
     ///
     /// Consumer: RPC
     fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
@@ -314,6 +364,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction>;
 
     /// Removes all transactions corresponding to the given hashes.
+    ///
+    /// Note: This removes the transactions as if they got discarded (_not_ mined).
     ///
     /// Consumer: Utility
     fn remove_transactions(
@@ -418,7 +470,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         nonce: u64,
     ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns all transactions that where submitted with the given [TransactionOrigin]
+    /// Returns all transactions that where submitted with the given [`TransactionOrigin`]
     fn get_transactions_by_origin(
         &self,
         origin: TransactionOrigin,
@@ -430,34 +482,34 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         origin: TransactionOrigin,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns all transactions that where submitted as [TransactionOrigin::Local]
+    /// Returns all transactions that where submitted as [`TransactionOrigin::Local`]
     fn get_local_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_transactions_by_origin(TransactionOrigin::Local)
     }
 
-    /// Returns all transactions that where submitted as [TransactionOrigin::Private]
+    /// Returns all transactions that where submitted as [`TransactionOrigin::Private`]
     fn get_private_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_transactions_by_origin(TransactionOrigin::Private)
     }
 
-    /// Returns all transactions that where submitted as [TransactionOrigin::External]
+    /// Returns all transactions that where submitted as [`TransactionOrigin::External`]
     fn get_external_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_transactions_by_origin(TransactionOrigin::External)
     }
 
-    /// Returns all pending transactions that where submitted as [TransactionOrigin::Local]
+    /// Returns all pending transactions that where submitted as [`TransactionOrigin::Local`]
     fn get_local_pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_pending_transactions_by_origin(TransactionOrigin::Local)
     }
 
-    /// Returns all pending transactions that where submitted as [TransactionOrigin::Private]
+    /// Returns all pending transactions that where submitted as [`TransactionOrigin::Private`]
     fn get_private_pending_transactions(
         &self,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
         self.get_pending_transactions_by_origin(TransactionOrigin::Private)
     }
 
-    /// Returns all pending transactions that where submitted as [TransactionOrigin::External]
+    /// Returns all pending transactions that where submitted as [`TransactionOrigin::External`]
     fn get_external_pending_transactions(
         &self,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {
@@ -467,40 +519,48 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Returns a set of all senders of transactions in the pool
     fn unique_senders(&self) -> HashSet<Address>;
 
-    /// Returns the [BlobTransactionSidecar] for the given transaction hash if it exists in the blob
-    /// store.
+    /// Returns the [`BlobTransactionSidecarVariant`] for the given transaction hash if it exists in
+    /// the blob store.
     fn get_blob(
         &self,
         tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError>;
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 
-    /// Returns all [BlobTransactionSidecar] for the given transaction hashes if they exists in the
-    /// blob store.
+    /// Returns all [`BlobTransactionSidecarVariant`] for the given transaction hashes if they
+    /// exists in the blob store.
     ///
     /// This only returns the blobs that were found in the store.
     /// If there's no blob it will not be returned.
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError>;
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError>;
 
-    /// Returns the exact [BlobTransactionSidecar] for the given transaction hashes in the order
-    /// they were requested.
+    /// Returns the exact [`BlobTransactionSidecarVariant`] for the given transaction hashes in the
+    /// order they were requested.
     ///
     /// Returns an error if any of the blobs are not found in the blob store.
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError>;
+    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
 
-    /// Return the [`BlobTransactionSidecar`]s for a list of blob versioned hashes.
-    fn get_blobs_for_versioned_hashes(
+    /// Return the [`BlobAndProofV1`]s for a list of blob versioned hashes.
+    fn get_blobs_for_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
+
+    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
+    /// Blobs and proofs are returned only if they are present for _all_ of the requested versioned
+    /// hashes.
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
 }
 
-/// Extension for [TransactionPool] trait that allows to set the current block info.
+/// Extension for [`TransactionPool`] trait that allows to set the current block info.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionPoolExt: TransactionPool {
     /// Sets the current block info for the pool.
@@ -630,7 +690,7 @@ pub struct NewBlobSidecar {
     /// hash of the EIP-4844 transaction.
     pub tx_hash: TxHash,
     /// the blob transaction sidecar.
-    pub sidecar: Arc<BlobTransactionSidecar>,
+    pub sidecar: Arc<BlobTransactionSidecarVariant>,
 }
 
 /// Where the transaction originates from.
@@ -924,19 +984,62 @@ impl BestTransactionsAttributes {
     }
 }
 
-/// Trait for transaction types used inside the pool.
+/// Trait for transaction types stored in the transaction pool.
 ///
-/// This supports two transaction formats
-/// - Consensus format: the form the transaction takes when it is included in a block.
-/// - Pooled format: the form the transaction takes when it is gossiping around the network.
+/// This trait represents the actual transaction object stored in the mempool, which includes not
+/// only the transaction data itself but also additional metadata needed for efficient pool
+/// operations. Implementations typically cache values that are frequently accessed during
+/// transaction ordering, validation, and eviction.
 ///
-/// This distinction is necessary for the EIP-4844 blob transactions, which require an additional
-/// sidecar when they are gossiped around the network. It is expected that the `Consensus` format is
-/// a subset of the `Pooled` format.
+/// ## Key Responsibilities
 ///
-/// The assumption is that fallible conversion from `Consensus` to `Pooled` will encapsulate
-/// handling of all valid `Consensus` transactions that can't be pooled (e.g Deposit transactions or
-/// blob-less EIP-4844 transactions).
+/// 1. **Metadata Caching**: Store computed values like address, cost and encoded size
+/// 2. **Representation Conversion**: Handle conversions between consensus and pooled
+///    representations
+/// 3. **Validation Support**: Provide methods for pool-specific validation rules
+///
+/// ## Cached Metadata
+///
+/// Implementations should cache frequently accessed values to avoid recomputation:
+/// - **Address**: Recovered sender address of the transaction
+/// - **Cost**: Max amount spendable (gas × price + value + blob costs)
+/// - **Size**: RLP encoded length for mempool size limits
+///
+/// See [`EthPooledTransaction`] for a reference implementation.
+///
+/// ## Transaction Representations
+///
+/// This trait abstracts over the different representations a transaction can have:
+///
+/// 1. **Consensus representation** (`Consensus` associated type): The canonical form included in
+///    blocks
+///    - Compact representation without networking metadata
+///    - For EIP-4844: includes only blob hashes, not the actual blobs
+///    - Used for block execution and state transitions
+///
+/// 2. **Pooled representation** (`Pooled` associated type): The form used for network propagation
+///    - May include additional data for validation
+///    - For EIP-4844: includes full blob sidecars (blobs, commitments, proofs)
+///    - Used for mempool validation and p2p gossiping
+///
+/// ## Why Two Representations?
+///
+/// This distinction is necessary because:
+///
+/// - **EIP-4844 blob transactions**: Require large blob sidecars for validation that would bloat
+///   blocks if included. Only blob hashes are stored on-chain.
+///
+/// - **Network efficiency**: Blob transactions are not broadcast to all peers automatically but
+///   must be explicitly requested to reduce bandwidth usage.
+///
+/// - **Special transactions**: Some transactions (like OP deposit transactions) exist only in
+///   consensus format and are never in the mempool.
+///
+/// ## Conversion Rules
+///
+/// - `Consensus` → `Pooled`: May fail for transactions that cannot be pooled (e.g., OP deposit
+///   transactions, blob transactions without sidecars)
+/// - `Pooled` → `Consensus`: Always succeeds (pooled is a superset)
 pub trait PoolTransaction:
     alloy_consensus::Transaction + InMemorySize + Debug + Send + Sync + Clone
 {
@@ -951,8 +1054,13 @@ pub trait PoolTransaction:
 
     /// Define a method to convert from the `Consensus` type to `Self`
     ///
-    /// Note: this _must_ fail on any transactions that cannot be pooled (e.g OP Deposit
-    /// transactions).
+    /// This conversion may fail for transactions that are valid for inclusion in blocks
+    /// but cannot exist in the transaction pool. Examples include:
+    ///
+    /// - **OP Deposit transactions**: These are special system transactions that are directly
+    ///   included in blocks by the sequencer/validator and never enter the mempool
+    /// - **Blob transactions without sidecars**: After being included in a block, the sidecar data
+    ///   is pruned, making the consensus transaction unpoolable
     fn try_from_consensus(
         tx: Recovered<Self::Consensus>,
     ) -> Result<Self, Self::TryFromConsensusError> {
@@ -969,6 +1077,14 @@ pub trait PoolTransaction:
 
     /// Define a method to convert from the `Self` type to `Consensus`
     fn into_consensus(self) -> Recovered<Self::Consensus>;
+
+    /// Converts the transaction into consensus format while preserving the EIP-2718 encoded bytes.
+    /// This is used to optimize transaction execution by reusing cached encoded bytes instead of
+    /// re-encoding the transaction. The cached bytes are particularly useful in payload building
+    /// where the same transaction may be executed multiple times.
+    fn into_consensus_with2718(self) -> WithEncoded<Recovered<Self::Consensus>> {
+        self.into_consensus().into_encoded()
+    }
 
     /// Define a method to convert from the `Pooled` type to `Self`
     fn from_pooled(pooled: Recovered<Self::Pooled>) -> Self;
@@ -1042,7 +1158,7 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// transaction: [`Typed2718::is_eip4844`].
     fn try_into_pooled_eip4844(
         self,
-        sidecar: Arc<BlobTransactionSidecar>,
+        sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>>;
 
     /// Tries to convert the `Consensus` type with a blob sidecar into the `Pooled` type.
@@ -1050,21 +1166,27 @@ pub trait EthPoolTransaction: PoolTransaction {
     /// Returns `None` if passed transaction is not a blob transaction.
     fn try_from_eip4844(
         tx: Recovered<Self::Consensus>,
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self>;
 
     /// Validates the blob sidecar of the transaction with the given settings.
     fn validate_blob(
         &self,
-        blob: &BlobTransactionSidecar,
+        blob: &BlobTransactionSidecarVariant,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError>;
 }
 
 /// The default [`PoolTransaction`] for the [Pool](crate::Pool) for Ethereum.
 ///
-/// This type is essentially a wrapper around [`Recovered`] with additional
-/// fields derived from the transaction that are frequently used by the pools for ordering.
+/// This type wraps a consensus transaction with additional cached data that's
+/// frequently accessed by the pool for transaction ordering and validation:
+///
+/// - `cost`: Pre-calculated max cost (gas * price + value + blob costs)
+/// - `encoded_length`: Cached RLP encoding length for size limits
+/// - `blob_sidecar`: Blob data state (None/Missing/Present)
+///
+/// This avoids recalculating these values repeatedly during pool operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EthPooledTransaction<T = TransactionSigned> {
     /// `EcRecovered` transaction, the consensus format.
@@ -1124,7 +1246,7 @@ impl PoolTransaction for EthPooledTransaction {
 
     type Consensus = TransactionSigned;
 
-    type Pooled = PooledTransaction;
+    type Pooled = PooledTransactionVariant;
 
     fn clone_into_consensus(&self) -> Recovered<Self::Consensus> {
         self.transaction().clone()
@@ -1138,7 +1260,7 @@ impl PoolTransaction for EthPooledTransaction {
         let encoded_length = tx.encode_2718_len();
         let (tx, signer) = tx.into_parts();
         match tx {
-            PooledTransaction::Eip4844(tx) => {
+            PooledTransactionVariant::Eip4844(tx) => {
                 // include the blob sidecar
                 let (tx, sig, hash) = tx.into_parts();
                 let (tx, blob) = tx.into_parts();
@@ -1281,7 +1403,7 @@ impl EthPoolTransaction for EthPooledTransaction {
 
     fn try_into_pooled_eip4844(
         self,
-        sidecar: Arc<BlobTransactionSidecar>,
+        sidecar: Arc<BlobTransactionSidecarVariant>,
     ) -> Option<Recovered<Self::Pooled>> {
         let (signed_transaction, signer) = self.into_consensus().into_parts();
         let pooled_transaction =
@@ -1292,7 +1414,7 @@ impl EthPoolTransaction for EthPooledTransaction {
 
     fn try_from_eip4844(
         tx: Recovered<Self::Consensus>,
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     ) -> Option<Self> {
         let (tx, signer) = tx.into_parts();
         tx.try_into_pooled_eip4844(sidecar)
@@ -1303,7 +1425,7 @@ impl EthPoolTransaction for EthPooledTransaction {
 
     fn validate_blob(
         &self,
-        sidecar: &BlobTransactionSidecar,
+        sidecar: &BlobTransactionSidecarVariant,
         settings: &KzgSettings,
     ) -> Result<(), BlobTransactionValidationError> {
         match self.transaction.inner().as_eip4844() {
@@ -1314,22 +1436,37 @@ impl EthPoolTransaction for EthPooledTransaction {
 }
 
 /// Represents the blob sidecar of the [`EthPooledTransaction`].
+///
+/// EIP-4844 blob transactions require additional data (blobs, commitments, proofs)
+/// for validation that is not included in the consensus format. This enum tracks
+/// the sidecar state throughout the transaction's lifecycle in the pool.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EthBlobTransactionSidecar {
     /// This transaction does not have a blob sidecar
+    /// (applies to all non-EIP-4844 transaction types)
     None,
-    /// This transaction has a blob sidecar (EIP-4844) but it is missing
+    /// This transaction has a blob sidecar (EIP-4844) but it is missing.
     ///
-    /// It was either extracted after being inserted into the pool or re-injected after reorg
-    /// without the blob sidecar
+    /// This can happen when:
+    /// - The sidecar was extracted after the transaction was added to the pool
+    /// - The transaction was re-injected after a reorg without its sidecar
+    /// - The transaction was recovered from the consensus format (e.g., from a block)
     Missing,
-    /// The eip-4844 transaction was pulled from the network and still has its blob sidecar
-    Present(BlobTransactionSidecar),
+    /// The EIP-4844 transaction was received from the network with its complete sidecar.
+    ///
+    /// This sidecar contains:
+    /// - The actual blob data (large data per blob)
+    /// - KZG commitments for each blob
+    /// - KZG proofs for validation
+    ///
+    /// The sidecar is required for validating the transaction but is not included
+    /// in blocks (only the blob hashes are included in the consensus format).
+    Present(BlobTransactionSidecarVariant),
 }
 
 impl EthBlobTransactionSidecar {
     /// Returns the blob sidecar if it is present
-    pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecar> {
+    pub const fn maybe_sidecar(&self) -> Option<&BlobTransactionSidecarVariant> {
         match self {
             Self::Present(sidecar) => Some(sidecar),
             _ => None,

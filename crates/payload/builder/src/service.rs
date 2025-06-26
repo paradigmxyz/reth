@@ -286,14 +286,14 @@ where
         id: PayloadId,
         kind: PayloadKind,
     ) -> Option<PayloadFuture<T::BuiltPayload>> {
-        trace!(%id, "resolving payload job");
+        debug!(target: "payload_builder", %id, "resolving payload job");
 
         let job = self.payload_jobs.iter().position(|(_, job_id)| *job_id == id)?;
         let (fut, keep_alive) = self.payload_jobs[job].0.resolve_kind(kind);
 
         if keep_alive == KeepPayloadJobAlive::No {
             let (_, id) = self.payload_jobs.swap_remove(job);
-            trace!(%id, "terminated resolved job");
+            debug!(target: "payload_builder", %id, "terminated resolved job");
         }
 
         // Since the fees will not be known until the payload future is resolved / awaited, we wrap
@@ -303,8 +303,10 @@ where
 
         let fut = async move {
             let res = fut.await;
-            if let Ok(ref payload) = res {
-                payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
+            if let Ok(payload) = &res {
+                if payload_events.receiver_count() > 0 {
+                    payload_events.send(Events::BuiltPayload(payload.clone().into())).ok();
+                }
 
                 resolved_metrics
                     .set_resolved_revenue(payload.block().number(), f64::from(payload.fees()));
@@ -335,7 +337,7 @@ where
             .map(|(j, _)| j.payload_attributes());
 
         if attributes.is_none() {
-            trace!(%id, "no matching payload job found to get attributes for");
+            trace!(target: "payload_builder", %id, "no matching payload job found to get attributes for");
         }
 
         attributes
@@ -372,10 +374,10 @@ where
                 match job.poll_unpin(cx) {
                     Poll::Ready(Ok(_)) => {
                         this.metrics.set_active_jobs(this.payload_jobs.len());
-                        trace!(%id, "payload job finished");
+                        trace!(target: "payload_builder", %id, "payload job finished");
                     }
                     Poll::Ready(Err(err)) => {
-                        warn!(%err, ?id, "Payload builder job failed; resolving payload");
+                        warn!(target: "payload_builder",%err, ?id, "Payload builder job failed; resolving payload");
                         this.metrics.inc_failed_jobs();
                         this.metrics.set_active_jobs(this.payload_jobs.len());
                     }
@@ -397,13 +399,13 @@ where
                         let mut res = Ok(id);
 
                         if this.contains_payload(id) {
-                            debug!(%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
+                            debug!(target: "payload_builder",%id, parent = %attr.parent(), "Payload job already in progress, ignoring.");
                         } else {
                             // no job for this payload yet, create one
                             let parent = attr.parent();
                             match this.generator.new_payload_job(attr.clone()) {
                                 Ok(job) => {
-                                    info!(%id, %parent, "New payload job created");
+                                    info!(target: "payload_builder", %id, %parent, "New payload job created");
                                     this.metrics.inc_initiated_jobs();
                                     new_job = true;
                                     this.payload_jobs.push((job, id));
@@ -411,7 +413,7 @@ where
                                 }
                                 Err(err) => {
                                     this.metrics.inc_failed_jobs();
-                                    warn!(%err, %id, "Failed to create payload builder job");
+                                    warn!(target: "payload_builder", %err, %id, "Failed to create payload builder job");
                                     res = Err(err);
                                 }
                             }
