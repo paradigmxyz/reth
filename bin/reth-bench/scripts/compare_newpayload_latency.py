@@ -91,7 +91,7 @@ def main():
     comparison_name = args.comparison_csv.replace('.csv', '') if args.comparison_csv.endswith('.csv') else args.comparison_csv
     
     # Top subplot: Histogram
-    sns.histplot(data=percent_diff, bins=bins, edgecolor='black', alpha=0.7, ax=ax1)
+    sns.histplot(data=percent_diff, bins=bins, color='#4682B4', edgecolor='black', alpha=0.7, ax=ax1)
     ax1.set_xlabel('Percent Difference (%)', fontsize=12)
     ax1.set_ylabel('Number of Blocks', fontsize=12)
     ax1.set_title(f'Total Latency Percent Difference Histogram\n({baseline_name} vs {comparison_name})', fontsize=14)
@@ -155,7 +155,7 @@ def main():
     
     # Save histogram only
     fig1, ax1_only = plt.subplots(1, 1, figsize=(12, 6))
-    sns.histplot(data=percent_diff, bins=bins, edgecolor='black', alpha=0.7, ax=ax1_only)
+    sns.histplot(data=percent_diff, bins=bins, color='#4682B4', edgecolor='black', alpha=0.7, ax=ax1_only)
     ax1_only.set_xlabel('Percent Difference (%)', fontsize=12)
     ax1_only.set_ylabel('Number of Blocks', fontsize=12)
     ax1_only.set_title(f'Total Latency Percent Difference Histogram\n({baseline_name} vs {comparison_name})', fontsize=14)
