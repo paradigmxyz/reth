@@ -52,7 +52,7 @@ where
     BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
     BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
 {
-    /// Creates a new sparse trie task which will use a [`SerialSparseTrie`] to compute the state
+    /// Creates a new sparse trie task which will use a `SerialSparseTrie` to compute the state
     /// root.
     pub(super) fn new(
         executor: WorkloadExecutor,
