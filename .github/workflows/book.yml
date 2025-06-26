@@ -31,12 +31,8 @@ jobs:
       - name: Install Rust nightly
         uses: dtolnay/rust-toolchain@nightly
 
-      - name: Build cargo docs
-        run: |
-          RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options" \
-          cargo +nightly doc --no-deps --workspace --exclude "example-*"
-        env:
-          RUSTDOCFLAGS: --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options
+      - name: Build docs
+        run: cd book/vocs && bash scripts/build-cargo-docs.sh
 
       - name: Build Vocs
         run: |

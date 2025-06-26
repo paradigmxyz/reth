@@ -7,8 +7,8 @@ cd ../.. || exit 1
 
 echo "Building cargo docs..."
 
-# Build the documentation with the same flags as CI
-RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options" \
-cargo +nightly doc --no-deps --workspace --exclude "example-*"
+# Build the documentation
+export RUSTDOCFLAGS="--cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options"
+cargo docs --exclude "example-*"
 
 echo "Cargo docs built successfully at ./target/doc"
