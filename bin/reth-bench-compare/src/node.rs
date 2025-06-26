@@ -18,6 +18,7 @@ pub struct NodeManager {
     jwt_secret: String,
     metrics_port: u16,
     chain: Option<String>,
+    use_sudo: bool,
     http_client: Client,
 }
 
@@ -29,6 +30,7 @@ impl NodeManager {
             jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
             metrics_port: args.metrics_port,
             chain: if args.chain == "mainnet" { None } else { Some(args.chain.clone()) },
+            use_sudo: args.sudo,
             http_client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
@@ -57,10 +59,21 @@ impl NodeManager {
 
     /// Start a reth node and return the process handle
     pub async fn start_node(&self) -> Result<tokio::process::Child> {
-        info!("Starting reth node...");
+        if self.use_sudo {
+            info!("Starting reth node with sudo...");
+        } else {
+            info!("Starting reth node...");
+        }
 
-        let mut cmd = tokio::process::Command::new("./target/profiling/reth");
-        cmd.arg("node");
+        let mut cmd = if self.use_sudo {
+            let mut sudo_cmd = tokio::process::Command::new("sudo");
+            sudo_cmd.args(["./target/profiling/reth", "node"]);
+            sudo_cmd
+        } else {
+            let mut reth_cmd = tokio::process::Command::new("./target/profiling/reth");
+            reth_cmd.arg("node");
+            reth_cmd
+        };
 
         // Add chain if specified
         if let Some(ref chain) = self.chain {
@@ -206,10 +219,21 @@ impl NodeManager {
 
     /// Unwind the node to a specific block
     pub async fn unwind_to_block(&self, block_number: u64) -> Result<()> {
-        info!("Unwinding node to block: {}", block_number);
+        if self.use_sudo {
+            info!("Unwinding node to block: {} (with sudo)", block_number);
+        } else {
+            info!("Unwinding node to block: {}", block_number);
+        }
 
-        let mut cmd = std::process::Command::new("./target/profiling/reth");
-        cmd.args(["stage", "unwind"]);
+        let mut cmd = if self.use_sudo {
+            let mut sudo_cmd = std::process::Command::new("sudo");
+            sudo_cmd.args(["./target/profiling/reth", "stage", "unwind"]);
+            sudo_cmd
+        } else {
+            let mut reth_cmd = std::process::Command::new("./target/profiling/reth");
+            reth_cmd.args(["stage", "unwind"]);
+            reth_cmd
+        };
 
         // Add chain if specified
         if let Some(ref chain) = self.chain {

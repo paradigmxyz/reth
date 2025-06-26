@@ -64,6 +64,10 @@ pub struct Args {
     #[arg(long, value_name = "CHAIN", default_value = "mainnet")]
     pub chain: String,
 
+    /// Run reth binary with sudo (for elevated privileges)
+    #[arg(long)]
+    pub sudo: bool,
+
     #[command(flatten)]
     pub logs: LogArgs,
 }
@@ -103,6 +107,10 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
         "Starting benchmark comparison between '{}' and '{}'",
         args.baseline_ref, args.feature_ref
     );
+    
+    if args.sudo {
+        info!("Running in sudo mode - reth commands will use elevated privileges");
+    }
 
     // Initialize managers
     let git_manager = GitManager::new()?;
