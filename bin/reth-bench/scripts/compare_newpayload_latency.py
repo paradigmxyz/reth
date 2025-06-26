@@ -144,7 +144,54 @@ def main():
 
     plt.tight_layout()
     plt.savefig(args.output, dpi=300, bbox_inches='tight')
-    print(f"Histogram and latency graph saved to {args.output}")
+    print(f"Combined histogram and latency graph saved to {args.output}")
+    
+    # Save individual charts
+    output_base = args.output.replace('.png', '')
+    
+    # Save histogram only
+    fig1, ax1_only = plt.subplots(1, 1, figsize=(12, 6))
+    ax1_only.hist(percent_diff, bins=bins, edgecolor='black', alpha=0.7)
+    ax1_only.set_xlabel('Percent Difference (%)')
+    ax1_only.set_ylabel('Number of Blocks')
+    ax1_only.set_title(f'Total Latency Percent Difference Histogram\n({baseline_name} vs {comparison_name})')
+    ax1_only.grid(True, alpha=0.3)
+    ax1_only.axvline(mean_diff, color='red', linestyle='--', label=f'Mean: {mean_diff:.2f}%')
+    ax1_only.axvline(median_diff, color='orange', linestyle='--', label=f'Median: {median_diff:.2f}%')
+    ax1_only.legend()
+    plt.tight_layout()
+    histogram_file = f"{output_base}_histogram.png"
+    plt.savefig(histogram_file, dpi=300, bbox_inches='tight')
+    plt.close(fig1)
+    print(f"Histogram saved to {histogram_file}")
+    
+    # Save latency chart only
+    fig2, ax2_only = plt.subplots(1, 1, figsize=(12, 6))
+    if 'block_number' in df1.columns and 'block_number' in df2.columns:
+        ax2_only.plot(block_numbers_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
+        ax2_only.plot(block_numbers_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        ax2_only.set_xlabel('Block Number')
+        ax2_only.set_ylabel('Total Latency (ms)')
+        ax2_only.set_title(f'Total Latency vs Block Number (Rolling Average, Window={window_size})')
+        ax2_only.grid(True, alpha=0.3)
+        ax2_only.legend()
+        ax2_only.xaxis.set_major_formatter(FuncFormatter(lambda x, p: f'{int(x):,}'))
+    else:
+        ax2_only.plot(indices_smooth, latency1_smooth, 'b-', alpha=0.7, label=baseline_name)
+        ax2_only.plot(indices_smooth, latency2_smooth, 'r-', alpha=0.7, label=comparison_name)
+        ax2_only.set_xlabel('Block Index')
+        ax2_only.set_ylabel('Total Latency (ms)')
+        ax2_only.set_title(f'Total Latency vs Block Index (Rolling Average, Window={window_size})')
+        ax2_only.grid(True, alpha=0.3)
+        ax2_only.legend()
+    plt.tight_layout()
+    chart_file = f"{output_base}_chart.png"
+    plt.savefig(chart_file, dpi=300, bbox_inches='tight')
+    plt.close(fig2)
+    print(f"Latency chart saved to {chart_file}")
+    
+    # Close the combined figure
+    plt.close(fig)
 
     print(f"\nStatistics:")
     print(f"Mean percent difference: {mean_diff:.2f}%")
