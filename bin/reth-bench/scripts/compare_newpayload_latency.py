@@ -83,7 +83,10 @@ def main():
     ax1.hist(percent_diff, bins=bins, edgecolor='black', alpha=0.7)
     ax1.set_xlabel('Percent Difference (%)')
     ax1.set_ylabel('Number of Blocks')
-    ax1.set_title(f'Total Latency Percent Difference Histogram\n({args.baseline_csv} vs {args.comparison_csv})')
+    # Remove .csv extension from filenames for cleaner display
+    baseline_name = args.baseline_csv.replace('.csv', '') if args.baseline_csv.endswith('.csv') else args.baseline_csv
+    comparison_name = args.comparison_csv.replace('.csv', '') if args.comparison_csv.endswith('.csv') else args.comparison_csv
+    ax1.set_title(f'Total Latency Percent Difference Histogram\n({baseline_name} vs {comparison_name})')
     ax1.grid(True, alpha=0.3)
 
     # Add statistics to the histogram
@@ -96,8 +99,8 @@ def main():
     # Bottom subplot: Latency vs Block Number
     if 'block_number' in df1.columns and 'block_number' in df2.columns:
         block_numbers = df1['block_number'].values[:len(percent_diff)]
-        ax2.plot(block_numbers, latency1[:len(percent_diff)], 'b-', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
-        ax2.plot(block_numbers, latency2[:len(percent_diff)], 'r-', alpha=0.7, label=f'Comparison ({args.comparison_csv})')
+        ax2.plot(block_numbers, latency1[:len(percent_diff)], 'b-', alpha=0.7, label=f'Baseline ({baseline_name})')
+        ax2.plot(block_numbers, latency2[:len(percent_diff)], 'r-', alpha=0.7, label=f'Comparison ({comparison_name})')
         ax2.set_xlabel('Block Number')
         ax2.set_ylabel('Total Latency (ms)')
         ax2.set_title('Total Latency vs Block Number')
@@ -106,8 +109,8 @@ def main():
     else:
         # If no block_number column, use index
         indices = np.arange(len(percent_diff))
-        ax2.plot(indices, latency1[:len(percent_diff)], 'b-', alpha=0.7, label=f'Baseline ({args.baseline_csv})')
-        ax2.plot(indices, latency2[:len(percent_diff)], 'r-', alpha=0.7, label=f'Comparison ({args.comparison_csv})')
+        ax2.plot(indices, latency1[:len(percent_diff)], 'b-', alpha=0.7, label=f'Baseline ({baseline_name})')
+        ax2.plot(indices, latency2[:len(percent_diff)], 'r-', alpha=0.7, label=f'Comparison ({comparison_name})')
         ax2.set_xlabel('Block Index')
         ax2.set_ylabel('Total Latency (ms)')
         ax2.set_title('Total Latency vs Block Index')
