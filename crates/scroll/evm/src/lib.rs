@@ -25,8 +25,11 @@ use reth_primitives_traits::NodePrimitives;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_primitives::ScrollPrimitives;
 use revm_scroll::ScrollSpecId;
-use scroll_alloy_evm::{ScrollBlockExecutorFactory, ScrollEvmFactory};
-use scroll_alloy_hardforks::{ScrollHardfork, ScrollHardforks};
+pub use scroll_alloy_evm::{
+    compute_compression_ratio, ScrollBlockExecutorFactory, ScrollEvmFactory,
+    ScrollTxCompressionRatios,
+};
+pub use scroll_alloy_hardforks::{ScrollHardfork, ScrollHardforks};
 
 /// Scroll EVM configuration.
 #[derive(Debug)]
@@ -97,6 +100,11 @@ pub fn spec_id_at_timestamp_and_number(
     chain_spec: impl ScrollHardforks,
 ) -> ScrollSpecId {
     if chain_spec
+        .scroll_fork_activation(ScrollHardfork::Feynman)
+        .active_at_timestamp_or_number(timestamp, number)
+    {
+        ScrollSpecId::FEYNMAN
+    } else if chain_spec
         .scroll_fork_activation(ScrollHardfork::EuclidV2)
         .active_at_timestamp_or_number(timestamp, number)
     {

@@ -1,5 +1,5 @@
 pub mod curie;
-mod feynman;
+pub mod feynman;
 
 pub use receipt_builder::{ReceiptBuilderCtx, ScrollReceiptBuilder};
 mod receipt_builder;
@@ -10,7 +10,8 @@ use crate::{
         feynman::apply_feynman_hard_fork,
     },
     system_caller::ScrollSystemCaller,
-    ScrollEvm, ScrollEvmFactory, ScrollTransactionIntoTxEnv,
+    FromTxWithCompressionRatio, ScrollEvm, ScrollEvmFactory, ScrollTransactionIntoTxEnv,
+    ToTxWithCompressionRatio,
 };
 use alloc::{boxed::Box, format, vec::Vec};
 
@@ -37,6 +38,9 @@ use revm::{
 use revm_scroll::builder::ScrollContext;
 use scroll_alloy_consensus::L1_MESSAGE_TRANSACTION_TYPE;
 use scroll_alloy_hardforks::{ScrollHardfork, ScrollHardforks};
+
+/// A cache for transaction compression ratios.
+pub type ScrollTxCompressionRatios = Vec<U256>;
 
 /// Context for Scroll Block Execution.
 #[derive(Debug, Default, Clone)]
@@ -88,6 +92,44 @@ where
             receipts: Vec::new(),
             gas_used: 0,
         }
+    }
+}
+
+impl<'db, DB, E, R, Spec> ScrollBlockExecutor<E, R, Spec>
+where
+    DB: Database + 'db,
+    E: EvmExt<
+        DB = &'db mut State<DB>,
+        Tx: FromRecoveredTx<R::Transaction>
+                + FromTxWithEncoded<R::Transaction>
+                + FromTxWithCompressionRatio<R::Transaction>,
+    >,
+    R: ScrollReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
+    Spec: ScrollHardforks,
+{
+    /// Executes all transactions in a block, applying pre and post execution changes. The provided
+    /// transaction compression ratios are expected to be in the same order as the
+    /// transactions.
+    pub fn execute_block_with_compression_cache(
+        mut self,
+        transactions: impl IntoIterator<
+            Item = impl ExecutableTx<Self>
+                       + ToTxWithCompressionRatio<<Self as BlockExecutor>::Transaction>,
+        >,
+        compression_ratios: ScrollTxCompressionRatios,
+    ) -> Result<BlockExecutionResult<R::Receipt>, BlockExecutionError>
+    where
+        Self: Sized,
+    {
+        self.apply_pre_execution_changes()?;
+
+        for (tx, compression_ratio) in transactions.into_iter().zip(compression_ratios.into_iter())
+        {
+            let tx = tx.with_compression_ratio(compression_ratio);
+            self.execute_transaction(&tx)?;
+        }
+
+        self.apply_post_execution_changes()
     }
 }
 
@@ -285,7 +327,12 @@ where
     fn l1_fee(&self) -> Option<U256> {
         let l1_block_info = &self.ctx().chain;
         let transaction_rlp_bytes = self.ctx().tx.rlp_bytes.as_ref()?;
-        Some(l1_block_info.calculate_tx_l1_cost(transaction_rlp_bytes, self.ctx().cfg.spec))
+        let compression_ratio = self.ctx().tx.compression_ratio;
+        Some(l1_block_info.calculate_tx_l1_cost(
+            transaction_rlp_bytes,
+            self.ctx().cfg.spec,
+            compression_ratio,
+        ))
     }
 }
 

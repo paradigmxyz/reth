@@ -11,6 +11,12 @@ use revm::context::{
 use revm_scroll::ScrollTransaction;
 use scroll_alloy_consensus::{ScrollTxEnvelope, TxL1Message, L1_MESSAGE_TRANSACTION_TYPE};
 
+mod compression;
+pub use compression::{
+    compute_compression_ratio, FromTxWithCompressionRatio, ToTxWithCompressionRatio,
+    WithCompressionRatio,
+};
+
 /// This structure wraps around a [`ScrollTransaction`] and allows us to implement the [`IntoTxEnv`]
 /// trait. This can be removed when the interface is improved. Without this wrapper, we would need
 /// to implement the trait in `revm-scroll`, which adds a dependency on `alloy-evm` in the crate.
@@ -21,8 +27,8 @@ pub struct ScrollTransactionIntoTxEnv<T: Transaction>(ScrollTransaction<T>);
 
 impl<T: Transaction> ScrollTransactionIntoTxEnv<T> {
     /// Returns a new [`ScrollTransactionIntoTxEnv`].
-    pub fn new(base: T, rlp_bytes: Option<Bytes>) -> Self {
-        Self(ScrollTransaction::new(base, rlp_bytes))
+    pub fn new(base: T, rlp_bytes: Option<Bytes>, compression_ratio: Option<U256>) -> Self {
+        Self(ScrollTransaction::new(base, rlp_bytes, compression_ratio))
     }
 }
 
@@ -154,7 +160,8 @@ impl FromTxWithEncoded<ScrollTxEnvelope> for ScrollTransactionIntoTxEnv<TxEnv> {
         };
 
         let encoded = (!tx.is_l1_message()).then_some(encoded);
-        Self::new(base, encoded)
+        let compression_ratio = encoded.as_ref().map(compute_compression_ratio);
+        Self::new(base, encoded, compression_ratio)
     }
 }
 
@@ -261,6 +268,7 @@ impl FromRecoveredTx<ScrollTxEnvelope> for ScrollTransactionIntoTxEnv<TxEnv> {
         };
 
         let rlp_bytes = (!tx.is_l1_message()).then_some(envelope.into());
-        Self::new(base, rlp_bytes)
+        let compression_ratio = rlp_bytes.as_ref().map(compute_compression_ratio);
+        Self::new(base, rlp_bytes, compression_ratio)
     }
 }

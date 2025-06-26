@@ -18,7 +18,7 @@ use revm::{
     context::{Block, TxEnv},
     Database,
 };
-use scroll_alloy_evm::ScrollTransactionIntoTxEnv;
+use scroll_alloy_evm::{ScrollTransactionIntoTxEnv, TX_L1_FEE_PRECISION_U256};
 
 impl<N> EthCall for ScrollEthApi<N>
 where
@@ -152,6 +152,10 @@ where
                 .collect(),
         };
 
-        Ok(ScrollTransactionIntoTxEnv::new(base, Some(Default::default())))
+        Ok(ScrollTransactionIntoTxEnv::new(
+            base,
+            Some(Default::default()),
+            Some(TX_L1_FEE_PRECISION_U256),
+        ))
     }
 }

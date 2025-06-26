@@ -6,7 +6,9 @@ use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, GotExpected, SealedBlock,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_scroll_evm::{spec_id_at_timestamp_and_number, RethL1BlockInfo};
+use reth_scroll_evm::{
+    compute_compression_ratio, spec_id_at_timestamp_and_number, RethL1BlockInfo,
+};
 use reth_scroll_forks::ScrollHardforks;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
@@ -164,12 +166,14 @@ where
             let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
             let tx = valid_tx.transaction().clone_into_consensus();
             tx.encode_2718(&mut encoded);
+            let compression_ratio = compute_compression_ratio(&encoded);
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 self.chain_spec(),
                 self.block_timestamp(),
                 self.block_number(),
                 &encoded,
+                Some(compression_ratio),
                 false,
             ) {
                 Ok(cost) => cost,

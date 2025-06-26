@@ -31,6 +31,7 @@ scroll-alloy-hardforks = { workspace = true, default-features = false }
 # misc
 auto_impl = { workspace = true, default-features = false }
 serde = { workspace = true, default-features = false, features = ["derive"], optional = true }
+zstd = { version = "=0.13.3", features = ["experimental"], default-features = false, optional = true }
 
 [dev-dependencies]
 alloy-hardforks.workspace = true
@@ -54,6 +55,7 @@ std = [
     "reth-evm/std",
     "reth-scroll-chainspec/std",
     "reth-scroll-evm/std",
+    "zstd_compression",
 ]
 serde = [
     "dep:serde",
@@ -66,3 +68,4 @@ serde = [
     "scroll-alloy-hardforks/serde",
     "alloy-hardforks/serde",
 ]
+zstd_compression = ["zstd"]

@@ -6,12 +6,15 @@
 
 mod block;
 pub use block::{
-    curie, EvmExt, ReceiptBuilderCtx, ScrollBlockExecutionCtx, ScrollBlockExecutor,
-    ScrollBlockExecutorFactory, ScrollReceiptBuilder,
+    curie, feynman, EvmExt, ReceiptBuilderCtx, ScrollBlockExecutionCtx, ScrollBlockExecutor,
+    ScrollBlockExecutorFactory, ScrollReceiptBuilder, ScrollTxCompressionRatios,
 };
 
 mod tx;
-pub use tx::ScrollTransactionIntoTxEnv;
+pub use tx::{
+    compute_compression_ratio, FromTxWithCompressionRatio, ScrollTransactionIntoTxEnv,
+    ToTxWithCompressionRatio, WithCompressionRatio,
+};
 
 mod system_caller;
 
@@ -41,6 +44,9 @@ use revm_scroll::{
     precompile::ScrollPrecompileProvider,
     ScrollSpecId, ScrollTransaction,
 };
+
+/// Re-export `TX_L1_FEE_PRECISION_U256` from `revm-scroll` for convenience.
+pub use revm_scroll::l1block::TX_L1_FEE_PRECISION_U256;
 
 /// Scroll EVM implementation.
 #[allow(missing_debug_implementations)]
@@ -148,6 +154,9 @@ where
                 authorization_list: Default::default(),
             },
             rlp_bytes: Some(Default::default()),
+            // System transactions (similar to L1MessageTx) do not pay a rollup fee,
+            // so this field is not used; we just set it to the default value.
+            compression_ratio: Some(TX_L1_FEE_PRECISION_U256),
         };
 
         let mut gas_limit = tx.base.gas_limit;
