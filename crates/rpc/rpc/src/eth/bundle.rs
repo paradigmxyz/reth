@@ -110,7 +110,7 @@ where
                 .eth_api()
                 .provider()
                 .chain_spec()
-                .blob_params_at_timestamp(evm_env.block_env.timestamp.to())
+                .blob_params_at_timestamp(evm_env.block_env.timestamp.saturating_to())
                 .unwrap_or_else(BlobParams::cancun);
             if transactions.iter().filter_map(|tx| tx.blob_gas_used()).sum::<u64>() >
                 blob_params.max_blob_gas_per_block()
