@@ -98,7 +98,7 @@ def main():
     ax1.legend()
 
     # Bottom subplot: Latency vs Block Number with rolling average
-    target_points = 100
+    target_points = 50
     data_length = len(percent_diff)
     window_size = max(1, data_length // target_points)
     
