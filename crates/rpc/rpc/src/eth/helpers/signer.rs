@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use crate::EthApi;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
-use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
+use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
 use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
@@ -65,7 +65,9 @@ impl DevSigner {
 }
 
 #[async_trait::async_trait]
-impl<T: Decodable2718> EthSigner<T> for DevSigner {
+impl<T: Decodable2718, N: alloy_network::Network, TxReq: TransactionBuilder<N>> EthSigner<T>
+    for DevSigner
+{
     fn accounts(&self) -> Vec<Address> {
         self.addresses.clone()
     }
@@ -81,7 +83,7 @@ impl<T: Decodable2718> EthSigner<T> for DevSigner {
         self.sign_hash(hash, address)
     }
 
-    async fn sign_transaction(&self, request: TransactionRequest, address: &Address) -> Result<T> {
+    async fn sign_transaction(&self, request: TxReq, address: &Address) -> Result<T> {
         // create local signer wallet from signing key
         let signer = self.accounts.get(address).ok_or(SignError::NoAccount)?.clone();
         let wallet = EthereumWallet::from(signer);

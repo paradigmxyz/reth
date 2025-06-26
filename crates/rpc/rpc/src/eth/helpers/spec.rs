@@ -1,6 +1,8 @@
+use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_network_api::NetworkInfo;
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{helpers::EthApiSpec, RpcNodeCore};
 use reth_storage_api::{BlockNumReader, BlockReader, ProviderTx, StageCheckpointReader};
 
@@ -17,6 +19,7 @@ where
     Provider: BlockReader,
 {
     type Transaction = ProviderTx<Provider>;
+    type Rpc = Ethereum;
 
     fn starting_block(&self) -> U256 {
         self.inner.starting_block()
@@ -24,8 +27,17 @@ where
 
     fn signers(
         &self,
-    ) -> &parking_lot::RwLock<Vec<Box<dyn reth_rpc_eth_api::helpers::EthSigner<Self::Transaction>>>>
-    {
+    ) -> &parking_lot::RwLock<
+        Vec<
+            Box<
+                dyn reth_rpc_eth_api::helpers::EthSigner<
+                    Self::Transaction,
+                    Self::Rpc,
+                    RpcTxReq<Self::Rpc>,
+                >,
+            >,
+        >,
+    > {
         self.inner.signers()
     }
 }
