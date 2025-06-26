@@ -180,10 +180,30 @@ impl NodeManager {
         result
     }
 
-    /// Stop the reth node
+    /// Stop the reth node gracefully
     pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
-        info!("Stopping reth node...");
-        child.kill().await.wrap_err("Failed to kill reth process")?;
+        info!("Stopping reth node gracefully with SIGINT...");
+        
+        // Send SIGINT (Ctrl+C) for graceful shutdown
+        #[cfg(unix)]
+        {
+            if let Some(pid) = child.id() {
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGINT);
+                }
+            }
+        }
+        
+        #[cfg(windows)]
+        {
+            // On Windows, we can't send SIGINT easily, so we use the built-in kill
+            child.start_kill().wrap_err("Failed to send kill signal to reth process")?;
+        }
+        
+        // Wait for the process to exit
+        let status = child.wait().await.wrap_err("Failed to wait for reth process to exit")?;
+        info!("Reth node exited with status: {:?}", status);
+        
         Ok(())
     }
 
