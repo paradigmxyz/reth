@@ -202,6 +202,7 @@ impl GitManager {
     }
 
     /// Get the latest commit hash for logging/reporting
+    #[allow(dead_code)]
     pub fn get_commit_hash(&self) -> Result<String> {
         let output = Command::new("git")
             .args(["rev-parse", "HEAD"])
@@ -222,11 +223,13 @@ impl GitManager {
     }
 
     /// Get the repository root path
+    #[allow(dead_code)]
     pub fn repo_root(&self) -> &str {
         &self.repo_root
     }
 
     /// Pull latest changes from remote (useful for ensuring branches are up-to-date)
+    #[allow(dead_code)]
     pub fn pull_latest(&self, branch: &str) -> Result<()> {
         info!("Pulling latest changes for branch: {}", branch);
 

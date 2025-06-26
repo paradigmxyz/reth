@@ -26,9 +26,7 @@ pub struct ComparisonGenerator {
 #[derive(Debug, Clone)]
 pub struct BenchmarkResults {
     pub branch_name: String,
-    pub output_path: PathBuf,
     pub combined_latency_data: Vec<CombinedLatencyRow>,
-    pub total_gas_data: Vec<TotalGasRow>,
     pub summary: BenchmarkSummary,
 }
 
@@ -198,9 +196,7 @@ impl ComparisonGenerator {
 
         Ok(BenchmarkResults {
             branch_name: branch_name.to_string(),
-            output_path: output_path.to_path_buf(),
             combined_latency_data,
-            total_gas_data,
             summary,
         })
     }
