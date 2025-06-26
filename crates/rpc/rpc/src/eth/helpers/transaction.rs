@@ -2,6 +2,7 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
@@ -17,7 +18,19 @@ where
     Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
 {
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(
+        &self,
+    ) -> &parking_lot::RwLock<
+        Vec<
+            Box<
+                dyn EthSigner<
+                    ProviderTx<Self::Provider>,
+                    Self::NetworkTypes,
+                    RpcTxReq<Self::NetworkTypes>,
+                >,
+            >,
+        >,
+    > {
         self.inner.signers()
     }
 

@@ -7,11 +7,11 @@ use crate::{
     },
     EthApiError, RevertError,
 };
-use alloy_consensus::{BlockHeader, Transaction as _, TxType};
-use alloy_eips::eip2718::WithEncoded;
+use alloy_consensus::{BlockHeader, Transaction as _};
+use alloy_eips::{eip2718::WithEncoded, Typed2718};
+use alloy_network::TransactionBuilder;
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
-    transaction::TransactionRequest,
     Block, BlockTransactionsKind, Header,
 };
 use jsonrpsee_types::ErrorObject;
@@ -22,7 +22,7 @@ use reth_evm::{
 use reth_primitives_traits::{
     block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
 };
-use reth_rpc_convert::{RpcConvert, RpcTransaction, RpcTypes};
+use reth_rpc_convert::{RpcConvert, RpcTransaction, RpcTxReq, RpcTypes};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
 use revm::{
@@ -64,7 +64,7 @@ impl ToRpcError for EthSimulateError {
 #[expect(clippy::type_complexity)]
 pub fn execute_transactions<S, T>(
     mut builder: S,
-    calls: Vec<TransactionRequest>,
+    calls: Vec<RpcTxReq<T::Network>>,
     default_gas_limit: u64,
     chain_id: u64,
     tx_resp_builder: &T,
@@ -79,7 +79,8 @@ where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
     T: RpcConvert<
         Primitives = S::Primitives,
-        Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+        Network: alloy_network::Network
+                     + RpcTypes<TransactionRequest: TransactionBuilder<<T as RpcConvert>::Network>>,
     >,
 {
     builder.apply_pre_execution_changes()?;
@@ -115,7 +116,7 @@ where
 ///
 /// This will set the defaults as defined in <https://github.com/ethereum/execution-apis/blob/e56d3208789259d0b09fa68e9d8594aa4d73c725/docs/ethsimulatev1-notes.md#default-values-for-transactions>
 pub fn resolve_transaction<DB: Database, Tx, T>(
-    mut tx: TransactionRequest,
+    mut tx: RpcTxReq<T::Network>,
     default_gas_limit: u64,
     block_base_fee_per_gas: u64,
     chain_id: u64,
@@ -126,65 +127,62 @@ where
     DB::Error: Into<EthApiError>,
     T: RpcConvert<
         Primitives: NodePrimitives<SignedTx = Tx>,
-        Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+        Network: alloy_network::Network
+                     + RpcTypes<TransactionRequest: TransactionBuilder<<T as RpcConvert>::Network>>,
     >,
 {
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
-    let tx_type = tx.preferred_type();
+    let tx_type = tx.output_tx_type();
 
-    let from = if let Some(from) = tx.from {
+    let from = if let Some(from) = tx.from() {
         from
     } else {
-        tx.from = Some(Address::ZERO);
+        tx.set_from(Address::ZERO);
         Address::ZERO
     };
 
-    if tx.nonce.is_none() {
-        tx.nonce =
-            Some(db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default());
+    if tx.nonce().is_none() {
+        tx.set_nonce(db.basic(from).map_err(Into::into)?.map(|acc| acc.nonce).unwrap_or_default());
     }
 
-    if tx.gas.is_none() {
-        tx.gas = Some(default_gas_limit);
+    if tx.gas_limit().is_none() {
+        tx.set_gas_limit(default_gas_limit);
     }
 
-    if tx.chain_id.is_none() {
-        tx.chain_id = Some(chain_id);
+    if tx.chain_id().is_none() {
+        tx.set_chain_id(chain_id);
     }
 
-    if tx.to.is_none() {
-        tx.to = Some(TxKind::Create);
+    if tx.kind().is_none() {
+        tx.set_kind(TxKind::Create);
     }
 
     // if we can't build the _entire_ transaction yet, we need to check the fee values
-    if tx.buildable_type().is_none() {
-        match tx_type {
-            TxType::Legacy | TxType::Eip2930 => {
-                if tx.gas_price.is_none() {
-                    tx.gas_price = Some(block_base_fee_per_gas as u128);
-                }
+    if tx.output_tx_type_checked().is_none() {
+        if tx_type.is_legacy() || tx_type.is_eip2930() {
+            if tx.gas_price().is_none() {
+                tx.set_gas_price(block_base_fee_per_gas as u128);
             }
-            _ => {
-                // set dynamic 1559 fees
-                if tx.max_fee_per_gas.is_none() {
-                    let mut max_fee_per_gas = block_base_fee_per_gas as u128;
-                    if let Some(prio_fee) = tx.max_priority_fee_per_gas {
-                        // if a prio fee is provided we need to select the max fee accordingly
-                        // because the base fee must be higher than the prio fee.
-                        max_fee_per_gas = prio_fee.max(max_fee_per_gas);
-                    }
-                    tx.max_fee_per_gas = Some(max_fee_per_gas);
+        } else {
+            // set dynamic 1559 fees
+            if tx.max_fee_per_gas().is_none() {
+                let mut max_fee_per_gas = block_base_fee_per_gas as u128;
+                if let Some(prio_fee) = tx.max_priority_fee_per_gas() {
+                    // if a prio fee is provided we need to select the max fee accordingly
+                    // because the base fee must be higher than the prio fee.
+                    max_fee_per_gas = prio_fee.max(max_fee_per_gas);
                 }
-                if tx.max_priority_fee_per_gas.is_none() {
-                    tx.max_priority_fee_per_gas = Some(0);
-                }
+                tx.set_max_fee_per_gas(max_fee_per_gas);
+            }
+            if tx.max_priority_fee_per_gas().is_none() {
+                tx.set_max_priority_fee_per_gas(0);
             }
         }
     }
 
     let tx = tx_resp_builder
-        .build_simulate_v1_transaction(tx.into())
+        .build_simulate_v1_transaction(tx)
         .map_err(|e| EthApiError::other(e.into()))?;
 
     Ok(Recovered::new_unchecked(tx, from))
