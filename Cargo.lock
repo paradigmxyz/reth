@@ -293,9 +293,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ce138b29a2f8e7ed97c064af8359dfa6559c12cba5e821ae4eb93081a56557e"
+checksum = "819a3620fe125e0fff365363315ee5e24c23169173b19747dfd6deba33db8990"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -390,9 +390,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-hardforks"
-version = "0.2.11"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9a510692bef4871797062ca09ec7873c45dc68c7f3f72291165320f53606a3"
+checksum = "2090f21bb6df43e147d976e754bc9a007ca851badbfc6685377aa679b5f151d9"
 dependencies = [
  "alloy-chains",
  "alloy-hardforks",
@@ -7303,7 +7303,7 @@ dependencies = [
 
 [[package]]
 name = "reth-bench-compare"
-version = "1.4.8"
+version = "1.5.0"
 dependencies = [
  "chrono",
  "clap",
@@ -11281,9 +11281,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1375ba8ef45a6f15d83fa8748f1079428295d403d6ea991d09ab100155fbc06d"
+checksum = "82d20c4491bc164fa2f6c5d44565947a52ad80b9505d8e36f8d54c27c739fcd0"
 dependencies = [
  "dyn-clone",
  "ref-cast",
@@ -11518,7 +11518,7 @@ dependencies = [
  "indexmap 1.9.3",
  "indexmap 2.10.0",
  "schemars 0.9.0",
- "schemars 1.0.3",
+ "schemars 1.0.4",
  "serde",
  "serde_derive",
  "serde_json",
