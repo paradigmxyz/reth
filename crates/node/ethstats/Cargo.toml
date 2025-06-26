@@ -25,5 +25,5 @@ serde_json.workspace = true
 
 tracing.workspace = true
 url.workspace = true
-http = "1.1"
+http.workspace = true
 thiserror = { workspace = true, features = ["std"] }

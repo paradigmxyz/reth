@@ -8969,7 +8969,7 @@ dependencies = [
 
 [[package]]
 name = "reth-node-ethstats"
-version = "1.4.3"
+version = "1.4.8"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
