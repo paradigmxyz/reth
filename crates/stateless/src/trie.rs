@@ -9,8 +9,8 @@ use reth_errors::ProviderError;
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
-    blinded::DefaultBlindedProviderFactory, errors::SparseStateTrieResult, SparseStateTrie,
-    SparseTrie,
+    blinded::DefaultBlindedProviderFactory, errors::SparseStateTrieResult, RevealedSparseTrie,
+    SparseStateTrie, SparseTrie,
 };
 
 /// `StatelessTrie` structure for usage during stateless validation

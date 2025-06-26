@@ -21,11 +21,19 @@ use reth_trie_common::{
 };
 use tracing::trace;
 
+/// Convenience type for a [`SerialSparseTrie`] which uses the factory's `AccountNodeProvider`.
+pub type SerialAccountSparseTrie<F> =
+    SerialSparseTrie<<F as BlindedProviderFactory>::AccountNodeProvider>;
+
+/// Convenience type for a [`SerialSparseTrie`] which uses the factory's `StorageNodeProvider`.
+pub type SerialStorageSparseTrie<F> =
+    SerialSparseTrie<<F as BlindedProviderFactory>::StorageNodeProvider>;
+
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
     F = DefaultBlindedProviderFactory,
-    R = SerialSparseTrie,
-    S = SerialSparseTrie,
+    R = SerialSparseTrie, // State root trie type
+    S = SerialSparseTrie, // Storage root trie type
 > {
     /// Blinded node provider factory.
     provider_factory: F,

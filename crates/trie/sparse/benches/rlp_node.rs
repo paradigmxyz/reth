@@ -7,7 +7,7 @@ use proptest::{prelude::*, test_runner::TestRunner};
 use rand::{seq::IteratorRandom, Rng};
 use reth_testing_utils::generators;
 use reth_trie::Nibbles;
-use reth_trie_sparse::RevealedSparseTrie;
+use reth_trie_sparse::{RevealedSparseTrie, SerialSparseTrie};
 
 fn update_rlp_node_level(c: &mut Criterion) {
     let mut rng = generators::rng();
@@ -22,7 +22,7 @@ fn update_rlp_node_level(c: &mut Criterion) {
             .current();
 
         // Create a sparse trie with `size` leaves
-        let mut sparse = RevealedSparseTrie::default();
+        let mut sparse = SerialSparseTrie::default();
         for (key, value) in &state {
             sparse
                 .update_leaf(Nibbles::unpack(key), alloy_rlp::encode_fixed_size(value).to_vec())

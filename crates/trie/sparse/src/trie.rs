@@ -109,7 +109,7 @@ pub trait RevealedSparseTrie: Sized + fmt::Debug {
     /// Creates a new revealed sparse trie from the given provider and root node.
     ///
     /// This function initializes the internal structures and then reveals the root.
-    /// It is the method used by the SparseTrieState to create new `RevealedSparseTrie`s, having
+    /// It is the method used by the [`SparseTrieState`] to create new `RevealedSparseTrie`s, having
     /// the root node already available.
     ///
     /// # Returns
@@ -339,12 +339,7 @@ impl SparseTrie {
         masks: TrieMasks,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut SerialSparseTrie> {
-        self.reveal_root_with_provider(
-            DefaultBlindedProvider::default(),
-            root,
-            masks,
-            retain_updates,
-        )
+        self.reveal_root_with_provider(DefaultBlindedProvider, root, masks, retain_updates)
     }
 }
 
