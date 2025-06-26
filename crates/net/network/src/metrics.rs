@@ -191,8 +191,6 @@ pub struct TransactionsManagerMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "network")]
 pub struct TransactionFetcherMetrics {
-    /// Total number of reported bad transactions
-    pub(crate) reported_bad_transactions: Counter,
     /// Currently active outgoing [`GetPooledTransactions`](reth_eth_wire::GetPooledTransactions)
     /// requests.
     pub(crate) inflight_transaction_requests: Gauge,
