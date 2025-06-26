@@ -5,10 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vocs dev",
-    "build": "./scripts/build-cargo-docs.sh && vocs build && bun generate-redirects.ts && bun scripts/inject-cargo-docs.ts",
+    "build": "./scripts/build-cargo-docs.sh && vocs build && bun scripts/generate-redirects.ts && bun scripts/inject-cargo-docs.ts",
     "preview": "vocs preview",
-    "check-links": "bun check-links.ts",
-    "generate-redirects": "bun generate-redirects.ts",
+    "check-links": "bun scripts/check-links.ts",
+    "generate-redirects": "bun scripts/generate-redirects.ts",
     "build-cargo-docs": "./scripts/build-cargo-docs.sh",
     "inject-cargo-docs": "bun scripts/inject-cargo-docs.ts"
   },

@@ -10,7 +10,10 @@
       "Bash(rm:*)",
       "Bash(grep:*)",
       "Bash(bun scripts/inject-cargo-docs.ts:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(mv:*)",
+      "Bash(bun scripts/generate-redirects.ts:*)"
     ],
     "deny": []
   }
