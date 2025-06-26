@@ -3,6 +3,7 @@
 pub mod api;
 use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
+use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
@@ -10,10 +11,10 @@ pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
+use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
-use reth_rpc_types_compat::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_transaction_pool::error::{
     Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     PoolError, PoolErrorKind, PoolTransactionError,
@@ -185,6 +186,22 @@ impl EthApiError {
     pub const fn is_gas_too_low(&self) -> bool {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
     }
+
+    /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
+    pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
+    where
+        E: Into<Self>,
+    {
+        err.into()
+    }
+
+    /// Converts the given [`CallError`] into a new [`EthApiError`] instance.
+    pub fn from_call_err<E>(err: CallError<E>) -> Self
+    where
+        E: Into<Self>,
+    {
+        err.into()
+    }
 }
 
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
@@ -256,6 +273,40 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
 impl From<TransactionConversionError> for EthApiError {
     fn from(_: TransactionConversionError) -> Self {
         Self::TransactionConversionError
+    }
+}
+
+impl<E> From<CallError<E>> for EthApiError
+where
+    E: Into<Self>,
+{
+    fn from(value: CallError<E>) -> Self {
+        match value {
+            CallError::Database(err) => err.into(),
+            CallError::InsufficientFunds(insufficient_funds_error) => {
+                Self::InvalidTransaction(RpcInvalidTransactionError::InsufficientFunds {
+                    cost: insufficient_funds_error.cost,
+                    balance: insufficient_funds_error.balance,
+                })
+            }
+        }
+    }
+}
+
+impl<E> From<StateOverrideError<E>> for EthApiError
+where
+    E: Into<Self>,
+{
+    fn from(value: StateOverrideError<E>) -> Self {
+        match value {
+            StateOverrideError::InvalidBytecode(bytecode_decode_error) => {
+                Self::InvalidBytecode(bytecode_decode_error.to_string())
+            }
+            StateOverrideError::BothStateAndStateDiff(address) => {
+                Self::BothStateAndStateDiffInOverride(address)
+            }
+            StateOverrideError::Database(err) => err.into(),
+        }
     }
 }
 
@@ -513,9 +564,6 @@ pub enum RpcInvalidTransactionError {
     /// Blob transaction is a create transaction
     #[error("blob transaction is a create transaction")]
     BlobTransactionIsCreate,
-    /// EOF crate should have `to` address
-    #[error("EOF crate should have `to` address")]
-    EofCrateShouldHaveToAddress,
     /// EIP-7702 is not enabled.
     #[error("EIP-7702 authorization list not supported")]
     AuthorizationListNotSupported,
@@ -595,10 +643,13 @@ impl From<RpcInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'s
 impl From<InvalidTransaction> for RpcInvalidTransactionError {
     fn from(err: InvalidTransaction) -> Self {
         match err {
-            InvalidTransaction::InvalidChainId => Self::InvalidChainId,
+            InvalidTransaction::InvalidChainId | InvalidTransaction::MissingChainId => {
+                Self::InvalidChainId
+            }
             InvalidTransaction::PriorityFeeGreaterThanMaxFee => Self::TipAboveFeeCap,
             InvalidTransaction::GasPriceLessThanBasefee => Self::FeeCapTooLow,
-            InvalidTransaction::CallerGasLimitMoreThanBlock => {
+            InvalidTransaction::CallerGasLimitMoreThanBlock |
+            InvalidTransaction::TxGasLimitGreaterThanCap { .. } => {
                 // tx.gas > block.gas_limit
                 Self::GasTooHigh
             }
@@ -632,7 +683,6 @@ impl From<InvalidTransaction> for RpcInvalidTransactionError {
             InvalidTransaction::BlobVersionNotSupported => Self::BlobHashVersionMismatch,
             InvalidTransaction::TooManyBlobs { have, .. } => Self::TooManyBlobs { have },
             InvalidTransaction::BlobCreateTransaction => Self::BlobTransactionIsCreate,
-            InvalidTransaction::EofCreateShouldHaveToAddress => Self::EofCrateShouldHaveToAddress,
             InvalidTransaction::AuthorizationListNotSupported => {
                 Self::AuthorizationListNotSupported
             }

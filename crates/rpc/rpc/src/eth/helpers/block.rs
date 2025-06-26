@@ -5,13 +5,13 @@ use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, NodePrimitives};
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
     RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
 };
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
-use reth_rpc_types_compat::TransactionCompat;
 use reth_storage_api::{BlockReader, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
@@ -22,7 +22,7 @@ where
     Self: LoadBlock<
         Error = EthApiError,
         NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
-        TransactionCompat: TransactionCompat<Network = Self::NetworkTypes>,
+        RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         Provider: BlockReader<
             Transaction = reth_ethereum_primitives::TransactionSigned,
             Receipt = reth_ethereum_primitives::Receipt,

@@ -31,7 +31,7 @@ fn update_leaf(c: &mut Criterion) {
                         .into_iter()
                         .map(|(path, _)| {
                             (
-                                path.clone(),
+                                path,
                                 alloy_rlp::encode_fixed_size(&U256::from(path.len() * 2)).to_vec(),
                             )
                         })
@@ -41,7 +41,7 @@ fn update_leaf(c: &mut Criterion) {
                 },
                 |(mut trie, new_leaves)| {
                     for (path, new_value) in new_leaves {
-                        trie.update_leaf(path, new_value).unwrap();
+                        trie.update_leaf(*path, new_value).unwrap();
                     }
                     trie
                 },

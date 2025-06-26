@@ -65,10 +65,8 @@ impl<T> OpNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
 pub struct OpEthApi<N: OpNodeCore, NetworkT = Optimism> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
-    /// Marker for the network types.
-    _nt: PhantomData<NetworkT>,
-    tx_resp_builder:
-        RpcConverter<N::Primitives, NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>,
+    /// Converter for RPC types.
+    tx_resp_builder: RpcConverter<NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>,
 }
 
 impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
@@ -82,7 +80,6 @@ impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
             Arc::new(OpEthApiInner { eth_api, sequencer_client, min_suggested_priority_fee });
         Self {
             inner: inner.clone(),
-            _nt: PhantomData,
             tx_resp_builder: RpcConverter::with_mapper(OpTxInfoMapper::new(inner)),
         }
     }
@@ -120,10 +117,9 @@ where
 {
     type Error = OpEthApiError;
     type NetworkTypes = NetworkT;
-    type TransactionCompat =
-        RpcConverter<N::Primitives, NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>;
+    type RpcConvert = RpcConverter<NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>;
 
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+    fn tx_resp_builder(&self) -> &Self::RpcConvert {
         &self.tx_resp_builder
     }
 }
@@ -239,7 +235,7 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         self.inner.eth_api.fee_history_cache()
     }
 
