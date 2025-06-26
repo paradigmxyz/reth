@@ -5,9 +5,8 @@ use crate::{
     bench::{
         context::BenchContext,
         output::{
-            create_baseline_comparison, load_baseline_data, BaselineComparisonResult,
-            CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow,
-            BASELINE_COMPARISON_OUTPUT_SUFFIX, COMBINED_OUTPUT_SUFFIX, GAS_OUTPUT_SUFFIX,
+            CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
+            GAS_OUTPUT_SUFFIX,
         },
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
@@ -19,11 +18,8 @@ use csv::Writer;
 use humantime::parse_duration;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::BenchmarkArgs;
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
-use tracing::{debug, info, warn};
+use std::time::{Duration, Instant};
+use tracing::{debug, info};
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -45,22 +41,6 @@ impl Command {
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
         let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
             BenchContext::new(&self.benchmark, self.rpc_url).await?;
-
-        // Load baseline data if provided
-        let baseline_data = if let Some(ref baseline_path) = self.benchmark.baseline {
-            match load_baseline_data(baseline_path) {
-                Ok(data) => {
-                    info!("Loaded baseline data from {:?} ({} blocks)", baseline_path, data.len());
-                    Some(data)
-                }
-                Err(e) => {
-                    warn!("Failed to load baseline data from {:?}: {}", baseline_path, e);
-                    None
-                }
-            }
-        } else {
-            None
-        };
 
         let (sender, mut receiver) = tokio::sync::mpsc::channel(1000);
         tokio::task::spawn(async move {
@@ -115,7 +95,6 @@ impl Command {
 
         // put results in a summary vec so they can be printed at the end
         let mut results = Vec::new();
-        let mut baseline_comparisons = Vec::new();
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
@@ -159,21 +138,6 @@ impl Command {
             let combined_result =
                 CombinedResult { block_number, new_payload_result, fcu_latency, total_latency };
 
-            // Create baseline comparison if baseline data is available
-            if let Some(ref baseline_map) = baseline_data {
-                if let Some(baseline_block_data) = baseline_map.get(&block_number) {
-                    let comparison = create_baseline_comparison(
-                        block_number,
-                        combined_result.new_payload_result.latency,
-                        baseline_block_data,
-                    );
-                    info!(%comparison);
-                    baseline_comparisons.push(comparison);
-                } else {
-                    warn!("No baseline data found for block {}", block_number);
-                }
-            }
-
             // current duration since the start of the benchmark minus the time
             // waiting for blocks
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
@@ -213,17 +177,6 @@ impl Command {
                 writer.serialize(row)?;
             }
             writer.flush()?;
-
-            // write baseline comparison results if available
-            if !baseline_comparisons.is_empty() {
-                let output_path = path.join(BASELINE_COMPARISON_OUTPUT_SUFFIX);
-                info!("Writing baseline comparison output to file: {:?}", output_path);
-                let mut writer = Writer::from_path(output_path)?;
-                for comparison in baseline_comparisons {
-                    writer.serialize(comparison)?;
-                }
-                writer.flush()?;
-            }
 
             info!("Finished writing benchmark output files to {:?}.", path);
         }

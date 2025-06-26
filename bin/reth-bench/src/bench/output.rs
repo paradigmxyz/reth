@@ -2,8 +2,8 @@
 //! serialization to / from files.
 
 use reth_primitives_traits::constants::GIGAGAS;
-use serde::{de::DeserializeOwned, ser::SerializeStruct, Deserialize, Serialize};
-use std::{collections::HashMap, path::Path, time::Duration};
+use serde::{ser::SerializeStruct, Serialize};
+use std::time::Duration;
 
 /// This is the suffix for gas output csv files.
 pub(crate) const GAS_OUTPUT_SUFFIX: &str = "total_gas.csv";
@@ -13,9 +13,6 @@ pub(crate) const COMBINED_OUTPUT_SUFFIX: &str = "combined_latency.csv";
 
 /// This is the suffix for new payload output csv files.
 pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
-
-/// This is the suffix for baseline comparison output csv files.
-pub(crate) const BASELINE_COMPARISON_OUTPUT_SUFFIX: &str = "baseline_comparison.csv";
 
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas
 /// used and the `newPayload` latency.
@@ -180,111 +177,6 @@ impl Serialize for TotalGasRow {
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("time", &time)?;
         state.end()
-    }
-}
-
-/// This represents baseline data loaded from a previous benchmark CSV file.
-#[derive(Debug, Clone, Deserialize)]
-pub(crate) struct BaselineData {
-    /// The block number.
-    pub(crate) block_number: u64,
-    /// The gas used in the baseline run.
-    pub(crate) gas_used: u64,
-    /// The newPayload latency from the baseline run in microseconds.
-    pub(crate) new_payload_latency: u128,
-    /// The forkchoice updated latency from the baseline run in microseconds (optional for
-    /// new_payload_only benchmarks).
-    pub(crate) fcu_latency: Option<u128>,
-    /// The total latency from the baseline run in microseconds (optional for new_payload_only
-    /// benchmarks).
-    pub(crate) total_latency: Option<u128>,
-}
-
-/// This represents a comparison result between baseline and current benchmark.
-#[derive(Debug)]
-pub(crate) struct BaselineComparisonResult {
-    /// The block number.
-    pub(crate) block_number: u64,
-    /// The baseline newPayload latency in microseconds.
-    pub(crate) baseline_latency: u128,
-    /// The current newPayload latency in microseconds.
-    pub(crate) current_latency: u128,
-    /// The absolute difference in latency (current - baseline) in microseconds.
-    pub(crate) latency_diff: i128,
-    /// The percentage difference ((current - baseline) / baseline * 100).
-    pub(crate) percent_diff: f64,
-}
-
-impl std::fmt::Display for BaselineComparisonResult {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let status = if self.percent_diff > 0.0 { "slower" } else { "faster" };
-        write!(
-            f,
-            "Block {}: {:.2}% {} than baseline (baseline: {}μs, current: {}μs, diff: {}μs)",
-            self.block_number,
-            self.percent_diff.abs(),
-            status,
-            self.baseline_latency,
-            self.current_latency,
-            self.latency_diff
-        )
-    }
-}
-
-impl Serialize for BaselineComparisonResult {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::ser::Serializer,
-    {
-        let mut state = serializer.serialize_struct("BaselineComparisonResult", 5)?;
-        state.serialize_field("block_number", &self.block_number)?;
-        state.serialize_field("baseline_latency", &self.baseline_latency)?;
-        state.serialize_field("current_latency", &self.current_latency)?;
-        state.serialize_field("latency_diff", &self.latency_diff)?;
-        state.serialize_field("percent_diff", &self.percent_diff)?;
-        state.end()
-    }
-}
-
-/// Loads baseline data from a CSV file.
-pub(crate) fn load_baseline_data(path: &Path) -> eyre::Result<HashMap<u64, BaselineData>> {
-    let mut reader = csv::Reader::from_path(path)?;
-    let mut baseline_map = HashMap::new();
-
-    for result in reader.deserialize() {
-        let record: BaselineData = result?;
-        baseline_map.insert(record.block_number, record);
-    }
-
-    if baseline_map.is_empty() {
-        return Err(eyre::eyre!("No baseline data found in file: {:?}", path));
-    }
-
-    Ok(baseline_map)
-}
-
-/// Creates a baseline comparison result from current and baseline data.
-pub(crate) fn create_baseline_comparison(
-    block_number: u64,
-    current_latency: Duration,
-    baseline_data: &BaselineData,
-) -> BaselineComparisonResult {
-    let current_latency_micros = current_latency.as_micros();
-    let baseline_latency_micros = baseline_data.new_payload_latency;
-
-    let latency_diff = current_latency_micros as i128 - baseline_latency_micros as i128;
-    let percent_diff = if baseline_latency_micros > 0 {
-        (latency_diff as f64 / baseline_latency_micros as f64) * 100.0
-    } else {
-        0.0
-    };
-
-    BaselineComparisonResult {
-        block_number,
-        baseline_latency: baseline_latency_micros,
-        current_latency: current_latency_micros,
-        latency_diff,
-        percent_diff,
     }
 }
 
