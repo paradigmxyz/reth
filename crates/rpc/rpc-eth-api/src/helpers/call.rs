@@ -763,9 +763,8 @@ pub trait Call:
             apply_block_overrides(*block_overrides, db, &mut evm_env.block_env);
         }
         if let Some(state_overrides) = overrides.state {
-            apply_state_overrides(state_overrides, db).map_err(|e| {
-                <EthApiError as From<alloy_evm::overrides::StateOverrideError<_>>>::from(e)
-            })?;
+            apply_state_overrides(state_overrides, db)
+                .map_err(EthApiError::from_state_overrides_err)?;
         }
 
         let request_gas = request.gas;
@@ -776,8 +775,7 @@ pub trait Call:
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let cap = caller_gas_allowance(db, &tx_env)
-                    .map_err(<EthApiError as From<alloy_evm::call::CallError<_>>>::from)?;
+                let cap = caller_gas_allowance(db, &tx_env).map_err(EthApiError::from_call_err)?;
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
             }

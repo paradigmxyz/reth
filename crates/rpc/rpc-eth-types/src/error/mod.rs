@@ -186,6 +186,22 @@ impl EthApiError {
     pub const fn is_gas_too_low(&self) -> bool {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
     }
+
+    /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
+    pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
+    where
+        E: Into<Self>,
+    {
+        err.into()
+    }
+
+    /// Converts the given [`CallError`] into a new [`EthApiError`] instance.
+    pub fn from_call_err<E>(err: CallError<E>) -> Self
+    where
+        E: Into<Self>,
+    {
+        err.into()
+    }
 }
 
 impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
