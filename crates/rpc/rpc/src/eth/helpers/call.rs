@@ -2,6 +2,7 @@
 
 use crate::EthApi;
 use alloy_evm::block::BlockExecutorFactory;
+use alloy_network::TransactionBuilder;
 use alloy_rpc_types_eth::TransactionRequest;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmFactory, TxEnvFor};
@@ -43,7 +44,8 @@ where
                 >,
             >,
             RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Network = Self::NetworkTypes>,
-            NetworkTypes: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+            NetworkTypes: alloy_network::Network
+                              + RpcTypes<TransactionRequest: TransactionBuilder<Self::NetworkTypes>>,
             Error: FromEvmError<Self::Evm>
                        + From<<Self::RpcConvert as RpcConvert>::Error>
                        + From<ProviderError>,

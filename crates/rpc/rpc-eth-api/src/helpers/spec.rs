@@ -6,6 +6,7 @@ use futures::Future;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthereumHardforks};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
+use reth_rpc_convert::RpcTxReq;
 use reth_storage_api::{BlockNumReader, StageCheckpointReader};
 
 use crate::{helpers::EthSigner, RpcNodeCore};
@@ -25,11 +26,18 @@ pub trait EthApiSpec:
     /// The transaction type signers are using.
     type Transaction;
 
+    /// The RPC requests and responses.
+    type Rpc: alloy_network::Network;
+
     /// Returns the block node is started on.
     fn starting_block(&self) -> U256;
 
     /// Returns a handle to the signers owned by provider.
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Self::Transaction>>>>;
+    fn signers(
+        &self,
+    ) -> &parking_lot::RwLock<
+        Vec<Box<dyn EthSigner<Self::Transaction, Self::Rpc, RpcTxReq<Self::Rpc>>>>,
+    >;
 
     /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> impl Future<Output = RethResult<U64>> + Send {

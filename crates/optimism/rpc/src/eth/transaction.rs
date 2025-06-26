@@ -12,7 +12,7 @@ use reth_optimism_primitives::DepositReceipt;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     try_into_op_tx_info, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore,
-    RpcNodeCoreExt, TxInfoMapper,
+    RpcNodeCoreExt, RpcTxReq, TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{
@@ -30,7 +30,19 @@ where
     Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<Error = OpEthApiError>,
     N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
 {
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(
+        &self,
+    ) -> &parking_lot::RwLock<
+        Vec<
+            Box<
+                dyn EthSigner<
+                    ProviderTx<Self::Provider>,
+                    Self::NetworkTypes,
+                    RpcTxReq<Self::NetworkTypes>,
+                >,
+            >,
+        >,
+    > {
         self.inner.eth_api.signers()
     }
 
