@@ -12,7 +12,7 @@ use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_engine_local::{LocalPayloadAttributesAddOn, UnsupportedPayloadAttributesBuilder};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadAttributesBuilder, PayloadTypes, ReceiptTy,
+    NodeAddOns, NodeTypes, PayloadAttrTy, PayloadAttributesBuilder, PayloadTypes, ReceiptTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -629,7 +629,7 @@ where
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
 {
-    type PayloadAttributes = <<N::Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes;
+    type PayloadAttributes = PayloadAttrTy<N::Types>;
 
     fn local_payload_attributes_builder(
         &self,
