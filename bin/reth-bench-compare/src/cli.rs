@@ -72,6 +72,10 @@ pub struct Args {
     #[arg(long)]
     pub sudo: bool,
 
+    /// Generate comparison charts using Python script
+    #[arg(long)]
+    pub draw: bool,
+
     #[command(flatten)]
     pub logs: LogArgs,
 }
@@ -237,5 +241,70 @@ async fn run_benchmark_workflow(
     // Generate comparison report
     comparison_generator.generate_comparison_report().await?;
 
+    // Generate charts if requested
+    if args.draw {
+        generate_comparison_charts(comparison_generator, args).await?;
+    }
+
+    Ok(())
+}
+
+/// Generate comparison charts using the Python script
+async fn generate_comparison_charts(
+    comparison_generator: &ComparisonGenerator,
+    _args: &Args,
+) -> Result<()> {
+    info!("Generating comparison charts with Python script...");
+
+    let baseline_output_dir = comparison_generator.get_ref_output_dir("baseline");
+    let feature_output_dir = comparison_generator.get_ref_output_dir("feature");
+    
+    let baseline_csv = baseline_output_dir.join("combined_latency.csv");
+    let feature_csv = feature_output_dir.join("combined_latency.csv");
+    
+    // Check if CSV files exist
+    if !baseline_csv.exists() {
+        return Err(eyre!("Baseline CSV not found: {:?}", baseline_csv));
+    }
+    if !feature_csv.exists() {
+        return Err(eyre!("Feature CSV not found: {:?}", feature_csv));
+    }
+    
+    let output_dir = comparison_generator.get_output_dir();
+    let chart_output = output_dir.join("latency_comparison.png");
+    
+    let script_path = "bin/reth-bench/scripts/compare_newpayload_latency.py";
+    
+    info!("Running Python comparison script...");
+    let mut cmd = tokio::process::Command::new("python3");
+    cmd.args([
+        script_path,
+        &baseline_csv.to_string_lossy(),
+        &feature_csv.to_string_lossy(),
+        "-o",
+        &chart_output.to_string_lossy(),
+    ]);
+    
+    let output = cmd.output().await.map_err(|e| {
+        eyre!("Failed to execute Python script: {}. Make sure python3 and required packages (pandas, matplotlib, numpy) are installed.", e)
+    })?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(eyre!(
+            "Python script failed with exit code {:?}:\nstdout: {}\nstderr: {}",
+            output.status.code(),
+            stdout,
+            stderr
+        ));
+    }
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if !stdout.trim().is_empty() {
+        info!("Python script output:\n{}", stdout);
+    }
+    
+    info!("Comparison chart generated: {:?}", chart_output);
     Ok(())
 }
