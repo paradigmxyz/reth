@@ -1958,6 +1958,28 @@ mod tests {
                 .unwrap_or_else(|| panic!("Lower subtrie at path {:?} should exist", path))
         }
 
+        /// Assert that a lower subtrie has a specific path field value
+        fn assert_subtrie_path(
+            &self,
+            trie: &ParallelSparseTrie,
+            subtrie_prefix: impl AsRef<[u8]>,
+            expected_path: impl AsRef<[u8]>,
+        ) {
+            let subtrie_prefix = Nibbles::from_nibbles(subtrie_prefix);
+            let expected_path = Nibbles::from_nibbles(expected_path);
+            let idx = path_subtrie_index_unchecked(&subtrie_prefix);
+
+            let subtrie = trie.lower_subtries[idx].as_ref().unwrap_or_else(|| {
+                panic!("Lower subtrie at prefix {:?} should exist", subtrie_prefix)
+            });
+
+            assert_eq!(
+                subtrie.path, expected_path,
+                "Subtrie at prefix {:?} should have path {:?}, but has {:?}",
+                subtrie_prefix, expected_path, subtrie.path
+            );
+        }
+
         /// Create test leaves with consecutive account values
         fn create_test_leaves(&self, paths: &[&[u8]]) -> Vec<(Nibbles, Vec<u8>)> {
             paths
@@ -3987,6 +4009,9 @@ mod tests {
         ctx.assert_upper_subtrie(&trie)
             .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3]));
 
+        // Verify lower subtrie path was correctly updated to 0x123
+        ctx.assert_subtrie_path(&trie, [0x1, 0x2], [0x1, 0x2, 0x3]);
+
         // Verify lower subtrie - all three leaves should be properly inserted
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5, 0x6]) // All three children
@@ -4100,12 +4125,7 @@ mod tests {
             .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]));
 
         // Verify subtrie path updated to 0x1234
-        let subtrie = &trie.lower_subtries[0x12].as_ref().unwrap();
-        assert_eq!(
-            subtrie.path,
-            Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]),
-            "Subtrie should have path 0x1234 after second leaf"
-        );
+        ctx.assert_subtrie_path(&trie, [0x1, 0x2], [0x1, 0x2, 0x3, 0x4]);
 
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &[0x5, 0x6])
@@ -4123,12 +4143,7 @@ mod tests {
             .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3]));
 
         // Verify subtrie path updated to 0x123
-        let subtrie = &trie.lower_subtries[0x12].as_ref().unwrap();
-        assert_eq!(
-            subtrie.path,
-            Nibbles::from_nibbles([0x1, 0x2, 0x3]),
-            "Subtrie should have path 0x123 after third leaf"
-        );
+        ctx.assert_subtrie_path(&trie, [0x1, 0x2], [0x1, 0x2, 0x3]);
 
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5])
@@ -4147,12 +4162,7 @@ mod tests {
             .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2]));
 
         // Verify subtrie path updated to 0x12
-        let subtrie = &trie.lower_subtries[0x12].as_ref().unwrap();
-        assert_eq!(
-            subtrie.path,
-            Nibbles::from_nibbles([0x1, 0x2]),
-            "Subtrie should have path 0x12 after fourth leaf"
-        );
+        ctx.assert_subtrie_path(&trie, [0x1, 0x2], [0x1, 0x2]);
 
         // Verify final structure
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
