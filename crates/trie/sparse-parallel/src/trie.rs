@@ -3204,7 +3204,6 @@ mod tests {
 
     #[test]
     fn test_update_leaf_cross_level() {
-        reth_tracing::init_test_tracing();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3343,7 +3342,6 @@ mod tests {
 
     #[test]
     fn test_update_subtrie_with_multiple_leaves() {
-        reth_tracing::init_test_tracing();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3455,7 +3453,6 @@ mod tests {
 
     #[test]
     fn test_update_subtrie_extension_node_subtrie() {
-        reth_tracing::init_test_tracing();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3500,7 +3497,6 @@ mod tests {
 
     #[test]
     fn update_subtrie_extension_node_cross_level() {
-        reth_tracing::init_test_tracing();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
