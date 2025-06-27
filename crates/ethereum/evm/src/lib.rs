@@ -76,6 +76,13 @@ pub struct EthEvmConfig<C = ChainSpec, EvmFactory = EthEvmFactory> {
 }
 
 impl EthEvmConfig {
+    /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
+    pub fn mainnet() -> Self {
+        Self::ethereum(MAINNET.clone())
+    }
+}
+
+impl<ChainSpec> EthEvmConfig<ChainSpec> {
     /// Creates a new Ethereum EVM configuration with the given chain spec.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self::ethereum(chain_spec)
@@ -84,11 +91,6 @@ impl EthEvmConfig {
     /// Creates a new Ethereum EVM configuration.
     pub fn ethereum(chain_spec: Arc<ChainSpec>) -> Self {
         Self::new_with_evm_factory(chain_spec, EthEvmFactory::default())
-    }
-
-    /// Creates a new Ethereum EVM configuration for the ethereum mainnet.
-    pub fn mainnet() -> Self {
-        Self::ethereum(MAINNET.clone())
     }
 }
 
