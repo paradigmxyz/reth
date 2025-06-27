@@ -637,7 +637,7 @@ impl ChainSpec {
 
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
-        let mut chain_spec = ChainSpec::from(genesis.config.clone());
+        let mut chain_spec = Self::from(genesis.config.clone());
         chain_spec.genesis_header =
             SealedHeader::new_unhashed(make_genesis_header(&genesis, &chain_spec.hardforks));
         chain_spec.genesis = genesis;
@@ -679,9 +679,7 @@ impl From<ChainConfig> for ChainSpec {
                 ForkCondition::TTD {
                     // NOTE: this will not work properly if the merge is not activated at
                     // genesis, and there is no merge netsplit block
-                    activation_block_number: config
-                        .merge_netsplit_block
-                        .unwrap_or_default(),
+                    activation_block_number: config.merge_netsplit_block.unwrap_or_default(),
                     total_difficulty: ttd,
                     fork_block: config.merge_netsplit_block,
                 },
