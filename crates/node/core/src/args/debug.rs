@@ -80,6 +80,11 @@ pub struct DebugArgs {
     pub invalid_block_hook: Option<InvalidBlockSelection>,
 
     /// The RPC URL of a healthy node to use for comparing invalid block hook results against.
+    ///
+    ///Debug setting that enables execution witness comparison for troubleshooting bad blocks.
+    /// When enabled, the node will collect execution witnesses from the specified source and
+    /// compare them against local execution when a bad block is encountered, helping identify
+    /// discrepancies in state execution.
     #[arg(
         long = "debug.healthy-node-rpc-url",
         help_heading = "Debug",
