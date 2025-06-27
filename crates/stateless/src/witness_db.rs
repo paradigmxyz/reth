@@ -1,7 +1,7 @@
 //! Provides the [`WitnessDatabase`] type, an implementation of [`reth_revm::Database`]
 //! specifically designed for stateless execution environments.
 
-use crate::trie::StatelessTrie;
+use crate::trie::StatelessTrieTrait;
 use alloc::{collections::btree_map::BTreeMap, format};
 use alloy_primitives::{map::B256Map, Address, B256, U256};
 use reth_errors::ProviderError;
@@ -11,7 +11,7 @@ use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 ///
 /// This struct implements the [`reth_revm::Database`] trait, allowing the EVM to execute
 /// transactions using:
-///  - Account and storage slot data provided by a [`StatelessTrie`].
+///  - Account and storage slot data provided by a [`StatelessTrieTrait`] implementation.
 ///  - Bytecode and ancestor block hashes provided by in-memory maps.
 ///
 /// This is designed for stateless execution scenarios where direct access to a full node's
@@ -32,7 +32,7 @@ pub(crate) struct WitnessDatabase<'a> {
     /// TODO: Ideally we do not have this trie and instead a simple map.
     /// TODO: Then as a corollary we can avoid unnecessary hashing in `Database::storage`
     /// TODO: and `Database::basic` without needing to cache the hashed Addresses and Keys
-    trie: &'a StatelessTrie,
+    trie: &'a dyn StatelessTrieTrait,
 }
 
 impl<'a> WitnessDatabase<'a> {
@@ -49,8 +49,8 @@ impl<'a> WitnessDatabase<'a> {
     ///    to 256 including the current block number). It assumes these hashes correspond to a
     ///    contiguous chain of blocks. The caller is responsible for verifying the contiguity and
     ///    the block limit.
-    pub(crate) const fn new(
-        trie: &'a StatelessTrie,
+    pub(crate) fn new(
+        trie: &'a dyn StatelessTrieTrait,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: BTreeMap<u64, B256>,
     ) -> Self {
@@ -63,7 +63,7 @@ impl Database for WitnessDatabase<'_> {
     type Error = ProviderError;
 
     /// Get basic account information by hashing the address and looking up the account RLP
-    /// in the underlying [`StatelessTrie`].
+    /// in the underlying [`StatelessTrieTrait`] implementation.
     ///
     /// Returns `Ok(None)` if the account is not found in the trie.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
