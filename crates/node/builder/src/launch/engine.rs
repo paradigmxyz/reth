@@ -27,7 +27,6 @@ use reth_node_api::{
     PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
-    args::DefaultEraHost,
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
@@ -37,7 +36,6 @@ use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader,
 };
-use reth_stages::stages::EraImportSource;
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -154,16 +152,11 @@ where
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        let era_import_source = if node_config.era.enabled {
-            EraImportSource::maybe_new(
-                node_config.era.source.path.clone(),
-                node_config.era.source.url.clone(),
-                || node_config.chain.chain().kind().default_era_host(),
-                || node_config.datadir().data_dir().join("era").into(),
-            )
-        } else {
-            None
-        };
+        // Configure the pipeline
+        let pipeline_exex_handle =
+            maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
+
+        let era_import_source = ctx.era_import_source();
 
         let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
@@ -176,7 +169,7 @@ where
             max_block,
             static_file_producer,
             ctx.components().evm_config().clone(),
-            maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
+            pipeline_exex_handle,
             era_import_source,
         )?;
 
