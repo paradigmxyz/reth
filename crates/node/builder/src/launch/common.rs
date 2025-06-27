@@ -3,7 +3,7 @@
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
-    BuilderContext, ExExLauncher, NodeAdapter,
+    BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
 };
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip2124::Head;
@@ -935,10 +935,14 @@ where
     }
 
     /// Launches ExEx (Execution Extensions) and returns the ExEx manager handle.
+    #[allow(clippy::type_complexity)]
     pub async fn launch_exex(
         &self,
-        installed_exex: Vec<(String, Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>)>,
-    ) -> eyre::Result<Option<ExExManagerHandle<<T::Types as NodeTypes>::Primitives>>> {
+        installed_exex: Vec<(
+            String,
+            Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
+        )>,
+    ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<T::Types>>>> {
         ExExLauncher::new(
             self.head(),
             self.node_adapter().clone(),

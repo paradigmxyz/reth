@@ -133,8 +133,8 @@ where
         // Try to expire pre-merge transaction history if configured
         ctx.expire_pre_merge_transactions()?;
 
-        // spawn exexs
-        let exex_manager_handle = ctx.launch_exex(installed_exex).await?;
+        // spawn exexs if any
+        let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 
         // create pipeline
         let network_handle = ctx.components().network().clone();
@@ -153,10 +153,6 @@ where
         info!(target: "reth::cli", "StaticFileProducer initialized");
 
         let consensus = Arc::new(ctx.components().consensus().clone());
-
-        // Configure the pipeline
-        let pipeline_exex_handle =
-            exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
 
         let era_import_source = if node_config.era.enabled {
             EraImportSource::maybe_new(
@@ -180,7 +176,7 @@ where
             max_block,
             static_file_producer,
             ctx.components().evm_config().clone(),
-            pipeline_exex_handle,
+            maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
             era_import_source,
         )?;
 
@@ -190,7 +186,7 @@ where
         let pipeline_events = pipeline.events();
 
         let mut pruner_builder = ctx.pruner_builder();
-        if let Some(exex_manager_handle) = &exex_manager_handle {
+        if let Some(exex_manager_handle) = &maybe_exex_manager_handle {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
