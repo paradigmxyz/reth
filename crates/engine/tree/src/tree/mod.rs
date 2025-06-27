@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_evm::block::BlockExecutor;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -50,6 +50,7 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use state::TreeState;
 use std::{
     borrow::Cow,
+    collections::HashMap,
     fmt::Debug,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -276,9 +277,8 @@ where
     evm_config: C,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
-    /// Metrics for precompile cache, saved between block executions so we don't re-allocate for
-    /// every block.
-    precompile_cache_metrics: CachedPrecompileMetrics,
+    /// Metrics for precompile cache, stored per address to avoid re-allocation.
+    precompile_cache_metrics: HashMap<Address, CachedPrecompileMetrics>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -373,7 +373,7 @@ where
             payload_processor,
             evm_config,
             precompile_cache_map,
-            precompile_cache_metrics: Default::default(),
+            precompile_cache_metrics: HashMap::new(),
         }
     }
 
@@ -2443,11 +2443,16 @@ where
 
         if !self.config.precompile_cache_disabled() {
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
+                let metrics = self
+                    .precompile_cache_metrics
+                    .entry(*address)
+                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                    .clone();
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
                     *self.evm_config.evm_env(block.header()).spec_id(),
-                    Some(self.precompile_cache_metrics.clone()),
+                    Some(metrics),
                 )
             });
         }
