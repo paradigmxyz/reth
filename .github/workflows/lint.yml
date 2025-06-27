@@ -184,8 +184,8 @@ jobs:
       - run: cargo build --bin reth --workspace --features ethereum
         env:
           RUSTFLAGS: -D warnings
-      - run: ./book/cli/update.sh target/debug/reth
-      - name: Check book changes
+      - run: ./docs/cli/update.sh target/debug/reth
+      - name: Check docs changes
         run: git diff --exit-code
 
   codespell:

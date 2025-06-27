@@ -24,7 +24,7 @@ jobs:
       - name: Install Playwright browsers
         # Required for rehype-mermaid to render Mermaid diagrams during build
         run: |
-          cd book/vocs/
+          cd docs/vocs/
           bun i
           npx playwright install --with-deps chromium
 
@@ -32,11 +32,11 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
 
       - name: Build docs
-        run: cd book/vocs && bash scripts/build-cargo-docs.sh
+        run: cd docs/vocs && bash scripts/build-cargo-docs.sh
 
       - name: Build Vocs
         run: |
-          cd book/vocs/ && bun run build
+          cd docs/vocs/ && bun run build
           echo "Vocs Build Complete"
 
       - name: Setup Pages
@@ -45,7 +45,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "./book/vocs/docs/dist"
+          path: "./docs/vocs/docs/dist"
 
   deploy:
     # Only deploy if a push to main
