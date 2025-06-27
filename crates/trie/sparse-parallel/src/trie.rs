@@ -4043,6 +4043,130 @@ mod tests {
     }
 
     #[test]
+    fn test_progressive_branch_creation() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test starting with a single leaf and progressively adding leaves
+        // that create branch nodes at shorter and shorter paths
+        //
+        // Step 1: Add leaf at 0x12345
+        // Upper trie:
+        //   0x: Leaf { key: 0x12345 }
+        //
+        // Step 2: Add leaf at 0x12346
+        // Upper trie:
+        //   0x: Extension { key: 0x1234 }
+        //       └── Subtrie (0x12): pointer
+        // Lower subtrie (0x12):
+        //   0x1234: Branch { state_mask: 0x60 }  // bits 5 and 6 set
+        //       ├── 0x12345: Leaf { key: 0x }
+        //       └── 0x12346: Leaf { key: 0x }
+        //
+        // Step 3: Add leaf at 0x1235
+        // Lower subtrie (0x12) updates to:
+        //   0x123: Branch { state_mask: 0x30 }  // bits 4 and 5 set
+        //       ├── 0x1234: Branch { state_mask: 0x60 }
+        //       │   ├── 0x12345: Leaf { key: 0x }
+        //       │   └── 0x12346: Leaf { key: 0x }
+        //       └── 0x1235: Leaf { key: 0x }
+        //
+        // Step 4: Add leaf at 0x124
+        // Lower subtrie (0x12) updates to:
+        //   0x12: Branch { state_mask: 0x18 }  // bits 3 and 4 set
+        //       ├── 0x123: Branch { state_mask: 0x30 }
+        //       │   ├── 0x1234: Branch { state_mask: 0x60 }
+        //       │   │   ├── 0x12345: Leaf { key: 0x }
+        //       │   │   └── 0x12346: Leaf { key: 0x }
+        //       │   └── 0x1235: Leaf { key: 0x }
+        //       └── 0x124: Leaf { key: 0x }
+
+        // Step 1: Add first leaf - initially stored as leaf in upper trie
+        let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4, 0x5], 1);
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify leaf node in upper trie (optimized single-leaf case)
+        ctx.assert_upper_subtrie(&trie)
+            .has_leaf(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]))
+            .has_value(&leaf1_path, &value1);
+
+        // Step 2: Add leaf at 0x12346 - creates branch at 0x1234
+        let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4, 0x6], 2);
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify extension now goes to 0x1234
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]));
+
+        // Verify subtrie path updated to 0x1234
+        let subtrie = &trie.lower_subtries[0x12].as_ref().unwrap();
+        assert_eq!(
+            subtrie.path,
+            Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]),
+            "Subtrie should have path 0x1234 after second leaf"
+        );
+
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &[0x5, 0x6])
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x6]), &Nibbles::default())
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf2_path, &value2);
+
+        // Step 3: Add leaf at 0x1235 - creates branch at 0x123
+        let (leaf3_path, value3) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x5], 3);
+        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify extension now goes to 0x123
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3]));
+
+        // Verify subtrie path updated to 0x123
+        let subtrie = &trie.lower_subtries[0x12].as_ref().unwrap();
+        assert_eq!(
+            subtrie.path,
+            Nibbles::from_nibbles([0x1, 0x2, 0x3]),
+            "Subtrie should have path 0x123 after third leaf"
+        );
+
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5])
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &[0x5, 0x6])
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]), &Nibbles::default())
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf2_path, &value2)
+            .has_value(&leaf3_path, &value3);
+
+        // Step 4: Add leaf at 0x124 - creates branch at 0x12 (subtrie root)
+        let (leaf4_path, value4) = ctx.create_test_leaf([0x1, 0x2, 0x4], 4);
+        trie.update_leaf(leaf4_path, value4.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify extension now goes to 0x12
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2]));
+
+        // Verify subtrie path updated to 0x12
+        let subtrie = &trie.lower_subtries[0x12].as_ref().unwrap();
+        assert_eq!(
+            subtrie.path,
+            Nibbles::from_nibbles([0x1, 0x2]),
+            "Subtrie should have path 0x12 after fourth leaf"
+        );
+
+        // Verify final structure
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x3, 0x4])
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5])
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &[0x5, 0x6])
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &Nibbles::default())
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf2_path, &value2)
+            .has_value(&leaf3_path, &value3)
+            .has_value(&leaf4_path, &value4);
+    }
+
+    #[test]
     fn test_update_max_depth_paths() {
         let ctx = ParallelSparseTrieTestContext;
         let mut trie =
