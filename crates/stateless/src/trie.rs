@@ -13,6 +13,35 @@ use reth_trie_sparse::{
     SparseTrie,
 };
 
+/// Trait for stateless trie implementations that can be used for stateless validation.
+pub trait StatelessTrieTrait: core::fmt::Debug {
+    /// Initialize the stateless trie using the `ExecutionWitness`
+    fn new(
+        witness: &ExecutionWitness,
+        pre_state_root: B256,
+    ) -> Result<(Self, B256Map<Bytecode>), StatelessValidationError>
+    where
+        Self: Sized;
+
+    /// Returns the `TrieAccount` that corresponds to the `Address`
+    ///
+    /// This method will error if the `ExecutionWitness` is not able to guarantee
+    /// that the account is missing from the Trie _and_ the witness was complete.
+    fn account(&self, address: Address) -> Result<Option<TrieAccount>, ProviderError>;
+
+    /// Returns the storage slot value that corresponds to the given (address, slot) tuple.
+    ///
+    /// This method will error if the `ExecutionWitness` is not able to guarantee
+    /// that the storage was missing from the Trie _and_ the witness was complete.
+    fn storage(&self, address: Address, slot: U256) -> Result<U256, ProviderError>;
+
+    /// Computes the new state root from the `HashedPostState`.
+    fn calculate_state_root(
+        &mut self,
+        state: HashedPostState,
+    ) -> Result<B256, StatelessValidationError>;
+}
+
 /// `StatelessTrie` structure for usage during stateless validation
 #[derive(Debug)]
 pub struct StatelessTrie {
@@ -96,6 +125,30 @@ impl StatelessTrie {
     ) -> Result<B256, StatelessValidationError> {
         calculate_state_root(&mut self.inner, state)
             .map_err(|_e| StatelessValidationError::StatelessStateRootCalculationFailed)
+    }
+}
+
+impl StatelessTrieTrait for StatelessTrie {
+    fn new(
+        witness: &ExecutionWitness,
+        pre_state_root: B256,
+    ) -> Result<(Self, B256Map<Bytecode>), StatelessValidationError> {
+        Self::new(witness, pre_state_root)
+    }
+
+    fn account(&self, address: Address) -> Result<Option<TrieAccount>, ProviderError> {
+        self.account(address)
+    }
+
+    fn storage(&self, address: Address, slot: U256) -> Result<U256, ProviderError> {
+        self.storage(address, slot)
+    }
+
+    fn calculate_state_root(
+        &mut self,
+        state: HashedPostState,
+    ) -> Result<B256, StatelessValidationError> {
+        self.calculate_state_root(state)
     }
 }
 
