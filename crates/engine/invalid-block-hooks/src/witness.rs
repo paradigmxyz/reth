@@ -281,7 +281,7 @@ where
 
             let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
             // Convert bundle state to sorted struct which has BTreeMap instead of HashMap to
-            // have deterministric ordering
+            // have deterministic ordering
             let bundle_state_sorted = BundleStateSorted::from_bundle_state(&bundle_state);
             let output_state_sorted = BundleStateSorted::from_bundle_state(&output.state);
 

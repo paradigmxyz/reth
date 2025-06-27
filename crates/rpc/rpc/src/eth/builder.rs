@@ -12,9 +12,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
-use reth_storage_api::{
-    BlockReaderIdExt, ProviderBlock, ProviderReceipt, StateProviderFactory,
-};
+use reth_storage_api::{BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, StateProviderFactory};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
 use std::sync::Arc;
 
@@ -169,6 +167,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N>
                 Primitives: NodePrimitives<
                     Block = ProviderBlock<N::Provider>,
                     Receipt = ProviderReceipt<N::Provider>,
+                    BlockHeader = ProviderHeader<N::Provider>,
                 >,
             > + 'static,
     {
@@ -195,7 +194,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N>
         let gas_oracle = gas_oracle.unwrap_or_else(|| {
             GasPriceOracle::new(provider.clone(), gas_oracle_config, eth_cache.clone())
         });
-        let fee_history_cache = FeeHistoryCache::new(fee_history_cache_config);
+        let fee_history_cache = FeeHistoryCache::<Provider::Header>::new(fee_history_cache_config);
         let new_canonical_blocks = provider.canonical_state_stream();
         let fhc = fee_history_cache.clone();
         let cache = eth_cache.clone();
@@ -241,6 +240,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N>
                 Primitives: NodePrimitives<
                     Block = ProviderBlock<N::Provider>,
                     Receipt = ProviderReceipt<N::Provider>,
+                    BlockHeader = ProviderHeader<N::Provider>,
                 >,
             > + ChainSpecProvider
             + 'static,

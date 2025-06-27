@@ -1456,8 +1456,11 @@ where
     /// Processes a [`FetchEvent`].
     fn on_fetch_event(&mut self, fetch_event: FetchEvent<N::PooledTransaction>) {
         match fetch_event {
-            FetchEvent::TransactionsFetched { peer_id, transactions } => {
+            FetchEvent::TransactionsFetched { peer_id, transactions, report_peer } => {
                 self.import_transactions(peer_id, transactions, TransactionSource::Response);
+                if report_peer {
+                    self.report_peer(peer_id, ReputationChangeKind::BadTransactions);
+                }
             }
             FetchEvent::FetchError { peer_id, error } => {
                 trace!(target: "net::tx", ?peer_id, %error, "requesting transactions from peer failed");

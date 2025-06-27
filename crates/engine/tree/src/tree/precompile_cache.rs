@@ -191,7 +191,7 @@ where
             }
         }
 
-        let result = self.precompile.call(input.clone());
+        let result = self.precompile.call(input);
 
         match &result {
             Ok(output) => {
@@ -223,6 +223,16 @@ pub(crate) struct CachedPrecompileMetrics {
 
     /// Precompile execution errors.
     precompile_errors: metrics::Counter,
+}
+
+impl CachedPrecompileMetrics {
+    /// Creates a new instance of [`CachedPrecompileMetrics`] with the given address.
+    ///
+    /// Adds address as an `address` label padded with zeros to at least two hex symbols, prefixed
+    /// by `0x`.
+    pub(crate) fn new_with_address(address: Address) -> Self {
+        Self::new_with_labels(&[("address", format!("0x{address:02x}"))])
+    }
 }
 
 #[cfg(test)]

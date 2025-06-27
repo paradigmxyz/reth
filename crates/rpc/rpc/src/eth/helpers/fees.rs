@@ -6,14 +6,18 @@ use reth_rpc_eth_api::{
     RpcNodeCore,
 };
 use reth_rpc_eth_types::{FeeHistoryCache, GasPriceOracle};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderHeader, StateProviderFactory};
 
 use crate::EthApi;
 
 impl<N> EthFees for EthApi<N>
 where
-    N: RpcNodeCore<Provider: BlockReader>,
-    Self: LoadFee,
+    N: RpcNodeCore<Provider: BlockReader +
+        ChainSpecProvider<
+            ChainSpec: EthChainSpec<Header = ProviderHeader<N::Provider>>,
+        >
+    >,
+    Self: LoadFee
 {
 }
 
@@ -32,7 +36,7 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
         self.inner.fee_history_cache()
     }
 }

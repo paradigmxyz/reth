@@ -100,7 +100,11 @@ pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
 ) -> BoxFuture<'static, ()>
 where
     N: NodePrimitives,
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Header = N::BlockHeader>
+        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
+        + Clone
+        + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -122,7 +126,11 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) where
     N: NodePrimitives,
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Header = N::BlockHeader>
+        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
+        + Clone
+        + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -137,8 +145,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             block_gas_limit: latest.gas_limit(),
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number(),
-            pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp()))
+            pending_basefee: chain_spec
+                .next_block_base_fee(latest.header(), latest.timestamp())
                 .unwrap_or_default(),
             pending_blob_fee: latest
                 .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp())),
@@ -317,11 +325,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `new_tip+1`
-                let pending_block_base_fee = new_tip
-                    .header()
-                    .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp()),
-                    )
+                let pending_block_base_fee = chain_spec
+                    .next_block_base_fee(new_tip.header(), new_tip.timestamp())
                     .unwrap_or_default();
                 let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(new_tip.timestamp()),
@@ -423,9 +428,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `tip+1`
-                let pending_block_base_fee = tip
-                    .header()
-                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(tip.timestamp()))
+                let pending_block_base_fee = chain_spec
+                    .next_block_base_fee(tip.header(), tip.timestamp())
                     .unwrap_or_default();
                 let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(tip.timestamp()),

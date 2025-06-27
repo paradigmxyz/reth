@@ -36,6 +36,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_consensus::Header;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
     use reth_evm_ethereum::EthEvmConfig;
@@ -67,7 +68,7 @@ mod tests {
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::<Header>::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
         )
@@ -93,7 +94,7 @@ mod tests {
             DEFAULT_MAX_SIMULATE_BLOCKS,
             DEFAULT_ETH_PROOF_WINDOW + 1,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
-            FeeHistoryCache::new(FeeHistoryCacheConfig::default()),
+            FeeHistoryCache::<Header>::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
         )

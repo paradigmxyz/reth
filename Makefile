@@ -368,7 +368,7 @@ db-tools: ## Compile MDBX debugging tools.
 .PHONY: update-book-cli
 update-book-cli: build-debug ## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./book/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
+	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.

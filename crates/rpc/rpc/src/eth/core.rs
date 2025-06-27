@@ -17,10 +17,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
-use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
-    ProviderTx,
-};
+use reth_storage_api::{BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -128,7 +125,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApi<N>
         max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
+        fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         evm_config: N::Evm,
         proof_permits: usize,
     ) -> Self {
@@ -260,7 +257,7 @@ pub struct EthApiInner<N: RpcNodeCore<Provider: BlockReader>> {
     /// A pool dedicated to CPU heavy blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
-    fee_history_cache: FeeHistoryCache,
+    fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
     /// The type that defines how to configure the EVM
     evm_config: N::Evm,
 
@@ -285,7 +282,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N>
         max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
+        fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         evm_config: N::Evm,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
@@ -388,7 +385,7 @@ impl<N: RpcNodeCore<Provider: BlockReader>> EthApiInner<N> {
 
     /// Returns a handle to the fee history cache.
     #[inline]
-    pub const fn fee_history_cache(&self) -> &FeeHistoryCache {
+    pub const fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
         &self.fee_history_cache
     }
 
@@ -445,7 +442,7 @@ mod tests {
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
-    use reth_chainspec::{BaseFeeParams, ChainSpec, ChainSpecProvider};
+    use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
@@ -557,9 +554,11 @@ mod tests {
 
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
-        base_fees_per_gas
-            .push(last_header.next_block_base_fee(BaseFeeParams::ethereum()).unwrap_or_default()
-                as u128);
+        let spec = mock_provider.chain_spec();
+        base_fees_per_gas.push(
+            spec.next_block_base_fee(&last_header, last_header.timestamp).unwrap_or_default()
+                as u128,
+        );
 
         let eth_api = build_test_eth_api(mock_provider);
 
