@@ -95,8 +95,31 @@ impl ParallelSparseTrie {
     /// Gets or creates a lower subtrie at the given index, updating its path if the provided path
     /// is shorter.
     ///
-    /// This method ensures that the subtrie always has the shortest path among all nodes it
-    /// contains.
+    /// This method is required for correctly handling extension nodes that cross the upper/lower
+    /// trie boundary. Unlike `lower_subtrie_for_path` which always creates subtries with paths
+    /// truncated to `UPPER_TRIE_MAX_DEPTH` (2 nibbles), this method allows subtries to have
+    /// a path field which is consistent with the its root branch node.
+    ///
+    /// This method is meant to be used when we will be adding nodes directly to the trie.
+    ///
+    /// When an extension node in the upper trie extends beyond 2 nibbles (e.g., 0x123), and we
+    /// need to move nodes to the lower subtrie, the subtrie must be created with the full
+    /// extension path (0x123), not just the first 2 nibbles (0x12). Otherwise, it's not possible
+    /// to easily traverse the lower subtrie, since the subtrie root is not easily identifiable
+    /// without the path field being set correctly.
+    ///
+    /// ## Example:
+    ///
+    /// If we have an extension node 0x → 0x123 in the upper trie, and we're inserting nodes
+    /// at 0x1234, 0x1235, and 0x1236:
+    /// - Incorrect: Create subtrie with path 0x12. subtrie.update_leaf would not be able to
+    /// traverse here because it starts at the subtrie path.
+    /// - Correct: Create subtrie with path 0x123. Here subtrie.update_leaf would start at 0x123,
+    /// correctly find the branch node, and proceed normally.
+    ///
+    /// The method also handles path updates: if a subtrie exists with path 0x12345 and we
+    /// insert a node at 0x1234, for example as a result of shortening the extension node and
+    /// creating a branch node, the subtrie path is updated to 0x1234.
     fn get_or_create_lower_subtrie(
         &mut self,
         subtrie_idx: usize,
@@ -273,7 +296,7 @@ impl ParallelSparseTrie {
                 None
             };
 
-            // Get or create the subtrie, updating its path if we have a shorter one
+            // Get or create the subtrie with the exact node path (not truncated to 2 nibbles).
             let subtrie = self.get_or_create_lower_subtrie(subtrie_idx, *node_path);
 
             // Insert the leaf value if we have one
@@ -289,7 +312,10 @@ impl ParallelSparseTrie {
         if let Some(next_path) = next.filter(|n| n.len() >= UPPER_TRIE_MAX_DEPTH) {
             let subtrie_idx = path_subtrie_index_unchecked(&next_path);
 
-            // Get or create the subtrie, updating its path if we have a shorter one
+            // Use get_or_create_lower_subtrie to ensure the subtrie has the correct path.
+            //
+            // The next_path here represents where we need to continue traversal, which may
+            // be longer than 2 nibbles if we're following an extension node.
             let subtrie = self.get_or_create_lower_subtrie(subtrie_idx, next_path);
 
             // Create an empty root at the subtrie path if the subtrie is empty
