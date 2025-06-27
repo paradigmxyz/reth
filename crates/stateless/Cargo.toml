@@ -18,11 +18,15 @@ alloy-rlp.workspace = true
 alloy-trie.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-debug.workspace = true
+alloy-genesis.workspace = true
 
 # reth
 reth-ethereum-consensus.workspace = true
 reth-primitives-traits.workspace = true
-reth-ethereum-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
+reth-ethereum-primitives = { workspace = true, features = [
+    "serde",
+    "serde-bincode-compat",
+] }
 reth-errors.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true
