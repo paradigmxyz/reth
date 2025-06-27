@@ -8973,7 +8973,11 @@ version = "1.4.8"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "chrono",
  "futures-util",
+ "reth-network-api",
+ "reth-provider",
+ "reth-transaction-pool",
  "serde",
  "serde_json",
  "thiserror 2.0.12",

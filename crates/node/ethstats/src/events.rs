@@ -186,7 +186,7 @@ pub struct PendingMsg {
     pub id: String,
 
     /// The pending transaction statistics to report
-    pub pending: PendingStats,
+    pub stats: PendingStats,
 }
 
 impl PendingMsg {
@@ -243,21 +243,42 @@ impl StatsMsg {
     }
 }
 
-/// Latency report message
-#[derive(Serialize, Debug)]
+/// Latency report message used to report network latency to the ethstats monitoring server.
+#[derive(Serialize, Deserialize, Debug)]
 pub struct LatencyMsg {
     /// The node's unique identifier
     pub id: String,
 
-    /// The latency to report
+    /// The latency to report in milliseconds
     pub latency: u64,
 }
 
 impl LatencyMsg {
-    /// Generate a latency message.
+    /// Generate a latency message for the ethstats monitoring server.
     pub fn generate_latency_message(&self) -> String {
         serde_json::json!({
             "emit": ["latency", self]
+        })
+        .to_string()
+    }
+}
+
+/// Ping message sent to the ethstats monitoring server to initiate latency measurement.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PingMsg {
+    /// The node's unique identifier
+    pub id: String,
+    
+    /// Client timestamp when the ping was sent
+    #[serde(rename = "clientTime")]
+    pub client_time: String
+}
+
+impl PingMsg {
+    /// Generate a ping message for the ethstats monitoring server.
+    pub fn generate_ping_message(&self) -> String {
+        serde_json::json!({
+            "emit": ["node-ping", self]
         })
         .to_string()
     }
