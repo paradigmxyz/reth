@@ -10,8 +10,8 @@ use reth_trie_common::{
     BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieNode, CHILD_INDEX_RANGE,
 };
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, RevealedNode}, RlpNodeStackItem, SparseNode,
-    SparseNodeType, SparseTrieUpdates, TrieMasks,
+    blinded::{BlindedProvider, RevealedNode},
+    RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrieUpdates, TrieMasks,
 };
 use smallvec::SmallVec;
 use std::sync::mpsc;
@@ -185,7 +185,7 @@ impl ParallelSparseTrie {
         value: Vec<u8>,
         provider: impl BlindedProvider + Clone,
     ) -> SparseTrieResult<()> {
-        self.prefix_set.insert(path.clone());
+        self.prefix_set.insert(path);
         let existing = self.upper_subtrie.inner.values.insert(path, value.clone());
         if existing.is_some() {
             // upper trie structure unchanged, return immediately
@@ -234,13 +234,13 @@ impl ParallelSparseTrie {
         let mut inserted_values = Vec::new();
 
         // collect any inserted nodes at level 2 in the upper subtrie
-        for path in inserted_nodes.iter() {
+        for path in &inserted_nodes {
             // If we are in an upper subtrie, skip removal
             if SparseSubtrieType::path_len_is_upper(path.len()) {
                 continue
             }
 
-            let full_node = self.upper_subtrie.nodes.remove(&path).unwrap();
+            let full_node = self.upper_subtrie.nodes.remove(path).unwrap();
             if let SparseNode::Leaf { key, .. } = &full_node {
                 // If the node is a leaf, we insert the value into the values list so it can be
                 // re-added to the values map of the lower subtrie.
@@ -255,7 +255,7 @@ impl ParallelSparseTrie {
 
         // Re-insert any created nodes into lower subtries.
         for (node_path, node) in full_inserted_nodes {
-            let Some(subtrie) = self.lower_subtrie_for_path(&node_path) else { return Ok(()) };
+            let Some(subtrie) = self.lower_subtrie_for_path(node_path) else { return Ok(()) };
             subtrie.nodes.insert(*node_path, node);
         }
 
@@ -266,7 +266,7 @@ impl ParallelSparseTrie {
         }
 
         // If we reached the max depth of the upper trie, we may have had more nodes to insert.
-        if next_node.map_or(false, |n| n.len() >= UPPER_TRIE_MAX_DEPTH) {
+        if next_node.is_some_and(|n| n.len() >= UPPER_TRIE_MAX_DEPTH) {
             let Some(subtrie) = self.lower_subtrie_for_path(&path) else { return Ok(()) };
 
             // Create an empty root at the subtrie path if the subtrie is empty
@@ -1006,7 +1006,7 @@ impl SparseSubtrie {
                 }
 
                 // find the common prefix
-                let common = current.common_prefix_length(&path);
+                let common = current.common_prefix_length(path);
 
                 // update existing node
                 let new_ext_key = current.slice(current.len() - current_key.len()..common);
@@ -1040,7 +1040,7 @@ impl SparseSubtrie {
 
                 if !path.starts_with(&current) {
                     // find the common prefix
-                    let common = current.common_prefix_length(&path);
+                    let common = current.common_prefix_length(path);
                     *key = current.slice(current.len() - key.len()..common);
 
                     // If branch node updates retention is enabled, we need to query the
@@ -1711,13 +1711,13 @@ pub struct LeafUpdateStep {
 
 impl LeafUpdateStep {
     /// Creates a new `LeafUpdateStep` with the given next node to process.
-    pub fn with_next_node(next_node: Nibbles) -> Self {
+    pub const fn with_next_node(next_node: Nibbles) -> Self {
         Self { next_node: Some(next_node), changed_nodes: vec![] }
     }
 
     /// Creates a new `LeafUpdateStep` with the given inserted nodes.
-    pub fn with_changed_nodes(inserted_nodes: Vec<Nibbles>) -> Self {
-        Self { next_node: None, changed_nodes: inserted_nodes }
+    pub const fn with_changed_nodes(changed_nodes: Vec<Nibbles>) -> Self {
+        Self { next_node: None, changed_nodes }
     }
 }
 
@@ -1834,11 +1834,8 @@ mod tests {
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
         node_iter::{TrieElement, TrieNodeIter},
         trie_cursor::{noop::NoopAccountTrieCursor, TrieCursor},
-        walker::TrieWalker, HashedPostState,
-    };
-    use reth_trie_sparse::{
-        blinded::{BlindedProvider, RevealedNode, DefaultBlindedProvider},
-        SparseNode, TrieMasks,
+        walker::TrieWalker,
+        HashedPostState,
     };
     use reth_trie_common::{
         prefix_set::PrefixSetMut,
@@ -1846,6 +1843,10 @@ mod tests {
         updates::TrieUpdates,
         BranchNode, ExtensionNode, HashBuilder, LeafNode, RlpNode, TrieMask, TrieNode,
         EMPTY_ROOT_HASH,
+    };
+    use reth_trie_sparse::{
+        blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
+        SparseNode, TrieMasks,
     };
 
     /// Mock blinded provider for testing that allows pre-setting nodes at specific paths.
@@ -3188,10 +3189,10 @@ mod tests {
 
         let (_hash_builder_root, _hash_builder_updates, hash_builder_proof_nodes, _, _) =
             run_hash_builder(
-                [(key.clone(), value())],
+                [(key, value())],
                 NoopAccountTrieCursor::default(),
                 Default::default(),
-                [key.clone()],
+                [key],
             );
 
         let mut sparse = SparseSubtrie::default().with_updates(true);
@@ -3373,18 +3374,10 @@ mod tests {
             (Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x7]), encode_account_value(4)),
         ];
 
-        println!(" ============== ADDING LEAVES ============== ");
-        println!("leaves = {:?}", leaves);
-
         // Insert all leaves
         for (path, value) in &leaves {
-            trie.update_leaf(path.clone(), value.clone(), DefaultBlindedProvider).unwrap();
+            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
         }
-
-        println!(
-            "!!!!!!!!!!!!!!!!!!!!!!!! Trie after adding leaves: {:?} !!!!!!!!!!!!!!!!!!!!!!!!",
-            trie
-        );
 
         // Verify that a lower subtrie was created at index [0x1, 0x2]
         let idx = path_subtrie_index_unchecked(&Nibbles::from_nibbles([0x1, 0x2]));
@@ -3405,7 +3398,6 @@ mod tests {
             if state_mask.is_bit_set(0x4) && state_mask.is_bit_set(0x5)
         );
 
-        println!("Lower subtrie at 0x12: {:?}", lower_subtrie);
         assert_matches!(
             lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x4])),
             Some(SparseNode::Branch { state_mask, .. })
@@ -3421,8 +3413,7 @@ mod tests {
         let updated_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
         let updated_value = encode_account_value(100);
 
-        trie.update_leaf(updated_path.clone(), updated_value.clone(), DefaultBlindedProvider)
-            .unwrap();
+        trie.update_leaf(updated_path, updated_value.clone(), DefaultBlindedProvider).unwrap();
 
         // Verify the subtrie structure is maintained
         let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
@@ -3455,8 +3446,7 @@ mod tests {
         let new_leaf_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x6]);
         let new_leaf_value = encode_account_value(200);
 
-        trie.update_leaf(new_leaf_path.clone(), new_leaf_value.clone(), DefaultBlindedProvider)
-            .unwrap();
+        trie.update_leaf(new_leaf_path, new_leaf_value.clone(), DefaultBlindedProvider).unwrap();
 
         // Verify the branch at [0x1, 0x2, 0x3] now has an additional child
         let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
@@ -3491,7 +3481,7 @@ mod tests {
 
         // Insert all leaves
         for (path, value) in &leaves {
-            trie.update_leaf(path.clone(), value.clone(), DefaultBlindedProvider).unwrap();
+            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
         }
 
         // Verify that a lower subtrie was created at index [0x1, 0x2]
@@ -3537,7 +3527,7 @@ mod tests {
 
         // Insert all leaves
         for (path, value) in &leaves {
-            trie.update_leaf(path.clone(), value.clone(), DefaultBlindedProvider).unwrap();
+            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
         }
 
         // Verify that a lower subtrie was created at index [0x1, 0x2]
