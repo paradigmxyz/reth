@@ -14,7 +14,7 @@ use reth_trie_sparse::{
 };
 
 /// Trait for stateless trie implementations that can be used for stateless validation.
-pub trait StatelessTrieTrait: core::fmt::Debug {
+pub trait StatelessTrie: core::fmt::Debug {
     /// Initialize the stateless trie using the `ExecutionWitness`
     fn new(
         witness: &ExecutionWitness,
@@ -42,13 +42,13 @@ pub trait StatelessTrieTrait: core::fmt::Debug {
     ) -> Result<B256, StatelessValidationError>;
 }
 
-/// `StatelessTrie` structure for usage during stateless validation
+/// `StatelessSparseTrie` structure for usage during stateless validation
 #[derive(Debug)]
-pub struct StatelessTrie {
+pub struct StatelessSparseTrie {
     inner: SparseStateTrie,
 }
 
-impl StatelessTrie {
+impl StatelessSparseTrie {
     /// Initialize the stateless trie using the `ExecutionWitness`
     ///
     /// Note: Currently this method does not check that the `ExecutionWitness`
@@ -128,7 +128,7 @@ impl StatelessTrie {
     }
 }
 
-impl StatelessTrieTrait for StatelessTrie {
+impl StatelessTrie for StatelessSparseTrie {
     fn new(
         witness: &ExecutionWitness,
         pre_state_root: B256,

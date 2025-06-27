@@ -39,7 +39,7 @@ extern crate alloc;
 pub mod trie;
 
 #[doc(inline)]
-pub use trie::StatelessTrieTrait;
+pub use trie::StatelessTrie;
 #[doc(inline)]
 pub use validation::stateless_validation_with_trie;
 

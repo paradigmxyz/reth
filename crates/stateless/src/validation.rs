@@ -1,5 +1,5 @@
 use crate::{
-    trie::{StatelessTrie, StatelessTrieTrait},
+    trie::{StatelessSparseTrie, StatelessTrie},
     witness_db::WitnessDatabase,
     ExecutionWitness,
 };
@@ -138,7 +138,7 @@ where
     ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
-    stateless_validation_with_trie::<StatelessTrie, ChainSpec, E>(
+    stateless_validation_with_trie::<StatelessSparseTrie, ChainSpec, E>(
         current_block,
         witness,
         chain_spec,
@@ -146,10 +146,10 @@ where
     )
 }
 
-/// Performs stateless validation of a block using a custom `StatelessTrieTrait` implementation.
+/// Performs stateless validation of a block using a custom `StatelessTrie` implementation.
 ///
 /// This is a generic version of `stateless_validation` that allows users to provide their own
-/// implementation of the `StatelessTrieTrait` for custom trie backends or optimizations.
+/// implementation of the `StatelessTrie` for custom trie backends or optimizations.
 ///
 /// See `stateless_validation` for detailed documentation of the validation process.
 pub fn stateless_validation_with_trie<T, ChainSpec, E>(
@@ -159,7 +159,7 @@ pub fn stateless_validation_with_trie<T, ChainSpec, E>(
     evm_config: E,
 ) -> Result<B256, StatelessValidationError>
 where
-    T: StatelessTrieTrait,
+    T: StatelessTrie,
     ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {

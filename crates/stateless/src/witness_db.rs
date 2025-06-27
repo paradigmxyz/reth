@@ -1,7 +1,7 @@
 //! Provides the [`WitnessDatabase`] type, an implementation of [`reth_revm::Database`]
 //! specifically designed for stateless execution environments.
 
-use crate::trie::StatelessTrieTrait;
+use crate::trie::StatelessTrie;
 use alloc::{collections::btree_map::BTreeMap, format};
 use alloy_primitives::{map::B256Map, Address, B256, U256};
 use reth_errors::ProviderError;
@@ -11,7 +11,7 @@ use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 ///
 /// This struct implements the [`reth_revm::Database`] trait, allowing the EVM to execute
 /// transactions using:
-///  - Account and storage slot data provided by a [`StatelessTrieTrait`] implementation.
+///  - Account and storage slot data provided by a [`StatelessTrie`] implementation.
 ///  - Bytecode and ancestor block hashes provided by in-memory maps.
 ///
 /// This is designed for stateless execution scenarios where direct access to a full node's
@@ -19,7 +19,7 @@ use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 #[derive(Debug)]
 pub(crate) struct WitnessDatabase<'a, T>
 where
-    T: StatelessTrieTrait,
+    T: StatelessTrie,
 {
     /// Map of block numbers to block hashes.
     /// This is used to service the `BLOCKHASH` opcode.
@@ -40,7 +40,7 @@ where
 
 impl<'a, T> WitnessDatabase<'a, T>
 where
-    T: StatelessTrieTrait,
+    T: StatelessTrie,
 {
     /// Creates a new [`WitnessDatabase`] instance.
     ///
@@ -66,13 +66,13 @@ where
 
 impl<T> Database for WitnessDatabase<'_, T>
 where
-    T: StatelessTrieTrait,
+    T: StatelessTrie,
 {
     /// The database error type.
     type Error = ProviderError;
 
     /// Get basic account information by hashing the address and looking up the account RLP
-    /// in the underlying [`StatelessTrieTrait`] implementation.
+    /// in the underlying [`StatelessTrie`] implementation.
     ///
     /// Returns `Ok(None)` if the account is not found in the trie.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
