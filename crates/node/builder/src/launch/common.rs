@@ -946,13 +946,13 @@ where
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the [`InvalidBlockHook`] to use for the node.
-    pub fn invalid_block_hook(
+    pub async fn invalid_block_hook(
         &self,
     ) -> eyre::Result<Box<dyn InvalidBlockHook<<T::Types as NodeTypes>::Primitives>>> {
         let Some(ref hook) = self.node_config().debug.invalid_block_hook else {
             return Ok(Box::new(NoopInvalidBlockHook::default()))
         };
-        let healthy_node_rpc_client = self.get_healthy_node_client()?;
+        let healthy_node_rpc_client = self.get_healthy_node_client().await?;
 
         let output_directory = self.data_dir().invalid_block_hooks();
         let hooks = hook
@@ -980,33 +980,31 @@ where
     }
 
     /// Returns an RPC client for the healthy node, if configured in the node config.
-    fn get_healthy_node_client(&self) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>> {
-        self.node_config()
-            .debug
-            .healthy_node_rpc_url
-            .as_ref()
-            .map(|url| {
-                let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
+    async fn get_healthy_node_client(
+        &self,
+    ) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>> {
+        let Some(url) = self.node_config().debug.healthy_node_rpc_url.as_ref() else {
+            return Ok(None);
+        };
 
-                // Verify that the healthy node is running the same chain as the current node.
-                let chain_id = futures::executor::block_on(async {
-                    EthApiClient::<
-                        alloy_rpc_types::TransactionRequest,
-                        alloy_rpc_types::Transaction,
-                        alloy_rpc_types::Block,
-                        alloy_rpc_types::Receipt,
-                        alloy_rpc_types::Header,
-                    >::chain_id(&client)
-                    .await
-                })?
-                .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
-                if chain_id.to::<u64>() != self.chain_id().id() {
-                    eyre::bail!("invalid chain id for healthy node: {chain_id}")
-                }
+        let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
 
-                Ok(client)
-            })
-            .transpose()
+        // Verify that the healthy node is running the same chain as the current node.
+        let chain_id = EthApiClient::<
+            alloy_rpc_types::TransactionRequest,
+            alloy_rpc_types::Transaction,
+            alloy_rpc_types::Block,
+            alloy_rpc_types::Receipt,
+            alloy_rpc_types::Header,
+        >::chain_id(&client)
+        .await?
+        .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
+
+        if chain_id.to::<u64>() != self.chain_id().id() {
+            eyre::bail!("invalid chain id for healthy node: {chain_id}")
+        }
+
+        Ok(Some(client))
     }
 }
 
