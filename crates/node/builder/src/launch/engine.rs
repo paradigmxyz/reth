@@ -152,12 +152,6 @@ where
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        // Configure the pipeline
-        let pipeline_exex_handle =
-            maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
-
-        let era_import_source = ctx.era_import_source();
-
         let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
@@ -169,8 +163,8 @@ where
             max_block,
             static_file_producer,
             ctx.components().evm_config().clone(),
-            pipeline_exex_handle,
-            era_import_source,
+            maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
+            ctx.era_import_source(),
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
