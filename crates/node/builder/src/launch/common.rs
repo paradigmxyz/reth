@@ -964,7 +964,7 @@ where
         if !node_config.era.enabled {
             return None;
         }
-        
+
         EraImportSource::maybe_new(
             node_config.era.source.path.clone(),
             node_config.era.source.url.clone(),
