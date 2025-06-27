@@ -13,7 +13,7 @@ use reth_network_peers::NodeRecord;
 #[auto_impl::auto_impl(&, Arc)]
 pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     /// The header type of the network.
-    type Header;
+    type Header: BlockHeader;
 
     /// Returns the [`Chain`] object this spec targets.
     fn chain(&self) -> Chain;
@@ -67,11 +67,7 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn final_paris_total_difficulty(&self) -> Option<U256>;
 
     /// See [`calc_next_block_base_fee`].
-    fn next_block_base_fee<H>(&self, parent: &H, target_timestamp: u64) -> Option<u64>
-    where
-        Self: Sized,
-        H: BlockHeader,
-    {
+    fn next_block_base_fee(&self, parent: &Self::Header, target_timestamp: u64) -> Option<u64> {
         Some(calc_next_block_base_fee(
             parent.gas_used(),
             parent.gas_limit(),

@@ -9,7 +9,11 @@ use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> EthFees for EthApi<Provider, Pool, Network, EvmConfig>
 where
-    Self: LoadFee,
+    Self: LoadFee<
+        Provider: ChainSpecProvider<
+            ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>,
+        >,
+    >,
     Provider: BlockReader,
 {
 }

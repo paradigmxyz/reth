@@ -249,12 +249,9 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
 
 /// Validates the base fee against the parent and EIP-1559 rules.
 #[inline]
-pub fn validate_against_parent_eip1559_base_fee<
-    H: BlockHeader,
-    ChainSpec: EthChainSpec + EthereumHardforks,
->(
-    header: &H,
-    parent: &H,
+pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + EthereumHardforks>(
+    header: &ChainSpec::Header,
+    parent: &ChainSpec::Header,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError> {
     if chain_spec.is_london_active_at_block(header.number()) {
