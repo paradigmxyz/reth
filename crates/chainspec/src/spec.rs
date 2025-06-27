@@ -17,7 +17,7 @@ use alloy_consensus::{
 use alloy_eips::{
     eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
 };
-use alloy_genesis::Genesis;
+use alloy_genesis::{ChainConfig, Genesis};
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
 use alloy_trie::root::state_root_ref_unhashed;
 use core::fmt::Debug;
@@ -637,22 +637,33 @@ impl ChainSpec {
 
 impl From<Genesis> for ChainSpec {
     fn from(genesis: Genesis) -> Self {
+        let mut chain_spec = ChainSpec::from(genesis.config.clone());
+        chain_spec.genesis_header =
+            SealedHeader::new_unhashed(make_genesis_header(&genesis, &chain_spec.hardforks));
+        chain_spec.genesis = genesis;
+
+        chain_spec
+    }
+}
+
+impl From<ChainConfig> for ChainSpec {
+    fn from(config: ChainConfig) -> Self {
         // Block-based hardforks
         let hardfork_opts = [
             (EthereumHardfork::Frontier.boxed(), Some(0)),
-            (EthereumHardfork::Homestead.boxed(), genesis.config.homestead_block),
-            (EthereumHardfork::Dao.boxed(), genesis.config.dao_fork_block),
-            (EthereumHardfork::Tangerine.boxed(), genesis.config.eip150_block),
-            (EthereumHardfork::SpuriousDragon.boxed(), genesis.config.eip155_block),
-            (EthereumHardfork::Byzantium.boxed(), genesis.config.byzantium_block),
-            (EthereumHardfork::Constantinople.boxed(), genesis.config.constantinople_block),
-            (EthereumHardfork::Petersburg.boxed(), genesis.config.petersburg_block),
-            (EthereumHardfork::Istanbul.boxed(), genesis.config.istanbul_block),
-            (EthereumHardfork::MuirGlacier.boxed(), genesis.config.muir_glacier_block),
-            (EthereumHardfork::Berlin.boxed(), genesis.config.berlin_block),
-            (EthereumHardfork::London.boxed(), genesis.config.london_block),
-            (EthereumHardfork::ArrowGlacier.boxed(), genesis.config.arrow_glacier_block),
-            (EthereumHardfork::GrayGlacier.boxed(), genesis.config.gray_glacier_block),
+            (EthereumHardfork::Homestead.boxed(), config.homestead_block),
+            (EthereumHardfork::Dao.boxed(), config.dao_fork_block),
+            (EthereumHardfork::Tangerine.boxed(), config.eip150_block),
+            (EthereumHardfork::SpuriousDragon.boxed(), config.eip155_block),
+            (EthereumHardfork::Byzantium.boxed(), config.byzantium_block),
+            (EthereumHardfork::Constantinople.boxed(), config.constantinople_block),
+            (EthereumHardfork::Petersburg.boxed(), config.petersburg_block),
+            (EthereumHardfork::Istanbul.boxed(), config.istanbul_block),
+            (EthereumHardfork::MuirGlacier.boxed(), config.muir_glacier_block),
+            (EthereumHardfork::Berlin.boxed(), config.berlin_block),
+            (EthereumHardfork::London.boxed(), config.london_block),
+            (EthereumHardfork::ArrowGlacier.boxed(), config.arrow_glacier_block),
+            (EthereumHardfork::GrayGlacier.boxed(), config.gray_glacier_block),
         ];
         let mut hardforks = hardfork_opts
             .into_iter()
@@ -662,33 +673,31 @@ impl From<Genesis> for ChainSpec {
         // We expect no new networks to be configured with the merge, so we ignore the TTD field
         // and merge netsplit block from external genesis files. All existing networks that have
         // merged should have a static ChainSpec already (namely mainnet and sepolia).
-        let paris_block_and_final_difficulty =
-            if let Some(ttd) = genesis.config.terminal_total_difficulty {
-                hardforks.push((
-                    EthereumHardfork::Paris.boxed(),
-                    ForkCondition::TTD {
-                        // NOTE: this will not work properly if the merge is not activated at
-                        // genesis, and there is no merge netsplit block
-                        activation_block_number: genesis
-                            .config
-                            .merge_netsplit_block
-                            .unwrap_or_default(),
-                        total_difficulty: ttd,
-                        fork_block: genesis.config.merge_netsplit_block,
-                    },
-                ));
+        let paris_block_and_final_difficulty = if let Some(ttd) = config.terminal_total_difficulty {
+            hardforks.push((
+                EthereumHardfork::Paris.boxed(),
+                ForkCondition::TTD {
+                    // NOTE: this will not work properly if the merge is not activated at
+                    // genesis, and there is no merge netsplit block
+                    activation_block_number: config
+                        .merge_netsplit_block
+                        .unwrap_or_default(),
+                    total_difficulty: ttd,
+                    fork_block: config.merge_netsplit_block,
+                },
+            ));
 
-                genesis.config.merge_netsplit_block.map(|block| (block, ttd))
-            } else {
-                None
-            };
+            config.merge_netsplit_block.map(|block| (block, ttd))
+        } else {
+            None
+        };
 
         // Time-based hardforks
         let time_hardfork_opts = [
-            (EthereumHardfork::Shanghai.boxed(), genesis.config.shanghai_time),
-            (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
-            (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
-            (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
+            (EthereumHardfork::Shanghai.boxed(), config.shanghai_time),
+            (EthereumHardfork::Cancun.boxed(), config.cancun_time),
+            (EthereumHardfork::Prague.boxed(), config.prague_time),
+            (EthereumHardfork::Osaka.boxed(), config.osaka_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -715,22 +724,24 @@ impl From<Genesis> for ChainSpec {
         ordered_hardforks.append(&mut hardforks);
 
         // Extract blob parameters directly from blob_schedule
-        let blob_params = genesis.config.blob_schedule_blob_params();
+        let blob_params = config.blob_schedule_blob_params();
 
         // NOTE: in full node, we prune all receipts except the deposit contract's. We do not
         // have the deployment block in the genesis file, so we use block zero. We use the same
         // deposit topic as the mainnet contract if we have the deposit contract address in the
         // genesis json.
-        let deposit_contract = genesis.config.deposit_contract_address.map(|address| {
-            DepositContract { address, block: 0, topic: MAINNET_DEPOSIT_CONTRACT.topic }
+        let deposit_contract = config.deposit_contract_address.map(|address| DepositContract {
+            address,
+            block: 0,
+            topic: MAINNET_DEPOSIT_CONTRACT.topic,
         });
 
         let hardforks = ChainHardforks::new(ordered_hardforks);
 
         Self {
-            chain: genesis.config.chain_id.into(),
-            genesis_header: SealedHeader::new_unhashed(make_genesis_header(&genesis, &hardforks)),
-            genesis,
+            chain: config.chain_id.into(),
+            genesis_header: Default::default(),
+            genesis: Default::default(),
             hardforks,
             paris_block_and_final_difficulty,
             deposit_contract,
