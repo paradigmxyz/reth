@@ -182,6 +182,7 @@ Label PRs appropriately, first check the available labels and then apply the rel
 * when changes are docs related, add C-docs label
 * when changes are optimism related (e.g. new feature or exclusive changes to crates/optimism), add A-op-reth label
 * ... and so on, check the available labels for more options.
+* if being tasked to open a pr, ensure that all changes are properly formatted: `cargo +nightly fmt --all`
 
 If changes in reth include changes to dependencies, run commands `zepter` and `make lint-toml` before finalizing the pr. Assume `zepter` binary is installed.
 
