@@ -2,7 +2,7 @@
 //!
 //! ## Launch Context Type System
 //!
-//! The node launch process uses a type-state pattern to ensure correct initialization 
+//! The node launch process uses a type-state pattern to ensure correct initialization
 //! order at compile time. Methods are only available when their prerequisites are met.
 //!
 //! ### Core Types
@@ -15,7 +15,7 @@
 //!
 //! - [`WithConfigs`]: Node config + TOML config
 //! - [`WithMeteredProvider`]: Provider factory with metrics
-//! - [`WithMeteredProviders`]: Provider factory + blockchain provider  
+//! - [`WithMeteredProviders`]: Provider factory + blockchain provider
 //! - [`WithComponents`]: Final form with all components
 //!
 //! ### Method Availability
