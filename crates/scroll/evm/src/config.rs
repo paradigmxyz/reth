@@ -17,12 +17,12 @@ use revm::{
 };
 use revm_scroll::ScrollSpecId;
 use scroll_alloy_evm::{
-    ScrollBlockExecutionCtx, ScrollBlockExecutorFactory, ScrollReceiptBuilder,
-    ScrollTransactionIntoTxEnv,
+    ScrollBlockExecutionCtx, ScrollBlockExecutorFactory, ScrollPrecompilesFactory,
+    ScrollReceiptBuilder, ScrollTransactionIntoTxEnv,
 };
 use scroll_alloy_hardforks::ScrollHardforks;
 
-impl<ChainSpec, N, R> ConfigureEvm for ScrollEvmConfig<ChainSpec, N, R>
+impl<ChainSpec, N, R, P> ConfigureEvm for ScrollEvmConfig<ChainSpec, N, R, P>
 where
     ChainSpec: EthChainSpec + ChainConfig<Config = ScrollChainConfig> + ScrollHardforks,
     N: NodePrimitives<
@@ -35,12 +35,13 @@ where
     ScrollTransactionIntoTxEnv<TxEnv>:
         FromRecoveredTx<N::SignedTx> + FromTxWithEncoded<N::SignedTx>,
     R: ScrollReceiptBuilder<Receipt = ScrollReceipt, Transaction: SignedTransaction>,
+    P: ScrollPrecompilesFactory,
     Self: Send + Sync + Unpin + Clone + 'static,
 {
     type Primitives = N;
     type Error = Infallible;
     type NextBlockEnvCtx = ScrollNextBlockEnvAttributes;
-    type BlockExecutorFactory = ScrollBlockExecutorFactory<R, Arc<ChainSpec>>;
+    type BlockExecutorFactory = ScrollBlockExecutorFactory<R, Arc<ChainSpec>, P>;
     type BlockAssembler = ScrollBlockAssembler<ChainSpec>;
 
     fn block_executor_factory(&self) -> &Self::BlockExecutorFactory {

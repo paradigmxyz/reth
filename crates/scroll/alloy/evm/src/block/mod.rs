@@ -10,8 +10,8 @@ use crate::{
         feynman::apply_feynman_hard_fork,
     },
     system_caller::ScrollSystemCaller,
-    FromTxWithCompressionRatio, ScrollEvm, ScrollEvmFactory, ScrollTransactionIntoTxEnv,
-    ToTxWithCompressionRatio,
+    FromTxWithCompressionRatio, ScrollDefaultPrecompilesFactory, ScrollEvm, ScrollEvmFactory,
+    ScrollPrecompilesFactory, ScrollTransactionIntoTxEnv, ToTxWithCompressionRatio,
 };
 use alloc::{boxed::Box, format, vec::Vec};
 
@@ -338,19 +338,20 @@ where
 
 /// Scroll block executor factory.
 #[derive(Debug, Clone, Default, Copy)]
-pub struct ScrollBlockExecutorFactory<R, Spec = ScrollHardfork, EvmFactory = ScrollEvmFactory> {
+pub struct ScrollBlockExecutorFactory<R, Spec = ScrollHardfork, P = ScrollDefaultPrecompilesFactory>
+{
     /// Receipt builder.
     receipt_builder: R,
     /// Chain specification.
     spec: Spec,
     /// EVM factory.
-    evm_factory: EvmFactory,
+    evm_factory: ScrollEvmFactory<P>,
 }
 
-impl<R, Spec, EvmFactory> ScrollBlockExecutorFactory<R, Spec, EvmFactory> {
+impl<R, Spec, P> ScrollBlockExecutorFactory<R, Spec, P> {
     /// Creates a new [`ScrollBlockExecutorFactory`] with the given receipt builder, spec and
     /// factory.
-    pub const fn new(receipt_builder: R, spec: Spec, evm_factory: EvmFactory) -> Self {
+    pub const fn new(receipt_builder: R, spec: Spec, evm_factory: ScrollEvmFactory<P>) -> Self {
         Self { receipt_builder, spec, evm_factory }
     }
 
@@ -365,20 +366,21 @@ impl<R, Spec, EvmFactory> ScrollBlockExecutorFactory<R, Spec, EvmFactory> {
     }
 
     /// Exposes the EVM factory.
-    pub const fn evm_factory(&self) -> &EvmFactory {
+    pub const fn evm_factory(&self) -> &ScrollEvmFactory<P> {
         &self.evm_factory
     }
 }
 
-impl<R, Spec> BlockExecutorFactory for ScrollBlockExecutorFactory<R, Spec>
+impl<R, Spec, P> BlockExecutorFactory for ScrollBlockExecutorFactory<R, Spec, P>
 where
     R: ScrollReceiptBuilder<Transaction: Transaction + Encodable2718, Receipt: TxReceipt>,
     Spec: ScrollHardforks,
+    P: ScrollPrecompilesFactory,
     ScrollTransactionIntoTxEnv<TxEnv>:
         FromRecoveredTx<R::Transaction> + FromTxWithEncoded<R::Transaction>,
     Self: 'static,
 {
-    type EvmFactory = ScrollEvmFactory;
+    type EvmFactory = ScrollEvmFactory<P>;
     type ExecutionCtx<'a> = ScrollBlockExecutionCtx;
     type Transaction = R::Transaction;
     type Receipt = R::Receipt;
@@ -389,12 +391,12 @@ where
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: <ScrollEvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
+        evm: <Self::EvmFactory as EvmFactory>::Evm<&'a mut State<DB>, I>,
         ctx: Self::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
         DB: Database + 'a,
-        I: Inspector<ScrollContext<&'a mut State<DB>>> + 'a,
+        I: Inspector<<Self::EvmFactory as EvmFactory>::Context<&'a mut State<DB>>> + 'a,
     {
         ScrollBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
     }
