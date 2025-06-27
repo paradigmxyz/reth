@@ -9,12 +9,14 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
 use reth_config::Config;
-use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder, NetworkPrimitives};
+use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs, NetworkArgs},
     utils::get_single_header,
 };
+
+use crate::common::CliNodeTypes;
 
 pub mod bootnode;
 mod rlpx;
@@ -76,7 +78,7 @@ pub enum Subcommands {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `p2p` command
-    pub async fn execute<N: NetworkPrimitives>(self) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
 
@@ -100,7 +102,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let rlpx_socket = (self.network.addr, self.network.port).into();
         let boot_nodes = self.chain.bootnodes().unwrap_or_default();
 
-        let net = NetworkConfigBuilder::<N>::new(p2p_secret_key)
+        let net = NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(None))
             .external_ip_resolver(self.network.nat)
             .disable_discv4_discovery_if(self.chain.chain().is_optimism())
