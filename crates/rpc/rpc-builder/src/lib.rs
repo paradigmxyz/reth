@@ -51,7 +51,7 @@ use reth_storage_api::{
     StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{noop::NoopTransactionPool, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -126,9 +126,6 @@ pub struct RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
 
 impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus>
-where
-    N: NodePrimitives,
-    EvmConfig: Clone,
 {
     /// Create a new instance of the builder
     pub const fn new(
@@ -146,12 +143,7 @@ where
     pub fn with_provider<P>(
         self,
         provider: P,
-    ) -> RpcModuleBuilder<N, P, Pool, Network, EvmConfig, Consensus>
-    where
-        P: BlockReader<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
-            + StateProviderFactory
-            + 'static,
-    {
+    ) -> RpcModuleBuilder<N, P, Pool, Network, EvmConfig, Consensus> {
         let Self { pool, network, executor, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
@@ -160,10 +152,7 @@ where
     pub fn with_pool<P>(
         self,
         pool: P,
-    ) -> RpcModuleBuilder<N, Provider, P, Network, EvmConfig, Consensus>
-    where
-        P: TransactionPool<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
-    {
+    ) -> RpcModuleBuilder<N, Provider, P, Network, EvmConfig, Consensus> {
         let Self { provider, network, executor, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
@@ -192,10 +181,7 @@ where
     pub fn with_network<Net>(
         self,
         network: Net,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Net, EvmConfig, Consensus>
-    where
-        Net: NetworkInfo + Peers + 'static,
-    {
+    ) -> RpcModuleBuilder<N, Provider, Pool, Net, EvmConfig, Consensus> {
         let Self { provider, pool, executor, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
@@ -247,11 +233,7 @@ where
     pub fn with_evm_config<E>(
         self,
         evm_config: E,
-    ) -> RpcModuleBuilder<N, Provider, Pool, Network, E, Consensus>
-    where
-        EvmConfig: 'static,
-        E: ConfigureEvm + Clone,
-    {
+    ) -> RpcModuleBuilder<N, Provider, Pool, Network, E, Consensus> {
         let Self { provider, pool, executor, network, consensus, _primitives, .. } = self;
         RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
@@ -288,6 +270,7 @@ where
     /// See also [`EthApiBuilder`].
     pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
     where
+        N: NodePrimitives,
         Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
             + StateProviderFactory
             + CanonStateSubscriptions<Primitives = N>
