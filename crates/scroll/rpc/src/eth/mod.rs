@@ -1,6 +1,7 @@
 //! Scroll-Reth `eth_` endpoint implementation.
 
 use alloy_primitives::U256;
+use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -40,6 +41,8 @@ mod pending_block;
 pub mod receipt;
 pub mod transaction;
 
+use crate::SequencerClient;
+
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
     <N as RpcNodeCore>::Provider,
@@ -74,8 +77,8 @@ pub struct ScrollEthApi<N: ScrollNodeCore, NetworkT = Scroll> {
 
 impl<N: ScrollNodeCore, NetworkT> ScrollEthApi<N, NetworkT> {
     /// Creates a new [`ScrollEthApi`].
-    pub fn new(eth_api: EthApiNodeBackend<N>) -> Self {
-        let inner = Arc::new(ScrollEthApiInner { eth_api });
+    pub fn new(eth_api: EthApiNodeBackend<N>, sequencer_client: Option<SequencerClient>) -> Self {
+        let inner = Arc::new(ScrollEthApiInner { eth_api, sequencer_client });
         Self {
             inner: inner.clone(),
             _nt: PhantomData,
@@ -97,6 +100,11 @@ where
     /// Returns a reference to the [`EthApiNodeBackend`].
     pub fn eth_api(&self) -> &EthApiNodeBackend<N> {
         self.inner.eth_api()
+    }
+
+    /// Returns the configured sequencer client, if any.
+    pub fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.inner.sequencer_client()
     }
 
     /// Return a builder for the [`ScrollEthApi`].
@@ -302,6 +310,9 @@ impl<N: ScrollNodeCore, NetworkT> fmt::Debug for ScrollEthApi<N, NetworkT> {
 pub struct ScrollEthApiInner<N: ScrollNodeCore> {
     /// Gateway to node's core components.
     pub eth_api: EthApiNodeBackend<N>,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given Scroll
+    /// network.
+    sequencer_client: Option<SequencerClient>,
 }
 
 impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
@@ -309,16 +320,31 @@ impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
     const fn eth_api(&self) -> &EthApiNodeBackend<N> {
         &self.eth_api
     }
+
+    /// Returns the configured sequencer client, if any.
+    const fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.sequencer_client.as_ref()
+    }
 }
 
 /// A type that knows how to build a [`ScrollEthApi`].
 #[derive(Debug, Default)]
-pub struct ScrollEthApiBuilder {}
+pub struct ScrollEthApiBuilder {
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given Scroll
+    /// network.
+    sequencer_url: Option<String>,
+}
 
 impl ScrollEthApiBuilder {
     /// Creates a [`ScrollEthApiBuilder`] instance.
     pub const fn new() -> Self {
-        Self {}
+        Self { sequencer_url: None }
+    }
+
+    /// With a [`SequencerClient`].
+    pub fn with_sequencer(mut self, sequencer_url: Option<String>) -> Self {
+        self.sequencer_url = sequencer_url;
+        self
     }
 }
 
@@ -330,6 +356,7 @@ where
     type EthApi = ScrollEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
+        let Self { sequencer_url } = self;
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -345,6 +372,16 @@ where
         .proof_permits(ctx.config.proof_permits)
         .build_inner();
 
-        Ok(ScrollEthApi::new(eth_api))
+        let sequencer_client = if let Some(url) = sequencer_url {
+            Some(
+                SequencerClient::new(&url)
+                    .await
+                    .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
+            )
+        } else {
+            None
+        };
+
+        Ok(ScrollEthApi::new(eth_api, sequencer_client))
     }
 }

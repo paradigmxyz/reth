@@ -61,6 +61,7 @@ tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thre
 aquamarine.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 eyre.workspace = true
+alloy-transport.workspace = true
 
 [dev-dependencies]
 backon.workspace = true

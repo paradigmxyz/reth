@@ -2,7 +2,7 @@
 
 use crate::{
     eth::{ScrollEthApiInner, ScrollNodeCore},
-    ScrollEthApi,
+    ScrollEthApi, SequencerClient,
 };
 use alloy_consensus::transaction::TransactionInfo;
 use alloy_primitives::{Bytes, B256};
@@ -41,6 +41,15 @@ where
         let recovered = recover_raw_transaction(&tx)?;
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
+        // On scroll, transactions are forwarded directly to the sequencer to be included in
+        // blocks that it builds.
+        if let Some(client) = self.raw_tx_forwarder().as_ref() {
+            tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to sequencer");
+            let _ = client.forward_raw_transaction(&tx).await.inspect_err(|err| {
+                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
+                });
+        }
+
         // submit the transaction to the pool with a `Local` origin
         let hash = self
             .pool()
@@ -58,6 +67,16 @@ where
     N: ScrollNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
     Self::Pool: TransactionPool,
 {
+}
+
+impl<N> ScrollEthApi<N>
+where
+    N: ScrollNodeCore,
+{
+    /// Returns the [`SequencerClient`] if one is set.
+    pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
+        self.inner.sequencer_client.clone()
+    }
 }
 
 /// Scroll implementation of [`TxInfoMapper`].

@@ -7195,6 +7195,7 @@ name = "reth"
 version = "1.4.8"
 dependencies = [
  "alloy-rpc-types",
+ "alloy-transport",
  "aquamarine",
  "backon",
  "clap",
@@ -10393,11 +10394,16 @@ name = "reth-scroll-rpc"
 version = "1.4.8"
 dependencies = [
  "alloy-consensus",
+ "alloy-json-rpc",
  "alloy-primitives",
+ "alloy-rpc-client",
  "alloy-rpc-types-eth",
+ "alloy-transport",
+ "alloy-transport-http",
  "eyre",
  "jsonrpsee-types",
  "parking_lot",
+ "reqwest",
  "reth-chainspec",
  "reth-evm",
  "reth-network-api",
@@ -10422,6 +10428,7 @@ dependencies = [
  "scroll-alloy-rpc-types",
  "thiserror 2.0.12",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

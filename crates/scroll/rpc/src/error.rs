@@ -1,6 +1,8 @@
 //! RPC errors specific to Scroll.
 
 use alloy_rpc_types_eth::BlockError;
+use alloy_transport::{RpcError, TransportErrorKind};
+use jsonrpsee_types::error::{INTERNAL_ERROR_CODE};
 use reth_evm::execute::ProviderError;
 use reth_rpc_eth_api::{AsEthApiError, TransactionConversionError};
 use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
@@ -60,5 +62,26 @@ impl From<TransactionConversionError> for ScrollEthApiError {
 impl From<ProviderError> for ScrollEthApiError {
     fn from(value: ProviderError) -> Self {
         Self::Eth(EthApiError::from(value))
+    }
+}
+
+/// Error type when interacting with the Sequencer
+#[derive(Debug, thiserror::Error)]
+pub enum SequencerClientError {
+    /// Wrapper around an [`RpcError<TransportErrorKind>`].
+    #[error(transparent)]
+    HttpError(#[from] RpcError<TransportErrorKind>),
+    /// Thrown when serializing transaction to forward to sequencer
+    #[error("invalid sequencer transaction")]
+    InvalidSequencerTransaction,
+}
+
+impl From<SequencerClientError> for jsonrpsee_types::error::ErrorObject<'static> {
+    fn from(err: SequencerClientError) -> Self {
+        jsonrpsee_types::error::ErrorObject::owned(
+            INTERNAL_ERROR_CODE,
+            err.to_string(),
+            None::<String>,
+        )
     }
 }
