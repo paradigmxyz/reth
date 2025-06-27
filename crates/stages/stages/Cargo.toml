@@ -121,7 +121,6 @@ test-utils = [
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
-skip-state-root-validation = []
 
 [[bench]]
 name = "criterion"

@@ -89,10 +89,6 @@ default = ["reth-codec", "scroll-alloy-traits"]
 reth-codec = [
     "reth-scroll-primitives/reth-codec",
 ]
-skip-state-root-validation = [
-    "reth-provider/skip-state-root-validation",
-    "reth-node-builder/skip-state-root-validation",
-]
 test-utils = [
     "dep:alloy-genesis",
     "dep:reth-e2e-test-utils",

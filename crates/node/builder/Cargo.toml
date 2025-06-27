@@ -111,7 +111,3 @@ op = [
     "reth-engine-local/op",
     "reth-evm/op",
 ]
-skip-state-root-validation = [
-    "reth-stages/skip-state-root-validation",
-    "reth-engine-tree/skip-state-root-validation",
-]

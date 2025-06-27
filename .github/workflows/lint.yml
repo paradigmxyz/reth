@@ -22,7 +22,7 @@ jobs:
             features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
           - type: scroll
             args: --bin scroll-reth --workspace --lib --examples --tests --benches --locked
-            features: "skip-state-root-validation asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
+            features: "asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
     #  issue <https://github.com/scroll-tech/reth/issues/250>
     #  - type: book
     #    args: --manifest-path book/sources/Cargo.toml --workspace --bins

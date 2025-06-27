@@ -23,7 +23,7 @@ jobs:
         bin:
           - cargo run --bin reth --features "dev"
           - cargo run --bin op-reth --features "dev" --manifest-path crates/optimism/bin/Cargo.toml
-          - cargo run --bin scroll-reth --features "skip-state-root-validation dev" --manifest-path crates/scroll/bin/scroll-reth/Cargo.toml
+          - cargo run --bin scroll-reth --features "dev" --manifest-path crates/scroll/bin/scroll-reth/Cargo.toml
     steps:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable

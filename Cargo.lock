@@ -11677,8 +11677,6 @@ version = "1.4.8"
 dependencies = [
  "clap",
  "reth-cli-util",
- "reth-engine-local",
- "reth-provider",
  "reth-scroll-cli",
  "reth-scroll-node",
  "tracing",

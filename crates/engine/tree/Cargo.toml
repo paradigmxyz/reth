@@ -139,4 +139,3 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
-skip-state-root-validation = ["reth-stages/skip-state-root-validation"]

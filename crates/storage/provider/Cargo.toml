@@ -102,4 +102,3 @@ test-utils = [
     "revm-state",
     "tokio",
 ]
-skip-state-root-validation = []

@@ -58,7 +58,6 @@ install-op: ## Build and install the op-reth binary under `~/.cargo/bin`.
 .PHONY: install-scroll
 install-scroll: ## Build and install the scroll-reth binary under `~/.cargo/bin`.
 	cargo install --path crates/scroll/bin/scroll-reth --bin scroll-reth --force --locked \
-		--features "skip-state-root-validation" \
 		--profile "$(PROFILE)" \
 		$(CARGO_INSTALL_EXTRA_FLAGS)
 
@@ -430,7 +429,7 @@ lint-scroll-reth:
 	--examples \
 	--tests \
 	--benches \
-	--features "$(BIN_OTHER_FEATURES) skip-state-root-validation" \
+	--features "$(BIN_OTHER_FEATURES)" \
 	-- -D warnings
 
 lint-all:

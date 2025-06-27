@@ -14,8 +14,6 @@ workspace = true
 [dependencies]
 # reth
 reth-cli-util.workspace = true
-reth-engine-local = { workspace = true, features = ["scroll-alloy-traits"] }
-reth-provider.workspace = true
 
 # scroll
 reth-scroll-cli.workspace = true
@@ -26,13 +24,8 @@ clap = { workspace = true, features = ["derive", "env"] }
 tracing.workspace = true
 
 [features]
-skip-state-root-validation = [
-    "reth-scroll-node/skip-state-root-validation",
-    "reth-provider/skip-state-root-validation",
-]
 dev = ["reth-scroll-cli/dev"]
 
 [[bin]]
 name = "scroll-reth"
 path = "src/main.rs"
-required-features = ["skip-state-root-validation"]
