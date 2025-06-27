@@ -201,7 +201,7 @@ where
     let (mut trie, bytecode) = T::new(&witness, pre_state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
-    let db = WitnessDatabase::new(&trie as &dyn StatelessTrieTrait, bytecode, ancestor_hashes);
+    let db = WitnessDatabase::new(&trie, bytecode, ancestor_hashes);
 
     // Execute the block
     let executor = evm_config.executor(db);

@@ -17,7 +17,10 @@ use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 /// This is designed for stateless execution scenarios where direct access to a full node's
 /// database is not available or desired.
 #[derive(Debug)]
-pub(crate) struct WitnessDatabase<'a> {
+pub(crate) struct WitnessDatabase<'a, T>
+where
+    T: StatelessTrieTrait,
+{
     /// Map of block numbers to block hashes.
     /// This is used to service the `BLOCKHASH` opcode.
     // TODO: use Vec instead -- ancestors should be contiguous
@@ -32,10 +35,13 @@ pub(crate) struct WitnessDatabase<'a> {
     /// TODO: Ideally we do not have this trie and instead a simple map.
     /// TODO: Then as a corollary we can avoid unnecessary hashing in `Database::storage`
     /// TODO: and `Database::basic` without needing to cache the hashed Addresses and Keys
-    trie: &'a dyn StatelessTrieTrait,
+    trie: &'a T,
 }
 
-impl<'a> WitnessDatabase<'a> {
+impl<'a, T> WitnessDatabase<'a, T>
+where
+    T: StatelessTrieTrait,
+{
     /// Creates a new [`WitnessDatabase`] instance.
     ///
     /// # Assumptions
@@ -50,7 +56,7 @@ impl<'a> WitnessDatabase<'a> {
     ///    contiguous chain of blocks. The caller is responsible for verifying the contiguity and
     ///    the block limit.
     pub(crate) fn new(
-        trie: &'a dyn StatelessTrieTrait,
+        trie: &'a T,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: BTreeMap<u64, B256>,
     ) -> Self {
@@ -58,7 +64,10 @@ impl<'a> WitnessDatabase<'a> {
     }
 }
 
-impl Database for WitnessDatabase<'_> {
+impl<T> Database for WitnessDatabase<'_, T>
+where
+    T: StatelessTrieTrait,
+{
     /// The database error type.
     type Error = ProviderError;
 
