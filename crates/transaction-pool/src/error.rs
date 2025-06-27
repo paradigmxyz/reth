@@ -319,7 +319,10 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
-            Self::MaxTxGasLimitExceeded(_, _) => true,
+            Self::MaxTxGasLimitExceeded(_, _) => {
+                // local setting
+                false
+            }
             Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
             Self::OversizedData(_, _) => true,
