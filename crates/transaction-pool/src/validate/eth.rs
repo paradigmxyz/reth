@@ -800,7 +800,6 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
             // max blob count is prague by default
             max_blob_count: BlobParams::prague().max_blob_count,
-
         }
     }
 
@@ -1123,9 +1122,7 @@ pub fn ensure_intrinsic_gas<T: EthPoolTransaction>(
         spec_id,
         transaction.input(),
         transaction.is_create(),
-        transaction
-            .access_list()
-            .map(|l| l.len()).unwrap_or_default() as u64,
+        transaction.access_list().map(|l| l.len()).unwrap_or_default() as u64,
         transaction
             .access_list()
             .map(|l| l.iter().map(|i| i.storage_keys.len()).sum::<usize>())
@@ -1288,7 +1285,7 @@ mod tests {
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider)
             .set_tx_fee_cap(0) // no cap
-            .build(blob_store.clone());
+            .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
@@ -1306,7 +1303,7 @@ mod tests {
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider)
             .set_tx_fee_cap(2e18 as u128) // 2 ETH cap
-            .build(blob_store.clone());
+            .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
@@ -1356,7 +1353,7 @@ mod tests {
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider)
             .with_max_tx_gas_limit(None) // disabled
-            .build(blob_store.clone());
+            .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
@@ -1374,7 +1371,7 @@ mod tests {
         let blob_store = InMemoryBlobStore::default();
         let validator = EthTransactionValidatorBuilder::new(provider)
             .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
-            .build(blob_store.clone());
+            .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
