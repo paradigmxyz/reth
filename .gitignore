@@ -55,7 +55,7 @@ rustc-ice-*
 book/sources/Cargo.lock
 
 # vocs node_modules
-book/vocs/node_modules
+docs/vocs/node_modules
 
 # Cargo chef recipe file
 recipe.json
