@@ -92,6 +92,27 @@ impl ParallelSparseTrie {
         }
     }
 
+    /// Gets or creates a lower subtrie at the given index, updating its path if the provided path
+    /// is shorter.
+    ///
+    /// This method ensures that the subtrie always has the shortest path among all nodes it
+    /// contains.
+    fn get_or_create_lower_subtrie(
+        &mut self,
+        subtrie_idx: usize,
+        path: Nibbles,
+    ) -> &mut Box<SparseSubtrie> {
+        let subtrie = self.lower_subtries[subtrie_idx]
+            .get_or_insert_with(|| Box::new(SparseSubtrie::new(path)));
+
+        // If this path is shorter than the current subtrie path, update it
+        if path.len() < subtrie.path.len() {
+            subtrie.path = path;
+        }
+
+        subtrie
+    }
+
     /// Creates a new revealed sparse trie from the given root node.
     ///
     /// # Returns
@@ -230,48 +251,46 @@ impl ParallelSparseTrie {
             }
         }
 
-        let mut inserted_nodes = Vec::new();
-        let mut inserted_values = Vec::new();
-
-        // collect any nodes created in the upper subtrie that should now be in a lower subtrie
+        // Move nodes from upper subtrie to lower subtries
         for node_path in &new_nodes {
-            // If we are in an upper subtrie, skip removal
+            // Skip nodes that belong in the upper subtrie
             if SparseSubtrieType::path_len_is_upper(node_path.len()) {
                 continue
             }
 
+            let subtrie_idx = path_subtrie_index_unchecked(node_path);
             let node = self.upper_subtrie.nodes.remove(node_path).unwrap();
-            if let SparseNode::Leaf { key, .. } = &node {
-                // If a leaf was created in the upper subtrie, we remove its value so it can be
-                // added to the values map of the lower subtrie.
+
+            // If it's a leaf node, extract its value before getting mutable reference to subtrie
+            let leaf_value = if let SparseNode::Leaf { key, .. } = &node {
                 let mut leaf_full_path = *node_path;
                 leaf_full_path.extend(key);
-                let value = self.upper_subtrie.inner.values.remove(&leaf_full_path).unwrap();
-                inserted_values.push((leaf_full_path, value));
+                Some((
+                    leaf_full_path,
+                    self.upper_subtrie.inner.values.remove(&leaf_full_path).unwrap(),
+                ))
+            } else {
+                None
+            };
+
+            // Get or create the subtrie, updating its path if we have a shorter one
+            let subtrie = self.get_or_create_lower_subtrie(subtrie_idx, *node_path);
+
+            // Insert the leaf value if we have one
+            if let Some((leaf_full_path, value)) = leaf_value {
+                subtrie.inner.values.insert(leaf_full_path, value);
             }
 
-            inserted_nodes.push((node_path, node));
-        }
-
-        // Re-insert any created nodes into lower subtries.
-        for (node_path, node) in inserted_nodes {
-            // We never insert nodes that have a path in the upper subtrie into this list , so the
-            // unwrap is safe here
-            let subtrie = self.lower_subtrie_for_path(node_path).unwrap();
+            // Insert the node into the lower subtrie
             subtrie.nodes.insert(*node_path, node);
         }
 
-        // Re-insert any created values into lower subtries.
-        for (leaf_full_path, value) in inserted_values {
-            // We never insert nodes that have a path in the upper subtrie into this list, so the
-            // unwrap is safe here
-            let subtrie = self.lower_subtrie_for_path(&leaf_full_path).unwrap();
-            subtrie.inner.values.insert(leaf_full_path, value);
-        }
-
         // If we reached the max depth of the upper trie, we may have had more nodes to insert.
-        if next.is_some_and(|n| n.len() >= UPPER_TRIE_MAX_DEPTH) {
-            let Some(subtrie) = self.lower_subtrie_for_path(&path) else { return Ok(()) };
+        if let Some(next_path) = next.filter(|n| n.len() >= UPPER_TRIE_MAX_DEPTH) {
+            let subtrie_idx = path_subtrie_index_unchecked(&next_path);
+
+            // Get or create the subtrie, updating its path if we have a shorter one
+            let subtrie = self.get_or_create_lower_subtrie(subtrie_idx, next_path);
 
             // Create an empty root at the subtrie path if the subtrie is empty
             if subtrie.nodes.is_empty() {
@@ -3944,9 +3963,9 @@ mod tests {
         let (leaf2_path, value2) = ctx.create_test_leaf([0x2, 0x3, 0x4, 0x5], 2);
         let (leaf3_path, value3) = ctx.create_test_leaf([0x2, 0x3, 0x5, 0x6], 3);
 
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf1_path, value1, DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2, DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf3_path, value3, DefaultBlindedProvider).unwrap();
 
         // Verify initial structure has branch at root
         ctx.assert_upper_subtrie(&trie).has_branch(&Nibbles::default(), &[0x1, 0x2]);
@@ -3957,8 +3976,9 @@ mod tests {
         let (new_leaf2_path, new_value2) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x5], 11);
         let (new_leaf3_path, new_value3) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x6], 12);
 
-        // Clear the trie and add new leaves
-        trie = ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+        // Clear and add new leaves
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
         trie.update_leaf(new_leaf1_path, new_value1.clone(), DefaultBlindedProvider).unwrap();
         trie.update_leaf(new_leaf2_path, new_value2.clone(), DefaultBlindedProvider).unwrap();
         trie.update_leaf(new_leaf3_path, new_value3.clone(), DefaultBlindedProvider).unwrap();
@@ -3967,19 +3987,12 @@ mod tests {
         ctx.assert_upper_subtrie(&trie)
             .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3]));
 
-        // BUG DISCOVERED: The third leaf (0x1236) has its value stored but the leaf node
-        // is missing from the trie structure. This causes the branch to only have bits 4 and 5
-        // set in its state_mask, not bit 6.
-        //
-        // This appears to be a bug in update_leaf where it can store a value without properly
-        // creating the corresponding leaf node in the trie structure.
-
-        // Verify lower subtrie - adjust expectations to match actual (buggy) behavior
+        // Verify lower subtrie - all three leaves should be properly inserted
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
-            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5, 0x6]) // Only 4 and 5, not 6!
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5, 0x6]) // All three children
             .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), &Nibbles::default())
             .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]), &Nibbles::default())
-            // NOTE: Leaf at 0x1236 is missing from nodes but value is stored
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x6]), &Nibbles::default())
             .has_value(&new_leaf1_path, &new_value1)
             .has_value(&new_leaf2_path, &new_value2)
             .has_value(&new_leaf3_path, &new_value3);
