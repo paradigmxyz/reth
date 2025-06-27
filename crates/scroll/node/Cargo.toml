@@ -13,7 +13,6 @@ workspace = true
 
 [dependencies]
 # reth
-reth-basic-payload-builder.workspace = true
 reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-engine-local = { workspace = true, features = ["scroll-alloy-traits"] }
@@ -41,10 +40,10 @@ revm = { workspace = true, features = ["c-kzg"] }
 
 # alloy
 alloy-consensus.workspace = true
-alloy-eips.workspace = true
 alloy-genesis = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 # scroll-reth
 reth-scroll-chainspec.workspace = true
@@ -66,7 +65,6 @@ scroll-alloy-rpc-types-engine.workspace = true
 eyre.workspace = true
 serde_json = { workspace = true, optional = true }
 tracing.workspace = true
-thiserror.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]
@@ -80,9 +78,7 @@ reth-tasks.workspace = true
 
 alloy-primitives.workspace = true
 scroll-alloy-consensus.workspace = true
-alloy-network.workspace = true
 alloy-consensus.workspace = true
-futures.workspace = true
 
 [features]
 default = ["reth-codec", "scroll-alloy-traits"]

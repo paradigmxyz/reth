@@ -19,7 +19,7 @@ fn main() {
     if let Err(err) = Cli::<ScrollChainSpecParser, ScrollRollupArgs>::parse()
         .run::<_, _, ScrollNode>(|builder, _| async move {
             info!(target: "reth::cli", "Launching node");
-            let handle = builder.launch_node(ScrollNode).await?;
+            let handle = builder.node(ScrollNode).launch_with_debug_capabilities().await?;
             handle.node_exit_future.await
         })
     {

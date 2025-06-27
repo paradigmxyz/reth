@@ -10287,14 +10287,11 @@ name = "reth-scroll-node"
 version = "1.4.8"
 dependencies = [
  "alloy-consensus",
- "alloy-eips",
  "alloy-genesis",
- "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "alloy-rpc-types-eth",
  "eyre",
- "futures",
- "reth-basic-payload-builder",
  "reth-chainspec",
  "reth-db",
  "reth-e2e-test-utils",
@@ -10332,7 +10329,6 @@ dependencies = [
  "scroll-alloy-hardforks",
  "scroll-alloy-rpc-types-engine",
  "serde_json",
- "thiserror 2.0.12",
  "tokio",
  "tracing",
 ]

@@ -4,10 +4,11 @@ use crate::{
     ScrollAddOns, ScrollConsensusBuilder, ScrollExecutorBuilder, ScrollNetworkBuilder,
     ScrollPayloadBuilderBuilder, ScrollPoolBuilder, ScrollStorage,
 };
+use reth_node_api::FullNodeComponents;
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     node::{FullNodeTypes, NodeTypes},
-    Node, NodeAdapter, NodeComponentsBuilder,
+    DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
 };
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_engine_primitives::ScrollEngineTypes;
@@ -71,6 +72,17 @@ where
 
     fn add_ons(&self) -> Self::AddOns {
         ScrollAddOns::default()
+    }
+}
+
+impl<N> DebugNode<N> for ScrollNode
+where
+    N: FullNodeComponents<Types = Self>,
+{
+    type RpcBlock = alloy_rpc_types_eth::Block<scroll_alloy_consensus::ScrollTxEnvelope>;
+
+    fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_node_api::BlockTy<Self> {
+        rpc_block.into_consensus()
     }
 }
 
