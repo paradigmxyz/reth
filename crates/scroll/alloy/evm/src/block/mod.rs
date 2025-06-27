@@ -116,7 +116,7 @@ where
             Item = impl ExecutableTx<Self>
                        + ToTxWithCompressionRatio<<Self as BlockExecutor>::Transaction>,
         >,
-        compression_ratios: ScrollTxCompressionRatios,
+        compression_ratios: impl IntoIterator<Item = U256>,
     ) -> Result<BlockExecutionResult<R::Receipt>, BlockExecutionError>
     where
         Self: Sized,
