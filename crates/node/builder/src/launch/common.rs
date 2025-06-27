@@ -65,6 +65,9 @@ use tokio::sync::{
     oneshot, watch,
 };
 
+use futures::{future::Either, stream, Stream, StreamExt};
+use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
+
 /// Reusable setup for launching a node.
 ///
 /// This provides commonly used boilerplate for launching a node.
@@ -971,6 +974,29 @@ where
             || node_config.chain.chain().kind().default_era_host(),
             || node_config.datadir().data_dir().join("era").into(),
         )
+    }
+
+    /// Creates consensus layer health events stream based on node configuration.
+    ///
+    /// Returns a stream that monitors consensus layer health if:
+    /// - No debug tip is configured
+    /// - Not running in dev mode
+    ///
+    /// Otherwise returns an empty stream.
+    pub fn consensus_layer_events(
+        &self,
+    ) -> impl Stream<Item = NodeEvent<PrimitivesTy<T::Types>>> + 'static
+    where
+        T::Provider: reth_provider::CanonChainTracker,
+    {
+        if self.node_config().debug.tip.is_none() && !self.is_dev() {
+            Either::Left(
+                ConsensusLayerHealthEvents::new(Box::new(self.blockchain_db().clone()))
+                    .map(Into::into),
+            )
+        } else {
+            Either::Right(stream::empty())
+        }
     }
 }
 
