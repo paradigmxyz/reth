@@ -3193,6 +3193,7 @@ mod tests {
 
         let mut sparse = SparseSubtrie::default().with_updates(true);
         sparse.update_leaf(key, value_encoded(), DefaultBlindedProvider).unwrap();
+        // TODO: enable these and make test pass as we have these implemented
         // let sparse_root = sparse.root();
         // let sparse_updates = sparse.take_updates();
 
