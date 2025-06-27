@@ -983,7 +983,9 @@ where
     /// - Not running in dev mode
     ///
     /// Otherwise returns an empty stream.
-    pub fn consensus_layer_events(&self) -> impl Stream<Item = NodeEvent<PrimitivesTy<T::Types>>> +'static
+    pub fn consensus_layer_events(
+        &self,
+    ) -> impl Stream<Item = NodeEvent<PrimitivesTy<T::Types>>> + 'static
     where
         T::Provider: reth_provider::CanonChainTracker,
     {
