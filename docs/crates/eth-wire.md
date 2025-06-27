@@ -1,6 +1,6 @@
 # eth-wire
 
-The `eth-wire` crate provides abstractions over the [``RLPx``](https://github.com/ethereum/devp2p/blob/master/rlpx.md) and
+The `eth-wire` crate provides abstractions over the [`RLPx`](https://github.com/ethereum/devp2p/blob/master/rlpx.md) and
 [Eth wire](https://github.com/ethereum/devp2p/blob/master/caps/eth.md) protocols.
 
 This crate can be thought of as having 2 components:
@@ -334,7 +334,7 @@ impl<S, E> Sink<EthMessage> for EthStream<S> {
 }
 ```
 ## Unauthed streams
-For a session to be established, peers in the Ethereum network must first exchange a `Hello` message in the ``RLPx`` layer and then a
+For a session to be established, peers in the Ethereum network must first exchange a `Hello` message in the `RLPx` layer and then a
 `Status` message in the eth-wire layer.
 
 To perform these, reth has special `Unauthed` versions of streams described above.
