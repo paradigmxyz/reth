@@ -1,15 +1,24 @@
 use crate::{
     connection::ConnWrapper,
     error::EthStatsError,
-    events::{AuthMsg, BlockStats, HistoryMsg, LatencyMsg, NodeInfo, NodeStats, PendingMsg, PendingStats, PingMsg, StatsMsg},
+    events::{
+        AuthMsg, BlockStats, HistoryMsg, LatencyMsg, NodeInfo, NodeStats, PendingMsg, PendingStats,
+        PingMsg, StatsMsg, TxStats, UncleStats,
+    },
 };
+use alloy_consensus::{BlockHeader, Sealable};
+use alloy_primitives::U256;
 use reth_network_api::{NetworkInfo, Peers};
-use reth_provider::{BlockReaderIdExt, CanonStateSubscriptions};
+use reth_primitives_traits::{Block, BlockBody, InMemorySize, SignedTransaction};
+use reth_provider::{BlockReader, BlockReaderIdExt, CanonStateSubscriptions};
 use reth_transaction_pool::TransactionPool;
 
-use serde_json::{Value};
+use chrono::Local;
+use serde_json::Value;
 use std::{
-    str::FromStr, sync::Arc, time::{Duration, Instant}
+    str::FromStr,
+    sync::Arc,
+    time::{Duration, Instant},
 };
 use tokio::{
     sync::{mpsc, Mutex, RwLock},
@@ -17,7 +26,6 @@ use tokio::{
 };
 use tokio_tungstenite::connect_async;
 use url::Url;
-use chrono::Local;
 
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 const PING_TIMEOUT: Duration = Duration::from_secs(5);
@@ -63,16 +71,21 @@ pub struct EthStatsService<Network, Provider, Pool> {
     last_ping: Arc<Mutex<Option<Instant>>>,
     network: Network,
     provider: Provider,
-    pool: Pool
+    pool: Pool,
 }
 
 impl<Network, Provider, Pool> EthStatsService<Network, Provider, Pool>
 where
     Network: NetworkInfo + Peers,
     Provider: BlockReaderIdExt + CanonStateSubscriptions,
-    Pool: TransactionPool
+    Pool: TransactionPool,
 {
-    pub async fn new(url: &str, network: Network, provider: Provider, pool: Pool) -> Result<Self, EthStatsError> {
+    pub async fn new(
+        url: &str,
+        network: Network,
+        provider: Provider,
+        pool: Pool,
+    ) -> Result<Self, EthStatsError> {
         let credentials = EthstatsCredentials::from_str(url)?;
         let service = EthStatsService {
             credentials,
@@ -80,7 +93,7 @@ where
             last_ping: Arc::new(Mutex::new(None)),
             network,
             provider,
-            pool
+            pool,
         };
         service.connect().await?;
 
@@ -108,7 +121,11 @@ where
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
-        let network_status = self.network.network_status().await.map_err(|e| EthStatsError::AuthError(e.to_string()))?;
+        let network_status = self
+            .network
+            .network_status()
+            .await
+            .map_err(|e| EthStatsError::AuthError(e.to_string()))?;
         let id = &self.credentials.node_id;
         let secret = &self.credentials.secret;
         let protocol = format!("eth/{}", network_status.protocol_version);
@@ -157,8 +174,8 @@ where
                 syncing: self.network.is_syncing(),
                 peers: self.network.num_connected_peers() as i32,
                 gas_price: 0, // TODO
-                uptime: 100
-            }
+                uptime: 100,
+            },
         };
 
         let message = stats_msg.generate_stats_message();
@@ -175,10 +192,7 @@ where
         *self.last_ping.lock().await = Some(ping_time);
 
         let client_time = Local::now().format("%Y-%m-%d %H:%M:%S%.f %:z %Z").to_string();
-        let ping_msg = PingMsg {
-            id: self.credentials.node_id.clone(),
-            client_time
-        };
+        let ping_msg = PingMsg { id: self.credentials.node_id.clone(), client_time };
 
         let message = ping_msg.generate_ping_message();
         conn.write_json(&message).await?;
@@ -206,17 +220,14 @@ where
         let mut active = self.last_ping.lock().await;
         if let Some(start) = active.take() {
             let latency = start.elapsed().as_millis() as u64 / 2;
-            
+
             tracing::debug!("Pong received, latency: {}ms", latency);
-            
+
             let conn = self.conn.read().await;
             let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
-            let latency_msg = LatencyMsg {
-                id: self.credentials.node_id.clone(),
-                latency
-            };
-    
+            let latency_msg = LatencyMsg { id: self.credentials.node_id.clone(), latency };
+
             let message = latency_msg.generate_latency_message();
             conn.write_json(&message).await?
         }
@@ -229,12 +240,8 @@ where
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
         let pending = self.pool.pool_size().pending as i32;
 
-        let pending_msg = PendingMsg {
-            id: self.credentials.node_id.clone(),
-            stats: PendingStats {
-                pending
-            }
-        };
+        let pending_msg =
+            PendingMsg { id: self.credentials.node_id.clone(), stats: PendingStats { pending } };
 
         let message = pending_msg.generate_pending_message();
         conn.write_json(&message).await?;
@@ -244,38 +251,81 @@ where
         Ok(())
     }
 
-    async fn handle_history_request(&self) -> Result<(), EthStatsError> {
+    async fn report_block(&self, report_block: Option<u64>) -> Result<(), EthStatsError> {
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
-        // In a real implementation, this would fetch actual block history
-        let history = HistoryMsg {
-            id: self.credentials.node_id.clone(),
-            history: vec![
-                // BlockStats {
-                //     number: 123455,
-                //     hash: "0x123...".into(),
-                //     parent: "0xabc...".into(),
-                //     timestamp: 1678899990,
-                //     gas_used: 14900000,
-                //     gas_limit: 30000000,
-                //     miner: "0xminer...".into(),
-                //     txs: vec!["0xtx1...".into()],
-                // },
-                // BlockStats {
-                //     number: 123454,
-                //     hash: "0x456...".into(),
-                //     parent: "0xdef...".into(),
-                //     timestamp: 1678899980,
-                //     gas_used: 14800000,
-                //     gas_limit: 30000000,
-                //     miner: "0xminer...".into(),
-                //     txs: vec!["0xtx3...".into(), "0xtx4...".into()],
-                // },
-            ],
-        };
+        // if let Some(block_id) = block_id {
 
-        let message = history.generate_history_message();
+        // }
+
+        // let best_block_number = self
+        //     .provider
+        //     .best_block_number()
+        //     .map_err(|e| EthStatsError::DataFetchError(e.to_string()))?;
+
+        // let block = self.provider
+        //     .block_by_id(block_id);
+
+        Ok(())
+    }
+
+    fn block_to_stats(
+        &self,
+        block: &<Provider as BlockReader>::Block,
+    ) -> Result<BlockStats, EthStatsError> {
+        let body = block.body();
+        let header = block.header();
+
+        let mut txs = vec![];
+        for &tx_hash in body.transaction_hashes_iter() {
+            txs.push(TxStats { hash: tx_hash })
+        }
+
+        Ok(BlockStats {
+            number: U256::from(header.number()),
+            hash: header.hash_slow(),
+            parent_hash: header.parent_hash(),
+            timestamp: U256::from(header.timestamp()),
+            miner: header.beneficiary(),
+            gas_used: header.gas_used(),
+            gas_limit: header.gas_limit(),
+            diff: header.difficulty().to_string(),
+            total_diff: "0".into(),
+            txs,
+            tx_hash: header.transactions_root(),
+            root: header.state_root(),
+            uncles: UncleStats(vec![]),
+        })
+    }
+
+    async fn report_history(&self, list: &Vec<u64>) -> Result<(), EthStatsError> {
+        let conn = self.conn.read().await;
+        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+
+        let mut blocks = Vec::with_capacity(list.size());
+        for &block_number in list {
+            match self.provider.block_by_id(block_number.into()) {
+                Ok(Some(block)) => {
+                    blocks.push(block);
+                }
+                Ok(None) => {
+                    // Block not found, stop fetching
+                    tracing::warn!("Block {} not found", block_number);
+                    return Err(EthStatsError::BlockNotFound(block_number));
+                }
+                Err(e) => {
+                    tracing::error!("Error fetching block {}: {}", block_number, e);
+                    return Err(EthStatsError::DataFetchError(e.to_string()));
+                }
+            }
+        }
+
+        let history: Vec<BlockStats> =
+            blocks.iter().map(|block| self.block_to_stats(&block)).collect::<Result<_, _>>()?;
+        let history_msg = HistoryMsg { id: self.credentials.node_id.clone(), history };
+
+        let message = history_msg.generate_history_message();
         conn.write_json(&message).await?;
         tracing::debug!("History request handled");
 
@@ -291,20 +341,51 @@ where
     }
 
     async fn handle_message(&self, msg: Value) -> Result<(), EthStatsError> {
-        if let Some(emit) = msg.get("emit") {
-            if let Some(Value::String(command)) = emit.get(0) {
-                match command.as_str() {
-                    "node-pong" => {
-                        self.report_latency().await?;
-                    }
-                    "history" => {
-                        // self.handle_history_request().await?;
-                    }
-                    other => tracing::warn!("Unhandled command: {}", other),
-                }
+        let emit = match msg.get("emit") {
+            Some(emit) => emit,
+            None => {
+                tracing::warn!("Stats server sent non-broadcast, msg {}", msg);
+                return Ok(());
             }
-        } else {
-            tracing::warn!("Stats server sent non-broadcast, msg {}", msg);
+        };
+
+        let command = match emit.get(0) {
+            Some(Value::String(command)) => command.as_str(),
+            _ => {
+                tracing::warn!("Invalid stats server message type, msg {}", msg);
+                return Ok(());
+            }
+        };
+
+        match command {
+            "node-pong" => {
+                self.report_latency().await?;
+            }
+            "history" => {
+                let block_numbers = emit
+                    .get(1)
+                    .and_then(|v| v.as_object())
+                    .and_then(|obj| obj.get("list"))
+                    .and_then(|v| v.as_array())
+                    .ok_or_else(|| {
+                        tracing::warn!("Invalid stats history request or block list, msg {}", msg);
+                        EthStatsError::InvalidRequest
+                    })?;
+
+                let block_numbers: Result<Vec<u64>, EthStatsError> = block_numbers
+                    .iter()
+                    .map(|val| {
+                        val.as_u64().ok_or_else(|| {
+                            tracing::warn!("Invalid stats history block number, msg {}", msg);
+                            EthStatsError::InvalidRequest
+                        })
+                    })
+                    .collect();
+
+                let block_numbers = block_numbers?;
+                self.report_history(&block_numbers).await?;
+            }
+            other => tracing::warn!("Unhandled command: {}", other),
         }
 
         Ok(())

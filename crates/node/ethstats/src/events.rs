@@ -268,10 +268,10 @@ impl LatencyMsg {
 pub struct PingMsg {
     /// The node's unique identifier
     pub id: String,
-    
+
     /// Client timestamp when the ping was sent
     #[serde(rename = "clientTime")]
-    pub client_time: String
+    pub client_time: String,
 }
 
 impl PingMsg {

@@ -8976,6 +8976,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "reth-network-api",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-transaction-pool",
  "serde",

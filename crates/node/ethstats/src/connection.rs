@@ -33,7 +33,7 @@ impl ConnWrapper {
             match msg? {
                 Message::Text(text) => return Ok(serde_json::from_str(&text)?),
                 Message::Close(_) => return Err(ConnectionError::ConnectionClosed),
-                _ => {}, // Ignore non-text messages
+                _ => {} // Ignore non-text messages
             }
         }
 

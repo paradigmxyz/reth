@@ -38,4 +38,13 @@ pub enum EthStatsError {
 
     #[error("URL parsing error: {0}")]
     Url(#[from] url::ParseError),
+
+    #[error("Block not found: {0}")]
+    BlockNotFound(u64),
+
+    #[error("Data fetch error: {0}")]
+    DataFetchError(String),
+
+    #[error("Inivalid request")]
+    InvalidRequest,
 }
