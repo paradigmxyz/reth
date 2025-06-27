@@ -42,6 +42,7 @@ pub mod trie;
 pub use trie::StatelessTrieTrait;
 #[doc(inline)]
 pub use validation::stateless_validation_with_trie;
+
 /// Implementation of stateless validation
 pub mod validation;
 pub(crate) mod witness_db;
