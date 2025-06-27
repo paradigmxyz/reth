@@ -9,8 +9,9 @@ use reth_errors::ProviderError;
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
-    blinded::DefaultBlindedProviderFactory, errors::SparseStateTrieResult, SparseStateTrie,
-    SparseTrie,
+    blinded::{DefaultBlindedProvider, DefaultBlindedProviderFactory},
+    errors::SparseStateTrieResult,
+    SparseStateTrie, SparseTrie,
 };
 
 /// `StatelessTrie` structure for usage during stateless validation
@@ -182,6 +183,11 @@ fn calculate_state_root(
     // borrowing issues.
     let mut storage_results = Vec::with_capacity(state.storages.len());
 
+    // In `verify_execution_witness` the trie gets initialized with a
+    // `DefaultBlindedProviderFactory`, so we use a corresponding default provider in here when
+    // interacting directly with its inner tries.
+    let storage_provider = DefaultBlindedProvider;
+
     for (address, storage) in state.storages.into_iter().sorted_unstable_by_key(|(addr, _)| *addr) {
         // Take the existing storage trie (or create an empty, “revealed” one)
         let mut storage_trie =
@@ -197,9 +203,13 @@ fn calculate_state_root(
         {
             let nibbles = Nibbles::unpack(hashed_slot);
             if value.is_zero() {
-                storage_trie.remove_leaf(&nibbles)?;
+                storage_trie.remove_leaf(&nibbles, &storage_provider)?;
             } else {
-                storage_trie.update_leaf(nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                storage_trie.update_leaf(
+                    nibbles,
+                    alloy_rlp::encode_fixed_size(&value).to_vec(),
+                    &storage_provider,
+                )?;
             }
         }
 
