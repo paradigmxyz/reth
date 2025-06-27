@@ -2,6 +2,7 @@
 
 use std::{path::PathBuf, sync::Arc};
 
+use crate::common::CliNodeTypes;
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
@@ -15,8 +16,6 @@ use reth_node_core::{
     args::{DatabaseArgs, DatadirArgs, NetworkArgs},
     utils::get_single_header,
 };
-
-use crate::common::CliNodeTypes;
 
 pub mod bootnode;
 mod rlpx;
