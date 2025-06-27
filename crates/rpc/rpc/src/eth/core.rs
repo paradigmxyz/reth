@@ -17,7 +17,10 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
-use reth_storage_api::{BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx};
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderHeader,
+    ProviderReceipt, ProviderTx,
+};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -77,8 +80,7 @@ impl<N: RpcNodeCore<Provider: BlockReader>> Clone for EthApi<N> {
     }
 }
 
-impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApi<N>
-{
+impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApi<N> {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
     ///
     /// Creating an [`EthApi`] requires a few mandatory components:
@@ -257,7 +259,7 @@ pub struct EthApiInner<N: RpcNodeCore<Provider: BlockReader>> {
     /// A pool dedicated to CPU heavy blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
-    fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
+    fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
     /// The type that defines how to configure the EVM
     evm_config: N::Evm,
 
@@ -268,8 +270,7 @@ pub struct EthApiInner<N: RpcNodeCore<Provider: BlockReader>> {
     raw_tx_sender: broadcast::Sender<Bytes>,
 }
 
-impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N>
-{
+impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N> {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
@@ -385,7 +386,7 @@ impl<N: RpcNodeCore<Provider: BlockReader>> EthApiInner<N> {
 
     /// Returns a handle to the fee history cache.
     #[inline]
-    pub const fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
+    pub const fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         &self.fee_history_cache
     }
 

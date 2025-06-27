@@ -12,12 +12,12 @@ use crate::EthApi;
 
 impl<N> EthFees for EthApi<N>
 where
-    N: RpcNodeCore<Provider: BlockReader +
-        ChainSpecProvider<
-            ChainSpec: EthChainSpec<Header = ProviderHeader<N::Provider>>,
-        >
+    N: RpcNodeCore<Provider: BlockReader>,
+    Self: LoadFee<
+        Provider: ChainSpecProvider<
+            ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>,
+        >,
     >,
-    Self: LoadFee
 {
 }
 
@@ -25,8 +25,8 @@ impl<N> LoadFee for EthApi<N>
 where
     N: RpcNodeCore<
         Provider: BlockReaderIdExt
-            + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-            + StateProviderFactory,
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+                      + StateProviderFactory,
     >,
     Self: LoadBlock<Provider = N::Provider>,
 {
@@ -36,7 +36,7 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         self.inner.fee_history_cache()
     }
 }
