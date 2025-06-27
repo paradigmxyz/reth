@@ -1912,6 +1912,147 @@ mod tests {
         buf
     }
 
+    /// Test context that provides helper methods for trie testing
+    #[derive(Default)]
+    struct ParallelSparseTrieTestContext;
+
+    impl ParallelSparseTrieTestContext {
+        /// Assert that a lower subtrie exists at the given path
+        fn assert_subtrie_exists(&self, trie: &ParallelSparseTrie, path: &Nibbles) {
+            let idx = path_subtrie_index_unchecked(path);
+            assert!(
+                trie.lower_subtries[idx].is_some(),
+                "Expected lower subtrie at path {:?} to exist",
+                path
+            );
+        }
+
+        /// Get a lower subtrie, panicking if it doesn't exist
+        fn get_subtrie<'a>(
+            &self,
+            trie: &'a ParallelSparseTrie,
+            path: &Nibbles,
+        ) -> &'a SparseSubtrie {
+            let idx = path_subtrie_index_unchecked(path);
+            trie.lower_subtries[idx]
+                .as_ref()
+                .unwrap_or_else(|| panic!("Lower subtrie at path {:?} should exist", path))
+        }
+
+        /// Create test leaves with consecutive account values
+        fn create_test_leaves(&self, paths: &[&[u8]]) -> Vec<(Nibbles, Vec<u8>)> {
+            paths
+                .iter()
+                .enumerate()
+                .map(|(i, path)| (Nibbles::from_nibbles(path), encode_account_value(i as u64 + 1)))
+                .collect()
+        }
+
+        /// Create a single test leaf with the given path and value nonce
+        fn create_test_leaf(&self, path: impl AsRef<[u8]>, value_nonce: u64) -> (Nibbles, Vec<u8>) {
+            (Nibbles::from_nibbles(path), encode_account_value(value_nonce))
+        }
+
+        /// Insert multiple leaves into the trie
+        fn insert_leaves(&self, trie: &mut ParallelSparseTrie, leaves: &[(Nibbles, Vec<u8>)]) {
+            for (path, value) in leaves {
+                trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
+            }
+        }
+
+        /// Create an assertion builder for a subtrie
+        fn assert_subtrie<'a>(
+            &self,
+            trie: &'a ParallelSparseTrie,
+            path: Nibbles,
+        ) -> SubtrieAssertion<'a> {
+            self.assert_subtrie_exists(trie, &path);
+            let subtrie = self.get_subtrie(trie, &path);
+            SubtrieAssertion::new(subtrie)
+        }
+
+        /// Create an assertion builder for the upper subtrie
+        fn assert_upper_subtrie<'a>(&self, trie: &'a ParallelSparseTrie) -> SubtrieAssertion<'a> {
+            SubtrieAssertion::new(&trie.upper_subtrie)
+        }
+    }
+
+    /// Assertion builder for subtrie structure
+    struct SubtrieAssertion<'a> {
+        subtrie: &'a SparseSubtrie,
+    }
+
+    impl<'a> SubtrieAssertion<'a> {
+        fn new(subtrie: &'a SparseSubtrie) -> Self {
+            Self { subtrie }
+        }
+
+        fn has_branch(self, path: &Nibbles, expected_mask_bits: &[u8]) -> Self {
+            match self.subtrie.nodes.get(path) {
+                Some(SparseNode::Branch { state_mask, .. }) => {
+                    for bit in expected_mask_bits {
+                        assert!(
+                            state_mask.is_bit_set(*bit),
+                            "Expected branch at {:?} to have bit {} set",
+                            path,
+                            bit
+                        );
+                    }
+                }
+                node => panic!("Expected branch node at {:?}, found {:?}", path, node),
+            }
+            self
+        }
+
+        #[allow(unused)]
+        fn has_leaf(self, path: &Nibbles, expected_key: &Nibbles) -> Self {
+            match self.subtrie.nodes.get(path) {
+                Some(SparseNode::Leaf { key, .. }) => {
+                    assert_eq!(
+                        *key, *expected_key,
+                        "Expected leaf at {:?} to have key {:?}, found {:?}",
+                        path, expected_key, key
+                    );
+                }
+                node => panic!("Expected leaf node at {:?}, found {:?}", path, node),
+            }
+            self
+        }
+
+        fn has_extension(self, path: &Nibbles, expected_key: &Nibbles) -> Self {
+            match self.subtrie.nodes.get(path) {
+                Some(SparseNode::Extension { key, .. }) => {
+                    assert_eq!(
+                        *key, *expected_key,
+                        "Expected extension at {:?} to have key {:?}, found {:?}",
+                        path, expected_key, key
+                    );
+                }
+                node => panic!("Expected extension node at {:?}, found {:?}", path, node),
+            }
+            self
+        }
+
+        fn has_value(self, path: &Nibbles, expected_value: &[u8]) -> Self {
+            let actual = self.subtrie.inner.values.get(path);
+            assert_eq!(
+                actual.map(|v| v.as_slice()),
+                Some(expected_value),
+                "Expected value at {:?} to be {:?}, found {:?}",
+                path,
+                expected_value,
+                actual
+            );
+            self
+        }
+
+        fn has_no_value(self, path: &Nibbles) -> Self {
+            let actual = self.subtrie.inner.values.get(path);
+            assert!(actual.is_none(), "Expected no value at {:?}, but found {:?}", path, actual);
+            self
+        }
+    }
+
     fn create_leaf_node(key: impl AsRef<[u8]>, value_nonce: u64) -> TrieNode {
         TrieNode::Leaf(LeafNode::new(Nibbles::from_nibbles(key), encode_account_value(value_nonce)))
     }
@@ -3231,144 +3372,123 @@ mod tests {
 
     #[test]
     fn test_update_leaf_cross_level() {
+        let ctx = ParallelSparseTrieTestContext::default();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
         // Test adding leaves that demonstrate the cross-level behavior
         // Based on the example: leaves 0x1234, 0x1245, 0x1334, 0x1345
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Branch { state_mask: 0x10 }
+        //   └── 0x1: Extension { key: 0x }
+        //       └── Subtrie (0x12): pointer to lower subtrie
+        //       └── Subtrie (0x13): pointer to lower subtrie
+        //
+        // Lower subtrie (0x12):
+        //   0x12: Branch { state_mask: 0x8 | 0x10 }
+        //   ├── 0x123: Leaf { key: 0x4 }
+        //   └── 0x124: Leaf { key: 0x5 }
+        //
+        // Lower subtrie (0x13):
+        //   0x13: Branch { state_mask: 0x8 | 0x10 }
+        //   ├── 0x133: Leaf { key: 0x4 }
+        //   └── 0x134: Leaf { key: 0x5 }
 
         // First add leaf 0x1345 - this should create a leaf in upper trie at 0x
-        let leaf1_path = Nibbles::from_nibbles([0x1, 0x3, 0x4, 0x5]);
-        let value1 = encode_account_value(1);
+        let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x3, 0x4, 0x5], 1);
         trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
 
         // Verify upper trie has a leaf at the root with key 1345
-        assert_matches!(
-            trie.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Leaf { key, .. })
-            if key == &Nibbles::from_nibbles([0x1, 0x3, 0x4, 0x5])
-        );
+        ctx.assert_upper_subtrie(&trie)
+            .has_leaf(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x3, 0x4, 0x5]));
 
         // Add leaf 0x1234 - this should go first in the upper subtrie
-        let leaf2_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
-        let value2 = encode_account_value(2);
+        let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 2);
         trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
 
         // Upper trie should now have a branch at 0x1
-        assert_matches!(
-            trie.upper_subtrie.nodes.get(&Nibbles::from_nibbles([0x1])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x2) && state_mask.is_bit_set(0x3)
-        );
+        ctx.assert_upper_subtrie(&trie).has_branch(&Nibbles::from_nibbles([0x1]), &[0x2, 0x3]);
 
         // Add leaf 0x1245 - this should cause a branch and create the 0x12 subtrie
-        let leaf3_path = Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x5]);
-        let value3 = encode_account_value(3);
+        let (leaf3_path, value3) = ctx.create_test_leaf([0x1, 0x2, 0x4, 0x5], 3);
         trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
 
-        // Verify lower subtrie at 0x12 exists
-        let idx_12 = path_subtrie_index_unchecked(&Nibbles::from_nibbles([0x1, 0x2]));
-        assert!(trie.lower_subtries[idx_12].is_some());
-        let lower_12 = trie.lower_subtries[idx_12].as_ref().unwrap();
-
-        // Lower subtrie should have a leaf at 0x123 with key 4
-        assert_matches!(
-            lower_12.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3])),
-            Some(SparseNode::Leaf { key, .. })
-            if key == &Nibbles::from_nibbles([0x4])
-        );
-
-        // Lower subtrie should have a branch at 0x12
-        assert_matches!(
-            lower_12.nodes.get(&Nibbles::from_nibbles([0x1, 0x2])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x3) && state_mask.is_bit_set(0x4)
-        );
-
-        // Lower subtrie should have a leaf at 0x124 with key 5
-        assert_matches!(
-            lower_12.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x4])),
-            Some(SparseNode::Leaf { key, .. })
-            if key == &Nibbles::from_nibbles([0x5])
-        );
+        // Verify lower subtrie at 0x12 exists with correct structure
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x3, 0x4])
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &Nibbles::from_nibbles([0x4]))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &Nibbles::from_nibbles([0x5]))
+            .has_value(&leaf2_path, &value2)
+            .has_value(&leaf3_path, &value3);
 
         // Add leaf 0x1334 - this should create another lower subtrie
-        let leaf4_path = Nibbles::from_nibbles([0x1, 0x3, 0x3, 0x4]);
-        let value4 = encode_account_value(4);
+        let (leaf4_path, value4) = ctx.create_test_leaf([0x1, 0x3, 0x3, 0x4], 4);
         trie.update_leaf(leaf4_path, value4.clone(), DefaultBlindedProvider).unwrap();
 
-        let lower_12 = trie.lower_subtries[idx_12].as_ref().unwrap();
-        assert_eq!(lower_12.inner.values.get(&leaf2_path), Some(&value2));
-        assert_eq!(lower_12.inner.values.get(&leaf3_path), Some(&value3));
+        // Verify lower subtrie at 0x13 exists with correct values
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x3]))
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf4_path, &value4);
 
-        let idx_13 = path_subtrie_index_unchecked(&Nibbles::from_nibbles([0x1, 0x3]));
-        let lower_13 = trie.lower_subtries[idx_13].as_ref().unwrap();
-        assert_eq!(lower_13.inner.values.get(&leaf1_path), Some(&value1));
-        assert_eq!(lower_13.inner.values.get(&leaf4_path), Some(&value4));
+        // Verify the 0x12 subtrie still has its values
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_value(&leaf2_path, &value2)
+            .has_value(&leaf3_path, &value3);
     }
 
     #[test]
     fn test_update_leaf_split_at_level_boundary() {
+        let ctx = ParallelSparseTrieTestContext::default();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
+        // This test demonstrates what happens when we insert leaves that cause
+        // splitting exactly at the upper/lower trie boundary (2 nibbles).
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Extension { key: 0x12 }
+        //       └── Subtrie (0x12): pointer to lower subtrie
+        //
+        // Lower subtrie (0x12):
+        //   0x12: Branch { state_mask: 0x4 | 0x8 }
+        //   ├── 0x122: Leaf { key: 0x4 }
+        //   └── 0x123: Leaf { key: 0x4 }
+
         // First insert a leaf that ends exactly at the boundary (2 nibbles)
-        let first_leaf_path = Nibbles::from_nibbles([0x1, 0x2, 0x2, 0x4]);
-        let first_value = encode_account_value(1);
+        let (first_leaf_path, first_value) = ctx.create_test_leaf([0x1, 0x2, 0x2, 0x4], 1);
 
         trie.update_leaf(first_leaf_path, first_value.clone(), DefaultBlindedProvider).unwrap();
 
         // In an empty trie, the first leaf becomes the root, regardless of path length
-        assert_matches!(
-            trie.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Leaf { key, .. })
-            if key == &Nibbles::from_nibbles([0x1, 0x2, 0x2, 0x4])
-        );
-        assert_eq!(trie.upper_subtrie.inner.values.get(&first_leaf_path), Some(&first_value));
+        ctx.assert_upper_subtrie(&trie)
+            .has_leaf(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x2, 0x4]))
+            .has_value(&first_leaf_path, &first_value);
 
         // Now insert another leaf that shares the same 2-nibble prefix
-        let second_leaf_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
-        let second_value = encode_account_value(2);
+        let (second_leaf_path, second_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 2);
 
         trie.update_leaf(second_leaf_path, second_value.clone(), DefaultBlindedProvider).unwrap();
 
         // Now both leaves should be in a lower subtrie at index [0x1, 0x2]
-        let idx = path_subtrie_index_unchecked(&Nibbles::from_nibbles([0x1, 0x2]));
-        assert!(trie.lower_subtries[idx].is_some());
-        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
-
-        // There should be a branch node at [0x1, 0x2] in the lower subtrie
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x2) && state_mask.is_bit_set(0x3)
-        );
-
-        // The first leaf should be at [0x1, 0x2, 0x2] with key 4
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x2])),
-            Some(SparseNode::Leaf { key, .. })
-            if key == &Nibbles::from_nibbles([0x4])
-        );
-
-        // The second leaf should be at [0x1, 0x2, 0x3] with key [0x4]
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3])),
-            Some(SparseNode::Leaf { key, .. })
-            if key == &Nibbles::from_nibbles([0x4])
-        );
-
-        // Verify values are stored correctly in the lower subtrie
-        assert_eq!(lower_subtrie.inner.values.get(&first_leaf_path), Some(&first_value));
-        assert_eq!(lower_subtrie.inner.values.get(&second_leaf_path), Some(&second_value));
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x2, 0x3])
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x2]), &Nibbles::from_nibbles([0x4]))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &Nibbles::from_nibbles([0x4]))
+            .has_value(&first_leaf_path, &first_value)
+            .has_value(&second_leaf_path, &second_value);
 
         // Upper subtrie should no longer have these values
-        assert_eq!(trie.upper_subtrie.inner.values.get(&first_leaf_path), None);
-        assert_eq!(trie.upper_subtrie.inner.values.get(&second_leaf_path), None);
+        ctx.assert_upper_subtrie(&trie)
+            .has_no_value(&first_leaf_path)
+            .has_no_value(&second_leaf_path);
     }
 
     #[test]
     fn test_update_subtrie_with_multiple_leaves() {
+        let ctx = ParallelSparseTrieTestContext::default();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3385,101 +3505,59 @@ mod tests {
         //      └── 0x124: Branch { state_mask: 0x6 | 0x7 }
         //          ├── 0x1246: Leaf { key: 0x }
         //          └── 0x1247: Leaf { key: 0x }
-        let leaves = vec![
-            (Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), encode_account_value(1)),
-            (Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]), encode_account_value(2)),
-            (Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x6]), encode_account_value(3)),
-            (Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x7]), encode_account_value(4)),
-        ];
+        let leaves = ctx.create_test_leaves(&[
+            &[0x1, 0x2, 0x3, 0x4],
+            &[0x1, 0x2, 0x3, 0x5],
+            &[0x1, 0x2, 0x4, 0x6],
+            &[0x1, 0x2, 0x4, 0x7],
+        ]);
 
         // Insert all leaves
-        for (path, value) in &leaves {
-            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
-        }
+        ctx.insert_leaves(&mut trie, &leaves);
 
-        // Verify that a lower subtrie was created at index [0x1, 0x2]
-        let idx = path_subtrie_index_unchecked(&Nibbles::from_nibbles([0x1, 0x2]));
-        assert!(trie.lower_subtries[idx].is_some());
-        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        // Verify the upper subtrie has an extension node at the root with key 0x12
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2]));
 
-        // Verify the structure: there should be a branch at [0x1, 0x2] with children at 0x3 and 0x4
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x3) && state_mask.is_bit_set(0x4)
-        );
-
-        // There should be branches at [0x1, 0x2, 0x3] and [0x1, 0x2, 0x4]
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x4) && state_mask.is_bit_set(0x5)
-        );
-
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x4])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x6) && state_mask.is_bit_set(0x7)
-        );
-
-        // Verify all leaf nodes exist
-        for (path, value) in &leaves {
-            assert_eq!(lower_subtrie.inner.values.get(path), Some(value));
-        }
+        // Verify the subtrie structure using fluent assertions
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x3, 0x4])
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5])
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &[0x6, 0x7])
+            .has_value(&leaves[0].0, &leaves[0].1)
+            .has_value(&leaves[1].0, &leaves[1].1)
+            .has_value(&leaves[2].0, &leaves[2].1)
+            .has_value(&leaves[3].0, &leaves[3].1);
 
         // Now update one of the leaves with a new value
         let updated_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
-        let updated_value = encode_account_value(100);
+        let (_, updated_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 100);
 
         trie.update_leaf(updated_path, updated_value.clone(), DefaultBlindedProvider).unwrap();
 
-        // Verify the subtrie structure is maintained
-        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
-
-        // The branch structure should remain the same
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x3) && state_mask.is_bit_set(0x4)
-        );
-
-        // Verify the updated value
-        assert_eq!(lower_subtrie.inner.values.get(&updated_path), Some(&updated_value));
-
-        // Verify other values remain unchanged
-        assert_eq!(
-            lower_subtrie.inner.values.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5])),
-            Some(&encode_account_value(2))
-        );
-        assert_eq!(
-            lower_subtrie.inner.values.get(&Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x6])),
-            Some(&encode_account_value(3))
-        );
-        assert_eq!(
-            lower_subtrie.inner.values.get(&Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x7])),
-            Some(&encode_account_value(4))
-        );
+        // Verify the subtrie structure is maintained and value is updated
+        // The branch structure should remain the same and all values should be present
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x3, 0x4])
+            .has_value(&updated_path, &updated_value)
+            .has_value(&leaves[1].0, &leaves[1].1)
+            .has_value(&leaves[2].0, &leaves[2].1)
+            .has_value(&leaves[3].0, &leaves[3].1);
 
         // Add a new leaf that extends an existing branch
-        let new_leaf_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x6]);
-        let new_leaf_value = encode_account_value(200);
+        let (new_leaf_path, new_leaf_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x6], 200);
 
         trie.update_leaf(new_leaf_path, new_leaf_value.clone(), DefaultBlindedProvider).unwrap();
 
         // Verify the branch at [0x1, 0x2, 0x3] now has an additional child
-        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x4) && state_mask.is_bit_set(0x5) && state_mask.is_bit_set(0x6)
-        );
-
-        // Verify the new leaf exists
-        assert_eq!(lower_subtrie.inner.values.get(&new_leaf_path), Some(&new_leaf_value));
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5, 0x6])
+            .has_value(&new_leaf_path, &new_leaf_value);
     }
 
     #[test]
     fn test_update_subtrie_extension_node_subtrie() {
+        let ctx = ParallelSparseTrieTestContext::default();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3491,39 +3569,25 @@ mod tests {
         //      0x123: Branch { state_mask: 0x3 | 0x4 }
         //      ├── 0x123: Leaf { key: 0x4 }
         //      └── 0x124: Leaf { key: 0x5 }
-        let leaves = vec![
-            (Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), encode_account_value(1)),
-            (Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x5]), encode_account_value(2)),
-        ];
+        let leaves = ctx.create_test_leaves(&[&[0x1, 0x2, 0x3, 0x4], &[0x1, 0x2, 0x3, 0x5]]);
 
         // Insert all leaves
-        for (path, value) in &leaves {
-            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
-        }
+        ctx.insert_leaves(&mut trie, &leaves);
 
-        // Verify that a lower subtrie was created at index [0x1, 0x2]
-        let idx = path_subtrie_index_unchecked(&Nibbles::from_nibbles([0x1, 0x2]));
-        assert!(trie.lower_subtries[idx].is_some());
-        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        // Verify the upper subtrie has an extension node at the root with key 0x123
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2, 0x3]));
 
-        // Verify the structure: there should be a branch at [0x1, 0x2, 0x3] with children at 0x4
-        // and 0x4
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x4) && state_mask.is_bit_set(0x5)
-        );
-
-        // Verify the structure: there should also be an extension node at 0x leading to 0x123
-        assert_matches!(
-            trie.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, .. })
-            if key == &Nibbles::from_nibbles([0x1, 0x2, 0x3])
-        );
+        // Verify the lower subtrie structure
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &[0x4, 0x5])
+            .has_value(&leaves[0].0, &leaves[0].1)
+            .has_value(&leaves[1].0, &leaves[1].1);
     }
 
     #[test]
     fn update_subtrie_extension_node_cross_level() {
+        let ctx = ParallelSparseTrieTestContext::default();
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3536,57 +3600,21 @@ mod tests {
         //      0x12: Branch { state_mask: 0x3 | 0x4 }
         //      ├── 0x123: Leaf { key: 0x4 }
         //      └── 0x124: Leaf { key: 0x5 }
-        let leaves = vec![
-            (Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]), encode_account_value(1)),
-            (Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x5]), encode_account_value(2)),
-        ];
+        let leaves = ctx.create_test_leaves(&[&[0x1, 0x2, 0x3, 0x4], &[0x1, 0x2, 0x4, 0x5]]);
 
         // Insert all leaves
-        for (path, value) in &leaves {
-            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
-        }
+        ctx.insert_leaves(&mut trie, &leaves);
 
-        // Verify that a lower subtrie was created at index [0x1, 0x2]
-        let idx = path_subtrie_index_unchecked(&Nibbles::from_nibbles([0x1, 0x2]));
-        assert!(trie.lower_subtries[idx].is_some());
-        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        // Verify the upper subtrie has an extension node at the root with key 0x12
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x2]));
 
-        // Verify the structure: there should be a branch at [0x1, 0x2] with children at 0x3 and 0x4
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2])),
-            Some(SparseNode::Branch { state_mask, .. })
-            if state_mask.is_bit_set(0x3) && state_mask.is_bit_set(0x4)
-        );
-
-        // Verify the structure: there should also be an extension node at 0x leading to 0x12
-        assert_matches!(
-            trie.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, .. })
-            if key == &Nibbles::from_nibbles([0x1, 0x2])
-        );
-
-        // Now check that there are leaves at 0x123 with key 4
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3])),
-            Some(SparseNode::Leaf { key, .. })
-            if key == &Nibbles::from_nibbles([0x4])
-        );
-
-        // And that there is a leaf at 0x124 with key 5
-        assert_matches!(
-            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x4])),
-            Some(SparseNode::Leaf { key, .. })
-            if key == &Nibbles::from_nibbles([0x5])
-        );
-
-        // Now check values of the lower subtrie
-        assert_eq!(
-            lower_subtrie.inner.values.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4])),
-            Some(&encode_account_value(1))
-        );
-        assert_eq!(
-            lower_subtrie.inner.values.get(&Nibbles::from_nibbles([0x1, 0x2, 0x4, 0x5])),
-            Some(&encode_account_value(2))
-        );
+        // Verify the lower subtrie structure
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x2]), &[0x3, 0x4])
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x3]), &Nibbles::from_nibbles([0x4]))
+            .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &Nibbles::from_nibbles([0x5]))
+            .has_value(&leaves[0].0, &leaves[0].1)
+            .has_value(&leaves[1].0, &leaves[1].1);
     }
 }
