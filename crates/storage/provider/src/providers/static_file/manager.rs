@@ -229,15 +229,16 @@ pub struct StaticFileProviderInner<N> {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
-    /// Min static file block for each segment.
-    /// This index is initialized on launch to keep track of the lowest, non-expired static files.
+    /// Min static file range for each segment.
+    /// This index is initialized on launch to keep track of the lowest, non-expired static file
+    /// per segment.
     ///
-    /// This tracks the lowest static file per segment together with the highest block in that
+    /// This tracks the lowest static file per segment together with the block range in that
     /// file. E.g. static file is batched in 500k block intervals then the lowest static file
-    /// is [0..499K], and the highest block is 499K.
+    /// is [0..499K], and the block range is start = 0, end = 499K.
     /// This index is mainly used to History expiry, which targets transactions, e.g. pre-merge
     /// history expiry would lead to removing all static files below the merge height.
-    static_files_min_block: RwLock<HashMap<StaticFileSegment, u64>>,
+    static_files_min_block: RwLock<HashMap<StaticFileSegment, SegmentRangeInclusive>>,
     /// This is an additional index that tracks the expired height, this will track the highest
     /// block number that has been expired (missing). The first, non expired block is
     /// `expired_history_height + 1`.
@@ -248,7 +249,7 @@ pub struct StaticFileProviderInner<N> {
     ///
     /// This additional tracker exists for more efficient lookups because the node must be aware of
     /// the expired height.
-    expired_history_height: AtomicU64,
+    earliest_history_height: AtomicU64,
     /// Max static file block for each segment
     static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
     /// Available static file block ranges on disk indexed by max transactions.
@@ -282,7 +283,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             map: Default::default(),
             writers: Default::default(),
             static_files_min_block: Default::default(),
-            expired_history_height: Default::default(),
+            earliest_history_height: Default::default(),
             static_files_max_block: Default::default(),
             static_files_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
@@ -675,7 +676,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for (segment, ranges) in iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
             if let Some((first_block_range, _)) = ranges.first() {
-                min_block.insert(segment, first_block_range.end());
+                min_block.insert(segment, *first_block_range);
             }
             if let Some((last_block_range, _)) = ranges.last() {
                 max_block.insert(segment, last_block_range.end());
@@ -702,8 +703,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.map.clear();
 
         // initialize the expired history height to the lowest static file block
-        if let Some(lowest_block) = min_block.get(&StaticFileSegment::Transactions) {
-            self.expired_history_height.store(*lowest_block, std::sync::atomic::Ordering::Relaxed);
+        if let Some(lowest_range) = min_block.get(&StaticFileSegment::Transactions) {
+            // the earliest height is the lowest available block number
+            self.earliest_history_height
+                .store(lowest_range.start(), std::sync::atomic::Ordering::Relaxed);
         }
 
         Ok(())
@@ -1015,14 +1018,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(None)
     }
 
-    /// Returns the highest block number that has been expired from the history (missing).
+    /// Returns the earliest available block number that has not been expired and is still
+    /// available.
     ///
-    /// The earliest block that is still available in the static files is `expired_history_height +
-    /// 1`.
+    /// This means that the highest expired block (or expired block height) is
+    /// `earliest_history_height.saturating_sub(1)`.
     ///
     /// Returns `0` if no history has been expired.
-    pub fn expired_history_height(&self) -> BlockNumber {
-        self.expired_history_height.load(std::sync::atomic::Ordering::Relaxed)
+    pub fn earliest_history_height(&self) -> BlockNumber {
+        self.earliest_history_height.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Gets the lowest transaction static file block if it exists.
@@ -1040,7 +1044,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_lowest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
-        self.static_files_min_block.read().get(&segment).copied()
+        self.static_files_min_block.read().get(&segment).map(|range| range.end())
     }
 
     /// Gets the highest static file's block height if it exists for a static file segment.
