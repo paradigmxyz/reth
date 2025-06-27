@@ -2004,7 +2004,6 @@ mod tests {
             self
         }
 
-        #[allow(unused)]
         fn has_leaf(self, path: &Nibbles, expected_key: &Nibbles) -> Self {
             match self.subtrie.nodes.get(path) {
                 Some(SparseNode::Leaf { key, .. }) => {
@@ -3372,7 +3371,7 @@ mod tests {
 
     #[test]
     fn test_update_leaf_cross_level() {
-        let ctx = ParallelSparseTrieTestContext::default();
+        let ctx = ParallelSparseTrieTestContext;
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3440,7 +3439,7 @@ mod tests {
 
     #[test]
     fn test_update_leaf_split_at_level_boundary() {
-        let ctx = ParallelSparseTrieTestContext::default();
+        let ctx = ParallelSparseTrieTestContext;
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3488,7 +3487,7 @@ mod tests {
 
     #[test]
     fn test_update_subtrie_with_multiple_leaves() {
-        let ctx = ParallelSparseTrieTestContext::default();
+        let ctx = ParallelSparseTrieTestContext;
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3557,7 +3556,7 @@ mod tests {
 
     #[test]
     fn test_update_subtrie_extension_node_subtrie() {
-        let ctx = ParallelSparseTrieTestContext::default();
+        let ctx = ParallelSparseTrieTestContext;
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3587,7 +3586,7 @@ mod tests {
 
     #[test]
     fn update_subtrie_extension_node_cross_level() {
-        let ctx = ParallelSparseTrieTestContext::default();
+        let ctx = ParallelSparseTrieTestContext;
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
@@ -3616,5 +3615,380 @@ mod tests {
             .has_leaf(&Nibbles::from_nibbles([0x1, 0x2, 0x4]), &Nibbles::from_nibbles([0x5]))
             .has_value(&leaves[0].0, &leaves[0].1)
             .has_value(&leaves[1].0, &leaves[1].1);
+    }
+
+    #[test]
+    fn test_update_single_nibble_paths() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test edge case: single nibble paths that create branches in upper trie
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Branch { state_mask: 0x1 | 0x2 | 0x4 | 0x8 }
+        //   ├── 0x0: Leaf { key: 0x }
+        //   ├── 0x1: Leaf { key: 0x }
+        //   ├── 0x2: Leaf { key: 0x }
+        //   └── 0x3: Leaf { key: 0x }
+
+        // Insert leaves with single nibble paths
+        let (leaf1_path, value1) = ctx.create_test_leaf([0x0], 1);
+        let (leaf2_path, value2) = ctx.create_test_leaf([0x1], 2);
+        let (leaf3_path, value3) = ctx.create_test_leaf([0x2], 3);
+        let (leaf4_path, value4) = ctx.create_test_leaf([0x3], 4);
+
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf4_path, value4.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify upper trie has a branch at root with 4 children
+        ctx.assert_upper_subtrie(&trie)
+            .has_branch(&Nibbles::default(), &[0x0, 0x1, 0x2, 0x3])
+            .has_leaf(&Nibbles::from_nibbles([0x0]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x1]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x2]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0x3]), &Nibbles::default())
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf2_path, &value2)
+            .has_value(&leaf3_path, &value3)
+            .has_value(&leaf4_path, &value4);
+    }
+
+    #[test]
+    fn test_update_deep_extension_chain() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test edge case: deep extension chains that span multiple levels
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Extension { key: 0x111111 }
+        //       └── Subtrie (0x11): pointer to lower subtrie
+        //
+        // Lower subtrie (0x11):
+        //   0x111111: Branch { state_mask: 0x1 | 0x2 }
+        //   ├── 0x1111110: Leaf { key: 0x }
+        //   └── 0x1111111: Leaf { key: 0x }
+
+        // Create leaves with a long common prefix
+        let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0], 1);
+        let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x1], 2);
+
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify upper trie has extension with the full common prefix
+        ctx.assert_upper_subtrie(&trie).has_extension(
+            &Nibbles::default(),
+            &Nibbles::from_nibbles([0x1, 0x1, 0x1, 0x1, 0x1, 0x1]),
+        );
+
+        // Verify lower subtrie has branch structure
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x1]))
+            .has_branch(&Nibbles::from_nibbles([0x1, 0x1, 0x1, 0x1, 0x1, 0x1]), &[0x0, 0x1])
+            .has_leaf(
+                &Nibbles::from_nibbles([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0]),
+                &Nibbles::default(),
+            )
+            .has_leaf(
+                &Nibbles::from_nibbles([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x1]),
+                &Nibbles::default(),
+            )
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf2_path, &value2);
+    }
+
+    #[test]
+    fn test_update_branch_with_all_nibbles() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test edge case: branch node with all 16 possible nibble children
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Extension { key: 0xA }
+        //       └── Subtrie (0xA0): pointer to lower subtrie
+        //
+        // Lower subtrie (0xA0):
+        //   0xA0: Branch { state_mask: 0xFFFF } (all 16 children)
+        //   ├── 0xA00: Leaf { key: 0x }
+        //   ├── 0xA01: Leaf { key: 0x }
+        //   ├── 0xA02: Leaf { key: 0x }
+        //   ... (all nibbles 0x0 through 0xF)
+        //   └── 0xA0F: Leaf { key: 0x }
+
+        // Create leaves for all 16 possible nibbles
+        let mut leaves = Vec::new();
+        for nibble in 0x0..=0xF {
+            let (path, value) = ctx.create_test_leaf([0xA, 0x0, nibble], nibble as u64 + 1);
+            leaves.push((path, value));
+        }
+
+        // Insert all leaves
+        for (path, value) in &leaves {
+            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
+        }
+
+        // Verify upper trie structure
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0xA, 0x0]));
+
+        // Verify lower subtrie has branch with all 16 children
+        let mut subtrie_assert =
+            ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0xA, 0x0])).has_branch(
+                &Nibbles::from_nibbles([0xA, 0x0]),
+                &[0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF],
+            );
+
+        // Verify all leaves exist
+        for (i, (path, value)) in leaves.iter().enumerate() {
+            subtrie_assert = subtrie_assert
+                .has_leaf(&Nibbles::from_nibbles([0xA, 0x0, i as u8]), &Nibbles::default())
+                .has_value(path, value);
+        }
+    }
+
+    #[test]
+    fn test_update_creates_multiple_subtries() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test edge case: updates that create multiple subtries at once
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Extension { key: 0x0 }
+        //       └── 0x0: Branch { state_mask: 0xF }
+        //           ├── Subtrie (0x00): pointer
+        //           ├── Subtrie (0x01): pointer
+        //           ├── Subtrie (0x02): pointer
+        //           └── Subtrie (0x03): pointer
+        //
+        // Each lower subtrie has leaves:
+        //   0xXY: Leaf { key: 0xZ... }
+
+        // Create leaves that will force multiple subtries
+        let leaves = vec![
+            ctx.create_test_leaf([0x0, 0x0, 0x1, 0x2], 1),
+            ctx.create_test_leaf([0x0, 0x1, 0x3, 0x4], 2),
+            ctx.create_test_leaf([0x0, 0x2, 0x5, 0x6], 3),
+            ctx.create_test_leaf([0x0, 0x3, 0x7, 0x8], 4),
+        ];
+
+        // Insert all leaves
+        for (path, value) in &leaves {
+            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
+        }
+
+        // Verify upper trie has extension then branch
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x0]))
+            .has_branch(&Nibbles::from_nibbles([0x0]), &[0x0, 0x1, 0x2, 0x3]);
+
+        // Verify each subtrie exists and contains its leaf
+        for (i, (leaf_path, leaf_value)) in leaves.iter().enumerate() {
+            let subtrie_path = Nibbles::from_nibbles([0x0, i as u8]);
+            ctx.assert_subtrie(&trie, subtrie_path)
+                .has_leaf(
+                    &subtrie_path,
+                    &Nibbles::from_nibbles(match i {
+                        0 => vec![0x1, 0x2],
+                        1 => vec![0x3, 0x4],
+                        2 => vec![0x5, 0x6],
+                        3 => vec![0x7, 0x8],
+                        _ => unreachable!(),
+                    }),
+                )
+                .has_value(leaf_path, leaf_value);
+        }
+    }
+
+    #[test]
+    fn test_update_extension_to_branch_transformation() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test edge case: extension node transforms to branch when split
+        //
+        // Initial state after first two leaves:
+        // Upper trie:
+        //   0x: Extension { key: 0xFF0 }
+        //       └── Subtrie (0xFF): pointer
+        //
+        // After third leaf (0xF0...):
+        // Upper trie:
+        //   0x: Extension { key: 0xF }
+        //       └── 0xF: Branch { state_mask: 0x10 | 0x8000 }
+        //           ├── Subtrie (0xF0): pointer
+        //           └── Subtrie (0xFF): pointer
+
+        // First two leaves share prefix 0xFF0
+        let (leaf1_path, value1) = ctx.create_test_leaf([0xF, 0xF, 0x0, 0x1], 1);
+        let (leaf2_path, value2) = ctx.create_test_leaf([0xF, 0xF, 0x0, 0x2], 2);
+
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify initial extension structure
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0xF, 0xF, 0x0]));
+
+        // Add leaf that splits the extension
+        let (leaf3_path, value3) = ctx.create_test_leaf([0xF, 0x0, 0x0, 0x3], 3);
+        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify transformed structure
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0xF]))
+            .has_branch(&Nibbles::from_nibbles([0xF]), &[0x0, 0xF]);
+
+        // Verify subtries
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0xF, 0xF]))
+            .has_branch(&Nibbles::from_nibbles([0xF, 0xF, 0x0]), &[0x1, 0x2])
+            .has_leaf(&Nibbles::from_nibbles([0xF, 0xF, 0x0, 0x1]), &Nibbles::default())
+            .has_leaf(&Nibbles::from_nibbles([0xF, 0xF, 0x0, 0x2]), &Nibbles::default())
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf2_path, &value2);
+
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0xF, 0x0]))
+            .has_leaf(&Nibbles::from_nibbles([0xF, 0x0]), &Nibbles::from_nibbles([0x0, 0x3]))
+            .has_value(&leaf3_path, &value3);
+    }
+
+    #[test]
+    fn test_update_long_shared_prefix_at_boundary() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test edge case: leaves with long shared prefix that ends exactly at 2-nibble boundary
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Extension { key: 0xAB }
+        //       └── Subtrie (0xAB): pointer to lower subtrie
+        //
+        // Lower subtrie (0xAB):
+        //   0xAB: Branch { state_mask: 0x1000 | 0x2000 }
+        //   ├── 0xABC: Leaf { key: 0xDEF }
+        //   └── 0xABD: Leaf { key: 0xEF0 }
+
+        // Create leaves that share exactly 2 nibbles
+        let (leaf1_path, value1) = ctx.create_test_leaf([0xA, 0xB, 0xC, 0xD, 0xE, 0xF], 1);
+        let (leaf2_path, value2) = ctx.create_test_leaf([0xA, 0xB, 0xD, 0xE, 0xF, 0x0], 2);
+
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify upper trie structure
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0xA, 0xB]));
+
+        // Verify lower subtrie structure
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0xA, 0xB]))
+            .has_branch(&Nibbles::from_nibbles([0xA, 0xB]), &[0xC, 0xD])
+            .has_leaf(
+                &Nibbles::from_nibbles([0xA, 0xB, 0xC]),
+                &Nibbles::from_nibbles([0xD, 0xE, 0xF]),
+            )
+            .has_leaf(
+                &Nibbles::from_nibbles([0xA, 0xB, 0xD]),
+                &Nibbles::from_nibbles([0xE, 0xF, 0x0]),
+            )
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf2_path, &value2);
+    }
+
+    #[test]
+    fn test_update_shared_prefix_patterns() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test edge case: different patterns of shared prefixes
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Branch { state_mask: 0x6 }
+        //       ├── 0x1: Leaf { key: 0x234 }
+        //       └── 0x2: Extension { key: 0x3 }
+        //           └── Subtrie (0x23): pointer
+        //
+        // Lower subtrie (0x23):
+        //   0x23: Branch { state_mask: 0x10 | 0x20 }
+        //   ├── 0x234: Leaf { key: 0x5 }
+        //   └── 0x235: Leaf { key: 0x6 }
+
+        // Create leaves with different shared prefix patterns
+        let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 1);
+        let (leaf2_path, value2) = ctx.create_test_leaf([0x2, 0x3, 0x4, 0x5], 2);
+        let (leaf3_path, value3) = ctx.create_test_leaf([0x2, 0x3, 0x5, 0x6], 3);
+
+        trie.update_leaf(leaf1_path, value1, DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+
+        // Verify upper trie structure
+        ctx.assert_upper_subtrie(&trie)
+            .has_branch(&Nibbles::default(), &[0x1, 0x2])
+            .has_leaf(&Nibbles::from_nibbles([0x1]), &Nibbles::from_nibbles([0x2, 0x3, 0x4]))
+            .has_extension(&Nibbles::from_nibbles([0x2]), &Nibbles::from_nibbles([0x3]));
+
+        // Verify lower subtrie structure
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x2, 0x3]))
+            .has_branch(&Nibbles::from_nibbles([0x2, 0x3]), &[0x4, 0x5])
+            .has_leaf(&Nibbles::from_nibbles([0x2, 0x3, 0x4]), &Nibbles::from_nibbles([0x5]))
+            .has_leaf(&Nibbles::from_nibbles([0x2, 0x3, 0x5]), &Nibbles::from_nibbles([0x6]))
+            .has_value(&leaf2_path, &value2)
+            .has_value(&leaf3_path, &value3);
+    }
+
+    #[test]
+    fn test_update_max_depth_paths() {
+        let ctx = ParallelSparseTrieTestContext;
+        let mut trie =
+            ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
+
+        // Test edge case: very long paths (64 nibbles - max for addresses/storage)
+        //
+        // Final trie structure:
+        // Upper trie:
+        //   0x: Extension { key: 0xFF }
+        //       └── Subtrie (0xFF): pointer
+        //
+        // Lower subtrie (0xFF):
+        //   Has very long paths with slight differences at the end
+
+        // Create two 64-nibble paths that differ only in the last nibble
+        let mut path1_nibbles = vec![0xF; 63];
+        path1_nibbles.push(0x0);
+        let mut path2_nibbles = vec![0xF; 63];
+        path2_nibbles.push(0x1);
+
+        let (leaf1_path, value1) = ctx.create_test_leaf(&path1_nibbles, 1);
+        let (leaf2_path, value2) = ctx.create_test_leaf(&path2_nibbles, 2);
+
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+
+        // The common prefix of 63 F's will create a very long extension
+        let extension_key = vec![0xF; 63];
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles(&extension_key));
+
+        // Verify the subtrie has the branch at the end
+        ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0xF, 0xF]))
+            .has_branch(&Nibbles::from_nibbles(&path1_nibbles[..63]), &[0x0, 0x1])
+            .has_value(&leaf1_path, &value1)
+            .has_value(&leaf2_path, &value2);
     }
 }
