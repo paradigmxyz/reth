@@ -3,7 +3,7 @@
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
-    BuilderContext, NodeAdapter,
+    BuilderContext, ExExLauncher, NodeAdapter,
 };
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip2124::Head;
@@ -19,6 +19,7 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
@@ -931,6 +932,21 @@ where
     /// Returns the node adapter components.
     pub const fn components(&self) -> &CB::Components {
         &self.node_adapter().components
+    }
+
+    /// Launches ExEx (Execution Extensions) and returns the ExEx manager handle.
+    pub async fn launch_exex(
+        &self,
+        installed_exex: Vec<(String, Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>)>,
+    ) -> eyre::Result<Option<ExExManagerHandle<<T::Types as NodeTypes>::Primitives>>> {
+        ExExLauncher::new(
+            self.head(),
+            self.node_adapter().clone(),
+            installed_exex,
+            self.configs().clone(),
+        )
+        .launch()
+        .await
     }
 }
 

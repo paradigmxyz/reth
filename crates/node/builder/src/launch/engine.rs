@@ -5,7 +5,7 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 use alloy_consensus::BlockHeader;
@@ -134,14 +134,7 @@ where
         ctx.expire_pre_merge_transactions()?;
 
         // spawn exexs
-        let exex_manager_handle = ExExLauncher::new(
-            ctx.head(),
-            ctx.node_adapter().clone(),
-            installed_exex,
-            ctx.configs().clone(),
-        )
-        .launch()
-        .await?;
+        let exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 
         // create pipeline
         let network_handle = ctx.components().network().clone();
