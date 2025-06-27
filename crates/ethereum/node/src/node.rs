@@ -12,7 +12,9 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
-use reth_evm::{ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes};
+use reth_evm::{
+    eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
+};
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
     AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PrimitivesTy, TxTy,
@@ -61,7 +63,12 @@ impl EthereumNode {
         EthereumConsensusBuilder,
     >
     where
-        Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
+        Node: FullNodeTypes<
+            Types: NodeTypes<
+                ChainSpec: Hardforks + EthereumHardforks + EthExecutorSpec,
+                Primitives = EthPrimitives,
+            >,
+        >,
         <Node::Types as NodeTypes>::Payload: PayloadTypes<
             BuiltPayload = EthBuiltPayload,
             PayloadAttributes = EthPayloadAttributes,
@@ -340,10 +347,13 @@ pub struct EthereumExecutorBuilder;
 
 impl<Types, Node> ExecutorBuilder<Node> for EthereumExecutorBuilder
 where
-    Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>,
+    Types: NodeTypes<
+        ChainSpec: Hardforks + EthExecutorSpec + EthereumHardforks,
+        Primitives = EthPrimitives,
+    >,
     Node: FullNodeTypes<Types = Types>,
 {
-    type EVM = EthEvmConfig;
+    type EVM = EthEvmConfig<Types::ChainSpec>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new(ctx.chain_spec())
@@ -397,6 +407,7 @@ where
 
         let validator = TransactionValidationTaskExecutor::eth_builder(ctx.provider().clone())
             .with_head_timestamp(ctx.head().timestamp)
+            .with_max_tx_input_bytes(ctx.config().txpool.max_tx_input_bytes)
             .kzg_settings(ctx.kzg_settings()?)
             .with_local_transactions_config(pool_config.local_transactions_config.clone())
             .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)

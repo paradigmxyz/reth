@@ -283,8 +283,6 @@ impl InMemorySize for Receipt {
     }
 }
 
-impl reth_primitives_traits::Receipt for Receipt {}
-
 impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt
 where
     T: Into<Log>,
