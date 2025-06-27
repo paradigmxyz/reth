@@ -135,7 +135,7 @@ pub fn stateless_validation<ChainSpec, E>(
     evm_config: E,
 ) -> Result<B256, StatelessValidationError>
 where
-    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
     stateless_validation_with_trie::<StatelessSparseTrie, ChainSpec, E>(
@@ -160,7 +160,7 @@ pub fn stateless_validation_with_trie<T, ChainSpec, E>(
 ) -> Result<B256, StatelessValidationError>
 where
     T: StatelessTrie,
-    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
     let current_block = current_block
@@ -251,7 +251,7 @@ fn validate_block_consensus<ChainSpec>(
     block: &RecoveredBlock<Block>,
 ) -> Result<(), StatelessValidationError>
 where
-    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
 {
     let consensus = EthBeaconConsensus::new(chain_spec);
 

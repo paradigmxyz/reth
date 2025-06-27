@@ -119,7 +119,7 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
 
 impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
 where
-    ChainSpec: EthExecutorSpec + EthChainSpec + Hardforks + 'static,
+    ChainSpec: EthExecutorSpec + EthChainSpec<Header = Header> + Hardforks + 'static,
     EvmF: EvmFactory<
             Tx: TransactionEnv
                     + FromRecoveredTx<TransactionSigned>

@@ -18,7 +18,11 @@ use tracing::debug;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthFees: LoadFee {
+pub trait EthFees:
+    LoadFee<
+    Provider: ChainSpecProvider<ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>>,
+>
+{
     /// Returns a suggestion for a gas price for legacy transactions.
     ///
     /// See also: <https://github.com/ethereum/pm/issues/328#issuecomment-853234014>
