@@ -2,7 +2,7 @@
 
 This repository contains several Rust crates that implement the different building blocks of an Ethereum node. The high-level structure of the repository is as follows:
 
-Generally reth is composed of a few components, with supporting crates. The main components can be defined as:
+Generally, reth is composed of a few components, with supporting crates. The main components can be defined as:
 
 - [Project Layout](#project-layout)
   - [Documentation](#documentation)
