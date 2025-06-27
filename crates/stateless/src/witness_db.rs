@@ -55,7 +55,7 @@ where
     ///    to 256 including the current block number). It assumes these hashes correspond to a
     ///    contiguous chain of blocks. The caller is responsible for verifying the contiguity and
     ///    the block limit.
-    pub(crate) fn new(
+    pub(crate) const fn new(
         trie: &'a T,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: BTreeMap<u64, B256>,
