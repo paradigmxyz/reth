@@ -9,7 +9,6 @@ license.workspace = true
 reth-payload-builder.workspace = true
 reth-basic-payload-builder.workspace = true
 reth-ethereum-payload-builder.workspace = true
-reth-engine-local.workspace = true
 reth-ethereum = { workspace = true, features = ["test-utils", "node", "node-api", "pool"] }
 reth-tracing.workspace = true
 reth-trie-db.workspace = true
