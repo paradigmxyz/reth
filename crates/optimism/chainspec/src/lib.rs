@@ -72,8 +72,6 @@ use reth_network_peers::NodeRecord;
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
-// use reth_chainspec::api::next_block_base_fee;
-
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
 pub struct OpChainSpecBuilder {
