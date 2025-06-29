@@ -27,7 +27,7 @@ use std::pin::Pin;
 use tokio_stream::StreamExt;
 use url::Url;
 
-/// An helper struct to handle node actions
+/// A helper struct to handle node actions
 #[expect(missing_debug_implementations)]
 pub struct NodeTestContext<Node, AddOns>
 where
