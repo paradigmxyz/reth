@@ -8,8 +8,6 @@ use alloc::vec::Vec;
 use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
 use alloy_primitives::{Bloom, B256};
 use alloy_trie::EMPTY_ROOT_HASH;
-use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
-use reth_chainspec::{BaseFeeParams, EthChainSpec};
 use reth_consensus::ConsensusError;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
