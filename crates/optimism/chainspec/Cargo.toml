@@ -44,6 +44,7 @@ miniz_oxide = { workspace = true, features = ["with-alloc"], optional = true }
 derive_more.workspace = true
 paste = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
+op-alloy-consensus.workspace = true
 
 [dev-dependencies]
 reth-chainspec = { workspace = true, features = ["test-utils"] }
