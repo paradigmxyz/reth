@@ -320,7 +320,7 @@ where
     type AddOns = EthereumAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         EthereumEthApiBuilder,
-        EthereumEngineValidatorBuilder<ChainSpec>,
+        EthereumEngineValidatorBuilder,
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
@@ -475,23 +475,19 @@ where
 /// Builder for [`EthereumEngineValidator`].
 #[derive(Debug, Default, Clone)]
 #[non_exhaustive]
-pub struct EthereumEngineValidatorBuilder<ChainSpec = reth_chainspec::ChainSpec> {
-    _phantom: std::marker::PhantomData<ChainSpec>,
-}
+pub struct EthereumEngineValidatorBuilder;
 
-impl<Node, Types, ChainSpec> EngineValidatorBuilder<Node>
-    for EthereumEngineValidatorBuilder<ChainSpec>
+impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
     Types: NodeTypes<
-        ChainSpec = ChainSpec,
+        ChainSpec: EthereumHardforks + Clone + 'static,
         Payload: EngineTypes<ExecutionData = ExecutionData>
                      + PayloadTypes<PayloadAttributes = EthPayloadAttributes>,
         Primitives = EthPrimitives,
     >,
     Node: FullNodeComponents<Types = Types>,
-    ChainSpec: EthChainSpec + EthereumHardforks + Clone + 'static,
 {
-    type Validator = EthereumEngineValidator<ChainSpec>;
+    type Validator = EthereumEngineValidator<Types::ChainSpec>;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
