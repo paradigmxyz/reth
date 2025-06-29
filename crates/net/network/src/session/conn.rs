@@ -65,7 +65,7 @@ impl<N: NetworkPrimitives> EthRlpxConnection<N> {
         }
     }
 
-    /// Returns  access to the underlying stream.
+    /// Returns access to the underlying stream.
     #[inline]
     pub(crate) const fn inner(&self) -> &P2PStream<ECIESStream<TcpStream>> {
         match self {
