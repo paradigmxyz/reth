@@ -230,6 +230,11 @@ impl OpChainSpec {
     }
 }
 
+/// Extracts the Holocene 1599 parameters from the encoded extra data from the parent header.
+///
+/// Caution: Caller must ensure that holocene is active in the parent header.
+///
+/// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
 pub fn decode_holocene_base_fee<H>(
     chain_spec: impl EthChainSpec + OpHardforks,
     parent: &H,
