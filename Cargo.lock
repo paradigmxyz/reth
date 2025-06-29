@@ -7197,6 +7197,7 @@ dependencies = [
  "reth-primitives",
  "reth-provider",
  "reth-prune-types",
+ "reth-rpc-convert",
  "reth-stages-types",
  "reth-storage-api",
  "reth-trie",
