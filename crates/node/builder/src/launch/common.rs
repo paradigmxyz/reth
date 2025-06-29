@@ -3,7 +3,8 @@
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
-    BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
+    setup::build_networked_pipeline,
+    BlockTy, BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
 };
 use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip2124::Head;
@@ -12,7 +13,7 @@ use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
 use reth_chainspec::{Chain, EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
-use reth_consensus::noop::NoopConsensus;
+use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_db_common::init::{init_genesis, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
@@ -22,7 +23,7 @@ use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
 use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
-use reth_network_p2p::headers::client::HeadersClient;
+use reth_network_p2p::{headers::client::HeadersClient, BlockClient};
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::{
     args::{DefaultEraHost, InvalidBlockHookType},
@@ -52,8 +53,8 @@ use reth_rpc_api::clients::EthApiClient;
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
 use reth_stages::{
-    sets::DefaultStages, stages::EraImportSource, MetricEvent, PipelineBuilder, PipelineTarget,
-    StageId,
+    sets::DefaultStages, stages::EraImportSource, MetricEvent, Pipeline, PipelineBuilder,
+    PipelineTarget, StageId,
 };
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
@@ -739,6 +740,7 @@ where
             },
             node_adapter,
             head,
+            exex_manager_handle: None,
         };
 
         let ctx = LaunchContextWith {
@@ -998,6 +1000,56 @@ where
             Either::Right(stream::empty())
         }
     }
+
+    /// Sets the ExEx manager handle.
+    pub fn set_exex_manager_handle(
+        &mut self,
+        handle: Option<ExExManagerHandle<PrimitivesTy<T::Types>>>,
+    ) {
+        self.right_mut().exex_manager_handle = handle;
+    }
+
+    /// Returns the ExEx manager handle if available.
+    pub fn exex_manager_handle(&self) -> Option<&ExExManagerHandle<PrimitivesTy<T::Types>>> {
+        self.right().exex_manager_handle.as_ref()
+    }
+
+    /// Builds a networked pipeline with all necessary components.
+    pub fn build_pipeline<Client>(
+        &self,
+        network_client: Client,
+        consensus: Arc<
+            dyn FullConsensus<<T::Types as NodeTypes>::Primitives, Error = ConsensusError>,
+        >,
+        max_block: Option<BlockNumber>,
+        static_file_producer: StaticFileProducer<
+            ProviderFactory<NodeTypesWithDBAdapter<T::Types, T::DB>>,
+        >,
+    ) -> eyre::Result<Pipeline<NodeTypesWithDBAdapter<T::Types, T::DB>>>
+    where
+        T: FullNodeTypes<Types: NodeTypesForProvider>,
+        CB: NodeComponentsBuilder<T>,
+        Client: BlockClient<Block = BlockTy<NodeTypesWithDBAdapter<T::Types, T::DB>>> + 'static,
+        CB::Components: NodeComponents<
+            T,
+            Evm: ConfigureEvm<Primitives = <T::Types as NodeTypes>::Primitives> + 'static,
+        >,
+    {
+        build_networked_pipeline(
+            &self.toml_config().stages,
+            network_client,
+            consensus,
+            self.provider_factory().clone(),
+            self.task_executor(),
+            self.sync_metrics_tx(),
+            self.prune_config(),
+            max_block,
+            static_file_producer,
+            self.components().evm_config().clone(),
+            self.exex_manager_handle().cloned().unwrap_or_else(|| ExExManagerHandle::empty()),
+            self.era_import_source(),
+        )
+    }
 }
 
 impl<T, CB>
@@ -1169,6 +1221,7 @@ where
     db_provider_container: WithMeteredProvider<NodeTypesWithDBAdapter<T::Types, T::DB>>,
     node_adapter: NodeAdapter<T, CB::Components>,
     head: Head,
+    exex_manager_handle: Option<ExExManagerHandle<PrimitivesTy<T::Types>>>,
 }
 
 #[cfg(test)]
