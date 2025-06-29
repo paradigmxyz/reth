@@ -39,14 +39,14 @@ where
                 expected: header.ommers_hash(),
             }
             .into(),
-        ))
+        ));
     }
 
     let tx_root = body.calculate_tx_root();
     if header.transactions_root() != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
             GotExpected { got: tx_root, expected: header.transactions_root() }.into(),
-        ))
+        ));
     }
 
     match (header.withdrawals_root(), body.calculate_withdrawals_root()) {
@@ -58,7 +58,7 @@ where
                 if withdrawals_root != EMPTY_ROOT_HASH {
                     return Err(ConsensusError::BodyWithdrawalsRootDiff(
                         GotExpected { got: withdrawals_root, expected: EMPTY_ROOT_HASH }.into(),
-                    ))
+                    ));
                 }
             } else {
                 // before isthmus we ensure that the header root matches the body
@@ -66,7 +66,7 @@ where
                     return Err(ConsensusError::BodyWithdrawalsRootDiff(
                         GotExpected { got: withdrawals_root, expected: header_withdrawals_root }
                             .into(),
-                    ))
+                    ));
                 }
             }
         }
@@ -105,7 +105,7 @@ pub fn validate_block_post_execution<R: DepositReceipt>(
                 .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
                 .collect::<Vec<_>>();
             tracing::debug!(%error, ?receipts, "receipts verification failed");
-            return Err(error)
+            return Err(error);
         }
     }
 
@@ -116,7 +116,7 @@ pub fn validate_block_post_execution<R: DepositReceipt>(
         return Err(ConsensusError::BlockGasUsed {
             gas: GotExpected { got: cumulative_gas_used, expected: header.gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
-        })
+        });
     }
 
     Ok(())
@@ -159,54 +159,16 @@ fn compare_receipts_root_and_logs_bloom(
     if calculated_receipts_root != expected_receipts_root {
         return Err(ConsensusError::BodyReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
-        ))
+        ));
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(ConsensusError::BodyBloomLogDiff(
             GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
-        ))
+        ));
     }
 
     Ok(())
-}
-
-/// Extracts the Holocene 1599 parameters from the encoded extra data from the parent header.
-///
-/// Caution: Caller must ensure that holocene is active in the parent header.
-///
-/// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
-pub fn decode_holocene_base_fee(
-    chain_spec: impl EthChainSpec + OpHardforks,
-    parent: impl BlockHeader,
-    timestamp: u64,
-) -> Result<u64, EIP1559ParamError> {
-    let (elasticity, denominator) = decode_holocene_extra_data(parent.extra_data())?;
-    let base_fee_params = if elasticity == 0 && denominator == 0 {
-        chain_spec.base_fee_params_at_timestamp(timestamp)
-    } else {
-        BaseFeeParams::new(denominator as u128, elasticity as u128)
-    };
-
-    Ok(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
-}
-
-/// Read from parent to determine the base fee for the next block
-///
-/// See also [Base fee computation](https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/holocene/exec-engine.md#base-fee-computation)
-pub fn next_block_base_fee<H: BlockHeader>(
-    chain_spec: impl EthChainSpec<Header = H> + OpHardforks,
-    parent: &H,
-    timestamp: u64,
-) -> Result<u64, EIP1559ParamError> {
-    // If we are in the Holocene, we need to use the base fee params
-    // from the parent block's extra data.
-    // Else, use the base fee params (default values) from chainspec
-    if chain_spec.is_holocene_active_at_timestamp(parent.timestamp()) {
-        Ok(decode_holocene_base_fee(chain_spec, parent, timestamp)?)
-    } else {
-        Ok(chain_spec.next_block_base_fee(parent, timestamp).unwrap_or_default())
-    }
 }
 
 #[cfg(test)]
@@ -255,7 +217,8 @@ mod tests {
             gas_limit: 144000000,
             ..Default::default()
         };
-        let base_fee = next_block_base_fee(&op_chain_spec, &parent, 0);
+        let base_fee =
+            reth_optimism_chainspec::OpChainSpec::next_block_base_fee(&op_chain_spec, &parent, 0);
         assert_eq!(
             base_fee.unwrap(),
             op_chain_spec.next_block_base_fee(&parent, 0).unwrap_or_default()
@@ -273,7 +236,11 @@ mod tests {
             extra_data: Bytes::from_static(&[0, 0, 0, 0, 0, 0, 0, 0, 0]),
             ..Default::default()
         };
-        let base_fee = next_block_base_fee(&op_chain_spec, &parent, 1800000005);
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &op_chain_spec,
+            &parent,
+            1800000005,
+        );
         assert_eq!(
             base_fee.unwrap(),
             op_chain_spec.next_block_base_fee(&parent, 0).unwrap_or_default()
@@ -291,7 +258,11 @@ mod tests {
             ..Default::default()
         };
 
-        let base_fee = next_block_base_fee(holocene_chainspec(), &parent, 1800000005);
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &holocene_chainspec(),
+            &parent,
+            1800000005,
+        );
         assert_eq!(
             base_fee.unwrap(),
             parent
@@ -312,7 +283,12 @@ mod tests {
             ..Default::default()
         };
 
-        let base_fee = next_block_base_fee(&*BASE_SEPOLIA, &parent, 1735315546).unwrap();
+        let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
+            &*BASE_SEPOLIA,
+            &parent,
+            1735315546,
+        )
+        .unwrap();
         assert_eq!(base_fee, 507);
     }
 
