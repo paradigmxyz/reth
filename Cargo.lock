@@ -9107,6 +9107,7 @@ dependencies = [
  "alloy-primitives",
  "derive_more",
  "miniz_oxide",
+ "op-alloy-consensus",
  "op-alloy-rpc-types",
  "paste",
  "reth-chainspec",

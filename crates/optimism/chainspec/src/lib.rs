@@ -56,12 +56,13 @@ pub use reth_optimism_forks::*;
 
 use alloc::{boxed::Box, vec, vec::Vec};
 use alloy_chains::Chain;
-use alloy_consensus::{proofs::storage_root_unhashed, Header};
+use alloy_consensus::{proofs::storage_root_unhashed, BlockHeader, Header};
 use alloy_eips::eip7840::BlobParams;
 use alloy_genesis::Genesis;
 use alloy_hardforks::Hardfork;
 use alloy_primitives::{B256, U256};
 use derive_more::{Constructor, Deref, From, Into};
+use op_alloy_consensus::{decode_holocene_extra_data, EIP1559ParamError};
 use reth_chainspec::{
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, DepositContract,
     DisplayHardforks, EthChainSpec, EthereumHardforks, ForkFilter, ForkId, Hardforks, Head,
@@ -227,6 +228,24 @@ impl OpChainSpec {
     }
 }
 
+pub fn decode_holocene_base_fee<H>(
+    chain_spec: impl EthChainSpec + OpHardforks,
+    parent: &H,
+    timestamp: u64,
+) -> Result<u64, EIP1559ParamError>
+where
+    H: BlockHeader,
+{
+    let (elasticity, denominator) = decode_holocene_extra_data(parent.extra_data())?;
+    let base_fee_params = if elasticity == 0 && denominator == 0 {
+        chain_spec.base_fee_params_at_timestamp(timestamp)
+    } else {
+        BaseFeeParams::new(denominator as u128, elasticity as u128)
+    };
+
+    Ok(parent.next_block_base_fee(base_fee_params).unwrap_or_default())
+}
+
 impl EthChainSpec for OpChainSpec {
     type Header = Header;
 
@@ -285,6 +304,15 @@ impl EthChainSpec for OpChainSpec {
 
     fn final_paris_total_difficulty(&self) -> Option<U256> {
         self.inner.final_paris_total_difficulty()
+    }
+
+    fn next_block_base_fee(&self, parent: &Header, target_timestamp: u64) -> Option<u64>
+    {
+        if self.is_holocene_active_at_timestamp(parent.timestamp()) {
+            decode_holocene_base_fee(self, parent, parent.timestamp()).ok()
+        } else {
+            EthChainSpec::next_block_base_fee(self, parent, target_timestamp)
+        }
     }
 }
 
