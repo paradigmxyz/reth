@@ -15,13 +15,12 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::PendingBlock;
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
-    StateProviderFactory,
+    ReceiptProvider, StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm_primitives::B256;
 
-impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> LoadPendingBlock for EthApi<N>
 where
     Self: SpawnBlocking<
             NetworkTypes: RpcTypes<
@@ -30,8 +29,10 @@ where
             Error: FromEvmError<Self::Evm>,
             RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         > + RpcNodeCore<
-            Provider: BlockReaderIdExt<Receipt = Provider::Receipt, Block = Provider::Block>
-                          + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
+            Provider: BlockReaderIdExt<
+                Receipt = <N::Provider as ReceiptProvider>::Receipt,
+                Block = <N::Provider as BlockReader>::Block,
+            > + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                           + StateProviderFactory,
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
@@ -47,7 +48,7 @@ where
                 Block = ProviderBlock<Self::Provider>,
             >,
         >,
-    Provider: BlockReader,
+    N: RpcNodeCore<Provider: BlockReader>,
 {
     #[inline]
     fn pending_block(
