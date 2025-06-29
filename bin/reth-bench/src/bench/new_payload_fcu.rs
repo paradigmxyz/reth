@@ -11,14 +11,18 @@ use crate::{
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
-use alloy_provider::Provider;
-use alloy_rpc_types_engine::{ExecutionPayload, ForkchoiceState};
+use alloy_provider::{network::AnyRpcBlock, Provider};
+use alloy_rpc_types_engine::{ExecutionData, ForkchoiceState};
 use clap::Parser;
 use csv::Writer;
 use humantime::parse_duration;
 use reth_cli_runner::CliContext;
+use reth_node_api::EngineTypes;
 use reth_node_core::args::BenchmarkArgs;
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tracing::{debug, info};
 
 /// `reth benchmark new-payload-fcu` command
@@ -38,7 +42,11 @@ pub struct Command {
 
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
-    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute<E: EngineTypes>(
+        self,
+        _ctx: CliContext,
+        convert: Arc<dyn Fn(AnyRpcBlock) -> eyre::Result<ExecutionData> + Send + Sync>,
+    ) -> eyre::Result<()> {
         let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
             BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
@@ -47,6 +55,11 @@ impl Command {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
+
+                // Convert to execution payload
+                let execution_data = convert(block.clone()).unwrap();
+                let payload = execution_data.payload;
+                let sidecar = execution_data.sidecar;
 
                 let block = block
                     .into_inner()
@@ -61,8 +74,6 @@ impl Command {
                 let blob_versioned_hashes =
                     block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
 
-                // Convert to execution payload
-                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
                 let header = block.header;
                 let head_block_hash = payload.block_hash();
                 let safe_block_hash =
