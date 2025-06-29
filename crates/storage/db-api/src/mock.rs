@@ -7,6 +7,7 @@ use crate::{
         ReverseWalker, Walker,
     },
     database::Database,
+    database_metrics::DatabaseMetrics,
     table::{DupSort, Encode, Table, TableImporter},
     transaction::{DbTx, DbTxMut},
     DatabaseError,
@@ -33,6 +34,8 @@ impl Database for DatabaseMock {
         Ok(TxMock::default())
     }
 }
+
+impl DatabaseMetrics for DatabaseMock {}
 
 /// Mock read only tx
 #[derive(Debug, Clone, Default)]
