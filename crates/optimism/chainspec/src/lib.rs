@@ -72,6 +72,8 @@ use reth_network_peers::NodeRecord;
 use reth_optimism_primitives::ADDRESS_L2_TO_L1_MESSAGE_PASSER;
 use reth_primitives_traits::{sync::LazyLock, SealedHeader};
 
+// use reth_chainspec::api::next_block_base_fee;
+
 /// Chain spec builder for a OP stack chain.
 #[derive(Debug, Default, From)]
 pub struct OpChainSpecBuilder {
@@ -311,7 +313,7 @@ impl EthChainSpec for OpChainSpec {
         if self.is_holocene_active_at_timestamp(parent.timestamp()) {
             decode_holocene_base_fee(self, parent, parent.timestamp()).ok()
         } else {
-            EthChainSpec::next_block_base_fee(self, parent, target_timestamp)
+            self.inner.next_block_base_fee( parent, target_timestamp)
         }
     }
 }
