@@ -5,13 +5,13 @@ use alloy_consensus::{
         RecoveryError,
     },
     transaction::SignerRecoverable,
-    SignableTransaction, Signed, Transaction, TransactionEnvelope,
+    Signed, Transaction, TransactionEnvelope,
 };
 use alloy_eips::{
     eip2718::{Eip2718Result, IsTyped2718},
     Decodable2718, Encodable2718, Typed2718,
 };
-use alloy_primitives::{bytes::Buf, keccak256, Sealed, Signature, TxHash, B256};
+use alloy_primitives::{bytes::Buf, Sealed, Signature, TxHash, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
 use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth_codecs::{
@@ -127,15 +127,6 @@ impl SignerRecoverable for CustomTransactionEnvelope {
 impl SignedTransaction for CustomTransactionEnvelope {
     fn tx_hash(&self) -> &TxHash {
         self.inner.hash()
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        self.inner.tx().encode_for_signing(buf);
-        let signature_hash = keccak256(buf);
-        recover_signer_unchecked(self.inner.signature(), signature_hash)
     }
 }
 
@@ -300,20 +291,6 @@ impl SignerRecoverable for CustomTransaction {
 }
 
 impl SignedTransaction for CustomTransaction {
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        match self {
-            CustomTransaction::Op(tx) => {
-                SignedTransaction::recover_signer_unchecked_with_buf(tx, buf)
-            }
-            CustomTransaction::Payment(tx) => {
-                SignedTransaction::recover_signer_unchecked_with_buf(tx, buf)
-            }
-        }
-    }
-
     fn tx_hash(&self) -> &B256 {
         match self {
             CustomTransaction::Op(tx) => SignedTransaction::tx_hash(tx),
