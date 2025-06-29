@@ -1,6 +1,7 @@
 use super::OpNodeCore;
 use crate::{OpEthApi, OpEthApiError};
 use alloy_rpc_types_eth::TransactionRequest;
+use op_alloy_network::TransactionBuilder;
 use op_revm::OpTransaction;
 use reth_evm::{execute::BlockExecutorFactory, ConfigureEvm, EvmFactory, TxEnvFor};
 use reth_node_api::NodePrimitives;
@@ -39,7 +40,10 @@ where
                 >,
             >,
             RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Network = Self::NetworkTypes>,
-            NetworkTypes: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+            NetworkTypes: alloy_network::Network
+                              + RpcTypes<
+                TransactionRequest: TransactionBuilder<<Self::RpcConvert as RpcConvert>::Network>,
+            >,
             Error: FromEvmError<Self::Evm>
                        + From<<Self::RpcConvert as RpcConvert>::Error>
                        + From<ProviderError>,
