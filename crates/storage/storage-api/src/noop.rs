@@ -8,6 +8,9 @@ use crate::{
     StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant, TransactionsProvider,
 };
+
+#[cfg(feature = "db-api")]
+use crate::{DatabaseProviderFactory, DBProvider};
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
@@ -25,7 +28,11 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{
     Account, Bytecode, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
+#[cfg(feature = "db-api")]
+use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
+#[cfg(feature = "db-api")]
+use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
@@ -38,20 +45,38 @@ use reth_trie_common::{
 #[non_exhaustive]
 pub struct NoopProvider<ChainSpec = reth_chainspec::ChainSpec, N = EthPrimitives> {
     chain_spec: Arc<ChainSpec>,
+    #[cfg(feature = "db-api")]
+    tx: TxMock,
+    #[cfg(feature = "db-api")]
+    prune_modes: PruneModes,
     _phantom: PhantomData<N>,
 }
 
 impl<ChainSpec, N> NoopProvider<ChainSpec, N> {
     /// Create a new instance for specific primitive types.
     pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, _phantom: Default::default() }
+        Self { 
+            chain_spec, 
+            #[cfg(feature = "db-api")]
+            tx: TxMock::default(),
+            #[cfg(feature = "db-api")]
+            prune_modes: PruneModes::none(),
+            _phantom: Default::default() 
+        }
     }
 }
 
 impl<ChainSpec> NoopProvider<ChainSpec> {
     /// Create a new instance of the `NoopBlockReader`.
     pub fn eth(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, _phantom: Default::default() }
+        Self { 
+            chain_spec, 
+            #[cfg(feature = "db-api")]
+            tx: TxMock::default(),
+            #[cfg(feature = "db-api")]
+            prune_modes: PruneModes::none(),
+            _phantom: Default::default() 
+        }
     }
 }
 
@@ -70,7 +95,14 @@ impl Default for NoopProvider {
 
 impl<ChainSpec, N> Clone for NoopProvider<ChainSpec, N> {
     fn clone(&self) -> Self {
-        Self { chain_spec: Arc::clone(&self.chain_spec), _phantom: Default::default() }
+        Self { 
+            chain_spec: Arc::clone(&self.chain_spec), 
+            #[cfg(feature = "db-api")]
+            tx: self.tx.clone(),
+            #[cfg(feature = "db-api")]
+            prune_modes: self.prune_modes.clone(),
+            _phantom: Default::default() 
+        }
     }
 }
 
@@ -558,5 +590,43 @@ impl<C: Send + Sync, N: Send + Sync> BlockBodyIndicesProvider for NoopProvider<C
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<StoredBlockBodyIndices>> {
         Ok(Vec::new())
+    }
+}
+
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: NodePrimitives> DBProvider for NoopProvider<ChainSpec, N> {
+    type Tx = TxMock;
+
+    fn tx_ref(&self) -> &Self::Tx {
+        &self.tx
+    }
+
+    fn tx_mut(&mut self) -> &mut Self::Tx {
+        &mut self.tx
+    }
+
+    fn into_tx(self) -> Self::Tx {
+        self.tx
+    }
+
+    fn prune_modes_ref(&self) -> &PruneModes {
+        &self.prune_modes
+    }
+}
+
+#[cfg(feature = "db-api")]
+impl<ChainSpec: Send + Sync, N: NodePrimitives> DatabaseProviderFactory 
+    for NoopProvider<ChainSpec, N> 
+{
+    type DB = DatabaseMock;
+    type Provider = Self;
+    type ProviderRW = Self;
+
+    fn database_provider_ro(&self) -> ProviderResult<Self::Provider> {
+        Ok(self.clone())
+    }
+
+    fn database_provider_rw(&self) -> ProviderResult<Self::ProviderRW> {
+        Ok(self.clone())
     }
 }
