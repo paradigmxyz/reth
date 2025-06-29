@@ -23,13 +23,13 @@ use reth_consensus_common::validation::{
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
+use reth_optimism_chainspec::decode_holocene_base_fee;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{
     Block, BlockBody, BlockHeader, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
     SealedHeader,
 };
-use reth_optimism_chainspec::decode_holocene_base_fee;
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
 
