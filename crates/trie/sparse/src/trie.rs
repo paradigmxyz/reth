@@ -1,4 +1,4 @@
-use crate::blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode};
+use crate::blinded::{BlindedProvider, RevealedNode};
 use alloc::{
     borrow::Cow,
     boxed::Box,
@@ -78,7 +78,7 @@ pub struct SparseTrieState {
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
 #[derive(PartialEq, Eq, Default, Clone)]
-pub enum SparseTrie<P = DefaultBlindedProvider> {
+pub enum SparseTrie {
     /// This is a variant that can be used to store a previously allocated trie. In these cases,
     /// the trie will still be treated as blind, but the allocated trie will be reused if the trie
     /// becomes revealed.
@@ -97,10 +97,10 @@ pub enum SparseTrie<P = DefaultBlindedProvider> {
     /// In this state, the trie can be queried and modified for the parts
     /// that have been revealed. Other parts remain blind and require revealing
     /// before they can be accessed.
-    Revealed(Box<RevealedSparseTrie<P>>),
+    Revealed(Box<RevealedSparseTrie>),
 }
 
-impl<P> fmt::Debug for SparseTrie<P> {
+impl fmt::Debug for SparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::AllocatedEmpty { .. } => write!(f, "AllocatedEmpty"),
@@ -118,9 +118,9 @@ impl SparseTrie {
     /// ```
     /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
     ///
-    /// let trie: SparseTrie<DefaultBlindedProvider> = SparseTrie::blind();
+    /// let trie = SparseTrie::blind();
     /// assert!(trie.is_blind());
-    /// let trie: SparseTrie<DefaultBlindedProvider> = SparseTrie::default();
+    /// let trie = SparseTrie::default();
     /// assert!(trie.is_blind());
     /// ```
     pub const fn blind() -> Self {
@@ -134,7 +134,7 @@ impl SparseTrie {
     /// ```
     /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
     ///
-    /// let trie: SparseTrie<DefaultBlindedProvider> = SparseTrie::revealed_empty();
+    /// let trie = SparseTrie::revealed_empty();
     /// assert!(!trie.is_blind());
     /// ```
     pub fn revealed_empty() -> Self {
@@ -158,61 +158,13 @@ impl SparseTrie {
         masks: TrieMasks,
         retain_updates: bool,
     ) -> SparseTrieResult<&mut RevealedSparseTrie> {
-        self.reveal_root_with_provider(Default::default(), root, masks, retain_updates)
-    }
-}
-
-impl<P> SparseTrie<P> {
-    /// Returns `true` if the sparse trie has no revealed nodes.
-    pub const fn is_blind(&self) -> bool {
-        matches!(self, Self::Blind)
-    }
-
-    /// Returns an immutable reference to the underlying revealed sparse trie.
-    ///
-    /// Returns `None` if the trie is blinded.
-    pub const fn as_revealed_ref(&self) -> Option<&RevealedSparseTrie<P>> {
-        if let Self::Revealed(revealed) = self {
-            Some(revealed)
-        } else {
-            None
-        }
-    }
-
-    /// Returns a mutable reference to the underlying revealed sparse trie.
-    ///
-    /// Returns `None` if the trie is blinded.
-    pub fn as_revealed_mut(&mut self) -> Option<&mut RevealedSparseTrie<P>> {
-        if let Self::Revealed(revealed) = self {
-            Some(revealed)
-        } else {
-            None
-        }
-    }
-
-    /// Reveals the root node using a specified provider.
-    ///
-    /// This function is similar to [`Self::reveal_root`] but allows the caller to provide
-    /// a custom provider for fetching blinded nodes.
-    ///
-    /// # Returns
-    ///
-    /// Mutable reference to [`RevealedSparseTrie`].
-    pub fn reveal_root_with_provider(
-        &mut self,
-        provider: P,
-        root: TrieNode,
-        masks: TrieMasks,
-        retain_updates: bool,
-    ) -> SparseTrieResult<&mut RevealedSparseTrie<P>> {
         // we take the allocated state here, which will make sure we are either `Blind` or
         // `Revealed`, and giving us the allocated state if we were `AllocatedEmpty`.
         let allocated = self.take_allocated_state();
 
         // if `Blind`, we initialize the revealed trie
         if self.is_blind() {
-            let mut revealed =
-                RevealedSparseTrie::from_provider_and_root(provider, root, masks, retain_updates)?;
+            let mut revealed = RevealedSparseTrie::from_root(root, masks, retain_updates)?;
 
             // If we had an allocated state, we use its maps internally. use_allocated_state copies
             // over any information we had from revealing.
@@ -223,6 +175,33 @@ impl<P> SparseTrie<P> {
             *self = Self::Revealed(Box::new(revealed));
         }
         Ok(self.as_revealed_mut().unwrap())
+    }
+
+    /// Returns `true` if the sparse trie has no revealed nodes.
+    pub const fn is_blind(&self) -> bool {
+        matches!(self, Self::Blind)
+    }
+
+    /// Returns an immutable reference to the underlying revealed sparse trie.
+    ///
+    /// Returns `None` if the trie is blinded.
+    pub const fn as_revealed_ref(&self) -> Option<&RevealedSparseTrie> {
+        if let Self::Revealed(revealed) = self {
+            Some(revealed)
+        } else {
+            None
+        }
+    }
+
+    /// Returns a mutable reference to the underlying revealed sparse trie.
+    ///
+    /// Returns `None` if the trie is blinded.
+    pub fn as_revealed_mut(&mut self) -> Option<&mut RevealedSparseTrie> {
+        if let Self::Revealed(revealed) = self {
+            Some(revealed)
+        } else {
+            None
+        }
     }
 
     /// Take the allocated state if this is `AllocatedEmpty`, otherwise returns `None`.
@@ -290,15 +269,20 @@ impl<P> SparseTrie<P> {
     }
 }
 
-impl<P: BlindedProvider> SparseTrie<P> {
+impl SparseTrie {
     /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
     ///
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the update fails.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+    pub fn update_leaf(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+        provider: impl BlindedProvider,
+    ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.update_leaf(path, value)?;
+        revealed.update_leaf(path, value, provider)?;
         Ok(())
     }
 
@@ -307,9 +291,13 @@ impl<P: BlindedProvider> SparseTrie<P> {
     /// # Errors
     ///
     /// Returns an error if the trie is still blind, or if the leaf cannot be removed
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+    pub fn remove_leaf(
+        &mut self,
+        path: &Nibbles,
+        provider: impl BlindedProvider,
+    ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
-        revealed.remove_leaf(path)?;
+        revealed.remove_leaf(path, provider)?;
         Ok(())
     }
 }
@@ -328,10 +316,7 @@ impl<P: BlindedProvider> SparseTrie<P> {
 ///   The opposite is also true.
 /// - All keys in `values` collection are full leaf paths.
 #[derive(Clone, PartialEq, Eq)]
-pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
-    /// Provider used for retrieving blinded nodes.
-    /// This allows lazily loading parts of the trie from an external source.
-    provider: P,
+pub struct RevealedSparseTrie {
     /// Map from a path (nibbles) to its corresponding sparse trie node.
     /// This contains all of the revealed nodes in trie.
     nodes: HashMap<Nibbles, SparseNode>,
@@ -351,7 +336,7 @@ pub struct RevealedSparseTrie<P = DefaultBlindedProvider> {
     rlp_buf: Vec<u8>,
 }
 
-impl<P> fmt::Debug for RevealedSparseTrie<P> {
+impl fmt::Debug for RevealedSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RevealedSparseTrie")
             .field("nodes", &self.nodes)
@@ -371,7 +356,7 @@ fn encode_nibbles(nibbles: &Nibbles) -> String {
     encoded[..nibbles.len()].to_string()
 }
 
-impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
+impl fmt::Display for RevealedSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // This prints the trie in preorder traversal, using a stack
         let mut stack = Vec::new();
@@ -440,7 +425,6 @@ impl<P: BlindedProvider> fmt::Display for RevealedSparseTrie<P> {
 impl Default for RevealedSparseTrie {
     fn default() -> Self {
         Self {
-            provider: Default::default(),
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
@@ -468,7 +452,6 @@ impl RevealedSparseTrie {
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
         let mut this = Self {
-            provider: Default::default(),
             nodes: HashMap::default(),
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
@@ -483,57 +466,7 @@ impl RevealedSparseTrie {
     }
 }
 
-impl<P> RevealedSparseTrie<P> {
-    /// Creates a new revealed sparse trie from the given provider and root node.
-    ///
-    /// Similar to `from_root`, but allows specifying a custom provider for
-    /// retrieving blinded nodes.
-    ///
-    /// # Returns
-    ///
-    /// A [`RevealedSparseTrie`] if successful, or an error if revealing fails.
-    pub fn from_provider_and_root(
-        provider: P,
-        node: TrieNode,
-        masks: TrieMasks,
-        retain_updates: bool,
-    ) -> SparseTrieResult<Self> {
-        let mut this = Self {
-            provider,
-            nodes: HashMap::default(),
-            branch_node_tree_masks: HashMap::default(),
-            branch_node_hash_masks: HashMap::default(),
-            values: HashMap::default(),
-            prefix_set: PrefixSetMut::default(),
-            updates: None,
-            rlp_buf: Vec::new(),
-        }
-        .with_updates(retain_updates);
-        this.reveal_node(Nibbles::default(), node, masks)?;
-        Ok(this)
-    }
-
-    /// Replaces the current provider with a new provider.
-    ///
-    /// This allows changing how blinded nodes are retrieved without
-    /// rebuilding the entire trie structure.
-    ///
-    /// # Returns
-    ///
-    /// A new [`RevealedSparseTrie`] with the updated provider.
-    pub fn with_provider<BP>(self, provider: BP) -> RevealedSparseTrie<BP> {
-        RevealedSparseTrie {
-            provider,
-            nodes: self.nodes,
-            branch_node_tree_masks: self.branch_node_tree_masks,
-            branch_node_hash_masks: self.branch_node_hash_masks,
-            values: self.values,
-            prefix_set: self.prefix_set,
-            updates: self.updates,
-            rlp_buf: self.rlp_buf,
-        }
-    }
-
+impl RevealedSparseTrie {
     /// Sets the fields of this `RevealedSparseTrie` to the fields of the input
     /// `SparseTrieState`.
     ///
@@ -558,11 +491,6 @@ impl<P> RevealedSparseTrie<P> {
         self.branch_node_tree_masks = other.branch_node_tree_masks;
         self.branch_node_hash_masks = other.branch_node_hash_masks;
         self.values = other.values;
-    }
-
-    /// Set the provider for the trie.
-    pub fn set_provider(&mut self, provider: P) {
-        self.provider = provider;
     }
 
     /// Configures the trie to retain information about updates.
@@ -1431,7 +1359,7 @@ pub enum LeafLookup {
     },
 }
 
-impl<P: BlindedProvider> RevealedSparseTrie<P> {
+impl RevealedSparseTrie {
     /// Attempts to find a leaf node at the specified path.
     ///
     /// This method traverses the trie from the root down to the given path, checking
@@ -1592,7 +1520,12 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
     ///
     /// Note: If an update requires revealing a blinded node, an error is returned if the blinded
     /// provider returns an error.
-    pub fn update_leaf(&mut self, path: Nibbles, value: Vec<u8>) -> SparseTrieResult<()> {
+    pub fn update_leaf(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+        provider: impl BlindedProvider,
+    ) -> SparseTrieResult<()> {
         self.prefix_set.insert(path);
         let existing = self.values.insert(path, value);
         if existing.is_some() {
@@ -1660,7 +1593,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
                                 if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                    self.provider.blinded_node(&current)?
+                                    provider.blinded_node(&current)?
                                 {
                                     let decoded = TrieNode::decode(&mut &node[..])?;
                                     trace!(
@@ -1727,7 +1660,11 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
     ///
     /// Returns `Ok(())` if the leaf is successfully removed, otherwise returns an error
     /// if the leaf is not present or if a blinded node prevents removal.
-    pub fn remove_leaf(&mut self, path: &Nibbles) -> SparseTrieResult<()> {
+    pub fn remove_leaf(
+        &mut self,
+        path: &Nibbles,
+        provider: impl BlindedProvider,
+    ) -> SparseTrieResult<()> {
         if self.values.remove(path).is_none() {
             if let Some(&SparseNode::Hash(hash)) = self.nodes.get(path) {
                 // Leaf is present in the trie, but it's blinded.
@@ -1833,7 +1770,7 @@ impl<P: BlindedProvider> RevealedSparseTrie<P> {
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                self.provider.blinded_node(&child_path)?
+                                provider.blinded_node(&child_path)?
                             {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(
@@ -2215,11 +2152,12 @@ mod find_leaf_tests {
     #[test]
     fn find_leaf_existing_leaf() {
         // Create a simple trie with one leaf
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
 
-        sparse.update_leaf(path, value.clone()).unwrap();
+        sparse.update_leaf(path, value.clone(), &provider).unwrap();
 
         // Check that the leaf exists
         let result = sparse.find_leaf(&path, None);
@@ -2233,12 +2171,13 @@ mod find_leaf_tests {
     #[test]
     fn find_leaf_value_mismatch() {
         // Create a simple trie with one leaf
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
         let wrong_value = b"wrong_value".to_vec();
 
-        sparse.update_leaf(path, value).unwrap();
+        sparse.update_leaf(path, value, &provider).unwrap();
 
         // Check with wrong expected value
         let result = sparse.find_leaf(&path, Some(&wrong_value));
@@ -2264,7 +2203,7 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_empty_trie() {
-        let sparse = RevealedSparseTrie::<DefaultBlindedProvider>::default();
+        let sparse = RevealedSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
         let result = sparse.find_leaf(&path, None);
@@ -2275,9 +2214,10 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exists_no_value_check() {
-        let mut sparse = RevealedSparseTrie::<DefaultBlindedProvider>::default();
+        let provider = DefaultBlindedProvider;
+        let mut sparse = RevealedSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
-        sparse.update_leaf(path, VALUE_A()).unwrap();
+        sparse.update_leaf(path, VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&path, None);
         assert_matches!(result, Ok(LeafLookup::Exists));
@@ -2285,10 +2225,11 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exists_with_value_check_ok() {
-        let mut sparse = RevealedSparseTrie::<DefaultBlindedProvider>::default();
+        let provider = DefaultBlindedProvider;
+        let mut sparse = RevealedSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let value = VALUE_A();
-        sparse.update_leaf(path, value.clone()).unwrap();
+        sparse.update_leaf(path, value.clone(), &provider).unwrap();
 
         let result = sparse.find_leaf(&path, Some(&value));
         assert_matches!(result, Ok(LeafLookup::Exists));
@@ -2296,13 +2237,14 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_branch_divergence() {
-        let mut sparse = RevealedSparseTrie::<DefaultBlindedProvider>::default();
+        let provider = DefaultBlindedProvider;
+        let mut sparse = RevealedSparseTrie::default();
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]); // Belongs to same branch
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]); // Diverges at nibble 7
 
-        sparse.update_leaf(path1, VALUE_A()).unwrap();
-        sparse.update_leaf(path2, VALUE_B()).unwrap();
+        sparse.update_leaf(path1, VALUE_A(), &provider).unwrap();
+        sparse.update_leaf(path2, VALUE_B(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
 
@@ -2313,13 +2255,14 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_extension_divergence() {
-        let mut sparse = RevealedSparseTrie::<DefaultBlindedProvider>::default();
+        let provider = DefaultBlindedProvider;
+        let mut sparse = RevealedSparseTrie::default();
         // This will create an extension node at root with key 0x12
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
         // This path diverges from the extension key
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]);
 
-        sparse.update_leaf(path1, VALUE_A()).unwrap();
+        sparse.update_leaf(path1, VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
 
@@ -2330,11 +2273,12 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_leaf_divergence() {
-        let mut sparse = RevealedSparseTrie::<DefaultBlindedProvider>::default();
+        let provider = DefaultBlindedProvider;
+        let mut sparse = RevealedSparseTrie::default();
         let existing_leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
 
-        sparse.update_leaf(existing_leaf_path, VALUE_A()).unwrap();
+        sparse.update_leaf(existing_leaf_path, VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
 
@@ -2347,13 +2291,14 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_path_ends_at_branch() {
-        let mut sparse = RevealedSparseTrie::<DefaultBlindedProvider>::default();
+        let provider = DefaultBlindedProvider;
+        let mut sparse = RevealedSparseTrie::default();
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2]); // Path of the branch itself
 
-        sparse.update_leaf(path1, VALUE_A()).unwrap();
-        sparse.update_leaf(path2, VALUE_B()).unwrap();
+        sparse.update_leaf(path1, VALUE_A(), &provider).unwrap();
+        sparse.update_leaf(path2, VALUE_B(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
 
@@ -2386,7 +2331,6 @@ mod find_leaf_tests {
         nodes.insert(leaf_path, SparseNode::Hash(blinded_hash)); // Blinded node at 0x1234
 
         let sparse = RevealedSparseTrie {
-            provider: DefaultBlindedProvider,
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
@@ -2430,7 +2374,6 @@ mod find_leaf_tests {
         values.insert(path_revealed_leaf, VALUE_A());
 
         let sparse = RevealedSparseTrie {
-            provider: DefaultBlindedProvider,
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
@@ -2510,6 +2453,7 @@ mod find_leaf_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blinded::DefaultBlindedProvider;
     use alloy_primitives::{map::B256Set, U256};
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
@@ -2694,8 +2638,9 @@ mod tests {
                 [key],
             );
 
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default().with_updates(true);
-        sparse.update_leaf(key, value_encoded()).unwrap();
+        sparse.update_leaf(key, value_encoded(), &provider).unwrap();
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
 
@@ -2724,9 +2669,10 @@ mod tests {
                 paths.clone(),
             );
 
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded()).unwrap();
+            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2754,9 +2700,10 @@ mod tests {
                 paths.clone(),
             );
 
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded()).unwrap();
+            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2792,9 +2739,10 @@ mod tests {
                 paths.clone(),
             );
 
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, value_encoded()).unwrap();
+            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2831,9 +2779,10 @@ mod tests {
                 paths.clone(),
             );
 
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default().with_updates(true);
         for path in &paths {
-            sparse.update_leaf(*path, old_value_encoded.clone()).unwrap();
+            sparse.update_leaf(*path, old_value_encoded.clone(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.updates_ref();
@@ -2851,7 +2800,7 @@ mod tests {
             );
 
         for path in &paths {
-            sparse.update_leaf(*path, new_value_encoded.clone()).unwrap();
+            sparse.update_leaf(*path, new_value_encoded.clone(), &provider).unwrap();
         }
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
@@ -2865,26 +2814,29 @@ mod tests {
     fn sparse_trie_remove_leaf() {
         reth_tracing::init_test_tracing();
 
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
             .unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
+            .unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1011)
@@ -2940,7 +2892,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), &provider).unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -2991,7 +2943,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), &provider).unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -3027,7 +2979,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), &provider).unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -3060,7 +3012,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), &provider).unwrap();
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1001)
@@ -3082,7 +3034,7 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), &provider).unwrap();
 
         // Leaf (Key = 53302)
         pretty_assertions::assert_eq!(
@@ -3093,7 +3045,7 @@ mod tests {
             ),])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2])).unwrap();
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), &provider).unwrap();
 
         // Empty
         pretty_assertions::assert_eq!(
@@ -3116,6 +3068,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::from_root(
             branch.clone(),
             TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
@@ -3141,7 +3094,7 @@ mod tests {
 
         // Removing a blinded leaf should result in an error
         assert_matches!(
-            sparse.remove_leaf(&Nibbles::from_nibbles([0x0])).map_err(|e| e.into_kind()),
+            sparse.remove_leaf(&Nibbles::from_nibbles([0x0]), &provider).map_err(|e| e.into_kind()),
             Err(SparseTrieErrorKind::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
         );
     }
@@ -3160,6 +3113,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::from_root(
             branch.clone(),
             TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
@@ -3185,7 +3139,7 @@ mod tests {
 
         // Removing a non-existent leaf should be a noop
         let sparse_old = sparse.clone();
-        assert_matches!(sparse.remove_leaf(&Nibbles::from_nibbles([0x2])), Ok(()));
+        assert_matches!(sparse.remove_leaf(&Nibbles::from_nibbles([0x2]), &provider), Ok(()));
         assert_eq!(sparse, sparse_old);
     }
 
@@ -3199,6 +3153,7 @@ mod tests {
         fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
             {
                 let mut state = BTreeMap::default();
+                let default_provider = DefaultBlindedProvider;
                 let provider_factory = create_test_provider_factory();
                 let mut sparse = RevealedSparseTrie::default().with_updates(true);
 
@@ -3208,7 +3163,7 @@ mod tests {
                         let account = account.into_trie_account(EMPTY_ROOT_HASH);
                         let mut account_rlp = Vec::new();
                         account.encode(&mut account_rlp);
-                        sparse.update_leaf(key, account_rlp).unwrap();
+                        sparse.update_leaf(key, account_rlp, &default_provider).unwrap();
                     }
                     // We need to clone the sparse trie, so that all updated branch nodes are
                     // preserved, and not only those that were changed after the last call to
@@ -3248,7 +3203,7 @@ mod tests {
                     // that the sparse trie root still matches the hash builder root
                     for key in &keys_to_delete {
                         state.remove(key).unwrap();
-                        sparse.remove_leaf(key).unwrap();
+                        sparse.remove_leaf(key, &default_provider).unwrap();
                     }
 
                     // We need to clone the sparse trie, so that all updated branch nodes are
@@ -3358,6 +3313,8 @@ mod tests {
                 Default::default(),
                 [Nibbles::default()],
             );
+
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -3395,7 +3352,7 @@ mod tests {
         );
 
         // Insert the leaf for the second key
-        sparse.update_leaf(key2(), value_encoded()).unwrap();
+        sparse.update_leaf(key2(), value_encoded(), &provider).unwrap();
 
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
@@ -3466,6 +3423,8 @@ mod tests {
                 Default::default(),
                 [Nibbles::default()],
             );
+
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -3504,7 +3463,7 @@ mod tests {
         );
 
         // Remove the leaf for the first key
-        sparse.remove_leaf(&key1()).unwrap();
+        sparse.remove_leaf(&key1(), &provider).unwrap();
 
         // Check that the branch node was turned into an extension node
         assert_eq!(
@@ -3567,6 +3526,8 @@ mod tests {
                 Default::default(),
                 [Nibbles::default()],
             );
+
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -3584,7 +3545,7 @@ mod tests {
         );
 
         // Insert the leaf with a different prefix
-        sparse.update_leaf(key3(), value_encoded()).unwrap();
+        sparse.update_leaf(key3(), value_encoded(), &provider).unwrap();
 
         // Check that the extension node was turned into a branch node
         assert_matches!(
@@ -3621,6 +3582,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_get_changed_nodes_at_depth() {
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -3638,21 +3600,23 @@ mod tests {
         //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
         //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
             .unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
+            .unwrap();
 
         assert_eq!(
             sparse.get_changed_nodes_at_depth(&mut PrefixSet::default(), 0),
@@ -3732,9 +3696,11 @@ mod tests {
             Default::default(),
             [Nibbles::default()],
         );
+
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default();
-        sparse.update_leaf(key1(), value_encoded()).unwrap();
-        sparse.update_leaf(key2(), value_encoded()).unwrap();
+        sparse.update_leaf(key1(), value_encoded(), &provider).unwrap();
+        sparse.update_leaf(key2(), value_encoded(), &provider).unwrap();
         let sparse_root = sparse.root();
         let sparse_updates = sparse.take_updates();
 
@@ -3744,6 +3710,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_wipe() {
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default().with_updates(true);
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -3761,21 +3728,23 @@ mod tests {
         //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
         //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
             .unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
+            .unwrap();
 
         sparse.wipe();
 
@@ -3786,18 +3755,21 @@ mod tests {
     fn sparse_trie_clear() {
         // tests that if we fill a sparse trie with some nodes and then clear it, it has the same
         // contents as an empty sparse trie
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default();
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
             .unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value).unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value, &provider)
+            .unwrap();
 
         sparse.clear();
 
@@ -3813,6 +3785,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_display() {
+        let provider = DefaultBlindedProvider;
         let mut sparse = RevealedSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -3830,21 +3803,23 @@ mod tests {
         //                       ├── 0 -> Leaf (Key = 3302, Path = 53302) – Level 4
         //                       └── 2 -> Leaf (Key = 3320, Path = 53320) – Level 4
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone())
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
             .unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value).unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
+            .unwrap();
 
         let normal_printed = format!("{sparse}");
         let expected = "\

@@ -40,11 +40,13 @@ where
     /// It's kept as a field on the struct to prevent blocking on de-allocation in [`Self::run`].
     pub(super) trie: SparseStateTrie<BPF>,
     pub(super) metrics: MultiProofTaskMetrics,
+    /// Blinded node provider factory.
+    blinded_provider_factory: BPF,
 }
 
 impl<BPF> SparseTrieTask<BPF>
 where
-    BPF: BlindedProviderFactory + Send + Sync,
+    BPF: BlindedProviderFactory + Send + Sync + Clone,
     BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
     BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
 {
@@ -59,7 +61,8 @@ where
             executor,
             updates,
             metrics,
-            trie: SparseStateTrie::new(blinded_provider_factory).with_updates(true),
+            trie: SparseStateTrie::new(blinded_provider_factory.clone()).with_updates(true),
+            blinded_provider_factory,
         }
     }
 
@@ -94,10 +97,10 @@ where
         metrics: MultiProofTaskMetrics,
         sparse_trie_state: SparseTrieState,
     ) -> Self {
-        let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
+        let mut trie = SparseStateTrie::new(blinded_provider_factory.clone()).with_updates(true);
         trie.populate_from(sparse_trie_state);
 
-        Self { executor, updates, metrics, trie }
+        Self { executor, updates, metrics, trie, blinded_provider_factory }
     }
 
     /// Runs the sparse trie task to completion.
@@ -129,9 +132,13 @@ where
                 "Updating sparse trie"
             );
 
-            let elapsed = update_sparse_trie(&mut self.trie, update).map_err(|e| {
-                ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            })?;
+            let elapsed =
+                update_sparse_trie(&mut self.trie, update, &self.blinded_provider_factory)
+                    .map_err(|e| {
+                        ParallelStateRootError::Other(format!(
+                            "could not calculate state root: {e:?}"
+                        ))
+                    })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
@@ -169,6 +176,7 @@ pub struct StateRootComputeOutcome {
 pub(crate) fn update_sparse_trie<BPF>(
     trie: &mut SparseStateTrie<BPF>,
     SparseTrieUpdate { mut state, multiproof }: SparseTrieUpdate,
+    blinded_provider_factory: &BPF,
 ) -> SparseStateTrieResult<Duration>
 where
     BPF: BlindedProviderFactory + Send + Sync,
@@ -198,6 +206,7 @@ where
             let span = trace_span!(target: "engine::root::sparse", "Storage trie", ?address);
             let _enter = span.enter();
             trace!(target: "engine::root::sparse", "Updating storage");
+            let storage_provider = blinded_provider_factory.storage_node_provider(address);
             let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
 
             if storage.wiped {
@@ -208,11 +217,14 @@ where
                 let slot_nibbles = Nibbles::unpack(slot);
                 if value.is_zero() {
                     trace!(target: "engine::root::sparse", ?slot, "Removing storage slot");
-                    storage_trie.remove_leaf(&slot_nibbles)?;
+                    storage_trie.remove_leaf(&slot_nibbles, &storage_provider)?;
                 } else {
                     trace!(target: "engine::root::sparse", ?slot, "Updating storage slot");
-                    storage_trie
-                        .update_leaf(slot_nibbles, alloy_rlp::encode_fixed_size(&value).to_vec())?;
+                    storage_trie.update_leaf(
+                        slot_nibbles,
+                        alloy_rlp::encode_fixed_size(&value).to_vec(),
+                        &storage_provider,
+                    )?;
                 }
             }
 
