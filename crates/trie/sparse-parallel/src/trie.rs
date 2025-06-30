@@ -60,7 +60,7 @@ impl ParallelSparseTrie {
     /// path belongs to the upper trie.
     ///
     /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
-    /// does exist, but it's `path` field is longer than the given path, then the field will be set
+    /// does exist, but its path field is longer than the given path, then the field will be set
     /// to the given path.
     fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
         match SparseSubtrieType::from_path(path) {
@@ -83,11 +83,11 @@ impl ParallelSparseTrie {
     /// depending on the path's length.
     ///
     /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
-    /// does exist, but it's `path` field is longer than the given path, then the field will be set
+    /// does exist, but its path field is longer than the given path, then the field will be set
     /// to the given path.
     fn subtrie_for_path(&mut self, path: &Nibbles) -> &mut Box<SparseSubtrie> {
         // We can't just call `lower_subtrie_for_path` and return `upper_subtrie` if it returns
-        // None, because rust complains about double mutable borrowing `self`.
+        // None, because Rust complains about double mutable borrowing `self`.
         if SparseSubtrieType::path_len_is_upper(path.len()) {
             &mut self.upper_subtrie
         } else {
@@ -302,7 +302,7 @@ impl ParallelSparseTrie {
 
         let Some(idx) = SparseSubtrieType::from_path(path).lower_index() else {
             // When removing a node from the upper trie there's nothing special we need to do to fix
-            // its `path` field; the upper trie's path is always empty.
+            // its path field; the upper trie's path is always empty.
             return;
         };
 
@@ -2581,8 +2581,8 @@ mod tests {
         // Check that both lower subtries were removed. 0x20 should have been removed because
         // removing its leaf made it empty. 0x21 should have been removed after its own leaf was
         // collapsed into the upper trie, leaving it also empty.
-        assert_matches!(trie.lower_subtries[0x50].as_ref(), None);
-        assert_matches!(trie.lower_subtries[0x51].as_ref(), None);
+        assert_matches!(trie.lower_subtries[0x20].as_ref(), None);
+        assert_matches!(trie.lower_subtries[0x21].as_ref(), None);
 
         // Check that the other leaf's value was moved to the upper trie
         let other_leaf_full_value = Nibbles::from_nibbles([0x2, 0x1, 0x5, 0x6]);
