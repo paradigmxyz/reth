@@ -25,7 +25,6 @@ pub struct ExportEraCommand<C: ChainSpecParser> {
 }
 
 #[derive(Debug, Args)]
-#[group(required = false, multiple = false)]
 pub struct ExportArgs {
     /// Optional first block number to export from the db.
     /// It is by default 0.
