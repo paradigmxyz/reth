@@ -10607,6 +10607,7 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "itertools 0.14.0",
+ "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
