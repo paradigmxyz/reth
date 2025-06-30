@@ -40,7 +40,6 @@ pub struct SparseStateTrie {
     metrics: crate::metrics::SparseStateTrieMetrics,
 }
 
-#[cfg(test)]
 impl Default for SparseStateTrie {
     fn default() -> Self {
         Self {
@@ -65,18 +64,9 @@ impl SparseStateTrie {
 }
 
 impl SparseStateTrie {
-    /// Create new [`SparseStateTrie`] with blinded node provider factory.
+    /// Create new [`SparseStateTrie`]
     pub fn new() -> Self {
-        Self {
-            state: Default::default(),
-            storages: Default::default(),
-            revealed_account_paths: Default::default(),
-            revealed_storage_paths: Default::default(),
-            retain_updates: false,
-            account_rlp_buf: Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE),
-            #[cfg(feature = "metrics")]
-            metrics: Default::default(),
-        }
+        Self::default()
     }
 
     /// Set the retention of branch node updates and deletions.
