@@ -18,6 +18,7 @@ static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::ne
 mod benchmark;
 mod cli;
 mod comparison;
+mod compilation;
 mod git;
 mod node;
 

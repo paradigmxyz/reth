@@ -1,10 +1,10 @@
-//! Git operations for branch management and compilation.
+//! Git operations for branch management.
 
 use eyre::{eyre, Result, WrapErr};
 use std::process::Command;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
-/// Manages git operations for branch switching and compilation
+/// Manages git operations for branch switching
 #[derive(Debug, Clone)]
 pub struct GitManager {
     repo_root: String,
@@ -182,76 +182,6 @@ impl GitManager {
         Ok(())
     }
 
-    /// Compile reth using `make profiling`
-    pub fn compile_reth(&self) -> Result<()> {
-        info!("Compiling reth with profiling configuration...");
-
-        let output = Command::new("make")
-            .arg("profiling")
-            .current_dir(&self.repo_root)
-            .output()
-            .wrap_err("Failed to execute make profiling command")?;
-
-        // Print stdout and stderr with prefixes at debug level
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-
-        for line in stdout.lines() {
-            if !line.trim().is_empty() {
-                debug!("[MAKE] {}", line);
-            }
-        }
-
-        for line in stderr.lines() {
-            if !line.trim().is_empty() {
-                debug!("[MAKE] {}", line);
-            }
-        }
-
-        if !output.status.success() {
-            return Err(eyre!("Compilation failed with exit code: {:?}", output.status.code()));
-        }
-
-        info!("Reth compilation completed successfully");
-        Ok(())
-    }
-
-    /// Compile and install reth-bench using `make install-reth-bench`
-    pub fn compile_reth_bench(&self) -> Result<()> {
-        info!("Compiling and installing reth-bench...");
-
-        let output = Command::new("make")
-            .arg("install-reth-bench")
-            .current_dir(&self.repo_root)
-            .output()
-            .wrap_err("Failed to execute make install-reth-bench command")?;
-
-        // Print stdout and stderr with prefixes at debug level
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-
-        for line in stdout.lines() {
-            if !line.trim().is_empty() {
-                debug!("[MAKE-BENCH] {}", line);
-            }
-        }
-
-        for line in stderr.lines() {
-            if !line.trim().is_empty() {
-                debug!("[MAKE-BENCH] {}", line);
-            }
-        }
-
-        if !output.status.success() {
-            return Err(eyre!(
-                "reth-bench compilation failed with exit code: {:?}",
-                output.status.code()
-            ));
-        }
-
-        info!("reth-bench compilation completed successfully");
-        Ok(())
-    }
 
     /// Get the latest commit hash for logging/reporting
     #[allow(dead_code)]
@@ -275,7 +205,6 @@ impl GitManager {
     }
 
     /// Get the repository root path
-    #[allow(dead_code)]
     pub fn repo_root(&self) -> &str {
         &self.repo_root
     }
