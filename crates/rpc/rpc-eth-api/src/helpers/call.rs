@@ -7,6 +7,10 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip2930::AccessListResult;
+use alloy_evm::{
+    call::caller_gas_allowance,
+    overrides::{apply_block_overrides, apply_state_overrides},
+};
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
@@ -27,10 +31,10 @@ use reth_revm::{
     db::{CacheDB, State},
     DatabaseRef,
 };
+use reth_rpc_convert::{RpcConvert, RpcTypes};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
-    revm_utils::{apply_block_overrides, apply_state_overrides, caller_gas_allowance},
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
@@ -131,7 +135,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         apply_block_overrides(block_overrides, &mut db, &mut evm_env.block_env);
                     }
                     if let Some(state_overrides) = state_overrides {
-                        apply_state_overrides(state_overrides, &mut db)?;
+                        apply_state_overrides(state_overrides, &mut db)
+                            .map_err(Self::Error::from_eth_err)?;
                     }
 
                     let block_gas_limit = evm_env.block_env.gas_limit;
@@ -189,7 +194,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let block = simulate::build_simulated_block(
                         result.block,
                         results,
-                        return_full_transactions,
+                        return_full_transactions.into(),
                         this.tx_resp_builder(),
                     )?;
 
@@ -215,7 +220,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
-            let (res, _env) =
+            let res =
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
             ensure_success(res.result)
@@ -288,7 +293,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let block_transactions = block.transactions_recovered().take(num_txs);
                     for tx in block_transactions {
                         let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
-                        let (res, _) = this.transact(&mut db, evm_env.clone(), tx_env)?;
+                        let res = this.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
@@ -313,7 +318,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                         let (current_evm_env, prepared_tx) =
                             this.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
-                        let (res, _) = this.transact(&mut db, current_evm_env, prepared_tx)?;
+                        let res = this.transact(&mut db, current_evm_env, prepared_tx)?;
 
                         match ensure_success::<_, Self::Error>(res.result) {
                             Ok(output) => {
@@ -380,7 +385,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
 
         if let Some(state_overrides) = state_override {
-            apply_state_overrides(state_overrides, &mut db)?;
+            apply_state_overrides(state_overrides, &mut db).map_err(Self::Error::from_eth_err)?;
         }
 
         let mut tx_env = self.create_txn_env(&evm_env, request.clone(), &mut db)?;
@@ -398,7 +403,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         evm_env.cfg_env.disable_eip3607 = true;
 
         if request.gas.is_none() && tx_env.gas_price() > 0 {
-            let cap = caller_gas_allowance(&mut db, &tx_env)?;
+            let cap = caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?;
             // no gas limit was provided in the request, so we need to cap the request's gas limit
             tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
         }
@@ -426,11 +431,11 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         };
 
         // transact again to get the exact gas used
-        let (result, (_, tx_env)) = self.transact(&mut db, evm_env, tx_env)?;
+        let gas_limit = tx_env.gas_limit();
+        let result = self.transact(&mut db, evm_env, tx_env)?;
         let res = match result.result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error =
-                    Some(Self::Error::from_evm_halt(reason, tx_env.gas_limit()).to_string());
+                let error = Some(Self::Error::from_evm_halt(reason, gas_limit).to_string());
                 AccessListResult { access_list, gas_used: U256::from(gas_used), error }
             }
             ExecutionResult::Revert { output, gas_used } => {
@@ -455,7 +460,13 @@ pub trait Call:
                 SignedTx = ProviderTx<Self::Provider>,
             >,
         >,
-        Error: FromEvmError<Self::Evm>,
+        RpcConvert: RpcConvert<
+            TxEnv = TxEnvFor<Self::Evm>,
+            Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+        >,
+        Error: FromEvmError<Self::Evm>
+                   + From<<Self::RpcConvert as RpcConvert>::Error>
+                   + From<ProviderError>,
     > + SpawnBlocking
 {
     /// Returns default gas limit to use for `eth_call` and tracing RPC methods.
@@ -477,61 +488,47 @@ pub trait Call:
 
     /// Executes the `TxEnv` against the given [Database] without committing state
     /// changes.
-    #[expect(clippy::type_complexity)]
     fn transact<DB>(
         &self,
         db: DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
-    ) -> Result<
-        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
-        Self::Error,
-    >
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
         DB: Database<Error = ProviderError>,
     {
-        let mut evm = self.evm_config().evm_with_env(db, evm_env.clone());
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let mut evm = self.evm_config().evm_with_env(db, evm_env);
+        let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
 
-        Ok((res, (evm_env, tx_env)))
+        Ok(res)
     }
 
     /// Executes the [`EvmEnv`] against the given [Database] without committing state
     /// changes.
-    #[expect(clippy::type_complexity)]
     fn transact_with_inspector<DB, I>(
         &self,
         db: DB,
         evm_env: EvmEnvFor<Self::Evm>,
         tx_env: TxEnvFor<Self::Evm>,
         inspector: I,
-    ) -> Result<
-        (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
-        Self::Error,
-    >
+    ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
         DB: Database<Error = ProviderError>,
         I: InspectorFor<Self::Evm, DB>,
     {
-        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env.clone(), inspector);
-        let res = evm.transact(tx_env.clone()).map_err(Self::Error::from_evm_err)?;
+        let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
+        let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
 
-        Ok((res, (evm_env, tx_env)))
+        Ok(res)
     }
 
     /// Executes the call request at the given [`BlockId`].
-    #[expect(clippy::type_complexity)]
     fn transact_call_at(
         &self,
         request: TransactionRequest,
         at: BlockId,
         overrides: EvmOverrides,
-    ) -> impl Future<
-        Output = Result<
-            (ResultAndState<HaltReasonFor<Self::Evm>>, (EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>)),
-            Self::Error,
-        >,
-    > + Send
+    ) -> impl Future<Output = Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>> + Send
     where
         Self: LoadPendingBlock,
     {
@@ -655,7 +652,7 @@ pub trait Call:
 
                 let tx_env = RpcNodeCore::evm_config(&this).tx_env(tx);
 
-                let (res, _) = this.transact(&mut db, evm_env, tx_env)?;
+                let res = this.transact(&mut db, evm_env, tx_env)?;
                 f(tx_info, res, db)
             })
             .await
@@ -703,9 +700,20 @@ pub trait Call:
     fn create_txn_env(
         &self,
         evm_env: &EvmEnv<SpecFor<Self::Evm>>,
-        request: TransactionRequest,
-        db: impl Database<Error: Into<EthApiError>>,
-    ) -> Result<TxEnvFor<Self::Evm>, Self::Error>;
+        mut request: TransactionRequest,
+        mut db: impl Database<Error: Into<EthApiError>>,
+    ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
+        if request.nonce.is_none() {
+            request.nonce.replace(
+                db.basic(request.from.unwrap_or_default())
+                    .map_err(Into::into)?
+                    .map(|acc| acc.nonce)
+                    .unwrap_or_default(),
+            );
+        }
+
+        Ok(self.tx_resp_builder().tx_env(request.into(), &evm_env.cfg_env, &evm_env.block_env)?)
+    }
 
     /// Prepares the [`EvmEnv`] for execution of calls.
     ///
@@ -758,7 +766,8 @@ pub trait Call:
             apply_block_overrides(*block_overrides, db, &mut evm_env.block_env);
         }
         if let Some(state_overrides) = overrides.state {
-            apply_state_overrides(state_overrides, db)?;
+            apply_state_overrides(state_overrides, db)
+                .map_err(EthApiError::from_state_overrides_err)?;
         }
 
         let request_gas = request.gas;
@@ -769,7 +778,7 @@ pub trait Call:
             if tx_env.gas_price() > 0 {
                 // If gas price is specified, cap transaction gas limit with caller allowance
                 trace!(target: "rpc::eth::call", ?tx_env, "Applying gas limit cap with caller allowance");
-                let cap = caller_gas_allowance(db, &tx_env)?;
+                let cap = caller_gas_allowance(db, &tx_env).map_err(EthApiError::from_call_err)?;
                 // ensure we cap gas_limit to the block's
                 tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
             }

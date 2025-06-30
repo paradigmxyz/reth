@@ -25,24 +25,26 @@ pub(crate) fn read_header_from_file(path: PathBuf) -> Result<Header, eyre::Error
 
 /// Creates a dummy chain (with no transactions) up to the last EVM block and appends the
 /// first valid block.
-pub fn setup_without_evm<Provider>(
+pub fn setup_without_evm<Provider, F>(
     provider_rw: &Provider,
     header: SealedHeader<<Provider::Primitives as NodePrimitives>::BlockHeader>,
     total_difficulty: U256,
+    header_factory: F,
 ) -> ProviderResult<()>
 where
-    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader = Header>>
+    Provider: StaticFileProviderFactory
         + StageCheckpointWriter
         + BlockWriter<Block = <Provider::Primitives as NodePrimitives>::Block>,
+    F: Fn(BlockNumber) -> <Provider::Primitives as NodePrimitives>::BlockHeader
+        + Send
+        + Sync
+        + 'static,
 {
     info!(target: "reth::cli", new_tip = ?header.num_hash(), "Setting up dummy EVM chain before importing state.");
 
     let static_file_provider = provider_rw.static_file_provider();
     // Write EVM dummy data up to `header - 1` block
-    append_dummy_chain(&static_file_provider, header.number() - 1, |number| Header {
-        number,
-        ..Default::default()
-    })?;
+    append_dummy_chain(&static_file_provider, header.number() - 1, header_factory)?;
 
     info!(target: "reth::cli", "Appending first valid block.");
 

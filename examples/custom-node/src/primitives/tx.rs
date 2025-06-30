@@ -1,34 +1,39 @@
-use super::{TxPayment, TxTypeCustom};
+use super::TxPayment;
 use alloy_consensus::{
     crypto::{
         secp256k1::{recover_signer, recover_signer_unchecked},
         RecoveryError,
     },
     transaction::SignerRecoverable,
-    SignableTransaction, Signed, Transaction,
+    Signed, Transaction, TransactionEnvelope,
 };
-use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718, Typed2718};
-use alloy_primitives::{keccak256, Signature, TxHash};
+use alloy_eips::{
+    eip2718::{Eip2718Result, IsTyped2718},
+    Decodable2718, Encodable2718, Typed2718,
+};
+use alloy_primitives::{bytes::Buf, Sealed, Signature, TxHash, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Result as RlpResult};
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{OpTxEnvelope, TxDeposit};
 use reth_codecs::{
     alloy::transaction::{FromTxCompact, ToTxCompact},
     Compact,
 };
-use reth_ethereum::primitives::{serde_bincode_compat::SerdeBincodeCompat, InMemorySize};
-use reth_op::{
-    primitives::{Extended, SignedTransaction},
-    OpTransaction,
-};
+use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, InMemorySize};
+use reth_op::{primitives::SignedTransaction, OpTransaction};
 use revm_primitives::{Address, Bytes};
 use serde::{Deserialize, Serialize};
 
-/// An [`OpTxEnvelope`] that is [`Extended`] by one more variant of [`CustomTransactionEnvelope`].
-pub type CustomTransaction = ExtendedOpTxEnvelope<CustomTransactionEnvelope>;
-
-/// A [`SignedTransaction`] implementation that combines the [`OpTxEnvelope`] and another
-/// transaction type.
-pub type ExtendedOpTxEnvelope<T> = Extended<OpTxEnvelope, T>;
+/// Either [`OpTxEnvelope`] or [`CustomTransactionEnvelope`].
+#[derive(Debug, Clone, TransactionEnvelope)]
+#[envelope(tx_type_name = TxTypeCustom)]
+pub enum CustomTransaction {
+    /// A regular Optimism transaction as defined by [`OpTxEnvelope`].
+    #[envelope(flatten)]
+    Op(OpTxEnvelope),
+    /// A [`TxPayment`] tagged with type 0x7E.
+    #[envelope(ty = 42)]
+    Payment(CustomTransactionEnvelope),
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash, Eq, PartialEq)]
 pub struct CustomTransactionEnvelope {
@@ -98,7 +103,7 @@ impl Transaction for CustomTransactionEnvelope {
         self.inner.tx().access_list()
     }
 
-    fn blob_versioned_hashes(&self) -> Option<&[revm_primitives::B256]> {
+    fn blob_versioned_hashes(&self) -> Option<&[B256]> {
         self.inner.tx().blob_versioned_hashes()
     }
 
@@ -122,15 +127,6 @@ impl SignerRecoverable for CustomTransactionEnvelope {
 impl SignedTransaction for CustomTransactionEnvelope {
     fn tx_hash(&self) -> &TxHash {
         self.inner.hash()
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        self.inner.tx().encode_for_signing(buf);
-        let signature_hash = keccak256(buf);
-        recover_signer_unchecked(self.inner.signature(), signature_hash)
     }
 }
 
@@ -198,20 +194,8 @@ impl ToTxCompact for CustomTransactionEnvelope {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct BincodeCompatSignedTxCustom(pub Signed<TxPayment>);
-
-impl SerdeBincodeCompat for CustomTransactionEnvelope {
-    type BincodeRepr<'a> = BincodeCompatSignedTxCustom;
-
-    fn as_repr(&self) -> Self::BincodeRepr<'_> {
-        BincodeCompatSignedTxCustom(self.inner.clone())
-    }
-
-    fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-        Self { inner: repr.0.clone() }
-    }
-}
+impl RlpBincode for CustomTransactionEnvelope {}
+impl RlpBincode for CustomTransaction {}
 
 impl reth_codecs::alloy::transaction::Envelope for CustomTransactionEnvelope {
     fn signature(&self) -> &Signature {
@@ -219,14 +203,14 @@ impl reth_codecs::alloy::transaction::Envelope for CustomTransactionEnvelope {
     }
 
     fn tx_type(&self) -> Self::TxType {
-        TxTypeCustom::Custom
+        TxTypeCustom::Payment
     }
 }
 
 impl Compact for CustomTransactionEnvelope {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
-        B: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
+        B: BufMut + AsMut<[u8]>,
     {
         self.inner.tx().to_compact(buf)
     }
@@ -239,8 +223,87 @@ impl Compact for CustomTransactionEnvelope {
     }
 }
 
+impl reth_codecs::Compact for CustomTransaction {
+    fn to_compact<Buf>(&self, buf: &mut Buf) -> usize
+    where
+        Buf: BufMut + AsMut<[u8]>,
+    {
+        buf.put_u8(self.ty());
+        match self {
+            Self::Op(tx) => tx.to_compact(buf),
+            Self::Payment(tx) => tx.to_compact(buf),
+        }
+    }
+
+    fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
+        let type_byte = buf.get_u8();
+
+        if <OpTxEnvelope as IsTyped2718>::is_type(type_byte) {
+            let (tx, remaining) = OpTxEnvelope::from_compact(buf, len);
+            return (Self::Op(tx), remaining);
+        }
+
+        let (tx, remaining) = CustomTransactionEnvelope::from_compact(buf, len);
+        (Self::Payment(tx), remaining)
+    }
+}
+
 impl OpTransaction for CustomTransactionEnvelope {
     fn is_deposit(&self) -> bool {
         false
+    }
+
+    fn as_deposit(&self) -> Option<&Sealed<TxDeposit>> {
+        None
+    }
+}
+
+impl OpTransaction for CustomTransaction {
+    fn is_deposit(&self) -> bool {
+        match self {
+            CustomTransaction::Op(op) => op.is_deposit(),
+            CustomTransaction::Payment(payment) => payment.is_deposit(),
+        }
+    }
+
+    fn as_deposit(&self) -> Option<&Sealed<TxDeposit>> {
+        match self {
+            CustomTransaction::Op(op) => op.as_deposit(),
+            CustomTransaction::Payment(payment) => payment.as_deposit(),
+        }
+    }
+}
+
+impl SignerRecoverable for CustomTransaction {
+    fn recover_signer(&self) -> Result<Address, RecoveryError> {
+        match self {
+            CustomTransaction::Op(tx) => SignerRecoverable::recover_signer(tx),
+            CustomTransaction::Payment(tx) => SignerRecoverable::recover_signer(tx),
+        }
+    }
+
+    fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
+        match self {
+            CustomTransaction::Op(tx) => SignerRecoverable::recover_signer_unchecked(tx),
+            CustomTransaction::Payment(tx) => SignerRecoverable::recover_signer_unchecked(tx),
+        }
+    }
+}
+
+impl SignedTransaction for CustomTransaction {
+    fn tx_hash(&self) -> &B256 {
+        match self {
+            CustomTransaction::Op(tx) => SignedTransaction::tx_hash(tx),
+            CustomTransaction::Payment(tx) => SignedTransaction::tx_hash(tx),
+        }
+    }
+}
+
+impl InMemorySize for CustomTransaction {
+    fn size(&self) -> usize {
+        match self {
+            CustomTransaction::Op(tx) => InMemorySize::size(tx),
+            CustomTransaction::Payment(tx) => InMemorySize::size(tx),
+        }
     }
 }

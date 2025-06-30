@@ -258,7 +258,7 @@ unsafe impl Sync for EnvironmentInner {}
 
 /// Determines how data is mapped into memory
 ///
-/// It only takes affect when the environment is opened.
+/// It only takes effect when the environment is opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EnvironmentKind {
     /// Open the environment in default mode, without WRITEMAP.

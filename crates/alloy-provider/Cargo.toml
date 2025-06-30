@@ -1,0 +1,49 @@
+[package]
+name = "reth-alloy-provider"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Alloy provider implementation for reth that fetches state via RPC"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-storage-api.workspace = true
+reth-chainspec.workspace = true
+reth-primitives.workspace = true
+reth-provider.workspace = true
+reth-errors.workspace = true
+reth-execution-types.workspace = true
+reth-prune-types.workspace = true
+reth-node-types.workspace = true
+reth-trie.workspace = true
+reth-stages-types.workspace = true
+reth-db-api.workspace = true
+reth-rpc-convert.workspace = true
+
+# alloy
+alloy-provider.workspace = true
+alloy-network.workspace = true
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types.workspace = true
+alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
+
+# async
+tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+
+# other
+tracing.workspace = true
+
+# revm
+revm.workspace = true
+revm-primitives.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

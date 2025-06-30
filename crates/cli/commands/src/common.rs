@@ -9,7 +9,9 @@ use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
 use reth_db::{init_db, open_db_read_only, DatabaseEnv};
 use reth_db_common::init::init_genesis;
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
+use reth_eth_wire::NetPrimitivesFor;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_network::NetworkEventListenerProvider;
 use reth_node_api::FullNodeTypesAdapter;
 use reth_node_builder::{
     Node, NodeComponents, NodeComponentsBuilder, NodeTypes, NodeTypesWithDBAdapter,
@@ -84,6 +86,9 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         // Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
         if config.stages.etl.dir.is_none() {
             config.stages.etl.dir = Some(EtlConfig::from_datadir(data_dir.data_dir()));
+        }
+        if config.stages.era.folder.is_none() {
+            config.stages.era = config.stages.era.with_datadir(data_dir.data_dir());
         }
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
@@ -164,6 +169,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     NoopEvmConfig::<N::Evm>::default(),
                     config.stages.clone(),
                     prune_modes.clone(),
+                    None,
                 ))
                 .build(factory.clone(), StaticFileProducer::new(factory.clone(), prune_modes));
 
@@ -214,6 +220,7 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
 /// [`NodeTypes`] in CLI.
 pub trait CliNodeTypes: NodeTypesForProvider {
     type Evm: ConfigureEvm<Primitives = Self::Primitives>;
+    type NetworkPrimitives: NetPrimitivesFor<Self::Primitives>;
 }
 
 impl<N> CliNodeTypes for N
@@ -221,6 +228,7 @@ where
     N: Node<FullTypesAdapter<Self>> + NodeTypesForProvider,
 {
     type Evm = <<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Evm;
+    type NetworkPrimitives = <<<N::ComponentsBuilder as NodeComponentsBuilder<FullTypesAdapter<Self>>>::Components as NodeComponents<FullTypesAdapter<Self>>>::Network as NetworkEventListenerProvider>::Primitives;
 }
 
 /// Helper trait aggregating components required for the CLI.

@@ -4,7 +4,7 @@
 
 use alloy_evm::{
     eth::EthEvmContext,
-    precompiles::{DynPrecompile, Precompile, PrecompilesMap},
+    precompiles::{DynPrecompile, Precompile, PrecompileInput, PrecompilesMap},
     Evm, EvmFactory,
 };
 use alloy_genesis::Genesis;
@@ -45,11 +45,9 @@ type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
 
 /// A cache for precompile inputs / outputs.
 ///
-/// This assumes that the precompile is a standard precompile, as in `StandardPrecompileFn`, meaning
-/// its inputs are only `(Bytes, u64)`.
-///
-/// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
-/// `ContextStatefulPrecompileMut`. They are explicitly banned.
+/// This cache works with standard precompiles that take input data and gas limit as parameters.
+/// The cache key is composed of the input bytes and gas limit, and the cached value is the
+/// precompile execution result.
 #[derive(Debug)]
 pub struct PrecompileCache {
     /// Caches for each precompile input / output.
@@ -120,15 +118,14 @@ impl WrappedPrecompile {
     /// wrapper that can be used inside Evm.
     fn wrap(precompile: DynPrecompile, cache: Arc<RwLock<PrecompileCache>>) -> DynPrecompile {
         let wrapped = Self::new(precompile, cache);
-        move |data: &[u8], gas_limit: u64| -> PrecompileResult { wrapped.call(data, gas_limit) }
-            .into()
+        move |input: PrecompileInput<'_>| -> PrecompileResult { wrapped.call(input) }.into()
     }
 }
 
 impl Precompile for WrappedPrecompile {
-    fn call(&self, data: &[u8], gas: u64) -> PrecompileResult {
+    fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
         let mut cache = self.cache.write();
-        let key = (Bytes::copy_from_slice(data), gas);
+        let key = (Bytes::copy_from_slice(input.data), input.gas);
 
         // get the result if it exists
         if let Some(result) = cache.cache.get(&key) {
@@ -136,7 +133,7 @@ impl Precompile for WrappedPrecompile {
         }
 
         // call the precompile if cache miss
-        let output = self.precompile.call(data, gas);
+        let output = self.precompile.call(input);
 
         // insert the result into the cache
         cache.cache.insert(key, output.clone());
@@ -166,7 +163,7 @@ impl<Node> ExecutorBuilder<Node> for MyExecutorBuilder
 where
     Node: FullNodeTypes<Types: NodeTypes<ChainSpec = ChainSpec, Primitives = EthPrimitives>>,
 {
-    type EVM = EthEvmConfig<MyEvmFactory>;
+    type EVM = EthEvmConfig<ChainSpec, MyEvmFactory>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
         let evm_config = EthEvmConfig::new_with_evm_factory(
