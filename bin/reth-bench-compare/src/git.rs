@@ -87,7 +87,7 @@ impl GitManager {
         info!("Fetching latest refs from remote...");
         
         let output = Command::new("git")
-            .args(["fetch", "--all", "--tags", "--quiet"])
+            .args(["fetch", "--all", "--tags", "--quiet", "--force"])
             .current_dir(&self.repo_root)
             .output()
             .wrap_err("Failed to fetch latest refs")?;
