@@ -8,7 +8,7 @@ pub use config::{ConnectionsConfig, PeersConfig};
 pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};
 
 use alloy_eip2124::ForkId;
-use tracing::{debug, trace};
+use tracing::debug;
 
 use crate::{
     is_banned_reputation, PeerAddr, PeerConnectionState, PeerKind, ReputationChangeOutcome,
