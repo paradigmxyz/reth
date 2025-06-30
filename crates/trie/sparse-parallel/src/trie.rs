@@ -59,14 +59,19 @@ impl ParallelSparseTrie {
     /// Returns a mutable reference to the lower `SparseSubtrie` for the given path, or None if the
     /// path belongs to the upper trie.
     ///
-    /// This method will create a new lower subtrie if one doesn't exist for the given path.
+    /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
+    /// does exist, but it's `path` field is longer than the given path, then the field will be set
+    /// to the given path.
     fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
-                if self.lower_subtries[idx].is_none() {
-                    let upper_path = path.slice(..UPPER_TRIE_MAX_DEPTH);
-                    self.lower_subtries[idx] = Some(Box::new(SparseSubtrie::new(upper_path)));
+                if let Some(subtrie) = self.lower_subtries[idx].as_mut() {
+                    if path.len() < subtrie.path.len() {
+                        subtrie.path = *path;
+                    }
+                } else {
+                    self.lower_subtries[idx] = Some(Box::new(SparseSubtrie::new(*path)));
                 }
 
                 self.lower_subtries[idx].as_mut()
@@ -77,18 +82,16 @@ impl ParallelSparseTrie {
     /// Returns a mutable reference to either the lower or upper `SparseSubtrie` for the given path,
     /// depending on the path's length.
     ///
-    /// This method will create a new lower subtrie if one doesn't exist for the given path.
+    /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
+    /// does exist, but it's `path` field is longer than the given path, then the field will be set
+    /// to the given path.
     fn subtrie_for_path(&mut self, path: &Nibbles) -> &mut Box<SparseSubtrie> {
-        match SparseSubtrieType::from_path(path) {
-            SparseSubtrieType::Upper => &mut self.upper_subtrie,
-            SparseSubtrieType::Lower(idx) => {
-                if self.lower_subtries[idx].is_none() {
-                    let upper_path = path.slice(..UPPER_TRIE_MAX_DEPTH);
-                    self.lower_subtries[idx] = Some(Box::new(SparseSubtrie::new(upper_path)));
-                }
-
-                self.lower_subtries[idx].as_mut().unwrap()
-            }
+        // We can't just call `lower_subtrie_for_path` and return `upper_subtrie` if it returns
+        // None, because rust complains about double mutable borrowing `self`.
+        if SparseSubtrieType::path_len_is_upper(path.len()) {
+            &mut self.upper_subtrie
+        } else {
+            self.lower_subtrie_for_path(path).unwrap()
         }
     }
 
@@ -1955,12 +1958,30 @@ mod tests {
             let idx = path_subtrie_index_unchecked(&path);
             assert!(trie.lower_subtries[idx].is_some());
 
+            // Check that the lower subtrie's path was correctly set
             let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+            assert_eq!(lower_subtrie.path, path);
+
             assert_matches!(
                 lower_subtrie.nodes.get(&path),
                 Some(SparseNode::Leaf { key, hash: None })
                 if key == &Nibbles::from_nibbles([0x3, 0x4])
             );
+        }
+
+        // Reveal leaf in a lower trie with a longer path, shouldn't result in the subtrie's root
+        // path changing.
+        {
+            let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+            let node = create_leaf_node([0x4, 0x5], 42);
+            let masks = TrieMasks::none();
+
+            trie.reveal_node(path, node, masks).unwrap();
+
+            // Check that the lower subtrie's path hasn't changed
+            let idx = path_subtrie_index_unchecked(&path);
+            let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+            assert_eq!(lower_subtrie.path, Nibbles::from_nibbles([0x1, 0x2]));
         }
     }
 
@@ -2008,6 +2029,7 @@ mod tests {
         assert!(trie.lower_subtries[idx].is_some());
 
         let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        assert_eq!(lower_subtrie.path, child_path);
         assert_eq!(lower_subtrie.nodes.get(&child_path), Some(&SparseNode::Hash(child_hash)));
     }
 
@@ -2034,6 +2056,7 @@ mod tests {
         assert!(trie.lower_subtries[idx].is_some());
 
         let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        assert_eq!(lower_subtrie.path, child_path);
         assert_eq!(lower_subtrie.nodes.get(&child_path), Some(&SparseNode::Hash(child_hash)));
     }
 
@@ -2101,6 +2124,7 @@ mod tests {
         for (i, child_path) in child_paths.iter().enumerate() {
             let idx = path_subtrie_index_unchecked(child_path);
             let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+            assert_eq!(&lower_subtrie.path, child_path);
             assert_eq!(
                 lower_subtrie.nodes.get(child_path),
                 Some(&SparseNode::Hash(child_hashes[i].as_hash().unwrap())),
