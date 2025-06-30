@@ -144,7 +144,8 @@ impl<Provider: DBProvider + StateCommitmentProvider> StateProofProvider
     }
 
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        TrieWitness::overlay_witness(self.tx(), input, target)
+        TrieWitness::from_tx(self.tx())
+            .overlay_witness(input, target)
             .map_err(ProviderError::from)
             .map(|hm| hm.into_values().collect())
     }
