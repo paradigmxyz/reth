@@ -4,7 +4,6 @@
 use alloy_consensus::Header;
 use alloy_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
-use serde_json;
 
 /// Collection of meta information about a node that is displayed on the monitoring page.
 /// This information is used to identify and display node details in the ethstats monitoring
@@ -79,7 +78,7 @@ pub struct TxStats {
 #[serde(transparent)]
 pub struct UncleStats(pub Vec<Header>);
 
-/// BlockStats is the information to report about individual blocks.
+/// Information to report about individual blocks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlockStats {
     /// Block number (height in the chain).

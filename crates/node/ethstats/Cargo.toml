@@ -15,6 +15,7 @@ reth-network-api.workspace = true
 reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
 
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
@@ -22,6 +23,7 @@ alloy-consensus.workspace = true
 tokio.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
 futures-util.workspace = true
+tokio-stream.workspace = true
 
 serde.workspace = true
 serde_json.workspace = true
