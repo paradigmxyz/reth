@@ -45,4 +45,4 @@ reth-cli-util.workspace = true
 reth-chainspec.workspace = true
 
 # Alloy for RPC communication
-alloy-provider.workspace = true
+alloy-provider = { workspace = true, default-features = true }
