@@ -7298,6 +7298,7 @@ dependencies = [
  "ctrlc",
  "eyre",
  "reqwest",
+ "reth-chainspec",
  "reth-cli-runner",
  "reth-cli-util",
  "reth-node-core",
