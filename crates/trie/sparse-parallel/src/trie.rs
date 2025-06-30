@@ -1,8 +1,9 @@
 use alloy_primitives::{
     map::{Entry, HashMap},
-    B256,
+    B256, U256,
 };
 use alloy_rlp::Decodable;
+use std::collections::BTreeMap;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
@@ -1942,13 +1943,14 @@ mod tests {
     use crate::trie::ChangedSubtrie;
     use alloy_primitives::{
         map::{foldhash::fast::RandomState, B256Set, DefaultHashBuilder, HashMap},
-        B256,
+        B256, U256,
     };
+    use std::collections::BTreeMap;
     use alloy_rlp::{Decodable, Encodable};
     use alloy_trie::{BranchNodeCompact, Nibbles};
     use assert_matches::assert_matches;
     use itertools::Itertools;
-    use reth_execution_errors::SparseTrieError;
+    use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
     use reth_primitives_traits::Account;
     use reth_trie::{
         hashed_cursor::{noop::NoopHashedAccountCursor, HashedPostStateAccountCursor},
@@ -4379,5 +4381,489 @@ mod tests {
             .has_branch(&Nibbles::from_nibbles(&path1_nibbles[..63]), &[0x0, 0x1])
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_empty_update_one() {
+        let key = Nibbles::unpack(B256::with_last_byte(42));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
+            run_hash_builder(
+                [(key, value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key],
+            );
+
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+        sparse.update_leaf(key, value_encoded(), DefaultBlindedProvider).unwrap();
+        let sparse_root = sparse.root();
+        let sparse_updates = sparse.take_updates();
+
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_empty_update_multiple_lower_nibbles() {
+        reth_tracing::init_test_tracing();
+
+        let paths = (0..=16).map(|b| Nibbles::unpack(B256::with_last_byte(b))).collect::<Vec<_>>();
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
+            run_hash_builder(
+                paths.iter().copied().zip(std::iter::repeat_with(value)),
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                paths.clone(),
+            );
+
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+        for path in &paths {
+            sparse.update_leaf(*path, value_encoded(), DefaultBlindedProvider).unwrap();
+        }
+        let sparse_root = sparse.root();
+        let sparse_updates = sparse.take_updates();
+
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_empty_update_multiple_upper_nibbles() {
+        let paths = (239..=255).map(|b| Nibbles::unpack(B256::repeat_byte(b))).collect::<Vec<_>>();
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
+            run_hash_builder(
+                paths.iter().copied().zip(std::iter::repeat_with(value)),
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                paths.clone(),
+            );
+
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+        for path in &paths {
+            sparse.update_leaf(*path, value_encoded(), DefaultBlindedProvider).unwrap();
+        }
+        let sparse_root = sparse.root();
+        let sparse_updates = sparse.take_updates();
+
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_empty_update_multiple() {
+        let paths = (0..=255)
+            .map(|b| {
+                Nibbles::unpack(if b % 2 == 0 {
+                    B256::repeat_byte(b)
+                } else {
+                    B256::with_last_byte(b)
+                })
+            })
+            .collect::<Vec<_>>();
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
+            run_hash_builder(
+                paths.iter().sorted_unstable().copied().zip(std::iter::repeat_with(value)),
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                paths.clone(),
+            );
+
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+        for path in &paths {
+            sparse.update_leaf(*path, value_encoded(), DefaultBlindedProvider).unwrap();
+        }
+        let sparse_root = sparse.root();
+        let sparse_updates = sparse.take_updates();
+
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq!(
+            std::collections::BTreeMap::from_iter(sparse_updates.updated_nodes),
+            std::collections::BTreeMap::from_iter(hash_builder_updates.account_nodes)
+        );
+        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_empty_update_repeated() {
+        let paths = (0..=255).map(|b| Nibbles::unpack(B256::repeat_byte(b))).collect::<Vec<_>>();
+        let old_value = Account { nonce: 1, ..Default::default() };
+        let old_value_encoded = {
+            let mut account_rlp = Vec::new();
+            old_value.into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+        let new_value = Account { nonce: 2, ..Default::default() };
+        let new_value_encoded = {
+            let mut account_rlp = Vec::new();
+            new_value.into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
+            run_hash_builder(
+                paths.iter().copied().zip(std::iter::repeat_with(|| old_value)),
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                paths.clone(),
+            );
+
+        let mut sparse = ParallelSparseTrie::default().with_updates(true);
+        for path in &paths {
+            sparse.update_leaf(*path, old_value_encoded.clone(), DefaultBlindedProvider).unwrap();
+        }
+        let sparse_root = sparse.root();
+        let sparse_updates = sparse.updates.as_ref().unwrap();
+
+        pretty_assertions::assert_eq!(sparse_root, hash_builder_root);
+        pretty_assertions::assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+
+        let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
+            run_hash_builder(
+                paths.iter().copied().zip(std::iter::repeat_with(|| new_value)),
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                paths.clone(),
+            );
+
+        for path in &paths {
+            sparse.update_leaf(*path, new_value_encoded.clone(), DefaultBlindedProvider).unwrap();
+        }
+        let sparse_root = sparse.root();
+        let sparse_updates = sparse.take_updates();
+
+        assert_eq!(sparse_root, hash_builder_root);
+        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_remove_leaf() {
+        reth_tracing::init_test_tracing();
+
+        let mut sparse = ParallelSparseTrie::default();
+
+        let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
+
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), DefaultBlindedProvider)
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), DefaultBlindedProvider)
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), DefaultBlindedProvider)
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), DefaultBlindedProvider)
+            .unwrap();
+        sparse
+            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), DefaultBlindedProvider)
+            .unwrap();
+        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, DefaultBlindedProvider).unwrap();
+
+        // For ParallelSparseTrie, we need to collect nodes from both upper and lower subtries
+        let mut all_nodes = std::collections::BTreeMap::new();
+        
+        // Add upper subtrie nodes
+        for (path, node) in sparse.upper_subtrie.nodes.iter() {
+            all_nodes.insert(path.clone(), node.clone());
+        }
+        
+        // Add lower subtrie nodes
+        for subtrie in sparse.lower_subtries.iter().flatten() {
+            for (path, node) in subtrie.nodes.iter() {
+                all_nodes.insert(path.clone(), node.clone());
+            }
+        }
+
+        // Extension (Key = 5)
+        // └── Branch (Mask = 1011)
+        //     ├── 0 -> Extension (Key = 23)
+        //     │        └── Branch (Mask = 0101)
+        //     │              ├── 1 -> Leaf (Key = 1, Path = 50231)
+        //     │              └── 3 -> Leaf (Key = 3, Path = 50233)
+        //     ├── 2 -> Leaf (Key = 013, Path = 52013)
+        //     └── 3 -> Branch (Mask = 0101)
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                └── 3 -> Branch (Mask = 1010)
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
+        assert_eq!(
+            all_nodes,
+            std::collections::BTreeMap::from_iter([
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0]),
+                    SparseNode::new_ext(Nibbles::from_nibbles([0x2, 0x3]))
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3]),
+                    SparseNode::new_branch(0b1010.into())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
+                    SparseNode::new_leaf(Nibbles::default())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
+                    SparseNode::new_leaf(Nibbles::default())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x2]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x1, 0x3]))
+                ),
+                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x1]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
+                ),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                )
+            ])
+        );
+
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), DefaultBlindedProvider).unwrap();
+
+        // Collect nodes again after removal
+        let mut all_nodes_after = BTreeMap::new();
+        
+        // Add upper subtrie nodes
+        for (path, node) in sparse.upper_subtrie.nodes.iter() {
+            all_nodes_after.insert(path.clone(), node.clone());
+        }
+        
+        // Add lower subtrie nodes
+        for subtrie in sparse.lower_subtries.iter().flatten() {
+            for (path, node) in subtrie.nodes.iter() {
+                all_nodes_after.insert(path.clone(), node.clone());
+            }
+        }
+
+        // Extension (Key = 5)
+        // └── Branch (Mask = 1001)
+        //     ├── 0 -> Extension (Key = 23)
+        //     │        └── Branch (Mask = 0101)
+        //     │              ├── 1 -> Leaf (Key = 0231, Path = 50231)
+        //     │              └── 3 -> Leaf (Key = 0233, Path = 50233)
+        //     └── 3 -> Branch (Mask = 0101)
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                └── 3 -> Branch (Mask = 1010)
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
+        assert_eq!(
+            all_nodes_after,
+            std::collections::BTreeMap::from_iter([
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0]),
+                    SparseNode::new_ext(Nibbles::from_nibbles([0x2, 0x3]))
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3]),
+                    SparseNode::new_branch(0b1010.into())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
+                    SparseNode::new_leaf(Nibbles::default())
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
+                    SparseNode::new_leaf(Nibbles::default())
+                ),
+                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x1]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
+                ),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                )
+            ])
+        );
+
+        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), DefaultBlindedProvider).unwrap();
+
+        // Collect nodes again after second removal
+        let mut all_nodes_final = BTreeMap::new();
+        
+        // Add upper subtrie nodes
+        for (path, node) in sparse.upper_subtrie.nodes.iter() {
+            all_nodes_final.insert(path.clone(), node.clone());
+        }
+        
+        // Add lower subtrie nodes
+        for subtrie in sparse.lower_subtries.iter().flatten() {
+            for (path, node) in subtrie.nodes.iter() {
+                all_nodes_final.insert(path.clone(), node.clone());
+            }
+        }
+
+        // Extension (Key = 5)
+        // └── Branch (Mask = 1001)
+        //     ├── 0 -> Leaf (Key = 0233, Path = 50233)
+        //     └── 3 -> Branch (Mask = 0101)
+        //                ├── 1 -> Leaf (Key = 3102, Path = 53102)
+        //                └── 3 -> Branch (Mask = 1010)
+        //                       ├── 0 -> Leaf (Key = 3302, Path = 53302)
+        //                       └── 2 -> Leaf (Key = 3320, Path = 53320)
+        assert_eq!(
+            all_nodes_final,
+            std::collections::BTreeMap::from_iter([
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x5]))),
+                (Nibbles::from_nibbles([0x5]), SparseNode::new_branch(0b1001.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2, 0x3, 0x3]))
+                ),
+                (Nibbles::from_nibbles([0x5, 0x3]), SparseNode::new_branch(0b1010.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x1]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0, 0x2]))
+                ),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3]), SparseNode::new_branch(0b0101.into())),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x2]))
+                ),
+                (
+                    Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles([0x0]))
+                )
+            ])
+        );
+    }
+
+    #[test]
+    fn parallel_sparse_trie_remove_leaf_blinded() {
+        let leaf = LeafNode::new(
+            Nibbles::default(),
+            alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec(),
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)),
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut sparse = ParallelSparseTrie::from_root(
+            branch.clone(),
+            TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
+            false,
+        )
+        .unwrap();
+
+        // Reveal a branch node and one of its children
+        //
+        // Branch (Mask = 11)
+        // ├── 0 -> Hash (Path = 0)
+        // └── 1 -> Leaf (Path = 1)
+        sparse
+            .reveal_node(
+                Nibbles::default(),
+                branch,
+                TrieMasks { hash_mask: None, tree_mask: Some(TrieMask::new(0b01)) },
+            )
+            .unwrap();
+        sparse
+            .reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), TrieMasks::none())
+            .unwrap();
+
+        // Removing a blinded leaf should result in an error
+        assert_matches!(
+            sparse.remove_leaf(&Nibbles::from_nibbles([0x0]), DefaultBlindedProvider).map_err(|e| e.into_kind()),
+            Err(SparseTrieErrorKind::BlindedNode { path, hash }) if path == Nibbles::from_nibbles([0x0]) && hash == B256::repeat_byte(1)
+        );
+    }
+
+    #[test]
+    fn parallel_sparse_trie_remove_leaf_non_existent() {
+        let leaf = LeafNode::new(
+            Nibbles::default(),
+            alloy_rlp::encode_fixed_size(&U256::from(1)).to_vec(),
+        );
+        let branch = TrieNode::Branch(BranchNode::new(
+            vec![
+                RlpNode::word_rlp(&B256::repeat_byte(1)),
+                RlpNode::from_raw_rlp(&alloy_rlp::encode(leaf.clone())).unwrap(),
+            ],
+            TrieMask::new(0b11),
+        ));
+
+        let mut sparse = ParallelSparseTrie::from_root(
+            branch.clone(),
+            TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
+            false,
+        )
+        .unwrap();
+
+        // Reveal a branch node and one of its children
+        //
+        // Branch (Mask = 11)
+        // ├── 0 -> Hash (Path = 0)
+        // └── 1 -> Leaf (Path = 1)
+        sparse
+            .reveal_node(
+                Nibbles::default(),
+                branch,
+                TrieMasks { hash_mask: None, tree_mask: Some(TrieMask::new(0b01)) },
+            )
+            .unwrap();
+        sparse
+            .reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), TrieMasks::none())
+            .unwrap();
+
+        // Removing a non-existent leaf should be a noop
+        let sparse_old = sparse.clone();
+        assert_matches!(sparse.remove_leaf(&Nibbles::from_nibbles([0x2]), DefaultBlindedProvider), Ok(()));
+        assert_eq!(sparse, sparse_old);
     }
 }
