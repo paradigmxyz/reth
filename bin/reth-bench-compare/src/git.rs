@@ -87,14 +87,17 @@ impl GitManager {
         info!("Fetching latest refs from remote...");
         
         let output = Command::new("git")
-            .args(["fetch", "--all", "--tags"])
+            .args(["fetch", "--all", "--tags", "--quiet"])
             .current_dir(&self.repo_root)
             .output()
             .wrap_err("Failed to fetch latest refs")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            warn!("Git fetch failed (continuing anyway): {}", stderr);
+            // Only warn if there's actual error content, not just fetch progress
+            if !stderr.trim().is_empty() && !stderr.contains("-> origin/") {
+                warn!("Git fetch encountered issues (continuing anyway): {}", stderr);
+            }
         } else {
             info!("Successfully fetched latest refs");
         }
