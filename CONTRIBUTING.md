@@ -55,7 +55,7 @@ If you have reviewed existing documentation and still have questions, or you are
 *opening a discussion**. This repository comes with a discussions board where you can also ask for help. Click the "
 Discussions" tab at the top.
 
-As Reth is still in heavy development, the documentation can be a bit scattered. The [Reth Book][reth-book] is our
+As Reth is still in heavy development, the documentation can be a bit scattered. The [Reth Docs][reth-docs] is our
 current best-effort attempt at keeping up-to-date information.
 
 ### Submitting a bug report
@@ -235,7 +235,7 @@ _Adapted from the [Foundry contributing guide][foundry-contributing]_.
 
 [dev-tg]: https://t.me/paradigm_reth
 
-[reth-book]: https://github.com/paradigmxyz/reth/tree/main/book
+[reth-docs]: https://github.com/paradigmxyz/reth/tree/main/docs
 
 [mcve]: https://stackoverflow.com/help/mcve
 

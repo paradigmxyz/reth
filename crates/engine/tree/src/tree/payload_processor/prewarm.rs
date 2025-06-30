@@ -275,7 +275,7 @@ where
                     precompile,
                     precompile_cache_map.cache_for_address(*address),
                     spec_id,
-                    None, // CachedPrecompileMetrics
+                    None, // No metrics for prewarm
                 )
             });
         }

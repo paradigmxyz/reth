@@ -315,7 +315,7 @@ pub trait Trace:
                 let state_at = block.parent_hash();
                 let block_hash = block.hash();
 
-                let block_number = evm_env.block_env.number.to();
+                let block_number = evm_env.block_env.number.saturating_to();
                 let base_fee = evm_env.block_env.basefee;
 
                 // now get the state

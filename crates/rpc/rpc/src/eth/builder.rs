@@ -160,7 +160,11 @@ where
             + StateProviderFactory
             + ChainSpecProvider
             + CanonStateSubscriptions<
-                Primitives: NodePrimitives<Block = Provider::Block, Receipt = Provider::Receipt>,
+                Primitives: NodePrimitives<
+                    Block = Provider::Block,
+                    Receipt = Provider::Receipt,
+                    BlockHeader = Provider::Header,
+                >,
             > + Clone
             + Unpin
             + 'static,
@@ -188,7 +192,7 @@ where
         let gas_oracle = gas_oracle.unwrap_or_else(|| {
             GasPriceOracle::new(provider.clone(), gas_oracle_config, eth_cache.clone())
         });
-        let fee_history_cache = FeeHistoryCache::new(fee_history_cache_config);
+        let fee_history_cache = FeeHistoryCache::<Provider::Header>::new(fee_history_cache_config);
         let new_canonical_blocks = provider.canonical_state_stream();
         let fhc = fee_history_cache.clone();
         let cache = eth_cache.clone();
@@ -232,7 +236,11 @@ where
         Provider: BlockReaderIdExt
             + StateProviderFactory
             + CanonStateSubscriptions<
-                Primitives: NodePrimitives<Block = Provider::Block, Receipt = Provider::Receipt>,
+                Primitives: NodePrimitives<
+                    Block = Provider::Block,
+                    Receipt = Provider::Receipt,
+                    BlockHeader = Provider::Header,
+                >,
             > + ChainSpecProvider
             + Clone
             + Unpin
