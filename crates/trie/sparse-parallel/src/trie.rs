@@ -285,6 +285,47 @@ impl ParallelSparseTrie {
         }
     }
 
+    /// Used by `remove_leaf` to ensure that when a node is removed from a lower subtrie that any
+    /// externalities are handled. These can include:
+    /// - Removing the lower subtrie completely, if it is now empty.
+    /// - Updating the `path` field of the lower subtrie to indicate that its root node has changed.
+    ///
+    /// This method assumes that the caller will deal with putting all other nodes in the trie into
+    /// a consistent state after the removal of this one.
+    ///
+    /// ## Panics
+    ///
+    /// - If the removed node was not a leaf or extension.
+    fn remove_node(&mut self, path: &Nibbles) {
+        let subtrie = self.subtrie_for_path(path);
+        let node = subtrie.nodes.remove(path);
+
+        let Some(idx) = SparseSubtrieType::from_path(path).lower_index() else {
+            // When removing a node from the upper trie there's nothing special we need to do to fix
+            // its `path` field; the upper trie's path is always empty.
+            return;
+        };
+
+        match node {
+            Some(SparseNode::Leaf { .. }) => {
+                // If the leaf was the final node in its lower subtrie then we can remove the lower
+                // subtrie completely.
+                if subtrie.nodes.is_empty() {
+                    self.lower_subtries[idx] = None;
+                }
+            }
+            Some(SparseNode::Extension { key, .. }) => {
+                // If the removed extension was the root node of a lower subtrie then the lower
+                // subtrie's `path` needs to be updated to be whatever node the extension used to
+                // point to.
+                if &subtrie.path == path {
+                    subtrie.path.extend(&key);
+                }
+            }
+            _ => panic!("Expected to remove a leaf or extension, but removed {:?}", node),
+        }
+    }
+
     /// Given the path to a parent branch node and a child node which is the sole remaining child on
     /// that branch after removing a leaf, returns a node to replace the parent branch node and a
     /// boolean indicating if the child should be deleted.
@@ -486,7 +527,7 @@ impl ParallelSparseTrie {
         // from its SparseSubtrie.
         self.prefix_set.insert(*leaf_full_path);
         leaf_subtrie.inner.values.remove(leaf_full_path);
-        leaf_subtrie.nodes.remove(&leaf_path);
+        self.remove_node(&leaf_path);
 
         // If the leaf was at the root replace its node with the empty value. We can stop execution
         // here, all remaining logic is related to the ancestors of the leaf.
@@ -569,12 +610,12 @@ impl ParallelSparseTrie {
                 );
 
                 if remove_child {
-                    remaining_child_subtrie.nodes.remove(&remaining_child_path);
                     self.move_value_on_leaf_removal(
                         branch_path,
                         &new_branch_node,
                         &remaining_child_path,
                     );
+                    self.remove_node(&remaining_child_path);
                 }
 
                 if let Some(updates) = self.updates.as_mut() {
@@ -610,8 +651,8 @@ impl ParallelSparseTrie {
                 branch_parent_node.as_ref().unwrap(),
             ) {
                 ext_subtrie.nodes.insert(ext_path, new_ext_node.clone());
-                self.subtrie_for_path(branch_path).nodes.remove(branch_path);
                 self.move_value_on_leaf_removal(&ext_path, &new_ext_node, branch_path);
+                self.remove_node(branch_path);
             }
         }
 
@@ -2358,10 +2399,10 @@ mod tests {
 
         let upper_subtrie = &trie.upper_subtrie;
         let lower_subtrie_50 = trie.lower_subtries[0x50].as_ref().unwrap();
-        let lower_subtrie_53 = trie.lower_subtries[0x53].as_ref().unwrap();
 
-        // Check that the leaf value was removed from the appropriate `SparseSubtrie`.
-        assert_matches!(lower_subtrie_53.inner.values.get(&leaf_full_path), None);
+        // Check that the `SparseSubtrie` the leaf was removed from was itself removed, as it is now
+        // empty.
+        assert_matches!(trie.lower_subtries[0x53].as_ref(), None);
 
         // Check that the leaf node was removed, and that its parent/grandparent were modified
         // appropriately.
@@ -2377,7 +2418,6 @@ mod tests {
             Some(SparseNode::Branch{ state_mask, .. })
             if *state_mask == 0b0101.into()
         );
-        assert_matches!(lower_subtrie_53.nodes.get(&Nibbles::from_nibbles([0x5, 0x3])), None);
     }
 
     #[test]
@@ -2477,15 +2517,15 @@ mod tests {
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
-        let lower_subtrie_50 = trie.lower_subtries[0x50].as_ref().unwrap();
-        let lower_subtrie_51 = trie.lower_subtries[0x51].as_ref().unwrap();
 
-        // Check that the full key was removed
-        assert_matches!(lower_subtrie_50.inner.values.get(&leaf_full_path), None);
+        // Check that both lower subtries were removed. 0x50 should have been removed because
+        // removing its leaf made it empty. 0x51 should have been removed after its own leaf was
+        // collapsed into the upper trie, leaving it also empty.
+        assert_matches!(trie.lower_subtries[0x50].as_ref(), None);
+        assert_matches!(trie.lower_subtries[0x51].as_ref(), None);
 
         // Check that the other leaf's value was moved to the upper trie
         let other_leaf_full_value = Nibbles::from_nibbles([0x5, 0x1, 0x3, 0x4]);
-        assert_matches!(lower_subtrie_51.inner.values.get(&other_leaf_full_value), None);
         assert_matches!(upper_subtrie.inner.values.get(&other_leaf_full_value), Some(_));
 
         // Check that the extension node collapsed into a leaf node
@@ -2497,8 +2537,6 @@ mod tests {
 
         // Check that intermediate nodes were removed
         assert_matches!(upper_subtrie.nodes.get(&Nibbles::from_nibbles([0x5])), None);
-        assert_matches!(lower_subtrie_50.nodes.get(&Nibbles::from_nibbles([0x5, 0x0])), None);
-        assert_matches!(lower_subtrie_51.nodes.get(&Nibbles::from_nibbles([0x5, 0x1])), None);
     }
 
     #[test]
@@ -2539,15 +2577,15 @@ mod tests {
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
-        let lower_subtrie_20 = trie.lower_subtries[0x20].as_ref().unwrap();
-        let lower_subtrie_21 = trie.lower_subtries[0x21].as_ref().unwrap();
 
-        // Check that the leaf's value was removed
-        assert_matches!(lower_subtrie_20.inner.values.get(&leaf_full_path), None);
+        // Check that both lower subtries were removed. 0x20 should have been removed because
+        // removing its leaf made it empty. 0x21 should have been removed after its own leaf was
+        // collapsed into the upper trie, leaving it also empty.
+        assert_matches!(trie.lower_subtries[0x50].as_ref(), None);
+        assert_matches!(trie.lower_subtries[0x51].as_ref(), None);
 
         // Check that the other leaf's value was moved to the upper trie
         let other_leaf_full_value = Nibbles::from_nibbles([0x2, 0x1, 0x5, 0x6]);
-        assert_matches!(lower_subtrie_21.inner.values.get(&other_leaf_full_value), None);
         assert_matches!(upper_subtrie.inner.values.get(&other_leaf_full_value), Some(_));
 
         // Check that the root branch still exists unchanged
@@ -2563,10 +2601,88 @@ mod tests {
             Some(SparseNode::Leaf{ key, ..})
             if key == &Nibbles::from_nibbles([0x1, 0x5, 0x6])
         );
+    }
 
-        // Check that the branch's child nodes were removed
-        assert_matches!(lower_subtrie_20.nodes.get(&Nibbles::from_nibbles([0x2, 0x0])), None);
-        assert_matches!(lower_subtrie_21.nodes.get(&Nibbles::from_nibbles([0x2, 0x1])), None);
+    #[test]
+    fn test_remove_leaf_lower_subtrie_root_path_update() {
+        //
+        // 0x:        Extension (Key = 123, root of lower subtrie)
+        // 0x123:     └── Branch (Mask = 0011000)
+        // 0x1233:        ├── 3 -> Leaf (Key = [])
+        // 0x1234:        └── 4 -> Extension (Key = 5)
+        // 0x12345:           └── Branch (Mask = 0011)
+        // 0x123450:              ├── 0 -> Leaf (Key = [])
+        // 0x123451:              └── 1 -> Leaf (Key = [])
+        //
+        // After removing leaf at 0x1233, the branch at 0x123 becomes an extension to 0x12345, which
+        // then gets merged with the root extension at 0x. The lower subtrie's `path` field should
+        // be updated from 0x123 to 0x12345.
+        //
+        let mut trie = new_test_trie(
+            [
+                (Nibbles::default(), SparseNode::new_ext(Nibbles::from_nibbles([0x1, 0x2, 0x3]))),
+                (
+                    Nibbles::from_nibbles([0x1, 0x2, 0x3]),
+                    SparseNode::new_branch(TrieMask::new(0b0011000)),
+                ),
+                (
+                    Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x3]),
+                    SparseNode::new_leaf(Nibbles::default()),
+                ),
+                (
+                    Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]),
+                    SparseNode::new_ext(Nibbles::from_nibbles([0x5])),
+                ),
+                (
+                    Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]),
+                    SparseNode::new_branch(TrieMask::new(0b0011)),
+                ),
+                (
+                    Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x0]),
+                    SparseNode::new_leaf(Nibbles::default()),
+                ),
+                (
+                    Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5, 0x1]),
+                    SparseNode::new_leaf(Nibbles::default()),
+                ),
+            ]
+            .into_iter(),
+        );
+
+        let provider = MockBlindedProvider::new();
+
+        // Verify initial state - the lower subtrie's path should be 0x123
+        let lower_subtrie_root_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        assert_matches!(
+            trie.lower_subtrie_for_path(&lower_subtrie_root_path),
+            Some(subtrie)
+            if subtrie.path == lower_subtrie_root_path
+        );
+
+        // Remove the leaf at 0x1233
+        let leaf_full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x3]);
+        trie.remove_leaf(&leaf_full_path, provider).unwrap();
+
+        // After removal:
+        // 1. The branch at 0x123 should become an extension to 0x12345
+        // 2. That extension should merge with the root extension at 0x
+        // 3. The lower subtrie's path should be updated to 0x12345
+        let lower_subtrie = trie.lower_subtries[0x12].as_ref().unwrap();
+        assert_eq!(lower_subtrie.path, Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]));
+
+        // Verify the root extension now points all the way to 0x12345
+        assert_matches!(
+            trie.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(SparseNode::Extension { key, .. })
+            if key == &Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5])
+        );
+
+        // Verify the branch at 0x12345 hasn't been modified
+        assert_matches!(
+            lower_subtrie.nodes.get(&Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5])),
+            Some(SparseNode::Branch { state_mask, .. })
+            if state_mask == &TrieMask::new(0b0011)
+        );
     }
 
     #[test]
