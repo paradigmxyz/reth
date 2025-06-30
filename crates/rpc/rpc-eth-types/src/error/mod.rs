@@ -857,6 +857,7 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
             RpcPoolError::Underpriced |
             RpcPoolError::ReplaceUnderpriced |
             RpcPoolError::ExceedsGasLimit |
+            RpcPoolError::MaxTxGasLimitExceeded |
             RpcPoolError::ExceedsFeeCap { .. } |
             RpcPoolError::NegativeValue |
             RpcPoolError::OversizedData |
