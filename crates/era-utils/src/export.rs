@@ -18,7 +18,7 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const REPORT_INTERVAL_SECS: u64 = 10;
 const ENTRY_HEADER_SIZE: usize = 8;
@@ -135,7 +135,20 @@ where
 
         let headers = provider.headers_range(start_block..=end_block)?;
 
-        let era1_id = Era1Id::new(&config.network, start_block, block_count as u32);
+        // Extract first 4 bytes of last block's state root as historical identifier
+        let historical_root = headers
+            .last()
+            .map(|header| {
+                let header_converted: Header = header.clone().into();
+                let state_root = header_converted.state_root;
+                [state_root[0], state_root[1], state_root[2], state_root[3]]
+            })
+            .unwrap_or([0u8; 4]);
+
+        let era1_id = Era1Id::new(&config.network, start_block, block_count as u32)
+            .with_hash(historical_root);
+
+        debug!("Final file name {}", era1_id.to_file_name());
         let file_path = config.dir.join(era1_id.to_file_name());
         let file = std::fs::File::create(&file_path)?;
         let mut writer = Era1Writer::new(file);
