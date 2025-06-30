@@ -61,7 +61,9 @@ impl BenchmarkRunner {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
-        info!("Executing: {:?}", cmd);
+        // Format command nicely for logging
+        info!("Executing: reth-bench new-payload-fcu --rpc-url {} --jwt-secret {} --from {} --to {} --output {}", 
+            self.rpc_url, self.jwt_secret, from_block, to_block, output_dir.display());
 
         // Execute the benchmark
         let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
@@ -199,7 +201,9 @@ impl BenchmarkRunner {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
-        info!("Executing: {:?}", cmd);
+        // Format command nicely for logging
+        info!("Executing: reth-bench new-payload-fcu --rpc-url {} --jwt-secret {} --from {} --to {} --output {} (with baseline: {})", 
+            self.rpc_url, self.jwt_secret, from_block, to_block, output_dir.display(), baseline_csv.display());
 
         // Execute the benchmark
         let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
