@@ -2,9 +2,9 @@
 
 This directory contains documentation for contributors.
 
-- [Repository and Project Structure](./repo)
-- [Design](./design)
-- [Crates](./crates)
+- [Repository and Project Structure](./repo/README.md)
+- [Design](./design/README.md)
+- [Crates](./crates/README.md)
 
 ### Meta
 
