@@ -345,33 +345,33 @@ mod tests {
 
     #[test_case::test_case(
         Era1Id::new("mainnet", 0, 8192).with_hash([0x5e, 0xc1, 0xff, 0xb8]),
-        "mainnet-00000-5ec1ffb8.era1";
-        "Mainnet 00000"
+        "mainnet-00000-00001-5ec1ffb8.era1";
+        "Mainnet era 0"
     )]
     #[test_case::test_case(
-        Era1Id::new("mainnet", 12, 8192).with_hash([0x5e, 0xcb, 0x9b, 0xf9]),
-        "mainnet-00012-5ecb9bf9.era1";
-        "Mainnet 00012"
+        Era1Id::new("mainnet", 8192, 8192).with_hash([0x5e, 0xcb, 0x9b, 0xf9]),
+        "mainnet-00001-00001-5ecb9bf9.era1";
+        "Mainnet era 1"
     )]
     #[test_case::test_case(
-        Era1Id::new("sepolia", 5, 8192).with_hash([0x90, 0x91, 0x84, 0x72]),
-        "sepolia-00005-90918472.era1";
-        "Sepolia 00005"
+        Era1Id::new("sepolia", 0, 8192).with_hash([0x90, 0x91, 0x84, 0x72]),
+        "sepolia-00000-00001-90918472.era1";
+        "Sepolia era 0"
     )]
     #[test_case::test_case(
-        Era1Id::new("sepolia", 19, 8192).with_hash([0xfa, 0x77, 0x00, 0x19]),
-        "sepolia-00019-fa770019.era1";
-        "Sepolia 00019"
+        Era1Id::new("sepolia", 155648, 8192).with_hash([0xfa, 0x77, 0x00, 0x19]),
+        "sepolia-00019-00001-fa770019.era1";
+        "Sepolia era 19"
     )]
     #[test_case::test_case(
         Era1Id::new("mainnet", 1000, 100),
-        "mainnet-1000-100.era1";
+        "mainnet-00000-00001-00000000.era1";
         "ID without hash"
     )]
     #[test_case::test_case(
-        Era1Id::new("sepolia", 12345, 8192).with_hash([0xab, 0xcd, 0xef, 0x12]),
-        "sepolia-12345-abcdef12.era1";
-        "Large block number"
+        Era1Id::new("sepolia", 101130240, 8192).with_hash([0xab, 0xcd, 0xef, 0x12]),
+        "sepolia-12345-00001-abcdef12.era1";
+        "Large block number era 12345"
     )]
     fn test_era1id_file_naming(id: Era1Id, expected_file_name: &str) {
         let actual_file_name = id.to_file_name();
