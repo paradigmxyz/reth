@@ -29,6 +29,57 @@ use tokio::sync::{broadcast, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
+/// A wrapper struct that holds components and implements `RpcNodeCore`.
+#[derive(Clone, Debug)]
+pub struct ComponentsWrapper<Provider, Pool, Network, Evm> {
+    provider: Provider,
+    pool: Pool,
+    network: Network,
+    evm_config: Evm,
+}
+
+impl<Provider, Pool, Network, Evm> ComponentsWrapper<Provider, Pool, Network, Evm> {
+    /// Creates a new instance.
+    pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: Evm) -> Self {
+        Self { provider, pool, network, evm_config }
+    }
+}
+
+impl<Provider, Pool, Network, Evm> RpcNodeCore for ComponentsWrapper<Provider, Pool, Network, Evm>
+where
+    Provider: Send + Sync + Clone + Unpin,
+    Pool: Send + Sync + Clone + Unpin,
+    Network: Send + Sync + Clone,
+    Evm: Send + Sync + Clone + Unpin,
+{
+    type Primitives = ();
+    type Provider = Provider;
+    type Pool = Pool;
+    type Evm = Evm;
+    type Network = Network;
+    type PayloadBuilder = ();
+
+    fn pool(&self) -> &Self::Pool {
+        &self.pool
+    }
+
+    fn evm_config(&self) -> &Self::Evm {
+        &self.evm_config
+    }
+
+    fn network(&self) -> &Self::Network {
+        &self.network
+    }
+
+    fn payload_builder(&self) -> &Self::PayloadBuilder {
+        &()
+    }
+
+    fn provider(&self) -> &Self::Provider {
+        &self.provider
+    }
+}
+
 // Type aliases to simplify complex types
 type EthSigners<N> =
     parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<<N as RpcNodeCore>::Provider>>>>>;
@@ -115,12 +166,10 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApi<N> {
         EthApiBuilder::new(provider, pool, network, evm_config)
     }
 
-    /// Creates a new, shareable instance using the default tokio task spawner.
+    /// Creates a new, shareable instance using the default tokio task spawner from node components.
     #[expect(clippy::too_many_arguments)]
-    pub fn new(
-        provider: N::Provider,
-        pool: N::Pool,
-        network: N::Network,
+    pub fn with_components(
+        components: N,
         eth_cache: EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>>,
         gas_oracle: GasPriceOracle<N::Provider>,
         gas_cap: impl Into<GasCap>,
@@ -128,13 +177,10 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApi<N> {
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
-        evm_config: N::Evm,
         proof_permits: usize,
     ) -> Self {
         let inner = EthApiInner::new(
-            provider,
-            pool,
-            network,
+            components,
             eth_cache,
             gas_oracle,
             gas_cap,
@@ -142,7 +188,6 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApi<N> {
             eth_proof_window,
             blocking_task_pool,
             fee_history_cache,
-            evm_config,
             TokioTaskExecutor::default().boxed(),
             proof_permits,
         );
@@ -232,12 +277,8 @@ where
 /// Container type `EthApi`
 #[expect(missing_debug_implementations)]
 pub struct EthApiInner<N: RpcNodeCore<Provider: BlockReader>> {
-    /// The transaction pool.
-    pool: N::Pool,
-    /// The provider that can interact with the chain.
-    provider: N::Provider,
-    /// An interface to interact with the network
-    network: N::Network,
+    /// The node components.
+    components: N,
     /// All configured Signers
     signers: EthSigners<N>,
     /// The async cache frontend for eth related data
@@ -260,8 +301,6 @@ pub struct EthApiInner<N: RpcNodeCore<Provider: BlockReader>> {
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
     fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
-    /// The type that defines how to configure the EVM
-    evm_config: N::Evm,
 
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
@@ -274,9 +313,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N> {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
-        provider: N::Provider,
-        pool: N::Pool,
-        network: N::Network,
+        components: N,
         eth_cache: EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>>,
         gas_oracle: GasPriceOracle<N::Provider>,
         gas_cap: impl Into<GasCap>,
@@ -284,14 +321,14 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N> {
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
-        evm_config: N::Evm,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
         let starting_block = U256::from(
-            provider
+            components
+                .provider()
                 .header_by_number_or_tag(BlockNumberOrTag::Latest)
                 .ok()
                 .flatten()
@@ -302,9 +339,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N> {
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
         Self {
-            provider,
-            pool,
-            network,
+            components,
             signers,
             eth_cache,
             gas_oracle,
@@ -316,7 +351,6 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N> {
             pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,
-            evm_config,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
             raw_tx_sender,
         }
@@ -326,8 +360,8 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiInner<N> {
 impl<N: RpcNodeCore<Provider: BlockReader>> EthApiInner<N> {
     /// Returns a handle to data on disk.
     #[inline]
-    pub const fn provider(&self) -> &N::Provider {
-        &self.provider
+    pub fn provider(&self) -> &N::Provider {
+        self.components.provider()
     }
 
     /// Returns a handle to data in memory.
@@ -356,14 +390,14 @@ impl<N: RpcNodeCore<Provider: BlockReader>> EthApiInner<N> {
 
     /// Returns a handle to the EVM config.
     #[inline]
-    pub const fn evm_config(&self) -> &N::Evm {
-        &self.evm_config
+    pub fn evm_config(&self) -> &N::Evm {
+        self.components.evm_config()
     }
 
     /// Returns a handle to the transaction pool.
     #[inline]
-    pub const fn pool(&self) -> &N::Pool {
-        &self.pool
+    pub fn pool(&self) -> &N::Pool {
+        self.components.pool()
     }
 
     /// Returns the gas cap.
@@ -404,8 +438,8 @@ impl<N: RpcNodeCore<Provider: BlockReader>> EthApiInner<N> {
 
     /// Returns the inner `Network`
     #[inline]
-    pub const fn network(&self) -> &N::Network {
-        &self.network
+    pub fn network(&self) -> &N::Network {
+        self.components.network()
     }
 
     /// The maximum number of blocks into the past for generating state proofs.

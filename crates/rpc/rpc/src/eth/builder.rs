@@ -159,7 +159,9 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build_inner(self) -> EthApiInner<N>
+    pub fn build_inner(
+        self,
+    ) -> EthApiInner<crate::eth::core::ComponentsWrapper<N::Provider, N::Pool, N::Network, N::Evm>>
     where
         N::Provider: StateProviderFactory
             + ChainSpecProvider
@@ -206,10 +208,10 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
             }),
         );
 
+        let components =
+            crate::eth::core::ComponentsWrapper::new(provider, pool, network, evm_config);
         EthApiInner::new(
-            provider,
-            pool,
-            network,
+            components,
             eth_cache,
             gas_oracle,
             gas_cap,
@@ -219,7 +221,6 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
                 BlockingTaskPool::build().expect("failed to build blocking task pool")
             }),
             fee_history_cache,
-            evm_config,
             task_spawner,
             proof_permits,
         )
@@ -233,7 +234,9 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build(self) -> EthApi<N>
+    pub fn build(
+        self,
+    ) -> EthApi<crate::eth::core::ComponentsWrapper<N::Provider, N::Pool, N::Network, N::Evm>>
     where
         N::Provider: StateProviderFactory
             + CanonStateSubscriptions<
