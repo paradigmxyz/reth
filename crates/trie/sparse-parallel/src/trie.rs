@@ -1,9 +1,8 @@
 use alloy_primitives::{
     map::{Entry, HashMap},
-    B256, U256,
+    B256,
 };
 use alloy_rlp::Decodable;
-use std::collections::BTreeMap;
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
@@ -2231,6 +2230,15 @@ mod tests {
             subtrie.nodes.insert(path, node);
         }
         trie
+    }
+
+    /// Helper function to pad nibbles to the right with zeros to make them full B256 paths
+    fn pad_nibbles_right(mut nibbles: Nibbles) -> Nibbles {
+        nibbles.extend(&Nibbles::from_nibbles_unchecked(vec![
+            0;
+            B256::len_bytes() * 2 - nibbles.len()
+        ]));
+        nibbles
     }
 
     /// Assert that the parallel sparse trie nodes and the proof nodes from the hash builder are
@@ -4718,5 +4726,268 @@ mod tests {
         let sparse_old = sparse.clone();
         assert_matches!(sparse.remove_leaf(&Nibbles::from_nibbles([0x2]), DefaultBlindedProvider), Ok(()));
         assert_eq!(sparse, sparse_old);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_reveal_node_1() {
+        let key1 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x00]));
+        let key2 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x01]));
+        let key3 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x02]));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        // Generate the proof for the root node and initialize the sparse trie with it
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key3(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [Nibbles::default()],
+            );
+        let mut sparse = ParallelSparseTrie::from_root(
+            TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            TrieMasks {
+                hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
+                tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
+            },
+            false,
+        )
+        .unwrap();
+
+        // Generate the proof for the first key and reveal it in the sparse trie
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key3(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key1()],
+            );
+        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
+            let hash_mask = branch_node_hash_masks.get(&path).copied();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
+                .unwrap();
+        }
+
+        // Check that the branch node exists with only two nibbles set
+        assert_eq!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b101.into()))
+        );
+
+        // Insert the leaf for the second key
+        sparse.update_leaf(key2(), value_encoded(), DefaultBlindedProvider).unwrap();
+
+        // Check that the branch node was updated and another nibble was set
+        assert_eq!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b111.into()))
+        );
+
+        // Generate the proof for the third key and reveal it in the sparse trie
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key3(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key3()],
+            );
+        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
+            let hash_mask = branch_node_hash_masks.get(&path).copied();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
+                .unwrap();
+        }
+
+        // Check that nothing changed in the branch node
+        assert_eq!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b111.into()))
+        );
+
+        // Generate the nodes for the full trie with all three key using the hash builder, and
+        // compare them to the sparse trie
+        let (_, _, hash_builder_proof_nodes, _, _) = run_hash_builder(
+            [(key1(), value()), (key2(), value()), (key3(), value())],
+            NoopAccountTrieCursor::default(),
+            Default::default(),
+            [key1(), key2(), key3()],
+        );
+
+        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+    }
+
+    #[test]
+    fn parallel_sparse_trie_reveal_node_2() {
+        let key1 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x00, 0x00]));
+        let key2 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x01, 0x01]));
+        let key3 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x01, 0x02]));
+        let value = || Account::default();
+
+        // Generate the proof for the root node and initialize the sparse trie with it
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value()), (key3(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [Nibbles::default()],
+            );
+        let mut sparse = ParallelSparseTrie::from_root(
+            TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            TrieMasks {
+                hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
+                tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
+            },
+            false,
+        )
+        .unwrap();
+
+        // Generate the proof for the children of the root branch node and reveal it in the sparse
+        // trie
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value()), (key3(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key1(), Nibbles::from_nibbles_unchecked([0x01])],
+            );
+        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
+            let hash_mask = branch_node_hash_masks.get(&path).copied();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
+                .unwrap();
+        }
+
+        // Check that the branch node exists
+        assert_eq!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_branch(0b11.into()))
+        );
+
+        // Remove the leaf for the first key
+        sparse.remove_leaf(&key1(), DefaultBlindedProvider).unwrap();
+
+        // Check that the branch node was turned into an extension node
+        assert_eq!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
+        );
+
+        // Generate the proof for the third key and reveal it in the sparse trie
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value()), (key3(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key2()],
+            );
+        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
+            let hash_mask = branch_node_hash_masks.get(&path).copied();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
+                .unwrap();
+        }
+
+        // Check that nothing changed in the extension node
+        assert_eq!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
+        );
+    }
+
+    #[test]
+    fn parallel_sparse_trie_reveal_node_3() {
+        let key1 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x00, 0x01]));
+        let key2 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x00, 0x02]));
+        let key3 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x01, 0x00]));
+        let value = || Account::default();
+        let value_encoded = || {
+            let mut account_rlp = Vec::new();
+            value().into_trie_account(EMPTY_ROOT_HASH).encode(&mut account_rlp);
+            account_rlp
+        };
+
+        // Generate the proof for the root node and initialize the sparse trie with it
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [Nibbles::default()],
+            );
+        let mut sparse = ParallelSparseTrie::from_root(
+            TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
+            TrieMasks {
+                hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
+                tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
+            },
+            false,
+        )
+        .unwrap();
+
+        // Check that the root extension node exists
+        assert_matches!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None }) if *key == Nibbles::from_nibbles([0x00])
+        );
+
+        // Insert the leaf with a different prefix
+        sparse.update_leaf(key3(), value_encoded(), DefaultBlindedProvider).unwrap();
+
+        // Check that the extension node was turned into a branch node
+        assert_matches!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+        );
+
+        // Generate the proof for the first key and reveal it in the sparse trie
+        let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
+            run_hash_builder(
+                [(key1(), value()), (key2(), value())],
+                NoopAccountTrieCursor::default(),
+                Default::default(),
+                [key1()],
+            );
+        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
+            let hash_mask = branch_node_hash_masks.get(&path).copied();
+            let tree_mask = branch_node_tree_masks.get(&path).copied();
+            sparse
+                .reveal_node(
+                    path,
+                    TrieNode::decode(&mut &node[..]).unwrap(),
+                    TrieMasks { hash_mask, tree_mask },
+                )
+                .unwrap();
+        }
+
+        // Check that the branch node wasn't overwritten by the extension node in the proof
+        assert_matches!(
+            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+        );
     }
 }
