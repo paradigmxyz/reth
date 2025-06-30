@@ -2,6 +2,7 @@
 
 use clap::Parser;
 use eyre::{eyre, Result};
+use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
@@ -64,9 +65,16 @@ pub struct Args {
     #[arg(long, value_name = "PORT", default_value = "5005")]
     pub metrics_port: u16,
 
-    /// Chain to use for reth operations (mainnet, sepolia, holesky, etc.)
-    #[arg(long, value_name = "CHAIN", default_value = "mainnet")]
-    pub chain: String,
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain name or numeric chain ID.
+    #[arg(
+        long,
+        value_name = "CHAIN",
+        default_value = "mainnet",
+        required = false,
+    )]
+    pub chain: Chain,
 
     /// Run reth binary with sudo (for elevated privileges)
     #[arg(long)]

@@ -3,6 +3,7 @@
 use crate::cli::Args;
 use eyre::{eyre, Result, WrapErr};
 use reqwest::Client;
+use reth_chainspec::Chain;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::{
@@ -17,7 +18,7 @@ pub struct NodeManager {
     #[allow(dead_code)]
     jwt_secret: String,
     metrics_port: u16,
-    chain: Option<String>,
+    chain: Chain,
     use_sudo: bool,
     http_client: Client,
 }
@@ -29,7 +30,7 @@ impl NodeManager {
             datadir: args.datadir_path().map(|p| p.to_string_lossy().to_string()),
             jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
             metrics_port: args.metrics_port,
-            chain: if args.chain == "mainnet" { None } else { Some(args.chain.clone()) },
+            chain: args.chain,
             use_sudo: args.sudo,
             http_client: Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -75,9 +76,10 @@ impl NodeManager {
             reth_cmd
         };
 
-        // Add chain if specified
-        if let Some(ref chain) = self.chain {
-            cmd.args(["--chain", chain]);
+        // Add chain argument (skip for mainnet as it's the default)
+        let chain_str = self.chain.to_string();
+        if chain_str != "mainnet" {
+            cmd.args(["--chain", &chain_str]);
         }
 
         // Add datadir if specified
@@ -262,9 +264,10 @@ impl NodeManager {
             reth_cmd
         };
 
-        // Add chain if specified
-        if let Some(ref chain) = self.chain {
-            cmd.args(["--chain", chain]);
+        // Add chain argument (skip for mainnet as it's the default)
+        let chain_str = self.chain.to_string();
+        if chain_str != "mainnet" {
+            cmd.args(["--chain", &chain_str]);
         }
 
         // Add datadir if specified
