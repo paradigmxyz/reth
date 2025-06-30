@@ -1,4 +1,4 @@
-use crate::stages::MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD;
+use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_primitives::BlockNumber;
 use num_traits::Zero;
@@ -71,7 +71,6 @@ where
     evm_config: E,
     /// The consensus instance for validating blocks.
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
-    /// The consensu
     /// The commit thresholds of the execution stage.
     thresholds: ExecutionStageThresholds,
     /// The highest threshold (in number of blocks) for switching between incremental
@@ -119,7 +118,7 @@ where
 
     /// Create an execution stage with the provided executor.
     ///
-    /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD`].
+    /// The commit threshold will be set to [`MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD`].
     pub fn new_with_executor(
         evm_config: E,
         consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
@@ -128,7 +127,7 @@ where
             evm_config,
             consensus,
             ExecutionStageThresholds::default(),
-            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
             ExExManagerHandle::empty(),
         )
     }
@@ -656,7 +655,7 @@ fn calculate_gas_used_from_headers<N: NodePrimitives>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestStageDB;
+    use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
     use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
@@ -693,7 +692,7 @@ mod tests {
                 max_cumulative_gas: None,
                 max_duration: None,
             },
-            MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+            MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             ExExManagerHandle::empty(),
         )
     }

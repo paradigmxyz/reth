@@ -50,9 +50,9 @@ use std::{
     marker::PhantomData,
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
-    sync::{mpsc, Arc},
+    sync::{atomic::AtomicU64, mpsc, Arc},
 };
-use tracing::{info, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// Alias type for a map that can be queried for block ranges from a transaction
 /// segment respectively. It uses `TxNumber` to represent the transaction end of a static file
@@ -229,6 +229,27 @@ pub struct StaticFileProviderInner<N> {
     /// Maintains a map which allows for concurrent access to different `NippyJars`, over different
     /// segments and ranges.
     map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
+    /// Min static file range for each segment.
+    /// This index is initialized on launch to keep track of the lowest, non-expired static file
+    /// per segment.
+    ///
+    /// This tracks the lowest static file per segment together with the block range in that
+    /// file. E.g. static file is batched in 500k block intervals then the lowest static file
+    /// is [0..499K], and the block range is start = 0, end = 499K.
+    /// This index is mainly used to History expiry, which targets transactions, e.g. pre-merge
+    /// history expiry would lead to removing all static files below the merge height.
+    static_files_min_block: RwLock<HashMap<StaticFileSegment, SegmentRangeInclusive>>,
+    /// This is an additional index that tracks the expired height, this will track the highest
+    /// block number that has been expired (missing). The first, non expired block is
+    /// `expired_history_height + 1`.
+    ///
+    /// This is effectively the transaction range that has been expired:
+    /// [`StaticFileProvider::delete_transactions_below`] and mirrors
+    /// `static_files_min_block[transactions] - blocks_per_file`.
+    ///
+    /// This additional tracker exists for more efficient lookups because the node must be aware of
+    /// the expired height.
+    earliest_history_height: AtomicU64,
     /// Max static file block for each segment
     static_files_max_block: RwLock<HashMap<StaticFileSegment, u64>>,
     /// Available static file block ranges on disk indexed by max transactions.
@@ -261,6 +282,8 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         let provider = Self {
             map: Default::default(),
             writers: Default::default(),
+            static_files_min_block: Default::default(),
+            earliest_history_height: Default::default(),
             static_files_max_block: Default::default(),
             static_files_tx_index: Default::default(),
             path: path.as_ref().to_path_buf(),
@@ -422,26 +445,71 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         self.map.remove(&(fixed_block_range_end, segment));
     }
 
+    /// This handles history expiry by deleting all transaction static files below the given block.
+    ///
+    /// For example if block is 1M and the blocks per file are 500K this will delete all individual
+    /// files below 1M, so 0-499K and 500K-999K.
+    ///
+    /// This will not delete the file that contains the block itself, because files can only be
+    /// removed entirely.
+    pub fn delete_transactions_below(&self, block: BlockNumber) -> ProviderResult<()> {
+        // Nothing to delete if block is 0.
+        if block == 0 {
+            return Ok(())
+        }
+
+        loop {
+            let Some(block_height) =
+                self.get_lowest_static_file_block(StaticFileSegment::Transactions)
+            else {
+                return Ok(())
+            };
+
+            if block_height >= block {
+                return Ok(())
+            }
+
+            debug!(
+                target: "provider::static_file",
+                ?block_height,
+                "Deleting transaction static file below block"
+            );
+
+            // now we need to wipe the static file, this will take care of updating the index and
+            // advance the lowest tracked block height for the transactions segment.
+            self.delete_jar(StaticFileSegment::Transactions, block_height)
+                .inspect_err(|err| {
+                    warn!( target: "provider::static_file", %block_height, ?err, "Failed to delete transaction static file below block")
+                })
+                ?;
+        }
+    }
+
     /// Given a segment and block, it deletes the jar and all files from the respective block range.
     ///
     /// CAUTION: destructive. Deletes files on disk.
+    ///
+    /// This will re-initialize the index after deletion, so all files are tracked.
     pub fn delete_jar(&self, segment: StaticFileSegment, block: BlockNumber) -> ProviderResult<()> {
         let fixed_block_range = self.find_fixed_range(block);
         let key = (fixed_block_range.end(), segment);
         let jar = if let Some((_, jar)) = self.map.remove(&key) {
             jar.jar
         } else {
-            NippyJar::<SegmentHeader>::load(&self.path.join(segment.filename(&fixed_block_range)))
-                .map_err(ProviderError::other)?
+            let file = self.path.join(segment.filename(&fixed_block_range));
+            debug!(
+                target: "provider::static_file",
+                ?file,
+                ?fixed_block_range,
+                ?block,
+                "Loading static file jar for deletion"
+            );
+            NippyJar::<SegmentHeader>::load(&file).map_err(ProviderError::other)?
         };
 
         jar.delete().map_err(ProviderError::other)?;
 
-        let mut segment_max_block = None;
-        if fixed_block_range.start() > 0 {
-            segment_max_block = Some(fixed_block_range.start() - 1)
-        };
-        self.update_index(segment, segment_max_block)?;
+        self.initialize_index()?;
 
         Ok(())
     }
@@ -597,16 +665,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Initializes the inner transaction and block index
     pub fn initialize_index(&self) -> ProviderResult<()> {
+        let mut min_block = self.static_files_min_block.write();
         let mut max_block = self.static_files_max_block.write();
         let mut tx_index = self.static_files_tx_index.write();
 
+        min_block.clear();
         max_block.clear();
         tx_index.clear();
 
         for (segment, ranges) in iter_static_files(&self.path).map_err(ProviderError::other)? {
-            // Update last block for each segment
-            if let Some((block_range, _)) = ranges.last() {
-                max_block.insert(segment, block_range.end());
+            // Update first and last block for each segment
+            if let Some((first_block_range, _)) = ranges.first() {
+                min_block.insert(segment, *first_block_range);
+            }
+            if let Some((last_block_range, _)) = ranges.last() {
+                max_block.insert(segment, last_block_range.end());
             }
 
             // Update tx -> block_range index
@@ -628,6 +701,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // If this is a re-initialization, we need to clear this as well
         self.map.clear();
+
+        // initialize the expired history height to the lowest static file block
+        if let Some(lowest_range) = min_block.get(&StaticFileSegment::Transactions) {
+            // the earliest height is the lowest available block number
+            self.earliest_history_height
+                .store(lowest_range.start(), std::sync::atomic::Ordering::Relaxed);
+        }
 
         Ok(())
     }
@@ -938,7 +1018,36 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(None)
     }
 
-    /// Gets the highest static file block if it exists for a static file segment.
+    /// Returns the earliest available block number that has not been expired and is still
+    /// available.
+    ///
+    /// This means that the highest expired block (or expired block height) is
+    /// `earliest_history_height.saturating_sub(1)`.
+    ///
+    /// Returns `0` if no history has been expired.
+    pub fn earliest_history_height(&self) -> BlockNumber {
+        self.earliest_history_height.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Gets the lowest transaction static file block if it exists.
+    ///
+    /// For example if the transactions static file has blocks 0-499, this will return 499..
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_transaction_static_file_block(&self) -> Option<BlockNumber> {
+        self.get_lowest_static_file_block(StaticFileSegment::Transactions)
+    }
+
+    /// Gets the lowest static file's block height if it exists for a static file segment.
+    ///
+    /// For example if the static file has blocks 0-499, this will return 499..
+    ///
+    /// If there is nothing on disk for the given segment, this will return [`None`].
+    pub fn get_lowest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
+        self.static_files_min_block.read().get(&segment).map(|range| range.end())
+    }
+
+    /// Gets the highest static file's block height if it exists for a static file segment.
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_highest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {

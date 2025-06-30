@@ -56,11 +56,13 @@ pub struct ImportCommand<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportCommand<C> {
     /// Execute `import` command
-    pub async fn execute<N, Comp, F>(self, components: F) -> eyre::Result<()>
+    pub async fn execute<N, Comp>(
+        self,
+        components: impl FnOnce(Arc<N::ChainSpec>) -> Comp,
+    ) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         Comp: CliNodeComponents<N>,
-        F: FnOnce(Arc<N::ChainSpec>) -> Comp,
     {
         info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
 

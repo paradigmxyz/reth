@@ -1,4 +1,8 @@
-use crate::{trie::StatelessTrie, witness_db::WitnessDatabase, ExecutionWitness};
+use crate::{
+    trie::{StatelessSparseTrie, StatelessTrie},
+    witness_db::WitnessDatabase,
+    ExecutionWitness,
+};
 use alloc::{
     boxed::Box,
     collections::BTreeMap,
@@ -131,7 +135,32 @@ pub fn stateless_validation<ChainSpec, E>(
     evm_config: E,
 ) -> Result<B256, StatelessValidationError>
 where
-    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
+    E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
+{
+    stateless_validation_with_trie::<StatelessSparseTrie, ChainSpec, E>(
+        current_block,
+        witness,
+        chain_spec,
+        evm_config,
+    )
+}
+
+/// Performs stateless validation of a block using a custom `StatelessTrie` implementation.
+///
+/// This is a generic version of `stateless_validation` that allows users to provide their own
+/// implementation of the `StatelessTrie` for custom trie backends or optimizations.
+///
+/// See `stateless_validation` for detailed documentation of the validation process.
+pub fn stateless_validation_with_trie<T, ChainSpec, E>(
+    current_block: Block,
+    witness: ExecutionWitness,
+    chain_spec: Arc<ChainSpec>,
+    evm_config: E,
+) -> Result<B256, StatelessValidationError>
+where
+    T: StatelessTrie,
+    ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
     let current_block = current_block
@@ -169,7 +198,7 @@ where
     };
 
     // First verify that the pre-state reads are correct
-    let (mut trie, bytecode) = StatelessTrie::new(&witness, pre_state_root)?;
+    let (mut trie, bytecode) = T::new(&witness, pre_state_root)?;
 
     // Create an in-memory database that will use the reads to validate the block
     let db = WitnessDatabase::new(&trie, bytecode, ancestor_hashes);
@@ -222,7 +251,7 @@ fn validate_block_consensus<ChainSpec>(
     block: &RecoveredBlock<Block>,
 ) -> Result<(), StatelessValidationError>
 where
-    ChainSpec: Send + Sync + EthChainSpec + EthereumHardforks + Debug,
+    ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
 {
     let consensus = EthBeaconConsensus::new(chain_spec);
 

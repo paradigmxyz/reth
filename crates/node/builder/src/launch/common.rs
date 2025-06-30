@@ -3,13 +3,14 @@
 use crate::{
     components::{NodeComponents, NodeComponentsBuilder},
     hooks::OnComponentInitializedHook,
-    BuilderContext, NodeAdapter,
+    BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
 };
+use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::{Context, OptionExt};
 use rayon::ThreadPoolBuilder;
-use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{Chain, EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
@@ -18,12 +19,13 @@ use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHe
 use reth_engine_local::MiningMode;
 use reth_engine_tree::tree::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
+use reth_exex::ExExManagerHandle;
 use reth_fs_util as fs;
 use reth_invalid_block_hooks::InvalidBlockWitnessHook;
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_node_api::{FullNodeTypes, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::{
-    args::InvalidBlockHookType,
+    args::{DefaultEraHost, InvalidBlockHookType},
     dirs::{ChainPath, DataDirPath},
     node_config::NodeConfig,
     primitives::BlockHeader,
@@ -41,14 +43,18 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ChainSpecProvider, ProviderError, ProviderFactory,
-    ProviderResult, StageCheckpointReader, StateProviderFactory, StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, BlockReaderIdExt, ChainSpecProvider, ProviderError,
+    ProviderFactory, ProviderResult, StageCheckpointReader, StateProviderFactory,
+    StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_api::clients::EthApiClient;
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_layer::JwtSecret;
-use reth_stages::{sets::DefaultStages, MetricEvent, PipelineBuilder, PipelineTarget, StageId};
+use reth_stages::{
+    sets::DefaultStages, stages::EraImportSource, MetricEvent, PipelineBuilder, PipelineTarget,
+    StageId,
+};
 use reth_static_file::StaticFileProducer;
 use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, error, info, warn};
@@ -58,6 +64,9 @@ use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
     oneshot, watch,
 };
+
+use futures::{future::Either, stream, Stream, StreamExt};
+use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
 
 /// Reusable setup for launching a node.
 ///
@@ -85,10 +94,13 @@ impl LaunchContext {
     /// `config`.
     ///
     /// Attaches both the `NodeConfig` and the loaded `reth.toml` config to the launch context.
-    pub fn with_loaded_toml_config<ChainSpec: EthChainSpec>(
+    pub fn with_loaded_toml_config<ChainSpec>(
         self,
         config: NodeConfig<ChainSpec>,
-    ) -> eyre::Result<LaunchContextWith<WithConfigs<ChainSpec>>> {
+    ) -> eyre::Result<LaunchContextWith<WithConfigs<ChainSpec>>>
+    where
+        ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
+    {
         let toml_config = self.load_toml_config(&config)?;
         Ok(self.with(WithConfigs { config, toml_config }))
     }
@@ -97,10 +109,13 @@ impl LaunchContext {
     /// `config`.
     ///
     /// This is async because the trusted peers may have to be resolved.
-    pub fn load_toml_config<ChainSpec: EthChainSpec>(
+    pub fn load_toml_config<ChainSpec>(
         &self,
         config: &NodeConfig<ChainSpec>,
-    ) -> eyre::Result<reth_config::Config> {
+    ) -> eyre::Result<reth_config::Config>
+    where
+        ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
+    {
         let config_path = config.config.clone().unwrap_or_else(|| self.data_dir.config());
 
         let mut toml_config = reth_config::Config::from_path(&config_path)
@@ -117,11 +132,14 @@ impl LaunchContext {
     }
 
     /// Save prune config to the toml file if node is a full node.
-    fn save_pruning_config_if_full_node<ChainSpec: EthChainSpec>(
+    fn save_pruning_config_if_full_node<ChainSpec>(
         reth_config: &mut reth_config::Config,
         config: &NodeConfig<ChainSpec>,
         config_path: impl AsRef<std::path::Path>,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<()>
+    where
+        ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
+    {
         if reth_config.prune.is_none() {
             if let Some(prune_config) = config.prune_config() {
                 reth_config.update_prune_config(prune_config);
@@ -273,8 +291,14 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     /// Make sure ETL doesn't default to /tmp/, but to whatever datadir is set to
     pub fn ensure_etl_datadir(mut self) -> Self {
         if self.toml_config_mut().stages.etl.dir.is_none() {
-            self.toml_config_mut().stages.etl.dir =
-                Some(EtlConfig::from_datadir(self.data_dir().data_dir()))
+            let etl_path = EtlConfig::from_datadir(self.data_dir().data_dir());
+            if etl_path.exists() {
+                // Remove etl-path files on launch
+                if let Err(err) = fs::remove_dir_all(&etl_path) {
+                    warn!(target: "reth::cli", ?etl_path, %err, "Failed to remove ETL path on launch");
+                }
+            }
+            self.toml_config_mut().stages.etl.dir = Some(etl_path);
         }
 
         self
@@ -334,7 +358,10 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     /// Returns the configured [`PruneConfig`]
     ///
     /// Any configuration set in CLI will take precedence over those set in toml
-    pub fn prune_config(&self) -> Option<PruneConfig> {
+    pub fn prune_config(&self) -> Option<PruneConfig>
+    where
+        ChainSpec: reth_chainspec::EthereumHardforks,
+    {
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
             return self.toml_config().prune.clone();
@@ -346,12 +373,18 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     }
 
     /// Returns the configured [`PruneModes`], returning the default if no config was available.
-    pub fn prune_modes(&self) -> PruneModes {
+    pub fn prune_modes(&self) -> PruneModes
+    where
+        ChainSpec: reth_chainspec::EthereumHardforks,
+    {
         self.prune_config().map(|config| config.segments).unwrap_or_default()
     }
 
     /// Returns an initialized [`PrunerBuilder`] based on the configured [`PruneConfig`]
-    pub fn pruner_builder(&self) -> PrunerBuilder {
+    pub fn pruner_builder(&self) -> PrunerBuilder
+    where
+        ChainSpec: reth_chainspec::EthereumHardforks,
+    {
         PrunerBuilder::new(self.prune_config().unwrap_or_default())
             .delete_limit(self.chain_spec().prune_delete_limit())
             .timeout(PrunerBuilder::DEFAULT_TIMEOUT)
@@ -867,6 +900,36 @@ where
         Ok(None)
     }
 
+    /// Expire the pre-merge transactions if the node is configured to do so and the chain has a
+    /// merge block.
+    ///
+    /// If the node is configured to prune pre-merge transactions and it has synced past the merge
+    /// block, it will delete the pre-merge transaction static files if they still exist.
+    pub fn expire_pre_merge_transactions(&self) -> eyre::Result<()>
+    where
+        T: FullNodeTypes<Provider: StaticFileProviderFactory>,
+    {
+        if self.node_config().pruning.bodies_pre_merge {
+            if let Some(merge_block) =
+                self.chain_spec().ethereum_fork_activation(EthereumHardfork::Paris).block_number()
+            {
+                // Ensure we only expire transactions after we synced past the merge block.
+                let Some(latest) = self.blockchain_db().latest_header()? else { return Ok(()) };
+                if latest.number() > merge_block {
+                    let provider = self.blockchain_db().static_file_provider();
+                    if provider.get_lowest_transaction_static_file_block() < Some(merge_block) {
+                        info!(target: "reth::cli", merge_block, "Expiring pre-merge transactions");
+                        provider.delete_transactions_below(merge_block)?;
+                    } else {
+                        debug!(target: "reth::cli", merge_block, "No pre-merge transactions to expire");
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns the metrics sender.
     pub fn sync_metrics_tx(&self) -> UnboundedSender<MetricEvent> {
         self.right().db_provider_container.metrics_sender.clone()
@@ -875,6 +938,65 @@ where
     /// Returns the node adapter components.
     pub const fn components(&self) -> &CB::Components {
         &self.node_adapter().components
+    }
+
+    /// Launches ExEx (Execution Extensions) and returns the ExEx manager handle.
+    #[allow(clippy::type_complexity)]
+    pub async fn launch_exex(
+        &self,
+        installed_exex: Vec<(
+            String,
+            Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
+        )>,
+    ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<T::Types>>>> {
+        ExExLauncher::new(
+            self.head(),
+            self.node_adapter().clone(),
+            installed_exex,
+            self.configs().clone(),
+        )
+        .launch()
+        .await
+    }
+
+    /// Creates the ERA import source based on node configuration.
+    ///
+    /// Returns `Some(EraImportSource)` if ERA is enabled in the node config, otherwise `None`.
+    pub fn era_import_source(&self) -> Option<EraImportSource> {
+        let node_config = self.node_config();
+        if !node_config.era.enabled {
+            return None;
+        }
+
+        EraImportSource::maybe_new(
+            node_config.era.source.path.clone(),
+            node_config.era.source.url.clone(),
+            || node_config.chain.chain().kind().default_era_host(),
+            || node_config.datadir().data_dir().join("era").into(),
+        )
+    }
+
+    /// Creates consensus layer health events stream based on node configuration.
+    ///
+    /// Returns a stream that monitors consensus layer health if:
+    /// - No debug tip is configured
+    /// - Not running in dev mode
+    ///
+    /// Otherwise returns an empty stream.
+    pub fn consensus_layer_events(
+        &self,
+    ) -> impl Stream<Item = NodeEvent<PrimitivesTy<T::Types>>> + 'static
+    where
+        T::Provider: reth_provider::CanonChainTracker,
+    {
+        if self.node_config().debug.tip.is_none() && !self.is_dev() {
+            Either::Left(
+                ConsensusLayerHealthEvents::new(Box::new(self.blockchain_db().clone()))
+                    .map(Into::into),
+            )
+        } else {
+            Either::Right(stream::empty())
+        }
     }
 }
 
@@ -890,13 +1012,13 @@ where
     CB: NodeComponentsBuilder<T>,
 {
     /// Returns the [`InvalidBlockHook`] to use for the node.
-    pub fn invalid_block_hook(
+    pub async fn invalid_block_hook(
         &self,
     ) -> eyre::Result<Box<dyn InvalidBlockHook<<T::Types as NodeTypes>::Primitives>>> {
         let Some(ref hook) = self.node_config().debug.invalid_block_hook else {
             return Ok(Box::new(NoopInvalidBlockHook::default()))
         };
-        let healthy_node_rpc_client = self.get_healthy_node_client()?;
+        let healthy_node_rpc_client = self.get_healthy_node_client().await?;
 
         let output_directory = self.data_dir().invalid_block_hooks();
         let hooks = hook
@@ -924,32 +1046,31 @@ where
     }
 
     /// Returns an RPC client for the healthy node, if configured in the node config.
-    fn get_healthy_node_client(&self) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>> {
-        self.node_config()
-            .debug
-            .healthy_node_rpc_url
-            .as_ref()
-            .map(|url| {
-                let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
+    async fn get_healthy_node_client(
+        &self,
+    ) -> eyre::Result<Option<jsonrpsee::http_client::HttpClient>> {
+        let Some(url) = self.node_config().debug.healthy_node_rpc_url.as_ref() else {
+            return Ok(None);
+        };
 
-                // Verify that the healthy node is running the same chain as the current node.
-                let chain_id = futures::executor::block_on(async {
-                    EthApiClient::<
-                        alloy_rpc_types::Transaction,
-                        alloy_rpc_types::Block,
-                        alloy_rpc_types::Receipt,
-                        alloy_rpc_types::Header,
-                    >::chain_id(&client)
-                    .await
-                })?
-                .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
-                if chain_id.to::<u64>() != self.chain_id().id() {
-                    eyre::bail!("invalid chain id for healthy node: {chain_id}")
-                }
+        let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
 
-                Ok(client)
-            })
-            .transpose()
+        // Verify that the healthy node is running the same chain as the current node.
+        let chain_id = EthApiClient::<
+            alloy_rpc_types::TransactionRequest,
+            alloy_rpc_types::Transaction,
+            alloy_rpc_types::Block,
+            alloy_rpc_types::Receipt,
+            alloy_rpc_types::Header,
+        >::chain_id(&client)
+        .await?
+        .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
+
+        if chain_id.to::<u64>() != self.chain_id().id() {
+            eyre::bail!("invalid chain id for healthy node: {chain_id}")
+        }
+
+        Ok(Some(client))
     }
 }
 
@@ -1088,7 +1209,10 @@ mod tests {
                     storage_history_full: false,
                     storage_history_distance: None,
                     storage_history_before: None,
+                    bodies_pre_merge: false,
+                    bodies_distance: None,
                     receipts_log_filter: None,
+                    bodies_before: None,
                 },
                 ..NodeConfig::test()
             };

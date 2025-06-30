@@ -9,12 +9,11 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
-    EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{
@@ -31,19 +30,16 @@ where
                 Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
             Error: FromEvmError<Self::Evm>,
+            RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         >,
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt<
-            Transaction = OpTransactionSigned,
-            Block = OpBlock,
-            Receipt = OpReceipt,
-            Header = alloy_consensus::Header,
-        > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
+        Provider: BlockReaderIdExt
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
         Evm: ConfigureEvm<
             Primitives = <Self as RpcNodeCore>::Primitives,
-            NextBlockEnvCtx = OpNextBlockEnvAttributes,
+            NextBlockEnvCtx: From<OpNextBlockEnvAttributes>,
         >,
         Primitives: NodePrimitives<
             BlockHeader = ProviderHeader<Self::Provider>,
@@ -72,8 +68,9 @@ where
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root(),
-            extra_data: parent.extra_data.clone(),
-        })
+            extra_data: parent.extra_data().clone(),
+        }
+        .into())
     }
 
     /// Returns the locally built pending block

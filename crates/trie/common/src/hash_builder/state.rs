@@ -51,7 +51,7 @@ impl From<HashBuilderState> for HashBuilder {
 impl From<HashBuilder> for HashBuilderState {
     fn from(state: HashBuilder) -> Self {
         Self {
-            key: state.key.into(),
+            key: state.key.to_vec(),
             stack: state.stack,
             value: state.value,
             groups: state.state_masks,

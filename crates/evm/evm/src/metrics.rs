@@ -278,7 +278,7 @@ mod tests {
         let state = {
             let mut state = EvmState::default();
             let storage =
-                EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2)))]);
+                EvmStorage::from_iter([(U256::from(1), EvmStorageSlot::new(U256::from(2), 0))]);
             state.insert(
                 Default::default(),
                 Account {
@@ -290,7 +290,8 @@ mod tests {
                         ..Default::default()
                     },
                     storage,
-                    status: AccountStatus::Loaded,
+                    status: AccountStatus::default(),
+                    transaction_id: 0,
                 },
             );
             state

@@ -22,8 +22,8 @@ use reth_evm::{
 use reth_primitives_traits::{
     block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
 };
+use reth_rpc_convert::{RpcConvert, RpcTransaction, RpcTypes};
 use reth_rpc_server_types::result::rpc_err;
-use reth_rpc_types_compat::{block::from_block, TransactionCompat};
 use reth_storage_api::noop::NoopProvider;
 use revm::{
     context_interface::result::ExecutionResult,
@@ -77,7 +77,10 @@ pub fn execute_transactions<S, T>(
 >
 where
     S: BlockBuilder<Executor: BlockExecutor<Evm: Evm<DB: Database<Error: Into<EthApiError>>>>>,
-    T: TransactionCompat<Primitives = S::Primitives>,
+    T: RpcConvert<
+        Primitives = S::Primitives,
+        Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+    >,
 {
     builder.apply_pre_execution_changes()?;
 
@@ -121,7 +124,10 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
 ) -> Result<Recovered<Tx>, EthApiError>
 where
     DB::Error: Into<EthApiError>,
-    T: TransactionCompat<Primitives: NodePrimitives<SignedTx = Tx>>,
+    T: RpcConvert<
+        Primitives: NodePrimitives<SignedTx = Tx>,
+        Network: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+    >,
 {
     // If we're missing any fields we try to fill nonce, gas and
     // gas price.
@@ -178,7 +184,7 @@ where
     }
 
     let tx = tx_resp_builder
-        .build_simulate_v1_transaction(tx)
+        .build_simulate_v1_transaction(tx.into())
         .map_err(|e| EthApiError::other(e.into()))?;
 
     Ok(Recovered::new_unchecked(tx, from))
@@ -189,11 +195,11 @@ where
 pub fn build_simulated_block<T, B, Halt: Clone>(
     block: RecoveredBlock<B>,
     results: Vec<ExecutionResult<Halt>>,
-    full_transactions: bool,
+    txs_kind: BlockTransactionsKind,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<T::Transaction, Header<B::Header>>>, T::Error>
+) -> Result<SimulatedBlock<Block<RpcTransaction<T::Network>, Header<B::Header>>>, T::Error>
 where
-    T: TransactionCompat<
+    T: RpcConvert<
         Primitives: NodePrimitives<SignedTx = BlockTx<B>>,
         Error: FromEthApiError + FromEvmHalt<Halt>,
     >,
@@ -256,9 +262,6 @@ where
         calls.push(call);
     }
 
-    let txs_kind =
-        if full_transactions { BlockTransactionsKind::Full } else { BlockTransactionsKind::Hashes };
-
-    let block = from_block(block, txs_kind, tx_resp_builder)?;
+    let block = block.into_rpc_block(txs_kind, |tx, tx_info| tx_resp_builder.fill(tx, tx_info))?;
     Ok(SimulatedBlock { inner: block, calls })
 }

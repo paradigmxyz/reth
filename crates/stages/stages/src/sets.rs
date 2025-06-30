@@ -418,7 +418,8 @@ where
                 self.stages_config.etl.clone(),
             ))
             .add_stage(MerkleStage::new_execution(
-                self.stages_config.merkle.clean_threshold,
+                self.stages_config.merkle.rebuild_threshold,
+                self.stages_config.merkle.incremental_threshold,
                 self.consensus,
             ))
     }

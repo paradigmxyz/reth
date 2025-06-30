@@ -21,6 +21,15 @@ pub trait FullSignedTx: SignedTransaction + MaybeCompact + MaybeSerdeBincodeComp
 impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
 
 /// A signed transaction.
+///
+/// # Recovery Methods
+///
+/// This trait provides two types of recovery methods:
+/// - Standard methods (e.g., `try_recover`) - enforce EIP-2 low-s signature requirement
+/// - Unchecked methods (e.g., `try_recover_unchecked`) - skip EIP-2 validation for pre-EIP-2
+///   transactions
+///
+/// Use unchecked methods only when dealing with historical pre-EIP-2 transactions.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait SignedTransaction:
     Send
