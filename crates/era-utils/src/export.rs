@@ -38,7 +38,7 @@ pub struct ExportConfig {
     /// It can never be larger than `MAX_BLOCKS_PER_ERA1 = 8192`
     /// See also <`https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md`>
     pub max_blocks_per_file: u64,
-    /// Network name
+    /// Network name, can only be `mainnet`, `sepolia`.
     pub network: String,
 }
 
@@ -67,6 +67,13 @@ impl ExportConfig {
 
         if self.max_blocks_per_file == 0 {
             return Err(eyre!("Max blocks per file cannot be zero"));
+        }
+
+        if self.network != "mainnet" && self.network != "sepolia" {
+            return Err(eyre!(
+                "Network '{}' is not supported. Only 'mainnet' and 'sepolia' are allowed",
+                self.network
+            ));
         }
 
         Ok(())
