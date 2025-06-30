@@ -1,7 +1,7 @@
 //! CLI argument parsing and main command orchestration.
 
-use clap::Parser;
 use alloy_provider::{Provider, ProviderBuilder};
+use clap::Parser;
 use eyre::{eyre, Result};
 use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
@@ -11,7 +11,8 @@ use std::path::PathBuf;
 use tracing::info;
 
 use crate::{
-    benchmark::BenchmarkRunner, comparison::ComparisonGenerator, compilation::CompilationManager, git::GitManager, node::NodeManager,
+    benchmark::BenchmarkRunner, comparison::ComparisonGenerator, compilation::CompilationManager,
+    git::GitManager, node::NodeManager,
 };
 
 /// Automated reth benchmark comparison between git references
@@ -69,12 +70,7 @@ pub struct Args {
     /// The chain this node is running.
     ///
     /// Possible values are either a built-in chain name or numeric chain ID.
-    #[arg(
-        long,
-        value_name = "CHAIN",
-        default_value = "mainnet",
-        required = false,
-    )]
+    #[arg(long, value_name = "CHAIN", default_value = "mainnet", required = false)]
     pub chain: Chain,
 
     /// Run reth binary with sudo (for elevated privileges)
@@ -121,7 +117,7 @@ impl Args {
 /// Validate that the RPC endpoint chain ID matches the specified chain
 async fn validate_rpc_chain_id(rpc_url: &str, expected_chain: &Chain) -> Result<()> {
     info!("Validating RPC endpoint chain ID...");
-    
+
     // Create Alloy provider
     let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
     let provider = ProviderBuilder::new().connect_http(url);
@@ -130,7 +126,7 @@ async fn validate_rpc_chain_id(rpc_url: &str, expected_chain: &Chain) -> Result<
     let rpc_chain_id = provider
         .get_chain_id()
         .await
-        .map_err(|e| eyre!("Failed to get chain ID from RPC endpoint {}: {}", rpc_url, e))?;
+        .map_err(|e| eyre!("Failed to get chain ID from RPC endpoint {}: {:?}", rpc_url, e))?;
 
     let expected_chain_id = expected_chain.id();
 
@@ -140,7 +136,10 @@ async fn validate_rpc_chain_id(rpc_url: &str, expected_chain: &Chain) -> Result<
             Expected: {} (chain: {})\n\
             Found: {} at RPC endpoint: {}\n\n\
             Please use an RPC endpoint for the correct network or change the --chain argument.",
-            expected_chain_id, expected_chain, rpc_chain_id, rpc_url
+            expected_chain_id,
+            expected_chain,
+            rpc_chain_id,
+            rpc_url
         ));
     }
 
@@ -154,7 +153,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
         "Starting benchmark comparison between '{}' and '{}'",
         args.baseline_ref, args.feature_ref
     );
-    
+
     if args.sudo {
         info!("Running in sudo mode - reth commands will use elevated privileges");
     }
@@ -304,10 +303,10 @@ async fn generate_comparison_charts(
 
     let baseline_output_dir = comparison_generator.get_ref_output_dir("baseline");
     let feature_output_dir = comparison_generator.get_ref_output_dir("feature");
-    
+
     let baseline_csv = baseline_output_dir.join("combined_latency.csv");
     let feature_csv = feature_output_dir.join("combined_latency.csv");
-    
+
     // Check if CSV files exist
     if !baseline_csv.exists() {
         return Err(eyre!("Baseline CSV not found: {:?}", baseline_csv));
@@ -315,12 +314,12 @@ async fn generate_comparison_charts(
     if !feature_csv.exists() {
         return Err(eyre!("Feature CSV not found: {:?}", feature_csv));
     }
-    
+
     let output_dir = comparison_generator.get_output_dir();
     let chart_output = output_dir.join("latency_comparison.png");
-    
+
     let script_path = "bin/reth-bench/scripts/compare_newpayload_latency.py";
-    
+
     info!("Running Python comparison script with uv...");
     let mut cmd = tokio::process::Command::new("uv");
     cmd.args([
@@ -331,11 +330,11 @@ async fn generate_comparison_charts(
         "-o",
         &chart_output.to_string_lossy(),
     ]);
-    
+
     let output = cmd.output().await.map_err(|e| {
         eyre!("Failed to execute Python script with uv: {}. Make sure uv is installed.", e)
     })?;
-    
+
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -346,12 +345,12 @@ async fn generate_comparison_charts(
             stderr
         ));
     }
-    
+
     let stdout = String::from_utf8_lossy(&output.stdout);
     if !stdout.trim().is_empty() {
         info!("Python script output:\n{}", stdout);
     }
-    
+
     info!("Comparison chart generated: {:?}", chart_output);
     Ok(())
 }
