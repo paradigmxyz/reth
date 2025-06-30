@@ -225,12 +225,12 @@ impl ParallelSparseTrie {
     /// provider returns an error.
     pub fn update_leaf(
         &mut self,
-        path: Nibbles,
+        full_path: Nibbles,
         value: Vec<u8>,
         provider: impl BlindedProvider + Clone,
     ) -> SparseTrieResult<()> {
-        self.prefix_set.insert(path);
-        let existing = self.upper_subtrie.inner.values.insert(path, value.clone());
+        self.prefix_set.insert(full_path);
+        let existing = self.upper_subtrie.inner.values.insert(full_path, value.clone());
         if existing.is_some() {
             // upper trie structure unchanged, return immediately
             return Ok(())
@@ -260,7 +260,7 @@ impl ParallelSparseTrie {
 
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie
-            match self.upper_subtrie.next_node(current, &path, &provider)? {
+            match self.upper_subtrie.next_node(current, &full_path, &provider)? {
                 LeafUpdateStep::Continue { next_node } => {
                     next = Some(next_node);
                 }
@@ -325,7 +325,7 @@ impl ParallelSparseTrie {
 
             // If we didn't update the target leaf, we need to call update_leaf on the subtrie
             // to ensure that the leaf is updated correctly.
-            subtrie.update_leaf(path, value, provider)?;
+            subtrie.update_leaf(full_path, value, provider)?;
         }
 
         Ok(())
@@ -996,12 +996,12 @@ impl SparseSubtrie {
     /// provider returns an error.
     pub fn update_leaf(
         &mut self,
-        path: Nibbles,
+        full_path: Nibbles,
         value: Vec<u8>,
         provider: impl BlindedProvider,
     ) -> SparseTrieResult<()> {
-        debug_assert!(path.starts_with(&self.path));
-        let existing = self.inner.values.insert(path, value);
+        debug_assert!(full_path.starts_with(&self.path));
+        let existing = self.inner.values.insert(full_path, value);
         if existing.is_some() {
             // trie structure unchanged, return immediately
             return Ok(())
@@ -1010,7 +1010,7 @@ impl SparseSubtrie {
         // Here we are starting at the root of the subtrie, and traversing from there.
         let mut current = Some(self.path);
         while let Some(current_path) = current {
-            match self.next_node(current_path, &path, &provider)? {
+            match self.next_node(current_path, &full_path, &provider)? {
                 LeafUpdateStep::Continue { next_node } => {
                     current = Some(next_node);
                 }
@@ -1049,8 +1049,8 @@ impl SparseSubtrie {
                 *node = SparseNode::new_leaf(path);
                 Ok(LeafUpdateStep::complete_with_insertions(vec![current]))
             }
-            &mut SparseNode::Hash(hash) => {
-                Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
+            SparseNode::Hash(hash) => {
+                Err(SparseTrieErrorKind::BlindedNode { path: current, hash: *hash }.into())
             }
             SparseNode::Leaf { key: current_key, .. } => {
                 current.extend(current_key);
