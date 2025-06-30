@@ -69,7 +69,8 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT_30M)]
     pub enforced_gas_limit: u64,
 
-    /// Maximum gas limit for individual transactions. Transactions exceeding this limit will be rejected by the transaction pool
+    /// Maximum gas limit for individual transactions. Transactions exceeding this limit will be
+    /// rejected by the transaction pool
     #[arg(long = "txpool.max-tx-gas")]
     pub max_tx_gas_limit: Option<u64>,
 
@@ -195,7 +196,6 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             },
             minimal_protocol_basefee: self.minimal_protocol_basefee,
             gas_limit: self.enforced_gas_limit,
-            max_tx_gas_limit: self.max_tx_gas_limit,
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
