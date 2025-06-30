@@ -24,6 +24,7 @@ reth-node-types.workspace = true
 reth-trie.workspace = true
 reth-stages-types.workspace = true
 reth-db-api.workspace = true
+reth-rpc-convert.workspace = true
 
 # alloy
 alloy-provider.workspace = true
