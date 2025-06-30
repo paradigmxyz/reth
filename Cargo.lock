@@ -7305,6 +7305,7 @@ dependencies = [
 name = "reth-bench-compare"
 version = "1.5.0"
 dependencies = [
+ "alloy-provider",
  "chrono",
  "clap",
  "csv",

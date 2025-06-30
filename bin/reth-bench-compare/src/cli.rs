@@ -1,14 +1,13 @@
 //! CLI argument parsing and main command orchestration.
 
 use clap::Parser;
+use alloy_provider::{Provider, ProviderBuilder};
 use eyre::{eyre, Result};
 use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
-use reqwest::Client;
-use serde_json::{json, Value};
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 use tracing::info;
 
 use crate::{
@@ -123,46 +122,15 @@ impl Args {
 async fn validate_rpc_chain_id(rpc_url: &str, expected_chain: &Chain) -> Result<()> {
     info!("Validating RPC endpoint chain ID...");
     
-    let client = Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| eyre!("Failed to create HTTP client: {}", e))?;
+    // Create Alloy provider
+    let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
+    let provider = ProviderBuilder::new().connect_http(url);
 
-    let request_body = json!({
-        "jsonrpc": "2.0",
-        "method": "eth_chainId",
-        "params": [],
-        "id": 1
-    });
-
-    let response = client
-        .post(rpc_url)
-        .json(&request_body)
-        .send()
+    // Query chain ID using Alloy
+    let rpc_chain_id = provider
+        .get_chain_id()
         .await
-        .map_err(|e| eyre!("Failed to connect to RPC endpoint {}: {}", rpc_url, e))?;
-
-    if !response.status().is_success() {
-        return Err(eyre!("RPC endpoint returned error status: {}", response.status()));
-    }
-
-    let json: Value = response
-        .json()
-        .await
-        .map_err(|e| eyre!("Failed to parse RPC response: {}", e))?;
-
-    let result = json
-        .get("result")
-        .ok_or_else(|| eyre!("No result field in RPC response"))?;
-
-    let chain_id_hex = result
-        .as_str()
-        .ok_or_else(|| eyre!("Chain ID result is not a string"))?;
-
-    // Parse the hex chain ID
-    let chain_id_hex = chain_id_hex.strip_prefix("0x").unwrap_or(chain_id_hex);
-    let rpc_chain_id = u64::from_str_radix(chain_id_hex, 16)
-        .map_err(|e| eyre!("Failed to parse chain ID from hex '{}': {}", chain_id_hex, e))?;
+        .map_err(|e| eyre!("Failed to get chain ID from RPC endpoint {}: {}", rpc_url, e))?;
 
     let expected_chain_id = expected_chain.id();
 
