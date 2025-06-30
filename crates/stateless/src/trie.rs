@@ -122,7 +122,8 @@ fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
 ) -> Result<(SparseStateTrie, B256Map<Bytecode>), StatelessValidationError> {
-    let mut trie = SparseStateTrie::new(DefaultBlindedProviderFactory);
+    let provider_factory = DefaultBlindedProviderFactory;
+    let mut trie = SparseStateTrie::new();
     let mut state_witness = B256Map::default();
     let mut bytecode = B256Map::default();
 
@@ -148,7 +149,7 @@ fn verify_execution_witness(
 
     // Calculate the root
     let computed_root = trie
-        .root()
+        .root(&provider_factory)
         .map_err(|_e| StatelessValidationError::StatelessPreStateRootCalculationFailed)?;
 
     if computed_root == pre_state_root {
@@ -183,9 +184,9 @@ fn calculate_state_root(
     // borrowing issues.
     let mut storage_results = Vec::with_capacity(state.storages.len());
 
-    // In `verify_execution_witness` the trie gets initialized with a
-    // `DefaultBlindedProviderFactory`, so we use a corresponding default provider in here when
-    // interacting directly with its inner tries.
+    // In `verify_execution_witness` a `DefaultBlindedProviderFactory` is used, so we use the same
+    // again in here.
+    let provider_factory = DefaultBlindedProviderFactory;
     let storage_provider = DefaultBlindedProvider;
 
     for (address, storage) in state.storages.into_iter().sorted_unstable_by_key(|(addr, _)| *addr) {
@@ -245,14 +246,14 @@ fn calculate_state_root(
 
         // Decide whether to remove or update the account leaf
         if account.is_empty() && storage_root == EMPTY_ROOT_HASH {
-            trie.remove_account_leaf(&nibbles)?;
+            trie.remove_account_leaf(&nibbles, &provider_factory)?;
         } else {
             account_rlp_buf.clear();
             account.into_trie_account(storage_root).encode(&mut account_rlp_buf);
-            trie.update_account_leaf(nibbles, account_rlp_buf.clone())?;
+            trie.update_account_leaf(nibbles, account_rlp_buf.clone(), &provider_factory)?;
         }
     }
 
     // Return new state root
-    trie.root()
+    trie.root(&provider_factory)
 }
