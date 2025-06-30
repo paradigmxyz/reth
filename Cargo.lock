@@ -10626,6 +10626,7 @@ dependencies = [
  "rayon",
  "reth-execution-errors",
  "reth-primitives-traits",
+ "reth-tracing",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-sparse",
