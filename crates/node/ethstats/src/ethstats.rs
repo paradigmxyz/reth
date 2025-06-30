@@ -31,6 +31,8 @@ use tokio_stream::StreamExt;
 use tokio_tungstenite::connect_async;
 use url::Url;
 
+/// Number of historical blocks to include in a history update sent to the `EthStats` server
+const HISTORY_UPDATE_RANGE: u64 = 50;
 /// Duration to wait before attempting to reconnect to the `EthStats` server
 const RECONNECT_INTERVAL: Duration = Duration::from_secs(5);
 /// Maximum time to wait for a ping response from the server
@@ -410,12 +412,26 @@ where
     ///
     /// # Arguments
     /// * `list` - Vector of block numbers to fetch and report
-    async fn report_history(&self, list: &Vec<u64>) -> Result<(), EthStatsError> {
+    async fn report_history(&self, list: Option<&Vec<u64>>) -> Result<(), EthStatsError> {
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
-        let mut blocks = Vec::with_capacity(list.size());
-        for &block_number in list {
+        let mut indexes = Vec::with_capacity(HISTORY_UPDATE_RANGE as usize);
+        if let Some(list) = list {
+            indexes.extend(list);
+        } else {
+            let best_block_number = self
+                .provider
+                .best_block_number()
+                .map_err(|e| EthStatsError::DataFetchError(e.to_string()))?;
+
+            let start = best_block_number.saturating_sub(HISTORY_UPDATE_RANGE);
+
+            indexes.extend(start..=best_block_number);
+        }
+
+        let mut blocks = Vec::with_capacity(indexes.size());
+        for block_number in indexes {
             match self.provider.block_by_id(block_number.into()) {
                 Ok(Some(block)) => {
                     blocks.push(block);
@@ -423,17 +439,28 @@ where
                 Ok(None) => {
                     // Block not found, stop fetching
                     tracing::warn!("Block {} not found", block_number);
-                    return Err(EthStatsError::BlockNotFound(block_number));
+                    break;
                 }
                 Err(e) => {
                     tracing::error!("Error fetching block {}: {}", block_number, e);
-                    return Err(EthStatsError::DataFetchError(e.to_string()));
+                    break;
                 }
             }
         }
 
         let history: Vec<BlockStats> =
             blocks.iter().map(|block| self.block_to_stats(block)).collect::<Result<_, _>>()?;
+
+        if history.is_empty() {
+            tracing::warn!("No history to send to stats server");
+        } else {
+            tracing::debug!(
+                "Sending historical blocks to ethstats, first: {}, last: {}",
+                history.first().unwrap().number,
+                history.last().unwrap().number
+            );
+        }
+
         let history_msg = HistoryMsg { id: self.credentials.node_id.clone(), history };
 
         let message = history_msg.generate_history_message();
@@ -486,13 +513,16 @@ where
                     .get(1)
                     .and_then(|v| v.as_object())
                     .and_then(|obj| obj.get("list"))
-                    .and_then(|v| v.as_array())
-                    .ok_or_else(|| {
-                        tracing::warn!("Invalid stats history request or block list, msg {}", msg);
-                        EthStatsError::InvalidRequest
-                    })?;
+                    .and_then(|v| v.as_array());
+
+                if block_numbers.is_none() {
+                    self.report_history(None).await?;
+
+                    return Ok(());
+                }
 
                 let block_numbers = block_numbers
+                    .unwrap()
                     .iter()
                     .map(|val| {
                         val.as_u64().ok_or_else(|| {
@@ -502,7 +532,7 @@ where
                     })
                     .collect::<Result<_, _>>()?;
 
-                self.report_history(&block_numbers).await?;
+                self.report_history(Some(&block_numbers)).await?;
             }
             other => tracing::warn!("Unhandled command: {}", other),
         }
@@ -525,7 +555,7 @@ where
         // Create channels for internal communication
         let (shutdown_tx, mut shutdown_rx) = mpsc::channel(1);
         let (message_tx, mut message_rx) = mpsc::channel(32);
-        let (head_tx, mut head_rx) = mpsc::channel(32);
+        let (head_tx, mut head_rx) = mpsc::channel(10);
 
         // Start the read loop in a separate task
         let read_handle = {
