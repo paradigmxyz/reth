@@ -610,6 +610,8 @@ where
             })
         };
 
+        let mut pending_tx_receiver = self.pool.pending_transactions_listener();
+
         // Set up intervals
         let mut report_interval = interval(REPORT_INTERVAL);
         let mut reconnect_interval = interval(RECONNECT_INTERVAL);
@@ -638,6 +640,14 @@ where
                         self.disconnect().await;
                     }
 
+                    if let Err(e) = self.report_pending().await {
+                        tracing::error!("Failed to report pending: {}", e);
+                        self.disconnect().await;
+                    }
+                }
+
+                // Handle new pending tx
+                _= pending_tx_receiver.recv() => {
                     if let Err(e) = self.report_pending().await {
                         tracing::error!("Failed to report pending: {}", e);
                         self.disconnect().await;
