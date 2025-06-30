@@ -142,6 +142,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     // Validate git state
     if !args.skip_git_validation {
         git_manager.validate_clean_state()?;
+        git_manager.fetch_all()?;
         git_manager.validate_refs(&[&args.baseline_ref, &args.feature_ref])?;
     }
 
