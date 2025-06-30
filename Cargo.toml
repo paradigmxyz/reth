@@ -495,9 +495,9 @@ alloy-hardforks = "0.2.2"
 alloy-consensus = { version = "1.0.9", default-features = false }
 alloy-contract = { version = "1.0.9", default-features = false }
 alloy-eips = { version = "1.0.9", default-features = false }
-alloy-genesis = { version = "1.0.9, <1.0.13", default-features = false }
+alloy-genesis = { version = "1.0.9, <1.0.13", default-features = false } # FIXME: when upstream upgrade this
 alloy-json-rpc = { version = "1.0.9", default-features = false }
-alloy-network = { version = "1.0.9", default-features = false }
+alloy-network = { version = "1.0.9, <=1.0.13", default-features = false } # FIXME: when upstream upgrade this
 alloy-network-primitives = { version = "1.0.9", default-features = false }
 alloy-provider = { version = "1.0.9", features = ["reqwest"], default-features = false }
 alloy-pubsub = { version = "1.0.9", default-features = false }
