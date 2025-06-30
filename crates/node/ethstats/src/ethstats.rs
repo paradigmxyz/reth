@@ -99,7 +99,7 @@ impl FromStr for EthstatsCredentials {
 pub struct EthStatsService<Network, Provider, Pool> {
     /// Authentication credentials for the `EthStats` server
     pub credentials: EthstatsCredentials,
-    /// `WebSocket` connection wrapper, wrapped in `Arc<RwLock>`` for shared access
+    /// `WebSocket` connection wrapper, wrapped in `Arc<RwLock>` for shared access
     pub conn: Arc<RwLock<Option<ConnWrapper>>>,
     /// Timestamp of the last ping sent to the server
     pub last_ping: Arc<Mutex<Option<Instant>>>,
