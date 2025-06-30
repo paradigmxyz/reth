@@ -82,6 +82,26 @@ impl GitManager {
         Ok(())
     }
 
+    /// Fetch all refs from remote to ensure we have latest branches and tags
+    pub fn fetch_all(&self) -> Result<()> {
+        info!("Fetching latest refs from remote...");
+        
+        let output = Command::new("git")
+            .args(["fetch", "--all", "--tags"])
+            .current_dir(&self.repo_root)
+            .output()
+            .wrap_err("Failed to fetch latest refs")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            warn!("Git fetch failed (continuing anyway): {}", stderr);
+        } else {
+            info!("Successfully fetched latest refs");
+        }
+
+        Ok(())
+    }
+
     /// Validate that the specified git references exist (branches or tags)
     pub fn validate_refs(&self, refs: &[&str]) -> Result<()> {
         for &git_ref in refs {
