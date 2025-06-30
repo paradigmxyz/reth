@@ -46,11 +46,11 @@ mod tests {
 
     use alloy_consensus::{
         transaction::{Recovered, SignerRecoverable},
-        Block, BlockBody, Header, SignableTransaction, Signed, TxLegacy,
+        Block, BlockBody, Header, SignableTransaction, Signed, Transaction, TxLegacy,
     };
     use alloy_eips::{
         eip7702::{constants::PER_EMPTY_ACCOUNT_COST, Authorization, SignedAuthorization},
-        Encodable2718, Typed2718,
+        Typed2718,
     };
     use alloy_evm::{
         block::{BlockExecutionResult, BlockExecutor},
@@ -511,7 +511,7 @@ mod tests {
     #[test]
     fn test_execute_transactions_legacy_feynman_fork() -> eyre::Result<()> {
         // Execute legacy transaction on feynman block
-        let expected_l1_fee = U256::from(100);
+        let expected_l1_fee = U256::from(10);
         execute_transaction(
             ScrollTxType::Legacy,
             CURIE_BLOCK_NUMBER + 1,
@@ -546,7 +546,7 @@ mod tests {
     #[test]
     fn test_execute_transactions_eip2930_feynman_fork() -> eyre::Result<()> {
         // Execute eip2930 transaction on feynman block
-        let expected_l1_fee = U256::from(103);
+        let expected_l1_fee = U256::from(10);
         execute_transaction(
             ScrollTxType::Eip2930,
             CURIE_BLOCK_NUMBER + 1,
@@ -581,7 +581,7 @@ mod tests {
     #[test]
     fn test_execute_transaction_eip1559_feynman_fork() -> eyre::Result<()> {
         // Execute eip1559 transaction on feynman block
-        let expected_l1_fee = U256::from(104);
+        let expected_l1_fee = U256::from(10);
         execute_transaction(
             ScrollTxType::Eip1559,
             CURIE_BLOCK_NUMBER + 1,
@@ -622,7 +622,7 @@ mod tests {
     #[test]
     fn test_execute_transactions_eip7702_feynman_fork() -> eyre::Result<()> {
         // Execute eip7702 transaction on feynman block
-        let expected_l1_fee = U256::from(198);
+        let expected_l1_fee = U256::from(19);
         execute_transaction(
             ScrollTxType::Eip7702,
             CURIE_BLOCK_NUMBER + 1,
@@ -641,13 +641,8 @@ mod tests {
             transaction(ScrollTxType::Eip1559, MIN_TRANSACTION_GAS),
             transaction(ScrollTxType::Eip7702, MIN_TRANSACTION_GAS),
         ];
-        let compression_ratios = transactions
-            .iter()
-            .map(|tx| {
-                let encoded = tx.encoded_2718();
-                compute_compression_ratio(&encoded)
-            })
-            .collect::<Vec<_>>();
+        let compression_ratios =
+            transactions.iter().map(|tx| compute_compression_ratio(tx.input())).collect::<Vec<_>>();
         let with_compression_ratios = execute_block(
             transactions.clone(),
             CURIE_BLOCK_NUMBER + 1,
