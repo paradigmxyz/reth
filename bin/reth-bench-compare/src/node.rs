@@ -32,7 +32,7 @@ impl NodeManager {
             metrics_port: args.metrics_port,
             chain: if args.chain == "mainnet" { None } else { Some(args.chain.clone()) },
             use_sudo: args.sudo,
-            quiet: args.quiet,
+            quiet: args.suppress_output,
             http_client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()

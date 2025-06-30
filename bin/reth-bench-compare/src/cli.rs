@@ -78,7 +78,7 @@ pub struct Args {
 
     /// Suppress output from child processes (compilation, reth node, etc.)
     #[arg(long)]
-    pub quiet: bool,
+    pub suppress_output: bool,
 
     #[command(flatten)]
     pub logs: LogArgs,
@@ -125,7 +125,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     }
 
     // Initialize managers
-    let git_manager = GitManager::new(args.quiet)?;
+    let git_manager = GitManager::new(args.suppress_output)?;
     let node_manager = NodeManager::new(&args);
     let benchmark_runner = BenchmarkRunner::new(&args);
     let mut comparison_generator = ComparisonGenerator::new(&args);
