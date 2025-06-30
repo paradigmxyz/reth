@@ -7,7 +7,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
 };
-use tracing::info;
+use tracing::{debug, info};
 
 /// Manages benchmark execution using reth-bench
 pub struct BenchmarkRunner {
@@ -65,24 +65,24 @@ impl BenchmarkRunner {
         // Execute the benchmark
         let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
 
-        // Stream stdout with prefix
+        // Stream stdout with prefix at debug level
         if let Some(stdout) = child.stdout.take() {
             tokio::spawn(async move {
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    println!("[RETH-BENCH] {}", line);
+                    debug!("[RETH-BENCH] {}", line);
                 }
             });
         }
 
-        // Stream stderr with prefix
+        // Stream stderr with prefix at debug level
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    eprintln!("[RETH-BENCH] {}", line);
+                    debug!("[RETH-BENCH] {}", line);
                 }
             });
         }
@@ -170,24 +170,24 @@ impl BenchmarkRunner {
         // Execute the benchmark
         let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
 
-        // Stream stdout with prefix
+        // Stream stdout with prefix at debug level
         if let Some(stdout) = child.stdout.take() {
             tokio::spawn(async move {
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    println!("[RETH-BENCH-BASELINE] {}", line);
+                    debug!("[RETH-BENCH-BASELINE] {}", line);
                 }
             });
         }
 
-        // Stream stderr with prefix
+        // Stream stderr with prefix at debug level
         if let Some(stderr) = child.stderr.take() {
             tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    eprintln!("[RETH-BENCH-BASELINE] {}", line);
+                    debug!("[RETH-BENCH-BASELINE] {}", line);
                 }
             });
         }

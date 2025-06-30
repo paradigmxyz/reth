@@ -2,18 +2,17 @@
 
 use eyre::{eyre, Result, WrapErr};
 use std::process::Command;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Manages git operations for branch switching and compilation
 #[derive(Debug, Clone)]
 pub struct GitManager {
     repo_root: String,
-    quiet: bool,
 }
 
 impl GitManager {
     /// Create a new GitManager, detecting the repository root
-    pub fn new(quiet: bool) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let output = Command::new("git")
             .args(["rev-parse", "--show-toplevel"])
             .output()
@@ -29,7 +28,7 @@ impl GitManager {
             .to_string();
 
         info!("Detected git repository at: {}", repo_root);
-        Ok(Self { repo_root, quiet })
+        Ok(Self { repo_root })
     }
 
     /// Get the current git branch name
@@ -193,21 +192,19 @@ impl GitManager {
             .output()
             .wrap_err("Failed to execute make profiling command")?;
 
-        // Print stdout and stderr with prefixes (unless quiet)
-        if !self.quiet {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        // Print stdout and stderr with prefixes at debug level
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
 
-            for line in stdout.lines() {
-                if !line.trim().is_empty() {
-                    println!("[MAKE] {}", line);
-                }
+        for line in stdout.lines() {
+            if !line.trim().is_empty() {
+                debug!("[MAKE] {}", line);
             }
+        }
 
-            for line in stderr.lines() {
-                if !line.trim().is_empty() {
-                    eprintln!("[MAKE] {}", line);
-                }
+        for line in stderr.lines() {
+            if !line.trim().is_empty() {
+                debug!("[MAKE] {}", line);
             }
         }
 
@@ -229,21 +226,19 @@ impl GitManager {
             .output()
             .wrap_err("Failed to execute make install-reth-bench command")?;
 
-        // Print stdout and stderr with prefixes (unless quiet)
-        if !self.quiet {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        // Print stdout and stderr with prefixes at debug level
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
 
-            for line in stdout.lines() {
-                if !line.trim().is_empty() {
-                    println!("[MAKE-BENCH] {}", line);
-                }
+        for line in stdout.lines() {
+            if !line.trim().is_empty() {
+                debug!("[MAKE-BENCH] {}", line);
             }
+        }
 
-            for line in stderr.lines() {
-                if !line.trim().is_empty() {
-                    eprintln!("[MAKE-BENCH] {}", line);
-                }
+        for line in stderr.lines() {
+            if !line.trim().is_empty() {
+                debug!("[MAKE-BENCH] {}", line);
             }
         }
 

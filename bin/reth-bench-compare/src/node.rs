@@ -19,7 +19,6 @@ pub struct NodeManager {
     metrics_port: u16,
     chain: Option<String>,
     use_sudo: bool,
-    quiet: bool,
     http_client: Client,
 }
 
@@ -32,7 +31,6 @@ impl NodeManager {
             metrics_port: args.metrics_port,
             chain: if args.chain == "mainnet" { None } else { Some(args.chain.clone()) },
             use_sudo: args.sudo,
-            quiet: args.suppress_output,
             http_client: Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
@@ -105,27 +103,25 @@ impl NodeManager {
 
         info!("Reth node started with PID: {:?}", child.id());
 
-        // Stream stdout and stderr with prefixes (unless quiet)
-        if !self.quiet {
-            if let Some(stdout) = child.stdout.take() {
-                tokio::spawn(async move {
-                    let reader = AsyncBufReader::new(stdout);
-                    let mut lines = reader.lines();
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        println!("[RETH] {}", line);
-                    }
-                });
-            }
+        // Stream stdout and stderr with prefixes at debug level
+        if let Some(stdout) = child.stdout.take() {
+            tokio::spawn(async move {
+                let reader = AsyncBufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    debug!("[RETH] {}", line);
+                }
+            });
+        }
 
-            if let Some(stderr) = child.stderr.take() {
-                tokio::spawn(async move {
-                    let reader = AsyncBufReader::new(stderr);
-                    let mut lines = reader.lines();
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        eprintln!("[RETH] {}", line);
-                    }
-                });
-            }
+        if let Some(stderr) = child.stderr.take() {
+            tokio::spawn(async move {
+                let reader = AsyncBufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    debug!("[RETH] {}", line);
+                }
+            });
         }
 
         // Give the node a moment to start up
@@ -280,21 +276,19 @@ impl NodeManager {
 
         let output = cmd.output().wrap_err("Failed to execute unwind command")?;
 
-        // Print stdout and stderr with prefixes (unless quiet)
-        if !self.quiet {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
+        // Print stdout and stderr with prefixes at debug level
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
 
-            for line in stdout.lines() {
-                if !line.trim().is_empty() {
-                    println!("[RETH-UNWIND] {}", line);
-                }
+        for line in stdout.lines() {
+            if !line.trim().is_empty() {
+                debug!("[RETH-UNWIND] {}", line);
             }
+        }
 
-            for line in stderr.lines() {
-                if !line.trim().is_empty() {
-                    eprintln!("[RETH-UNWIND] {}", line);
-                }
+        for line in stderr.lines() {
+            if !line.trim().is_empty() {
+                debug!("[RETH-UNWIND] {}", line);
             }
         }
 
