@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use tracing::info;
 
 use crate::{
-    benchmark::BenchmarkRunner, comparison::ComparisonGenerator, git::GitManager, node::NodeManager,
+    benchmark::BenchmarkRunner, comparison::ComparisonGenerator, compilation::CompilationManager, git::GitManager, node::NodeManager,
 };
 
 /// Automated reth benchmark comparison between git references
@@ -130,6 +130,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
 
     // Initialize managers
     let git_manager = GitManager::new()?;
+    let compilation_manager = CompilationManager::new(git_manager.repo_root().to_string());
     let node_manager = NodeManager::new(&args);
     let benchmark_runner = BenchmarkRunner::new(&args);
     let mut comparison_generator = ComparisonGenerator::new(&args);
@@ -157,6 +158,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
 
     let result = run_benchmark_workflow(
         &git_manager,
+        &compilation_manager,
         &node_manager,
         &benchmark_runner,
         &mut comparison_generator,
@@ -178,6 +180,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
 /// Execute the complete benchmark workflow for both branches
 async fn run_benchmark_workflow(
     git_manager: &GitManager,
+    compilation_manager: &CompilationManager,
     node_manager: &NodeManager,
     benchmark_runner: &BenchmarkRunner,
     comparison_generator: &mut ComparisonGenerator,
@@ -196,9 +199,9 @@ async fn run_benchmark_workflow(
 
         // Compile reth (always) and reth-bench (only if requested)
         if !args.skip_compilation {
-            git_manager.compile_reth()?;
+            compilation_manager.compile_reth()?;
             if args.compile_reth_bench {
-                git_manager.compile_reth_bench()?;
+                compilation_manager.compile_reth_bench()?;
             }
         }
 
