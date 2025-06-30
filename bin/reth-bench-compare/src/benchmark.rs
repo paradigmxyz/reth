@@ -3,11 +3,12 @@
 use crate::cli::Args;
 use eyre::{eyre, Result, WrapErr};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
 };
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Manages benchmark execution using reth-bench
 pub struct BenchmarkRunner {
@@ -65,24 +66,36 @@ impl BenchmarkRunner {
         // Execute the benchmark
         let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;
 
-        // Stream stdout with prefix at debug level
+        // Capture stdout and stderr for error reporting
+        let stdout_lines = Arc::new(Mutex::new(Vec::new()));
+        let stderr_lines = Arc::new(Mutex::new(Vec::new()));
+
+        // Stream stdout with prefix at debug level and capture for error reporting
         if let Some(stdout) = child.stdout.take() {
+            let stdout_lines_clone = stdout_lines.clone();
             tokio::spawn(async move {
                 let reader = BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!("[RETH-BENCH] {}", line);
+                    if let Ok(mut captured) = stdout_lines_clone.lock() {
+                        captured.push(line);
+                    }
                 }
             });
         }
 
-        // Stream stderr with prefix at debug level
+        // Stream stderr with prefix at debug level and capture for error reporting
         if let Some(stderr) = child.stderr.take() {
+            let stderr_lines_clone = stderr_lines.clone();
             tokio::spawn(async move {
                 let reader = BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
                     debug!("[RETH-BENCH] {}", line);
+                    if let Ok(mut captured) = stderr_lines_clone.lock() {
+                        captured.push(line);
+                    }
                 }
             });
         }
@@ -90,6 +103,27 @@ impl BenchmarkRunner {
         let status = child.wait().await.wrap_err("Failed to wait for reth-bench")?;
 
         if !status.success() {
+            // Print all captured output when command fails
+            error!("reth-bench failed with exit code: {:?}", status.code());
+            
+            if let Ok(stdout) = stdout_lines.lock() {
+                if !stdout.is_empty() {
+                    error!("reth-bench stdout:");
+                    for line in stdout.iter() {
+                        error!("  {}", line);
+                    }
+                }
+            }
+            
+            if let Ok(stderr) = stderr_lines.lock() {
+                if !stderr.is_empty() {
+                    error!("reth-bench stderr:");
+                    for line in stderr.iter() {
+                        error!("  {}", line);
+                    }
+                }
+            }
+            
             return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
         }
 
