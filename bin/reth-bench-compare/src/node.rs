@@ -10,7 +10,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader as AsyncBufReader},
     time::{sleep, timeout},
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Manages reth node lifecycle and operations
 pub struct NodeManager {
@@ -296,6 +296,23 @@ impl NodeManager {
         }
 
         if !output.status.success() {
+            // Print all output when unwind fails
+            error!("Reth unwind failed with exit code: {:?}", output.status.code());
+            
+            if !stdout.trim().is_empty() {
+                error!("Reth unwind stdout:");
+                for line in stdout.lines() {
+                    error!("  {}", line);
+                }
+            }
+            
+            if !stderr.trim().is_empty() {
+                error!("Reth unwind stderr:");
+                for line in stderr.lines() {
+                    error!("  {}", line);
+                }
+            }
+            
             return Err(eyre!("Unwind command failed with exit code: {:?}", output.status.code()));
         }
 

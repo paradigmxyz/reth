@@ -2,7 +2,7 @@
 
 use eyre::{eyre, Result, WrapErr};
 use std::process::Command;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 /// Manages compilation operations for reth components
 #[derive(Debug)]
@@ -43,6 +43,23 @@ impl CompilationManager {
         }
 
         if !output.status.success() {
+            // Print all output when compilation fails
+            error!("Make profiling failed with exit code: {:?}", output.status.code());
+            
+            if !stdout.trim().is_empty() {
+                error!("Make stdout:");
+                for line in stdout.lines() {
+                    error!("  {}", line);
+                }
+            }
+            
+            if !stderr.trim().is_empty() {
+                error!("Make stderr:");
+                for line in stderr.lines() {
+                    error!("  {}", line);
+                }
+            }
+            
             return Err(eyre!("Compilation failed with exit code: {:?}", output.status.code()));
         }
 
@@ -77,6 +94,23 @@ impl CompilationManager {
         }
 
         if !output.status.success() {
+            // Print all output when compilation fails
+            error!("Make install-reth-bench failed with exit code: {:?}", output.status.code());
+            
+            if !stdout.trim().is_empty() {
+                error!("Make stdout:");
+                for line in stdout.lines() {
+                    error!("  {}", line);
+                }
+            }
+            
+            if !stderr.trim().is_empty() {
+                error!("Make stderr:");
+                for line in stderr.lines() {
+                    error!("  {}", line);
+                }
+            }
+            
             return Err(eyre!(
                 "reth-bench compilation failed with exit code: {:?}",
                 output.status.code()
