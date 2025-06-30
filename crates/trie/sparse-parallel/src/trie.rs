@@ -322,7 +322,7 @@ impl ParallelSparseTrie {
                     subtrie.path.extend(&key);
                 }
             }
-            _ => panic!("Expected to remove a leaf or extension, but removed {:?}", node),
+            _ => panic!("Expected to remove a leaf or extension, but removed {node:?}"),
         }
     }
 
