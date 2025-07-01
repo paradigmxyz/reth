@@ -230,7 +230,7 @@ impl ParallelSparseTrie {
         provider: impl BlindedProvider + Clone,
     ) -> SparseTrieResult<()> {
         self.prefix_set.insert(full_path);
-        let existing = self.upper_subtrie.inner.values.insert(full_path, value);
+        let existing = self.upper_subtrie.inner.values.insert(full_path, value.clone());
         if existing.is_some() {
             // upper trie structure unchanged, return immediately
             return Ok(())
@@ -314,10 +314,6 @@ impl ParallelSparseTrie {
             // The next_path here represents where we need to continue traversal, which may
             // be longer than 2 nibbles if we're following an extension node.
             let subtrie = self.get_or_create_lower_subtrie(subtrie_idx, next_path);
-
-            // get the value from the subtrie, remove and then call with `update_leaf` so we don't
-            // need to clone
-            let value = subtrie.inner.values.remove(&full_path).unwrap();
 
             // Create an empty root at the subtrie path if the subtrie is empty
             if subtrie.nodes.is_empty() {
