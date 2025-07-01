@@ -23,9 +23,10 @@ This tool automates the complete workflow you described:
 reth-bench-compare \
   --baseline-ref main \
   --feature-ref my-optimization \
-  --blocks 100 \
-  --jwt-secret ~/chain/reth/data/jwt.hex
+  --blocks 100
 ```
+
+**Note**: The JWT secret file is automatically generated at `<datadir>/<chain>/jwt.hex` if not provided. For mainnet with default datadir, this would be `~/.local/share/reth/mainnet/jwt.hex` on Linux.
 
 ### Full Command with All Options
 
@@ -35,6 +36,7 @@ reth-bench-compare \
   --feature-ref my-optimization \
   --chain mainnet \
   --datadir ~/chain/reth/data \
+  --datadir.static-files ~/chain/reth/static_files \
   --blocks 100 \
   --rpc-url https://reth-ethereum.ithaca.xyz/rpc \
   --jwt-secret ~/chain/reth/data/jwt.hex \
@@ -52,7 +54,6 @@ reth-bench-compare \
   --baseline-ref v1.4.8 \
   --feature-ref v1.5.0 \
   --blocks 500 \
-  --jwt-secret ~/chain/reth/data/jwt.hex \
   --draw
 ```
 
@@ -62,9 +63,10 @@ reth-bench-compare \
 |----------|-------------|---------|
 | `--baseline-ref` | Git reference (branch or tag) to use as baseline | Required |
 | `--feature-ref` | Git reference (branch or tag) to compare against baseline | Required |
-| `--jwt-secret` | JWT secret file path | Required |
+| `--jwt-secret` | JWT secret file path | `<datadir>/<chain>/jwt.hex` |
 | `--chain` | Chain to use for reth operations | `mainnet` |
-| `--datadir` | Reth datadir path | Optional |
+| `--datadir` | Reth datadir path (defaults to OS-specific location) | OS default |
+| `--datadir.static-files` | Path to store static files | Uses datadir |
 | `--blocks` | Number of blocks to benchmark | `100` |
 | `--rpc-url` | RPC endpoint for fetching block data | `https://reth-ethereum.ithaca.xyz/rpc` |
 | `--output-dir` | Output directory for results | `./benchmark-comparison` |
@@ -126,7 +128,7 @@ Feature Summary:
 3. **Reference Availability**: Both baseline and feature git references (branches/tags) must exist
 4. **Build Environment**: Must have make and rust toolchain available
 5. **reth-bench**: Available in PATH (optionally compiled by the tool)
-6. **JWT Secret**: Valid JWT secret file for engine API authentication
+6. **JWT Secret**: JWT secret file for engine API authentication (auto-generated if not provided)
 7. **Python & uv**: Required for chart generation (if using `--draw`)
 
 ## Safety Features
