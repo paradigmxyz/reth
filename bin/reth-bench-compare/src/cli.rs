@@ -174,7 +174,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     let original_branch = git_manager.get_current_branch()?;
     info!("Current branch: {}", original_branch);
 
-    // Fetch all branches and tags
+    // Fetch all branches, tags, and commits
     git_manager.fetch_all()?;
 
     // Validate git state
