@@ -202,7 +202,7 @@ impl NodeManager {
                 std::path::Path::new(datadir).join("db").join("lock"),
                 std::path::Path::new(datadir).join("static_files").join("lock"),
             ];
-            
+
             for lock_file in lock_files {
                 if lock_file.exists() {
                     if self.use_sudo {
@@ -211,21 +211,25 @@ impl NodeManager {
                             .args(["rm", "-f", &lock_file.to_string_lossy()])
                             .spawn()
                         {
-                            Ok(mut child) => {
-                                match child.wait().await {
-                                    Ok(status) if status.success() => {
-                                        info!("Removed storage lock file with sudo: {:?}", lock_file);
-                                    }
-                                    Ok(status) => {
-                                        warn!("Failed to remove storage lock file with sudo {:?}: exit status {:?}", lock_file, status);
-                                    }
-                                    Err(e) => {
-                                        warn!("Failed to wait for sudo rm process {:?}: {}", lock_file, e);
-                                    }
+                            Ok(mut child) => match child.wait().await {
+                                Ok(status) if status.success() => {
+                                    info!("Removed storage lock file with sudo: {:?}", lock_file);
                                 }
-                            }
+                                Ok(status) => {
+                                    warn!("Failed to remove storage lock file with sudo {:?}: exit status {:?}", lock_file, status);
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to wait for sudo rm process {:?}: {}",
+                                        lock_file, e
+                                    );
+                                }
+                            },
                             Err(e) => {
-                                warn!("Failed to spawn sudo rm for storage lock file {:?}: {}", lock_file, e);
+                                warn!(
+                                    "Failed to spawn sudo rm for storage lock file {:?}: {}",
+                                    lock_file, e
+                                );
                             }
                         }
                     } else {
@@ -298,21 +302,21 @@ impl NodeManager {
         if !output.status.success() {
             // Print all output when unwind fails
             error!("Reth unwind failed with exit code: {:?}", output.status.code());
-            
+
             if !stdout.trim().is_empty() {
                 error!("Reth unwind stdout:");
                 for line in stdout.lines() {
                     error!("  {}", line);
                 }
             }
-            
+
             if !stderr.trim().is_empty() {
                 error!("Reth unwind stderr:");
                 for line in stderr.lines() {
                     error!("  {}", line);
                 }
             }
-            
+
             return Err(eyre!("Unwind command failed with exit code: {:?}", output.status.code()));
         }
 

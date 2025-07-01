@@ -2,8 +2,10 @@
 
 use crate::cli::Args;
 use eyre::{eyre, Result, WrapErr};
-use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::{
+    path::Path,
+    sync::{Arc, Mutex},
+};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
@@ -107,7 +109,7 @@ impl BenchmarkRunner {
         if !status.success() {
             // Print all captured output when command fails
             error!("reth-bench failed with exit code: {:?}", status.code());
-            
+
             if let Ok(stdout) = stdout_lines.lock() {
                 if !stdout.is_empty() {
                     error!("reth-bench stdout:");
@@ -116,7 +118,7 @@ impl BenchmarkRunner {
                     }
                 }
             }
-            
+
             if let Ok(stderr) = stderr_lines.lock() {
                 if !stderr.is_empty() {
                     error!("reth-bench stderr:");
@@ -125,7 +127,7 @@ impl BenchmarkRunner {
                     }
                 }
             }
-            
+
             return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
         }
 
@@ -242,5 +244,4 @@ impl BenchmarkRunner {
         info!("Benchmark with baseline comparison completed successfully");
         Ok(())
     }
-
 }

@@ -199,11 +199,7 @@ impl ComparisonGenerator {
 
         let summary = self.calculate_summary(&combined_latency_data, &total_gas_data)?;
 
-        Ok(BenchmarkResults {
-            ref_name: ref_name.to_string(),
-            combined_latency_data,
-            summary,
-        })
+        Ok(BenchmarkResults { ref_name: ref_name.to_string(), combined_latency_data, summary })
     }
 
     /// Load combined latency CSV data

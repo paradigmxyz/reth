@@ -85,7 +85,7 @@ impl GitManager {
     /// Fetch all refs from remote to ensure we have latest branches and tags
     pub fn fetch_all(&self) -> Result<()> {
         info!("Fetching latest refs from remote...");
-        
+
         let output = Command::new("git")
             .args(["fetch", "--all", "--tags", "--quiet", "--force"])
             .current_dir(&self.repo_root)
@@ -113,21 +113,21 @@ impl GitManager {
                 .args(["rev-parse", "--verify", &format!("refs/heads/{git_ref}")])
                 .current_dir(&self.repo_root)
                 .output();
-                
+
             let tag_check = Command::new("git")
                 .args(["rev-parse", "--verify", &format!("refs/tags/{git_ref}")])
                 .current_dir(&self.repo_root)
                 .output();
-                
+
             let mut found = false;
-            
+
             if let Ok(output) = branch_check {
                 if output.status.success() {
                     info!("Validated branch exists: {}", git_ref);
                     found = true;
                 }
             }
-            
+
             if !found {
                 if let Ok(output) = tag_check {
                     if output.status.success() {
@@ -136,7 +136,7 @@ impl GitManager {
                     }
                 }
             }
-            
+
             if !found {
                 return Err(eyre!("Git reference '{}' does not exist as branch or tag", git_ref));
             }
@@ -204,7 +204,6 @@ impl GitManager {
         info!("Successfully switched to branch: {}", branch);
         Ok(())
     }
-
 
     /// Get the latest commit hash for logging/reporting
     #[allow(dead_code)]
