@@ -160,5 +160,4 @@ impl BenchmarkRunner {
         info!("Verified benchmark output files");
         Ok(())
     }
-
 }
