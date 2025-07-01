@@ -255,7 +255,6 @@ impl ParallelSparseTrie {
         // We stop when the next node to traverse would be in a lower subtrie, or if there are no
         // more nodes to traverse.
         while let Some(current) = next.filter(|next| next.len() < UPPER_TRIE_MAX_DEPTH) {
-
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie
             match self.upper_subtrie.next_node(current, &full_path, &provider)? {
