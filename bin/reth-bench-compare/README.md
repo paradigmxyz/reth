@@ -93,16 +93,18 @@ The tool generates timestamped output directories with:
 ```
 benchmark-comparison/
 └── 20240101_120000/
-    ├── baseline_ref/
+    ├── main/                    # Actual branch/tag/commit name
     │   ├── combined_latency.csv
     │   └── total_gas.csv
-    ├── feature_ref/
+    ├── my-optimization/         # Actual branch/tag/commit name
     │   ├── combined_latency.csv
     │   └── total_gas.csv
     ├── comparison_report.json
     ├── per_block_comparison.csv
     └── latency_comparison.png (if --draw used)
 ```
+
+Note: Reference names are sanitized for filesystem compatibility (e.g., `feature/new-api` becomes `feature-new-api`).
 
 ### Console Output
 
