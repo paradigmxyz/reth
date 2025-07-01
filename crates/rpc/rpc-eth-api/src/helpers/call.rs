@@ -675,7 +675,7 @@ pub trait Call:
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
     where
-        DB: Database<Error = ProviderError> + DatabaseCommit,
+        DB: Database<Error = ProviderError> + DatabaseCommit + core::fmt::Debug,
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
