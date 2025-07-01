@@ -67,7 +67,7 @@ pub fn optimism_payload_attributes<T>(timestamp: u64) -> OpPayloadBuilderAttribu
         payload_attributes: EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
         transactions: vec![],
         no_tx_pool: false,
-        gas_limit: Some(30_000_000),
+        gas_limit: Some(300_000_000),
         eip_1559_params: None,
     }
 }

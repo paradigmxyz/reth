@@ -6,7 +6,7 @@
 /// Spec'd at 4096 hashes.
 ///
 /// <https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08>
-pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 4096;
+pub const SOFT_LIMIT_COUNT_HASHES_IN_NEW_POOLED_TRANSACTIONS_BROADCAST_MESSAGE: usize = 8192;
 
 /// Default soft limit for the byte size of a [`Transactions`](reth_eth_wire::Transactions)
 /// broadcast message.
@@ -40,7 +40,7 @@ pub mod tx_manager {
     /// Default limit for number of transactions to keep track of for a single peer.
     ///
     /// Default is 320 transaction hashes.
-    pub const DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER: u32 = 10 * 1024 / 32;
+    pub const DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER: u32 = 100 * 1024 / 32;
 
     /// Default maximum pending pool imports to tolerate.
     ///

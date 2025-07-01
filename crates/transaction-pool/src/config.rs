@@ -4,18 +4,18 @@ use crate::{
     PoolSize, TransactionOrigin,
 };
 use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
-use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
+use alloy_eips::eip1559::MIN_PROTOCOL_BASE_FEE;
 use alloy_primitives::Address;
 use std::{collections::HashSet, ops::Mul, time::Duration};
 
 /// Guarantees max transactions for one sender, compatible with geth/erigon
-pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
+pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 160;
 
 /// The default maximum allowed number of transactions in the given subpool.
-pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 10_000;
+pub const TXPOOL_SUBPOOL_MAX_TXS_DEFAULT: usize = 50_000;
 
 /// The default maximum allowed size of the given subpool.
-pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 20;
+pub const TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT: usize = 200;
 
 /// The default additional validation tasks size.
 pub const DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS: usize = 1;
@@ -29,7 +29,7 @@ pub const DEFAULT_PRICE_BUMP: u128 = 10;
 pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
 
 /// Default maximum new transactions for broadcasting.
-pub const MAX_NEW_PENDING_TXS_NOTIFICATIONS: usize = 200;
+pub const MAX_NEW_PENDING_TXS_NOTIFICATIONS: usize = 2000;
 
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
@@ -84,7 +84,7 @@ impl Default for PoolConfig {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            gas_limit: 300_000_000,
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,

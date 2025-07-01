@@ -120,9 +120,9 @@ pub mod txpool;
 mod update;
 
 /// Bound on number of pending transactions from `reth_network::TransactionsManager` to buffer.
-pub const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 2048;
+pub const PENDING_TX_LISTENER_BUFFER_SIZE: usize = 20000;
 /// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
-pub const NEW_TX_LISTENER_BUFFER_SIZE: usize = 1024;
+pub const NEW_TX_LISTENER_BUFFER_SIZE: usize = 20000;
 
 const BLOB_SIDECAR_LISTENER_BUFFER_SIZE: usize = 512;
 

@@ -22,11 +22,7 @@ use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID,
     LEGACY_TX_TYPE_ID,
 };
-use alloy_eips::{
-    eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE},
-    eip4844::BLOB_TX_MIN_BLOB_GASPRICE,
-    Typed2718,
-};
+use alloy_eips::{eip1559::MIN_PROTOCOL_BASE_FEE, eip4844::BLOB_TX_MIN_BLOB_GASPRICE, Typed2718};
 use alloy_primitives::{Address, TxHash, B256};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
@@ -1832,7 +1828,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
         Self {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            block_gas_limit: 300_000_000,
             by_hash: Default::default(),
             txs: Default::default(),
             tx_counter: Default::default(),
@@ -2730,7 +2726,7 @@ mod tests {
         let mut f = MockTransactionFactory::default();
         let mut pool = AllTransactions::default();
 
-        let tx = MockTransaction::eip1559().with_gas_limit(30_000_000);
+        let tx = MockTransaction::eip1559().with_gas_limit(300_000_000);
 
         let InsertOk { state, .. } =
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce).unwrap();

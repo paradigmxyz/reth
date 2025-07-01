@@ -81,7 +81,7 @@ pub mod gas_oracle {
     /// The default gas limit for `eth_call` and adjacent calls.
     ///
     /// This is different from the default to regular 30M block gas limit
-    /// `ETHEREUM_BLOCK_GAS_LIMIT_30M` to allow for more complex calls.
+    /// `300_000_000` to allow for more complex calls.
     pub const RPC_DEFAULT_GAS_CAP: u64 = 50_000_000;
 
     /// Allowed error ratio for gas estimation
