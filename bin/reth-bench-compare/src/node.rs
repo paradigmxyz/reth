@@ -15,8 +15,6 @@ use tracing::{debug, error, info, warn};
 /// Manages reth node lifecycle and operations
 pub struct NodeManager {
     datadir: Option<String>,
-    #[allow(dead_code)]
-    jwt_secret: String,
     metrics_port: u16,
     chain: Chain,
     use_sudo: bool,
@@ -28,7 +26,6 @@ impl NodeManager {
     pub fn new(args: &Args) -> Self {
         Self {
             datadir: Some(args.datadir_path().to_string_lossy().to_string()),
-            jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
             metrics_port: args.metrics_port,
             chain: args.chain,
             use_sudo: args.sudo,
