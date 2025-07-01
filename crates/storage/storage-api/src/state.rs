@@ -3,9 +3,8 @@ use super::{
     StorageRootProvider,
 };
 use alloc::boxed::Box;
-use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, StorageValue, B256, U256};
+use alloy_primitives::{BlockHash, BlockNumber, B256};
 use auto_impl::auto_impl;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::Bytecode;
@@ -42,54 +41,6 @@ pub trait StateProvider:
     + Send
     + Sync
 {
-    /// Get storage of given account.
-    fn storage(
-        &self,
-        account: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>>;
-
-    /// Get account code by its address.
-    ///
-    /// Returns `None` if the account doesn't exist or account is not a contract
-    fn account_code(&self, addr: &Address) -> ProviderResult<Option<Bytecode>> {
-        // Get basic account information
-        // Returns None if acc doesn't exist
-        let acc = match self.basic_account(addr)? {
-            Some(acc) => acc,
-            None => return Ok(None),
-        };
-
-        if let Some(code_hash) = acc.bytecode_hash {
-            if code_hash == KECCAK_EMPTY {
-                return Ok(None)
-            }
-            // Get the code from the code hash
-            return self.bytecode_by_hash(&code_hash)
-        }
-
-        // Return `None` if no code hash is set
-        Ok(None)
-    }
-
-    /// Get account balance by its address.
-    ///
-    /// Returns `None` if the account doesn't exist
-    fn account_balance(&self, addr: &Address) -> ProviderResult<Option<U256>> {
-        // Get basic account information
-        // Returns None if acc doesn't exist
-
-        self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.balance)))
-    }
-
-    /// Get account nonce by its address.
-    ///
-    /// Returns `None` if the account doesn't exist
-    fn account_nonce(&self, addr: &Address) -> ProviderResult<Option<u64>> {
-        // Get basic account information
-        // Returns None if acc doesn't exist
-        self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
-    }
 }
 
 /// Minimal requirements to read a full account, for example, to validate its new transactions
