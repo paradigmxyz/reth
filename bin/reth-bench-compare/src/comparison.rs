@@ -118,7 +118,27 @@ impl ComparisonGenerator {
 
     /// Get the output directory for a specific reference
     pub fn get_ref_output_dir(&self, ref_type: &str) -> PathBuf {
-        self.output_dir.join(&self.timestamp).join(format!("{ref_type}_ref"))
+        // Use the actual git reference name, sanitized for filesystem
+        let ref_name = match ref_type {
+            "baseline" => &self.baseline_ref_name,
+            "feature" => &self.feature_ref_name,
+            _ => ref_type, // fallback to the provided string
+        };
+
+        // Sanitize the reference name for use as a directory name
+        // Replace filesystem-unfriendly characters
+        let sanitized_name = ref_name
+            .replace('/', "-") // branch names can have slashes
+            .replace('\\', "-")
+            .replace(':', "-")
+            .replace('*', "-")
+            .replace('?', "-")
+            .replace('"', "-")
+            .replace('<', "-")
+            .replace('>', "-")
+            .replace('|', "-");
+
+        self.output_dir.join(&self.timestamp).join(&sanitized_name)
     }
 
     /// Get the main output directory for this comparison run
