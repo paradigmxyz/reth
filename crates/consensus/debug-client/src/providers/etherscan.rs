@@ -14,6 +14,7 @@ pub struct EtherscanBlockProvider<RpcBlock, PrimitiveBlock> {
     http_client: Client,
     base_url: String,
     api_key: String,
+    chain_id: u64,
     interval: Duration,
     #[debug(skip)]
     convert: Arc<dyn Fn(RpcBlock) -> PrimitiveBlock + Send + Sync>,
@@ -27,12 +28,14 @@ where
     pub fn new(
         base_url: String,
         api_key: String,
+        chain_id: u64,
         convert: impl Fn(RpcBlock) -> PrimitiveBlock + Send + Sync + 'static,
     ) -> Self {
         Self {
             http_client: Client::new(),
             base_url,
             api_key,
+            chain_id,
             interval: Duration::from_secs(3),
             convert: Arc::new(convert),
         }
@@ -65,6 +68,7 @@ where
                 ("tag", &tag),
                 ("boolean", "true"),
                 ("apikey", &self.api_key),
+                ("chainid", &self.chain_id.to_string()),
             ])
             .send()
             .await?
