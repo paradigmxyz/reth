@@ -13,19 +13,19 @@ use alloy_eips::{
 };
 use alloy_primitives::{
     map::{hash_map, HashMap},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use reth_chain_state::{BlockState, CanonicalInMemoryState, MemoryOverlayStateProviderRef};
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::{BundleStateInit, ExecutionOutcome, RevertsInit};
 use reth_node_types::{BlockTy, HeaderTy, ReceiptTy, TxTy};
-use reth_primitives_traits::{Account, BlockBody, RecoveredBlock, SealedHeader, StorageEntry};
+use reth_primitives_traits::{Account, BlockBody, Bytecode, RecoveredBlock, SealedHeader, StorageEntry};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, BytecodeReader, DatabaseProviderFactory, NodePrimitivesProvider,
+    StateProvider, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use revm_database::states::PlainStorageRevert;
@@ -1422,6 +1422,22 @@ impl<N: ProviderNodeTypes> AccountReader for ConsistentProvider<N> {
         // use latest state provider
         let state_provider = self.latest_ref()?;
         state_provider.basic_account(address)
+    }
+
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let state_provider = self.latest_ref()?;
+        state_provider.storage(address, storage_key)
+    }
+}
+
+impl<N: ProviderNodeTypes> BytecodeReader for ConsistentProvider<N> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        let state_provider = self.latest_ref()?;
+        state_provider.bytecode_by_hash(code_hash)
     }
 }
 

@@ -245,7 +245,7 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provi
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> AccountReader
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider + AccountReader> AccountReader
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
@@ -265,6 +265,36 @@ impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> AccountRea
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
             }
+        }
+    }
+
+    /// Get storage.
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        match self.storage_history_lookup(address, storage_key)? {
+            HistoryInfo::NotYetWritten => Ok(None),
+            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
+                self.tx()
+                    .cursor_dup_read::<tables::StorageChangeSets>()?
+                    .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
+                    .filter(|entry| entry.key == storage_key)
+                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                        block_number: changeset_block_number,
+                        address,
+                        storage_key: Box::new(storage_key),
+                    })?
+                    .value,
+            )),
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
+                .tx()
+                .cursor_dup_read::<tables::PlainStorageState>()?
+                .seek_by_key_subkey(address, storage_key)?
+                .filter(|entry| entry.key == storage_key)
+                .map(|entry| entry.value)
+                .or(Some(StorageValue::ZERO))),
         }
     }
 }
@@ -402,38 +432,10 @@ impl<Provider: StateCommitmentProvider> HashedPostStateProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider>
-    StateProvider for HistoricalStateProviderRef<'_, Provider>
+impl<
+        Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider + AccountReader,
+    > StateProvider for HistoricalStateProviderRef<'_, Provider>
 {
-    /// Get storage.
-    fn storage(
-        &self,
-        address: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        match self.storage_history_lookup(address, storage_key)? {
-            HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
-                self.tx()
-                    .cursor_dup_read::<tables::StorageChangeSets>()?
-                    .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
-                    .filter(|entry| entry.key == storage_key)
-                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address,
-                        storage_key: Box::new(storage_key),
-                    })?
-                    .value,
-            )),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
-        }
-    }
 }
 
 impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> BytecodeReader
@@ -463,7 +465,7 @@ pub struct HistoricalStateProvider<Provider> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
-impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider>
+impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider + AccountReader>
     HistoricalStateProvider<Provider>
 {
     /// Create new `StateProvider` for historical block number
@@ -507,7 +509,7 @@ impl<Provider: StateCommitmentProvider> StateCommitmentProvider
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider]);
+delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider + AccountReader]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -566,7 +568,7 @@ mod tests {
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
     const fn assert_historical_state_provider<
-        T: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider,
+        T: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider + AccountReader,
     >() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }

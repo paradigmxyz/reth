@@ -178,9 +178,7 @@ impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
         self.record_account_fetch(start.elapsed());
         res
     }
-}
 
-impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
     fn storage(
         &self,
         account: Address,
@@ -192,6 +190,8 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
         res
     }
 }
+
+impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {}
 
 impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {

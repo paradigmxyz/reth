@@ -14,7 +14,10 @@ use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag,
 };
-use alloy_primitives::{Address, BlockHash, BlockNumber, Sealable, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{
+    Address, BlockHash, BlockNumber, Sealable, StorageKey, StorageValue, TxHash, TxNumber, B256,
+    U256,
+};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
@@ -31,13 +34,14 @@ use reth_evm::{ConfigureEvm, EvmEnv};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_primitives_traits::{
-    Account, BlockBody, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader, StorageEntry,
+    Account, BlockBody, Bytecode, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DBProvider, NodePrimitivesProvider, StateCommitmentProvider,
-    StorageChangeSetReader,
+    BlockBodyIndicesProvider, BytecodeReader, DBProvider, NodePrimitivesProvider,
+    StateCommitmentProvider, StorageChangeSetReader,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
@@ -718,6 +722,20 @@ impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         self.consistent_provider()?.basic_account(address)
+    }
+
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        self.consistent_provider()?.storage(address, storage_key)
+    }
+}
+
+impl<N: ProviderNodeTypes> BytecodeReader for BlockchainProvider<N> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        self.consistent_provider()?.bytecode_by_hash(code_hash)
     }
 }
 

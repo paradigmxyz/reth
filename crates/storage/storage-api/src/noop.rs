@@ -353,6 +353,14 @@ impl<C: Send + Sync, N: NodePrimitives> AccountReader for NoopProvider<C, N> {
     fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
         Ok(None)
     }
+
+    fn storage(
+        &self,
+        _account: Address,
+        _storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        Ok(None)
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
@@ -445,15 +453,7 @@ impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider
     }
 }
 
-impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {
-    fn storage(
-        &self,
-        _account: Address,
-        _storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        Ok(None)
-    }
-}
+impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {}
 
 impl<C: Send + Sync, N: NodePrimitives> BytecodeReader for NoopProvider<C, N> {
     fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
