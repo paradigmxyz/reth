@@ -17,7 +17,7 @@ pub struct NodeInfo {
     pub node: String,
 
     /// The port number the node is listening on for P2P connections
-    pub port: i32,
+    pub port: u64,
 
     /// The network ID the node is connected to (e.g. "1" for mainnet)
     pub network: String,
@@ -174,7 +174,7 @@ impl HistoryMsg {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PendingStats {
     /// Number of pending transactions
-    pub pending: i32,
+    pub pending: u64,
 }
 
 /// Message containing pending transaction statistics to be reported to the ethstats monitoring
@@ -211,15 +211,15 @@ pub struct NodeStats {
 
     /// Number of connected peers
     #[serde(rename = "peers")]
-    pub peers: i32,
+    pub peers: u64,
 
     /// Current gas price in wei
     #[serde(rename = "gasPrice")]
-    pub gas_price: i32,
+    pub gas_price: u64,
 
     /// Node uptime percentage
     #[serde(rename = "uptime")]
-    pub uptime: i32,
+    pub uptime: u64,
 }
 
 /// Message containing node statistics to be reported to the ethstats monitoring server.

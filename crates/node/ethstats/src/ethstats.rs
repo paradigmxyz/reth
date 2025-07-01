@@ -228,7 +228,7 @@ where
             stats: NodeStats {
                 active: true,
                 syncing: self.network.is_syncing(),
-                peers: self.network.num_connected_peers() as i32,
+                peers: self.network.num_connected_peers() as u64,
                 gas_price: 0, // TODO
                 uptime: 100,
             },
@@ -306,7 +306,7 @@ where
     async fn report_pending(&self) -> Result<(), EthStatsError> {
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
-        let pending = self.pool.pool_size().pending as i32;
+        let pending = self.pool.pool_size().pending as u64;
 
         let pending_msg =
             PendingMsg { id: self.credentials.node_id.clone(), stats: PendingStats { pending } };
