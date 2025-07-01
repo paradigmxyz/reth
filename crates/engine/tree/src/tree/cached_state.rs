@@ -126,20 +126,7 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
         self.caches.account_cache.insert(*address, res);
         Ok(res)
     }
-}
 
-/// Represents the status of a storage slot in the cache
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SlotStatus {
-    /// The account's storage cache doesn't exist
-    NotCached,
-    /// The storage slot is empty (either not in cache or explicitly None)
-    Empty,
-    /// The storage slot has a value
-    Value(StorageValue),
-}
-
-impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
     fn storage(
         &self,
         account: Address,
@@ -163,6 +150,19 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         }
     }
 }
+
+/// Represents the status of a storage slot in the cache
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SlotStatus {
+    /// The account's storage cache doesn't exist
+    NotCached,
+    /// The storage slot is empty (either not in cache or explicitly None)
+    Empty,
+    /// The storage slot has a value
+    Value(StorageValue),
+}
+
+impl<S: StateProvider> StateProvider for CachedStateProvider<S> {}
 
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
