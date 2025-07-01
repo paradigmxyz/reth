@@ -241,7 +241,7 @@ async fn run_benchmark_workflow(
         if !args.skip_compilation {
             compilation_manager.compile_reth()?;
         }
-        
+
         // Always ensure reth-bench is available (compile if not found)
         compilation_manager.ensure_reth_bench_available()?;
 
