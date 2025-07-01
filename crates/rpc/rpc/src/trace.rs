@@ -5,7 +5,7 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     Address, BlockHash, Bytes, B256, U256,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use alloy_rpc_types_eth::{
     state::{EvmOverrides, StateOverride},
@@ -30,7 +30,7 @@ use reth_rpc_eth_api::{
     FromEthApiError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, EthConfig};
-use reth_storage_api::{BlockIdReader, BlockNumReader, BlockReader};
+use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::DatabaseCommit;
@@ -603,41 +603,29 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<BlockStorageAccess>, Eth::Error> {
-        let shared_inspector = Arc::new(Mutex::new(Some(StorageInspector::default())));
         let res = self
             .eth_api()
             .trace_block_inspector(
                 block_id,
                 None,
-                {
-                    let inspector = shared_inspector.clone();
-                    move || inspector.lock().unwrap().take().expect("inspector should be set")
-                },
-                {
-                    let inspector = shared_inspector.clone();
-                    move |tx_info, current_inspector, _res, _, _| {
-                        let trace = TransactionStorageAccess {
-                            transaction_hash: tx_info.hash.expect("tx hash is set"),
-                            storage_access: current_inspector.accessed_slots().clone(),
-                            unique_loads: current_inspector.unique_loads(),
-                            warm_loads: current_inspector.warm_loads(),
-                        };
-                        *inspector.lock().unwrap() = Some(current_inspector);
-                        Ok(trace)
-                    }
+                StorageInspector::default,
+                move |tx_info, ctx| {
+                    let trace = TransactionStorageAccess {
+                        transaction_hash: tx_info.hash.expect("tx hash is set"),
+                        storage_access: ctx.inspector.accessed_slots().clone(),
+                        unique_loads: ctx.inspector.unique_loads(),
+                        warm_loads: ctx.inspector.warm_loads(),
+                    };
+                    Ok(trace)
                 },
             )
             .await?;
 
         let Some(transactions) = res else { return Ok(None) };
 
-        let Some(block_hash) =
-            self.provider().block_hash_for_id(block_id).map_err(Eth::Error::from_eth_err)?
-        else {
-            return Ok(None)
-        };
+        let Some(block) = self.eth_api().recovered_block(block_id).await? else { return Ok(None) };
 
-        Ok(Some(BlockStorageAccess { block_hash, transactions }))
+        Ok(Some(BlockStorageAccess { block_hash: block.hash(), transactions }))
     }
 }
 
