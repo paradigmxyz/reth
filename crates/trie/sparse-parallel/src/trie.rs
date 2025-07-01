@@ -113,9 +113,9 @@ impl ParallelSparseTrie {
     /// If we have an extension node 0x → 0x123 in the upper trie, and we're inserting nodes
     /// at 0x1234, 0x1235, and 0x1236:
     /// - Incorrect: Create subtrie with path 0x12. `subtrie.update_leaf` would not be able to
-    /// traverse here because it starts at the subtrie path.
+    ///   traverse here because it starts at the subtrie path.
     /// - Correct: Create subtrie with path 0x123. Here `subtrie.update_leaf` would start at 0x123,
-    /// correctly find the branch node, and proceed normally.
+    ///   correctly find the branch node, and proceed normally.
     ///
     /// The method also handles path updates: if a subtrie exists with path 0x12345 and we
     /// insert a node at 0x1234, for example as a result of shortening the extension node and
