@@ -461,7 +461,7 @@ revm-context = { version = "7.0.1", default-features = false }
 revm-context-interface = { version = "7.0.0", default-features = false }
 revm-database-interface = { version = "6.0.0", default-features = false }
 op-revm = { version = "7.0.1", default-features = false }
-revm-inspectors = "0.25.0"
+# revm-inspectors = "0.25.0"
 
 # eth
 alloy-chains = { version = "0.2.0", default-features = false }
@@ -740,7 +740,7 @@ vergen-git2 = "1.0.5"
 # op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 #
-# revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "1207e33" }
+revm-inspectors = { git = "https://github.com/Rimeeeeee/revm-inspectors", branch = "add-clone-storage" }
 #
 # jsonrpsee = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-core = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
