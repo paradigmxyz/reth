@@ -330,7 +330,7 @@ where
 
         block_transactions_rlp_length += tx.inner().length();
 
-        // update add to total fees
+        // update and add to total fees
         let miner_fee =
             tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);

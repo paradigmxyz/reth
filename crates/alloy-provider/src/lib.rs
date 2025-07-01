@@ -46,6 +46,7 @@ use reth_provider::{
     TransactionVariant, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
+use reth_rpc_convert::TryFromBlockResponse;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
@@ -143,7 +144,7 @@ impl<P, Node: NodeTypes, N> AlloyRethProvider<P, Node, N> {
         tokio::task::block_in_place(move || Handle::current().block_on(fut))
     }
 
-    /// Get a reference to the conon state notification sender
+    /// Get a reference to the canon state notification sender
     pub const fn canon_state_notification(
         &self,
     ) -> &broadcast::Sender<CanonStateNotification<PrimitivesTy<Node>>> {
@@ -345,6 +346,7 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    BlockTy<Node>: TryFromBlockResponse<N>,
 {
     type Block = BlockTy<Node>;
 
@@ -356,8 +358,21 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn block(&self, _id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
+        let block_response = self.block_on_async(async {
+            self.provider.get_block(id.into()).full().await.map_err(ProviderError::other)
+        })?;
+
+        let Some(block_response) = block_response else {
+            // If the block was not found, return None
+            return Ok(None);
+        };
+
+        // Convert the network block response to primitive block
+        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
+            .map_err(ProviderError::other)?;
+
+        Ok(Some(block))
     }
 
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
@@ -410,9 +425,13 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    BlockTy<Node>: TryFromBlockResponse<N>,
 {
-    fn block_by_id(&self, _id: BlockId) -> ProviderResult<Option<Self::Block>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
+        match id {
+            BlockId::Number(number_or_tag) => self.block_by_number_or_tag(number_or_tag),
+            BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+        }
     }
 
     fn sealed_header_by_id(

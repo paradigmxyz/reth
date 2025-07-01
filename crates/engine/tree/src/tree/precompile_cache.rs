@@ -191,11 +191,12 @@ where
             }
         }
 
-        let result = self.precompile.call(input.clone());
+        let calldata = input.data;
+        let result = self.precompile.call(input);
 
         match &result {
             Ok(output) => {
-                let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(input.data));
+                let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(calldata));
                 let size = self.cache.insert(key, CacheEntry(output.clone()));
                 self.set_precompile_cache_size_metric(size as f64);
                 self.increment_by_one_precompile_cache_misses();
@@ -225,12 +226,24 @@ pub(crate) struct CachedPrecompileMetrics {
     precompile_errors: metrics::Counter,
 }
 
+impl CachedPrecompileMetrics {
+    /// Creates a new instance of [`CachedPrecompileMetrics`] with the given address.
+    ///
+    /// Adds address as an `address` label padded with zeros to at least two hex symbols, prefixed
+    /// by `0x`.
+    pub(crate) fn new_with_address(address: Address) -> Self {
+        Self::new_with_labels(&[("address", format!("0x{address:02x}"))])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::hash::DefaultHasher;
 
     use super::*;
-    use revm::precompile::PrecompileOutput;
+    use reth_evm::EvmInternals;
+    use reth_revm::db::EmptyDB;
+    use revm::{context::JournalTr, precompile::PrecompileOutput, Journal};
     use revm_primitives::{hardfork::SpecId, U256};
 
     #[test]
@@ -331,6 +344,7 @@ mod tests {
                 gas: gas_limit,
                 caller: Address::ZERO,
                 value: U256::ZERO,
+                internals: EvmInternals::new(&mut Journal::<_>::new(EmptyDB::new())),
             })
             .unwrap();
         assert_eq!(result1.bytes.as_ref(), b"output_from_precompile_1");
@@ -343,6 +357,7 @@ mod tests {
                 gas: gas_limit,
                 caller: Address::ZERO,
                 value: U256::ZERO,
+                internals: EvmInternals::new(&mut Journal::<_>::new(EmptyDB::new())),
             })
             .unwrap();
         assert_eq!(result2.bytes.as_ref(), b"output_from_precompile_2");
@@ -354,6 +369,7 @@ mod tests {
                 gas: gas_limit,
                 caller: Address::ZERO,
                 value: U256::ZERO,
+                internals: EvmInternals::new(&mut Journal::<_>::new(EmptyDB::new())),
             })
             .unwrap();
         assert_eq!(result3.bytes.as_ref(), b"output_from_precompile_1");

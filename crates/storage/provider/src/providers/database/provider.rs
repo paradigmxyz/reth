@@ -2332,7 +2332,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let tx = self.tx_ref();
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
         for (key, updated_node) in account_updates {
-            let nibbles = StoredNibbles(key.clone());
+            let nibbles = StoredNibbles(*key);
             match updated_node {
                 Some(node) => {
                     if !nibbles.0.is_empty() {

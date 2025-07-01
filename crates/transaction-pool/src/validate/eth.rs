@@ -61,6 +61,57 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     pub fn client(&self) -> &Client {
         &self.inner.client
     }
+
+    /// Returns the tracks activated forks relevant for transaction validation
+    pub fn fork_tracker(&self) -> &ForkTracker {
+        &self.inner.fork_tracker
+    }
+
+    /// Returns if there are EIP-2718 type transactions
+    pub fn eip2718(&self) -> bool {
+        self.inner.eip2718
+    }
+
+    /// Returns if there are EIP-1559 type transactions
+    pub fn eip1559(&self) -> bool {
+        self.inner.eip1559
+    }
+
+    /// Returns if there are EIP-4844 blob transactions
+    pub fn eip4844(&self) -> bool {
+        self.inner.eip4844
+    }
+
+    /// Returns if there are EIP-7702 type transactions
+    pub fn eip7702(&self) -> bool {
+        self.inner.eip7702
+    }
+
+    /// Returns the current tx fee cap limit in wei locally submitted into the pool
+    pub fn tx_fee_cap(&self) -> &Option<u128> {
+        &self.inner.tx_fee_cap
+    }
+
+    /// Returns the minimum priority fee to enforce for acceptance into the pool
+    pub fn minimum_priority_fee(&self) -> &Option<u128> {
+        &self.inner.minimum_priority_fee
+    }
+
+    /// Returns the setup and parameters needed for validating KZG proofs.
+    pub fn kzg_settings(&self) -> &EnvKzgSettings {
+        &self.inner.kzg_settings
+    }
+
+    /// Returns the config to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions..
+    pub fn local_transactions_config(&self) -> &LocalTransactionConfig {
+        &self.inner.local_transactions_config
+    }
+
+    /// Returns the maximum size in bytes a single transaction can have in order to be accepted into
+    /// the pool.
+    pub fn max_tx_input_bytes(&self) -> usize {
+        self.inner.max_tx_input_bytes
+    }
 }
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
@@ -68,6 +119,11 @@ where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
+    /// Returns the current max gas limit
+    pub fn block_gas_limit(&self) -> u64 {
+        self.inner.max_gas_limit()
+    }
+
     /// Validates a single transaction.
     ///
     /// See also [`TransactionValidator::validate_transaction`]
@@ -175,6 +231,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     local_transactions_config: LocalTransactionConfig,
     /// Maximum size in bytes a single transaction can have in order to be accepted into the pool.
     max_tx_input_bytes: usize,
+    /// Maximum gas limit for individual transactions
+    max_tx_gas_limit: Option<u64>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
     /// Metrics for tsx pool validation
@@ -329,6 +387,19 @@ where
                     block_gas_limit,
                 ),
             ))
+        }
+
+        // Check individual transaction gas limit if configured
+        if let Some(max_tx_gas_limit) = self.max_tx_gas_limit {
+            if transaction_gas_limit > max_tx_gas_limit {
+                return Err(TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::MaxTxGasLimitExceeded(
+                        transaction_gas_limit,
+                        max_tx_gas_limit,
+                    ),
+                ))
+            }
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -715,17 +786,20 @@ pub struct EthTransactionValidatorBuilder<Client> {
     local_transactions_config: LocalTransactionConfig,
     /// Max size in bytes of a single transaction allowed
     max_tx_input_bytes: usize,
+    /// Maximum gas limit for individual transactions
+    max_tx_gas_limit: Option<u64>,
 }
 
 impl<Client> EthTransactionValidatorBuilder<Client> {
     /// Creates a new builder for the given client
     ///
-    /// By default this assumes the network is on the `Cancun` hardfork and the following
+    /// By default this assumes the network is on the `Prague` hardfork and the following
     /// transactions are allowed:
     ///  - Legacy
     ///  - EIP-2718
     ///  - EIP-1559
     ///  - EIP-4844
+    ///  - EIP-7702
     pub fn new(client: Client) -> Self {
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
@@ -736,6 +810,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             local_transactions_config: Default::default(),
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             tx_fee_cap: Some(1e18 as u128),
+            max_tx_gas_limit: None,
             // by default all transaction types are allowed
             eip2718: true,
             eip1559: true,
@@ -905,6 +980,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
+    /// Sets the maximum gas limit for individual transactions
+    pub const fn with_max_tx_gas_limit(mut self, max_tx_gas_limit: Option<u64>) -> Self {
+        self.max_tx_gas_limit = max_tx_gas_limit;
+        self
+    }
+
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
@@ -926,6 +1007,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             kzg_settings,
             local_transactions_config,
             max_tx_input_bytes,
+            max_tx_gas_limit,
             ..
         } = self;
 
@@ -960,6 +1042,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             kzg_settings,
             local_transactions_config,
             max_tx_input_bytes,
+            max_tx_gas_limit,
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
         };
@@ -1261,6 +1344,74 @@ mod tests {
             .build(blob_store);
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn invalid_on_max_tx_gas_limit_exceeded() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
+            .build(blob_store.clone());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        assert!(outcome.is_invalid());
+
+        let pool =
+            Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
+
+        let res = pool.add_external_transaction(transaction.clone()).await;
+        assert!(res.is_err());
+        assert!(matches!(
+            res.unwrap_err().kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::MaxTxGasLimitExceeded(
+                1_015_288, 500_000
+            ))
+        ));
+        let tx = pool.get(transaction.hash());
+        assert!(tx.is_none());
+    }
+
+    #[tokio::test]
+    async fn valid_on_max_tx_gas_limit_disabled() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .with_max_tx_gas_limit(None) // disabled
+            .build(blob_store);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_max_tx_gas_limit_within_limit() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
+            .build(blob_store);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
     }
 }
