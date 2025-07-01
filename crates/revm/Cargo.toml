@@ -22,7 +22,7 @@ reth-trie = { workspace = true, optional = true }
 alloy-primitives.workspace = true
 
 # revm
-revm.workspace = true
+revm = { workspace = true, features = ["gmp"] }
 
 [dev-dependencies]
 reth-trie.workspace = true
