@@ -5,7 +5,7 @@ use clap::Parser;
 use eyre::{eyre, Result};
 use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
-use reth_node_core::args::LogArgs;
+use reth_node_core::args::{DatadirArgs, LogArgs};
 use reth_tracing::FileWorkerGuard;
 use std::path::PathBuf;
 use tracing::info;
@@ -31,9 +31,8 @@ pub struct Args {
     #[arg(long, value_name = "REF")]
     pub feature_ref: String,
 
-    /// Reth datadir path
-    #[arg(long, value_name = "PATH")]
-    pub datadir: Option<String>,
+    #[command(flatten)]
+    pub datadir: DatadirArgs,
 
     /// Number of blocks to benchmark
     #[arg(long, value_name = "N", default_value = "100")]
@@ -44,8 +43,11 @@ pub struct Args {
     pub rpc_url: String,
 
     /// JWT secret file path
+    ///
+    /// If not provided, defaults to `<datadir>/<chain>/jwt.hex`.
+    /// If the file doesn't exist, it will be created automatically.
     #[arg(long, value_name = "PATH")]
-    pub jwt_secret: PathBuf,
+    pub jwt_secret: Option<PathBuf>,
 
     /// Output directory for benchmark results
     #[arg(long, value_name = "PATH", default_value = "./benchmark-comparison")]
@@ -92,19 +94,26 @@ impl Args {
         Ok(guard)
     }
 
-    /// Get the JWT secret path
+    /// Get the JWT secret path - either provided or derived from datadir
     pub fn jwt_secret_path(&self) -> PathBuf {
-        let jwt_secret_str = self.jwt_secret.to_string_lossy();
-        let expanded = shellexpand::tilde(&jwt_secret_str);
-        PathBuf::from(expanded.as_ref())
+        match &self.jwt_secret {
+            Some(path) => {
+                let jwt_secret_str = path.to_string_lossy();
+                let expanded = shellexpand::tilde(&jwt_secret_str);
+                PathBuf::from(expanded.as_ref())
+            }
+            None => {
+                // Use the same logic as reth: <datadir>/<chain>/jwt.hex
+                let chain_path = self.datadir.clone().resolve_datadir(self.chain);
+                chain_path.jwt()
+            }
+        }
     }
 
-    /// Get the expanded datadir path if specified
-    pub fn datadir_path(&self) -> Option<PathBuf> {
-        self.datadir.as_ref().map(|path| {
-            let expanded = shellexpand::tilde(path);
-            PathBuf::from(expanded.as_ref())
-        })
+    /// Get the resolved datadir path using the chain
+    pub fn datadir_path(&self) -> PathBuf {
+        let chain_path = self.datadir.clone().resolve_datadir(self.chain);
+        chain_path.data_dir().to_path_buf()
     }
 
     /// Get the expanded output directory path

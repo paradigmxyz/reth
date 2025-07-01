@@ -27,7 +27,7 @@ impl NodeManager {
     /// Create a new NodeManager with configuration from CLI args
     pub fn new(args: &Args) -> Self {
         Self {
-            datadir: args.datadir_path().map(|p| p.to_string_lossy().to_string()),
+            datadir: Some(args.datadir_path().to_string_lossy().to_string()),
             jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
             metrics_port: args.metrics_port,
             chain: args.chain,
