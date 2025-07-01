@@ -127,16 +127,7 @@ impl ComparisonGenerator {
 
         // Sanitize the reference name for use as a directory name
         // Replace filesystem-unfriendly characters
-        let sanitized_name = ref_name
-            .replace('/', "-") // branch names can have slashes
-            .replace('\\', "-")
-            .replace(':', "-")
-            .replace('*', "-")
-            .replace('?', "-")
-            .replace('"', "-")
-            .replace('<', "-")
-            .replace('>', "-")
-            .replace('|', "-");
+        let sanitized_name = ref_name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-");
 
         self.output_dir.join(&self.timestamp).join(&sanitized_name)
     }
