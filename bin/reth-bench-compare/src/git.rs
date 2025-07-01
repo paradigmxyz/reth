@@ -105,10 +105,10 @@ impl GitManager {
         Ok(())
     }
 
-    /// Validate that the specified git references exist (branches or tags)
+    /// Validate that the specified git references exist (branches, tags, or commits)
     pub fn validate_refs(&self, refs: &[&str]) -> Result<()> {
         for &git_ref in refs {
-            // Try branch first, then tag
+            // Try branch first, then tag, then commit
             let branch_check = Command::new("git")
                 .args(["rev-parse", "--verify", &format!("refs/heads/{git_ref}")])
                 .current_dir(&self.repo_root)
@@ -116,6 +116,11 @@ impl GitManager {
 
             let tag_check = Command::new("git")
                 .args(["rev-parse", "--verify", &format!("refs/tags/{git_ref}")])
+                .current_dir(&self.repo_root)
+                .output();
+
+            let commit_check = Command::new("git")
+                .args(["rev-parse", "--verify", &format!("{git_ref}^{{commit}}")])
                 .current_dir(&self.repo_root)
                 .output();
 
@@ -138,14 +143,26 @@ impl GitManager {
             }
 
             if !found {
-                return Err(eyre!("Git reference '{}' does not exist as branch or tag", git_ref));
+                if let Ok(output) = commit_check {
+                    if output.status.success() {
+                        info!("Validated commit exists: {}", git_ref);
+                        found = true;
+                    }
+                }
+            }
+
+            if !found {
+                return Err(eyre!(
+                    "Git reference '{}' does not exist as branch, tag, or commit",
+                    git_ref
+                ));
             }
         }
 
         Ok(())
     }
 
-    /// Switch to the specified git reference (branch or tag)
+    /// Switch to the specified git reference (branch, tag, or commit)
     pub fn switch_ref(&self, git_ref: &str) -> Result<()> {
         info!("Switching to git reference: {}", git_ref);
 

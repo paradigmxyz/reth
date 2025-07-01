@@ -1,6 +1,6 @@
 # reth-bench-compare
 
-Automated tool for comparing reth performance between two git references (branches or tags). This tool completely automates your benchmark workflow, handling git branch/tag switching, compilation, node management, and results comparison.
+Automated tool for comparing reth performance between two git references (branches, tags, or commits). This tool completely automates your benchmark workflow, handling git reference switching, compilation, node management, and results comparison.
 
 ## Overview
 
@@ -58,12 +58,21 @@ reth-bench-compare \
   --draw
 ```
 
+### Using Commits
+
+```bash
+reth-bench-compare \
+  --baseline-ref abc123def456 \
+  --feature-ref xyz789abc123 \
+  --blocks 100
+```
+
 ## Arguments
 
 | Argument | Description | Default |
 |----------|-------------|---------|
-| `--baseline-ref` | Git reference (branch or tag) to use as baseline | Required |
-| `--feature-ref` | Git reference (branch or tag) to compare against baseline | Required |
+| `--baseline-ref` | Git reference (branch, tag, or commit) to use as baseline | Required |
+| `--feature-ref` | Git reference (branch, tag, or commit) to compare against baseline | Required |
 | `--jwt-secret` | JWT secret file path | `<datadir>/<chain>/jwt.hex` |
 | `--chain` | Chain to use for reth operations | `mainnet` |
 | `--datadir` | Reth datadir path (defaults to OS-specific location) | OS default |
@@ -125,7 +134,7 @@ Feature Summary:
 
 1. **Git Repository**: Must be run from the root of a reth git repository
 2. **Clean Working Directory**: Git working directory must be clean (no uncommitted changes)
-3. **Reference Availability**: Both baseline and feature git references (branches/tags) must exist
+3. **Reference Availability**: Both baseline and feature git references (branches, tags, or commits) must exist
 4. **Build Environment**: Must have make and rust toolchain available
 5. **reth-bench**: Automatically compiled and installed if not found in PATH
 6. **JWT Secret**: JWT secret file for engine API authentication (auto-generated if not provided)
@@ -145,8 +154,8 @@ For each git reference, the tool:
 
 1. **Git Operations**:
    - Validates reference exists and working directory is clean
-   - Switches to target reference (branch or tag)
-   - Handles detached HEAD state for tags
+   - Switches to target reference (branch, tag, or commit)
+   - Handles detached HEAD state for tags and commits
 
 2. **Compilation**:
    - Runs `make profiling` to build optimized reth binary
