@@ -15,7 +15,7 @@ use core::fmt;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{Consensus, FullConsensus};
+use reth_consensus::{Consensus, FullConsensus, HeaderValidator};
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -207,7 +207,7 @@ where
         let state_root =
             state_provider.state_root(state_provider.hashed_post_state(&output.state))?;
 
-        if state_root != block.header().state_root() {
+        if self.consensus.validate_state_root(block.header(), state_root).is_err() {
             return Err(ConsensusError::BodyStateRootDiff(
                 GotExpected { got: state_root, expected: block.header().state_root() }.into(),
             )

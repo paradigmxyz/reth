@@ -6112,7 +6112,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "5.0.0"
-source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#28f83c2759ac9d2d23969a931cf308b375bb6bd4"
+source = "git+https://github.com/scroll-tech/revm?branch=feat%2Freth-v74#774616019e9562b12cbe1c3f1cdd110793f8084c"
 dependencies = [
  "auto_impl",
  "once_cell",

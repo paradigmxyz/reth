@@ -262,12 +262,19 @@ impl<Txs> ScrollBuilder<'_, Txs> {
         let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, mut block } =
             builder.finish(state_provider)?;
 
-        // set the block extra data and difficulty fields using the payload attributes.
+        // set the block fields using the hints from the payload attributes.
         if let Some(block_data) = &ctx.config.attributes.block_data_hint {
             let (mut scroll_block, senders) = block.split();
             scroll_block = scroll_block.map_header(|mut header| {
                 header.extra_data = block_data.extra_data.clone();
+                header.state_root = block_data.state_root;
                 header.difficulty = block_data.difficulty;
+                if let Some(coinbase) = block_data.coinbase {
+                    header.beneficiary = coinbase;
+                }
+                if let Some(nonce) = block_data.nonce {
+                    header.nonce = nonce.into();
+                }
                 header
             });
             block = RecoveredBlock::new_unhashed(scroll_block, senders)
@@ -387,7 +394,7 @@ where
                 ScrollNextBlockEnvAttributes {
                     timestamp: self.attributes().timestamp(),
                     suggested_fee_recipient: self.attributes().suggested_fee_recipient(),
-                    gas_limit: builder_config.gas_limit,
+                    gas_limit: self.attributes().gas_limit.unwrap_or(builder_config.gas_limit),
                     base_fee,
                 },
             )

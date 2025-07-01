@@ -79,5 +79,6 @@ pub fn scroll_payload_attributes(timestamp: u64) -> ScrollPayloadBuilderAttribut
         transactions: vec![],
         no_tx_pool: false,
         block_data_hint: None,
+        gas_limit: None,
     }
 }

@@ -23,6 +23,7 @@ serde = { workspace = true, optional = true }
 arbitrary = { workspace = true, optional = true }
 
 [dev-dependencies]
+alloy-primitives = { workspace = true, features = ["getrandom"] }
 serde_json.workspace = true
 
 [features]
