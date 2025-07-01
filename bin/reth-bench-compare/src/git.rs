@@ -205,66 +205,8 @@ impl GitManager {
         Ok(())
     }
 
-    /// Get the latest commit hash for logging/reporting
-    #[allow(dead_code)]
-    pub fn get_commit_hash(&self) -> Result<String> {
-        let output = Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(&self.repo_root)
-            .output()
-            .wrap_err("Failed to get commit hash")?;
-
-        if !output.status.success() {
-            return Err(eyre!("Failed to get commit hash"));
-        }
-
-        let hash = String::from_utf8(output.stdout)
-            .wrap_err("Commit hash is not valid UTF-8")?
-            .trim()
-            .to_string();
-
-        Ok(hash)
-    }
-
     /// Get the repository root path
     pub fn repo_root(&self) -> &str {
         &self.repo_root
-    }
-
-    /// Pull latest changes from remote (useful for ensuring branches are up-to-date)
-    #[allow(dead_code)]
-    pub fn pull_latest(&self, branch: &str) -> Result<()> {
-        info!("Pulling latest changes for branch: {}", branch);
-
-        // First, fetch to make sure we have the latest refs
-        let fetch_output = Command::new("git")
-            .args(["fetch", "origin", branch])
-            .current_dir(&self.repo_root)
-            .output()
-            .wrap_err("Failed to fetch latest changes")?;
-
-        if !fetch_output.status.success() {
-            let stderr = String::from_utf8_lossy(&fetch_output.stderr);
-            warn!("Git fetch failed (continuing anyway): {}", stderr);
-        }
-
-        // Try to pull if we're on the right branch
-        let current = self.get_current_branch()?;
-        if current == branch {
-            let pull_output = Command::new("git")
-                .args(["pull", "origin", branch])
-                .current_dir(&self.repo_root)
-                .output()
-                .wrap_err("Failed to pull latest changes")?;
-
-            if !pull_output.status.success() {
-                let stderr = String::from_utf8_lossy(&pull_output.stderr);
-                warn!("Git pull failed (continuing anyway): {}", stderr);
-            } else {
-                info!("Successfully pulled latest changes");
-            }
-        }
-
-        Ok(())
     }
 }

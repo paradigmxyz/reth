@@ -39,25 +39,6 @@ impl NodeManager {
         }
     }
 
-    /// Get the current chain tip by querying an existing node or RPC endpoint
-    #[allow(dead_code)]
-    pub async fn get_chain_tip(&self) -> Result<u64> {
-        // Try to get tip from local metrics endpoint first (if node is running)
-        if let Ok(tip) = self.get_tip_from_metrics().await {
-            return Ok(tip);
-        }
-
-        // Fallback to querying the local RPC endpoint
-        self.get_tip_from_rpc("http://localhost:8545").await
-    }
-
-    /// Get the current chain tip from an external RPC endpoint
-    #[allow(dead_code)]
-    pub async fn get_tip_from_external_rpc(&self, rpc_url: &str) -> Result<u64> {
-        info!("Getting chain tip from external RPC: {}", rpc_url);
-        self.get_tip_from_rpc(rpc_url).await
-    }
-
     /// Start a reth node and return the process handle
     pub async fn start_node(&self) -> Result<tokio::process::Child> {
         if self.use_sudo {
@@ -130,31 +111,6 @@ impl NodeManager {
         sleep(Duration::from_secs(5)).await;
 
         Ok(child)
-    }
-
-    /// Wait for the node to sync and return the current tip
-    #[allow(dead_code)]
-    pub async fn wait_for_sync_and_get_tip(&self) -> Result<u64> {
-        info!("Waiting for node to sync...");
-
-        let max_wait = Duration::from_secs(300); // 5 minutes
-        let check_interval = Duration::from_secs(10);
-
-        let result = timeout(max_wait, async {
-            loop {
-                if let Ok(tip) = self.get_tip_from_metrics().await {
-                    info!("Node synced to block: {}", tip);
-                    return Ok(tip);
-                }
-
-                debug!("Node not ready yet, waiting...");
-                sleep(check_interval).await;
-            }
-        })
-        .await
-        .wrap_err("Timed out waiting for node to sync")?;
-
-        result
     }
 
     /// Wait for the node to be ready and return its current tip (doesn't wait for sync)
