@@ -27,7 +27,7 @@ use reth_node_builder::{
     node::{FullNodeTypes, NodeTypes},
     rpc::{
         BasicEngineApiBuilder, EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder,
-        EthApiBuilder, EthApiCtx, RethRpcAddOns, RpcAddOns, RpcHandle,
+        EthApiBuilder, EthApiCtx, Identity, RethRpcAddOns, RpcAddOns, RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder, PayloadBuilderConfig,
     PayloadTypes,
@@ -166,8 +166,9 @@ pub struct EthereumAddOns<
     EthB: EthApiBuilder<N>,
     EV,
     EB = BasicEngineApiBuilder<EV>,
+    RpcMiddleware = Identity,
 > {
-    inner: RpcAddOns<N, EthB, EV, EB>,
+    inner: RpcAddOns<N, EthB, EV, EB, RpcMiddleware>,
 }
 
 impl<N> Default for EthereumAddOns<N, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>
@@ -211,6 +212,15 @@ where
     {
         let Self { inner } = self;
         EthereumAddOns { inner: inner.with_engine_validator(engine_validator_builder) }
+    }
+
+    /// Sets rpc middleware
+    pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> EthereumAddOns<N, EthB, EV, EB, T>
+    where
+        T: Send,
+    {
+        let Self { inner } = self;
+        EthereumAddOns { inner: inner.with_rpc_middleware(rpc_middleware) }
     }
 }
 
