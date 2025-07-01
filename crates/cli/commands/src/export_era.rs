@@ -13,6 +13,7 @@ use reth_provider::DatabaseProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
+// Default folder name for era1 export files
 const ERA1_EXPORT_FOLDER_NAME: &str = "era1-export";
 
 #[derive(Debug, Parser)]
