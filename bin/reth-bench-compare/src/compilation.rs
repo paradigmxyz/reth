@@ -2,7 +2,7 @@
 
 use eyre::{eyre, Result, WrapErr};
 use std::process::Command;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// Manages compilation operations for reth components
 #[derive(Debug)]
@@ -65,6 +65,33 @@ impl CompilationManager {
 
         info!("Reth compilation completed successfully");
         Ok(())
+    }
+
+    /// Check if reth-bench is available in PATH
+    pub fn is_reth_bench_available(&self) -> bool {
+        match Command::new("reth-bench").arg("--version").output() {
+            Ok(output) => {
+                if output.status.success() {
+                    let version = String::from_utf8_lossy(&output.stdout);
+                    info!("Found reth-bench: {}", version.trim());
+                    true
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Ensure reth-bench is available, compiling if necessary
+    pub fn ensure_reth_bench_available(&self) -> Result<()> {
+        if self.is_reth_bench_available() {
+            info!("reth-bench is already available");
+            Ok(())
+        } else {
+            warn!("reth-bench not found in PATH, compiling and installing...");
+            self.compile_reth_bench()
+        }
     }
 
     /// Compile and install reth-bench using `make install-reth-bench`
