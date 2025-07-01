@@ -185,7 +185,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     ctrlc::set_handler(move || {
         eprintln!("Received interrupt signal, cleaning up...");
         if let Err(e) = git_manager_cleanup.switch_branch(&original_branch_cleanup) {
-            eprintln!("Failed to restore original branch: {}", e);
+            eprintln!("Failed to restore original branch: {e}");
         }
         std::process::exit(1);
     })?;

@@ -110,12 +110,12 @@ impl GitManager {
         for &git_ref in refs {
             // Try branch first, then tag
             let branch_check = Command::new("git")
-                .args(["rev-parse", "--verify", &format!("refs/heads/{}", git_ref)])
+                .args(["rev-parse", "--verify", &format!("refs/heads/{git_ref}")])
                 .current_dir(&self.repo_root)
                 .output();
                 
             let tag_check = Command::new("git")
-                .args(["rev-parse", "--verify", &format!("refs/tags/{}", git_ref)])
+                .args(["rev-parse", "--verify", &format!("refs/tags/{git_ref}")])
                 .current_dir(&self.repo_root)
                 .output();
                 
@@ -153,7 +153,7 @@ impl GitManager {
             .args(["checkout", git_ref])
             .current_dir(&self.repo_root)
             .output()
-            .wrap_err_with(|| format!("Failed to switch to reference '{}'", git_ref))?;
+            .wrap_err_with(|| format!("Failed to switch to reference '{git_ref}'"))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -184,7 +184,7 @@ impl GitManager {
             .args(["checkout", branch])
             .current_dir(&self.repo_root)
             .output()
-            .wrap_err_with(|| format!("Failed to switch to branch '{}'", branch))?;
+            .wrap_err_with(|| format!("Failed to switch to branch '{branch}'"))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);

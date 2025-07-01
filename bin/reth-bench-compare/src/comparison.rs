@@ -118,7 +118,7 @@ impl ComparisonGenerator {
 
     /// Get the output directory for a specific reference
     pub fn get_ref_output_dir(&self, ref_type: &str) -> PathBuf {
-        self.output_dir.join(&self.timestamp).join(format!("{}_ref", ref_type))
+        self.output_dir.join(&self.timestamp).join(format!("{ref_type}_ref"))
     }
 
     /// Get the main output directory for this comparison run
@@ -209,12 +209,12 @@ impl ComparisonGenerator {
     /// Load combined latency CSV data
     fn load_combined_latency_csv(&self, path: &Path) -> Result<Vec<CombinedLatencyRow>> {
         let mut reader = Reader::from_path(path)
-            .wrap_err_with(|| format!("Failed to open combined latency CSV: {:?}", path))?;
+            .wrap_err_with(|| format!("Failed to open combined latency CSV: {path:?}"))?;
 
         let mut rows = Vec::new();
         for result in reader.deserialize() {
             let row: CombinedLatencyRow = result
-                .wrap_err_with(|| format!("Failed to parse combined latency row in {:?}", path))?;
+                .wrap_err_with(|| format!("Failed to parse combined latency row in {path:?}"))?;
             rows.push(row);
         }
 
@@ -228,12 +228,12 @@ impl ComparisonGenerator {
     /// Load total gas CSV data
     fn load_total_gas_csv(&self, path: &Path) -> Result<Vec<TotalGasRow>> {
         let mut reader = Reader::from_path(path)
-            .wrap_err_with(|| format!("Failed to open total gas CSV: {:?}", path))?;
+            .wrap_err_with(|| format!("Failed to open total gas CSV: {path:?}"))?;
 
         let mut rows = Vec::new();
         for result in reader.deserialize() {
             let row: TotalGasRow =
-                result.wrap_err_with(|| format!("Failed to parse total gas row in {:?}", path))?;
+                result.wrap_err_with(|| format!("Failed to parse total gas row in {path:?}"))?;
             rows.push(row);
         }
 
@@ -384,19 +384,19 @@ impl ComparisonGenerator {
     async fn write_comparison_reports(&self, report: &ComparisonReport) -> Result<()> {
         let report_dir = self.output_dir.join(&self.timestamp);
         fs::create_dir_all(&report_dir)
-            .wrap_err_with(|| format!("Failed to create report directory: {:?}", report_dir))?;
+            .wrap_err_with(|| format!("Failed to create report directory: {report_dir:?}"))?;
 
         // Write JSON report
         let json_path = report_dir.join("comparison_report.json");
         let json_content = serde_json::to_string_pretty(report)
             .wrap_err("Failed to serialize comparison report to JSON")?;
         fs::write(&json_path, json_content)
-            .wrap_err_with(|| format!("Failed to write JSON report: {:?}", json_path))?;
+            .wrap_err_with(|| format!("Failed to write JSON report: {json_path:?}"))?;
 
         // Write CSV report for per-block comparisons
         let csv_path = report_dir.join("per_block_comparison.csv");
         let mut writer = csv::Writer::from_path(&csv_path)
-            .wrap_err_with(|| format!("Failed to create CSV writer: {:?}", csv_path))?;
+            .wrap_err_with(|| format!("Failed to create CSV writer: {csv_path:?}"))?;
 
         for comparison in &report.per_block_comparisons {
             writer.serialize(comparison).wrap_err("Failed to write comparison row to CSV")?;
@@ -421,7 +421,7 @@ impl ComparisonGenerator {
         };
 
         println!("\n=== BENCHMARK COMPARISON SUMMARY ===");
-        println!("Timestamp: {}", formatted_timestamp);
+        println!("Timestamp: {formatted_timestamp}");
         println!("Baseline: {}", report.baseline.ref_name);
         println!("Feature:  {}", report.feature.ref_name);
         println!();
