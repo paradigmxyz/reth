@@ -7,21 +7,26 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+use crate::{
+    evm::CustomExecutorBuilder, pool::CustomPooledTransaction, primitives::CustomTransaction,
+};
 use chainspec::CustomChainSpec;
-use engine::CustomPayloadTypes;
 use primitives::CustomNodePrimitives;
 use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
-use reth_node_builder::{components::ComponentsBuilder, Node, NodeComponentsBuilder};
+use reth_node_builder::{
+    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
+    Node,
+};
 use reth_op::node::{
-    node::{OpConsensusBuilder, OpPoolBuilder, OpStorage},
-    OpNode,
+    node::{OpConsensusBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder},
+    txpool, OpNode, OpPayloadTypes,
 };
 
 pub mod chainspec;
 pub mod engine;
 pub mod engine_api;
 pub mod evm;
-pub mod network;
+pub mod pool;
 pub mod primitives;
 
 #[derive(Debug, Clone)]
@@ -32,22 +37,21 @@ impl NodeTypes for CustomNode {
     type ChainSpec = CustomChainSpec;
     type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
     type Storage = <OpNode as NodeTypes>::Storage;
-    type Payload = CustomPayloadTypes;
+    type Payload = OpPayloadTypes<CustomNodePrimitives>;
 }
 
 impl<N> Node<N> for CustomNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = CustomPayloadTypes,
-            ChainSpec = CustomChainSpec,
-            Primitives = CustomNodePrimitives,
-            Storage = OpStorage,
-        >,
-    >,
-    ComponentsBuilder<N, OpPoolBuilder, (), (), (), OpConsensusBuilder>: NodeComponentsBuilder<N>,
+    N: FullNodeTypes<Types = Self>,
 {
-    type ComponentsBuilder = ComponentsBuilder<N, OpPoolBuilder, (), (), (), OpConsensusBuilder>;
+    type ComponentsBuilder = ComponentsBuilder<
+        N,
+        OpPoolBuilder<txpool::OpPooledTransaction<CustomTransaction, CustomPooledTransaction>>,
+        BasicPayloadServiceBuilder<OpPayloadBuilder>,
+        OpNetworkBuilder,
+        CustomExecutorBuilder,
+        OpConsensusBuilder,
+    >;
 
     type AddOns = ();
 
@@ -55,6 +59,9 @@ where
         ComponentsBuilder::default()
             .node_types::<N>()
             .pool(OpPoolBuilder::default())
+            .executor(CustomExecutorBuilder::default())
+            .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
+            .network(OpNetworkBuilder::new(false, false))
             .consensus(OpConsensusBuilder::default())
     }
 

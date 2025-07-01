@@ -6,18 +6,18 @@ use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
     config_cmd, db, download, dump_genesis, import, import_era, init_cmd, init_state,
+    launcher::FnLauncher,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
-use reth_network::EthNetworkPrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::LogArgs,
     version::{LONG_VERSION, SHORT_VERSION},
 };
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthExecutorProvider, EthereumNode};
+use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -148,12 +148,12 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         let _ = install_prometheus_recorder();
 
         let components = |spec: Arc<C::ChainSpec>| {
-            (EthExecutorProvider::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
+            (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
         };
         match self.command {
-            Commands::Node(command) => {
-                runner.run_command_until_exit(|ctx| command.execute(ctx, launcher))
-            }
+            Commands::Node(command) => runner.run_command_until_exit(|ctx| {
+                command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
+            }),
             Commands::Init(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
@@ -161,7 +161,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
             Commands::Import(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode, _, _>(components))
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode, _>(components))
             }
             Commands::ImportEra(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
@@ -173,12 +173,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             Commands::Download(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
-            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<EthereumNode, _, _, EthNetworkPrimitives>(ctx, components)
-            }),
-            Commands::P2P(command) => {
-                runner.run_until_ctrl_c(command.execute::<EthNetworkPrimitives>())
-            }
+            Commands::Stage(command) => runner
+                .run_command_until_exit(|ctx| command.execute::<EthereumNode, _>(ctx, components)),
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),

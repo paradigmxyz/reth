@@ -176,6 +176,12 @@ pub enum Eip4844PoolTransactionError {
     /// would introduce gap in the nonce sequence.
     #[error("nonce too high")]
     Eip4844NonceGap,
+    /// Thrown if blob transaction has an EIP-7594 style sidecar before Osaka.
+    #[error("unexpected eip-7594 sidecar before osaka")]
+    UnexpectedEip7594SidecarBeforeOsaka,
+    /// Thrown if blob transaction has an EIP-4844 style sidecar after Osaka.
+    #[error("unexpected eip-4844 sidecar after osaka")]
+    UnexpectedEip4844SidecarAfterOsaka,
 }
 
 /// Represents all errors that can happen when validating transactions for the pool for EIP-7702
@@ -185,6 +191,19 @@ pub enum Eip7702PoolTransactionError {
     /// Thrown if the transaction has no items in its authorization list
     #[error("no items in authorization list for EIP7702 transaction")]
     MissingEip7702AuthorizationList,
+    /// Returned when a transaction with a nonce
+    /// gap is received from accounts with a deployed delegation or pending delegation.
+    #[error("gapped-nonce tx from delegated accounts")]
+    OutOfOrderTxFromDelegated,
+    /// Returned when the maximum number of in-flight
+    /// transactions is reached for specific accounts.
+    #[error("in-flight transaction limit reached for delegated accounts")]
+    InflightTxLimitReached,
+    /// Returned if a transaction has an authorization
+    /// signed by an address which already has in-flight transactions known to the
+    /// pool.
+    #[error("authority already reserved")]
+    AuthorityReserved,
 }
 
 /// Represents errors that can happen when validating transactions for the pool
@@ -199,6 +218,9 @@ pub enum InvalidPoolTransactionError {
     /// respect the size limits of the pool.
     #[error("transaction's gas limit {0} exceeds block's gas limit {1}")]
     ExceedsGasLimit(u64, u64),
+    /// Thrown when a transaction's gas limit exceeds the configured maximum per-transaction limit.
+    #[error("transaction's gas limit {0} exceeds maximum per-transaction gas limit {1}")]
+    MaxTxGasLimitExceeded(u64, u64),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
@@ -228,6 +250,10 @@ pub enum InvalidPoolTransactionError {
         /// Balance of account.
         balance: U256,
     },
+    /// EIP-2681 error thrown if the nonce is higher or equal than `U64::max`
+    /// `<https://eips.ethereum.org/EIPS/eip-2681>`
+    #[error("nonce exceeds u64 limit")]
+    Eip2681,
     /// EIP-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
@@ -292,10 +318,15 @@ impl InvalidPoolTransactionError {
                     InvalidTransactionError::ChainIdMismatch |
                     InvalidTransactionError::GasUintOverflow |
                     InvalidTransactionError::TxTypeNotSupported |
-                    InvalidTransactionError::SignerAccountHasBytecode => true,
+                    InvalidTransactionError::SignerAccountHasBytecode |
+                    InvalidTransactionError::GasLimitTooHigh => true,
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
+            Self::MaxTxGasLimitExceeded(_, _) => {
+                // local setting
+                false
+            }
             Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
             Self::OversizedData(_, _) => true,
@@ -306,6 +337,7 @@ impl InvalidPoolTransactionError {
             Self::IntrinsicGasTooLow => true,
             Self::Overdraft { .. } => false,
             Self::Other(err) => err.is_bad_transaction(),
+            Self::Eip2681 => true,
             Self::Eip4844(eip4844_err) => {
                 match eip4844_err {
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar => {
@@ -330,10 +362,24 @@ impl InvalidPoolTransactionError {
                         // this is a malformed transaction and should not be sent over the network
                         true
                     }
+                    Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka |
+                    Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka => {
+                        // for now we do not want to penalize peers for broadcasting different
+                        // sidecars
+                        false
+                    }
                 }
             }
             Self::Eip7702(eip7702_err) => match eip7702_err {
-                Eip7702PoolTransactionError::MissingEip7702AuthorizationList => false,
+                Eip7702PoolTransactionError::MissingEip7702AuthorizationList => {
+                    // as EIP-7702 specifies, 7702 transactions must have an non-empty authorization
+                    // list so this is a malformed transaction and should not be
+                    // sent over the network
+                    true
+                }
+                Eip7702PoolTransactionError::OutOfOrderTxFromDelegated => false,
+                Eip7702PoolTransactionError::InflightTxLimitReached => false,
+                Eip7702PoolTransactionError::AuthorityReserved => false,
             },
         }
     }

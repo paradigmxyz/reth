@@ -2,15 +2,18 @@
 
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_provider::{BlockReader, ProviderBlock, ProviderReceipt};
 use reth_rpc_eth_types::EthStateCache;
+use reth_storage_api::{BlockReader, ProviderBlock, ProviderReceipt};
 
-/// Helper trait to relax trait bounds on [`FullNodeComponents`].
+/// Helper trait that provides the same interface as [`FullNodeComponents`] but without requiring
+/// implementation of trait bounds.
 ///
-/// Helpful when defining types that would otherwise have a generic `N: FullNodeComponents`. Using
-/// `N: RpcNodeCore` instead, allows access to all the associated types on [`FullNodeComponents`]
-/// that are used in RPC, but with more flexibility since they have no trait bounds (asides auto
-/// traits).
+/// This trait is structurally equivalent to [`FullNodeComponents`], exposing the same associated
+/// types and methods. However, it doesn't enforce the trait bounds required by
+/// [`FullNodeComponents`]. This makes it useful for RPC types that need access to node components
+/// where the full trait bounds of the components are not necessary.
+///
+/// Every type that is a [`FullNodeComponents`] also implements this trait.
 pub trait RpcNodeCore: Clone + Send + Sync {
     /// Blockchain data primitives.
     type Primitives: Send + Sync + Clone + Unpin;

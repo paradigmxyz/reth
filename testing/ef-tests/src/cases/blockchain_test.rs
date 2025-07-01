@@ -12,7 +12,7 @@ use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::Block;
 use reth_evm::{execute::Executor, ConfigureEvm};
-use reth_evm_ethereum::execute::EthExecutorProvider;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
@@ -108,7 +108,7 @@ impl BlockchainTestCase {
             }
 
             // A block processing failure occurred.
-            Err(Error::BlockProcessingFailed { block_number }) => match expectation {
+            err @ Err(Error::BlockProcessingFailed { block_number, .. }) => match expectation {
                 // It happened on exactly the block we were told to fail on
                 Some((expected, _)) if block_number == expected => Ok(()),
 
@@ -122,7 +122,7 @@ impl BlockchainTestCase {
                 ))),
 
                 // No failure expected at all - bubble up original error.
-                None => Err(Error::BlockProcessingFailed { block_number }),
+                None => err,
             },
 
             // Non‑processing error – forward as‑is.
@@ -199,20 +199,20 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
     provider
         .insert_block(genesis_block.clone(), StorageLocation::Database)
-        .map_err(|_| Error::BlockProcessingFailed { block_number: 0 })?;
+        .map_err(|err| Error::block_failed(0, err))?;
 
     let genesis_state = case.pre.clone().into_genesis_state();
     insert_genesis_state(&provider, genesis_state.iter())
-        .map_err(|_| Error::BlockProcessingFailed { block_number: 0 })?;
+        .map_err(|err| Error::block_failed(0, err))?;
     insert_genesis_hashes(&provider, genesis_state.iter())
-        .map_err(|_| Error::BlockProcessingFailed { block_number: 0 })?;
+        .map_err(|err| Error::block_failed(0, err))?;
     insert_genesis_history(&provider, genesis_state.iter())
-        .map_err(|_| Error::BlockProcessingFailed { block_number: 0 })?;
+        .map_err(|err| Error::block_failed(0, err))?;
 
     // Decode blocks
     let blocks = decode_blocks(&case.blocks)?;
 
-    let executor_provider = EthExecutorProvider::ethereum(chain_spec.clone());
+    let executor_provider = EthEvmConfig::ethereum(chain_spec.clone());
     let mut parent = genesis_block;
     let mut program_inputs = Vec::new();
 
@@ -223,11 +223,11 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
         // Insert the block into the database
         provider
             .insert_block(block.clone(), StorageLocation::Database)
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Consensus checks before block execution
         pre_execution_checks(chain_spec.clone(), &parent, block)
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            .map_err(|err| Error::block_failed(block_number, err))?;
 
         let mut witness_record = ExecutionWitnessRecord::default();
 
@@ -240,11 +240,11 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
                 witness_record.record_executed_state(statedb);
             })
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Consensus checks after block execution
         validate_block_post_execution(block, &chain_spec, &output.receipts, &output.requests)
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Generate the stateless witness
         // TODO: Most of this code is copy-pasted from debug_executionWitness
@@ -278,9 +278,12 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
             HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
         let (computed_state_root, _) =
             StateRoot::overlay_root_with_updates(provider.tx_ref(), hashed_state.clone())
-                .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+                .map_err(|err| Error::block_failed(block_number, err))?;
         if computed_state_root != block.state_root {
-            return Err(Error::BlockProcessingFailed { block_number })
+            return Err(Error::block_failed(
+                block_number,
+                Error::Assertion("state root mismatch".to_string()),
+            ))
         }
 
         // Commit the post state/state diff to the database
@@ -290,14 +293,14 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
                 OriginalValuesKnown::Yes,
                 StorageLocation::Database,
             )
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            .map_err(|err| Error::block_failed(block_number, err))?;
 
         provider
             .write_hashed_state(&hashed_state.into_sorted())
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            .map_err(|err| Error::block_failed(block_number, err))?;
         provider
             .update_history_indices(block.number..=block.number)
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            .map_err(|err| Error::block_failed(block_number, err))?;
 
         // Since there were no errors, update the parent block
         parent = block.clone()
@@ -319,8 +322,13 @@ fn run_case(case: &BlockchainTest) -> Result<(), Error> {
 
     // Now validate using the stateless client if everything else passes
     for (block, execution_witness) in program_inputs {
-        stateless_validation(block, execution_witness, chain_spec.clone())
-            .expect("stateless validation failed");
+        stateless_validation(
+            block.into_block(),
+            execution_witness,
+            chain_spec.clone(),
+            EthEvmConfig::new(chain_spec.clone()),
+        )
+        .expect("stateless validation failed");
     }
 
     Ok(())
@@ -336,12 +344,10 @@ fn decode_blocks(
         let block_number = (block_index + 1) as u64;
 
         let decoded = SealedBlock::<Block>::decode(&mut block.rlp.as_ref())
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+            .map_err(|err| Error::block_failed(block_number, err))?;
 
-        let recovered_block = decoded
-            .clone()
-            .try_recover()
-            .map_err(|_| Error::BlockProcessingFailed { block_number })?;
+        let recovered_block =
+            decoded.clone().try_recover().map_err(|err| Error::block_failed(block_number, err))?;
 
         blocks.push(recovered_block);
     }

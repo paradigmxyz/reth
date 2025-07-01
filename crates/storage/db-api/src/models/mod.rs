@@ -128,7 +128,7 @@ impl Encode for StoredNibbles {
     fn encode(self) -> Self::Encoded {
         // NOTE: This used to be `to_compact`, but all it does is append the bytes to the buffer,
         // so we can just use the implementation of `Into<Vec<u8>>` to reuse the buffer.
-        self.0.into()
+        self.0.to_vec()
     }
 }
 
@@ -278,7 +278,7 @@ impl_compression_fixed_compact!(B256, Address);
 macro_rules! add_wrapper_struct {
     ($(($name:tt, $wrapper:tt)),+) => {
         $(
-            /// Wrapper struct so it can use StructFlags from Compact, when used as pure table values.
+            /// Wrapper struct so it can use `StructFlags` from Compact, when used as pure table values.
             #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
             #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
             #[add_arbitrary_tests(compact)]

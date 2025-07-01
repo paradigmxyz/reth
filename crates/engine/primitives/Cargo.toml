@@ -26,6 +26,7 @@ reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -46,6 +47,7 @@ std = [
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-rpc-types-engine/std",
+    "alloy-eips/std",
     "futures/std",
     "serde/std",
     "thiserror/std",

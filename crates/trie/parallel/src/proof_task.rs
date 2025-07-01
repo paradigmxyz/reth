@@ -22,7 +22,7 @@ use reth_trie::{
     proof::{ProofBlindedProviderFactory, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdatesSorted,
-    HashedPostStateSorted, Nibbles, StorageMultiProof,
+    DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
 };
 use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
@@ -39,7 +39,7 @@ use std::{
 use tokio::runtime::Handle;
 use tracing::debug;
 
-type StorageProofResult = Result<StorageMultiProof, ParallelStateRootError>;
+type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type BlindedNodeResult = Result<Option<RevealedNode>, SparseTrieError>;
 
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
@@ -244,15 +244,24 @@ where
 
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
-        let result = StorageProof::new_hashed(
+        let raw_proof_result = StorageProof::new_hashed(
             trie_cursor_factory,
             hashed_cursor_factory,
             input.hashed_address,
         )
-        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().cloned()))
+        .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
         .storage_multiproof(input.target_slots)
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+
+        let decoded_result = raw_proof_result.and_then(|raw_proof| {
+            raw_proof.try_into().map_err(|e: alloy_rlp::Error| {
+                ParallelStateRootError::Other(format!(
+                    "Failed to decode storage proof for {}: {}",
+                    input.hashed_address, e
+                ))
+            })
+        });
 
         debug!(
             target: "trie::proof_task",
@@ -264,13 +273,13 @@ where
         );
 
         // send the result back
-        if let Err(error) = result_sender.send(result) {
+        if let Err(error) = result_sender.send(decoded_result) {
             debug!(
                 target: "trie::proof_task",
                 hashed_address = ?input.hashed_address,
                 ?error,
                 task_time = ?proof_start.elapsed(),
-                "Failed to send proof result"
+                "Storage proof receiver is dropped, discarding the result"
             );
         }
 
@@ -525,12 +534,12 @@ impl<Tx: DbTx> BlindedProvider for ProofTaskBlindedNodeProvider<Tx> {
         match self {
             Self::AccountNode { sender } => {
                 let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedAccountNode(path.clone(), tx),
+                    ProofTaskKind::BlindedAccountNode(*path, tx),
                 ));
             }
             Self::StorageNode { sender, account } => {
                 let _ = sender.send(ProofTaskMessage::QueueTask(
-                    ProofTaskKind::BlindedStorageNode(*account, path.clone(), tx),
+                    ProofTaskKind::BlindedStorageNode(*account, *path, tx),
                 ));
             }
         }

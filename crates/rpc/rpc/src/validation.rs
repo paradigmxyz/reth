@@ -20,7 +20,11 @@ use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::BlockExecutionOutput;
-use reth_metrics::{metrics, metrics::Gauge, Metrics};
+use reth_metrics::{
+    metrics,
+    metrics::{gauge, Gauge},
+    Metrics,
+};
 use reth_node_api::NewPayloadError;
 use reth_primitives_traits::{
     constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
@@ -33,6 +37,7 @@ use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
@@ -77,6 +82,11 @@ where
         });
 
         inner.metrics.disallow_size.set(inner.disallow.len() as f64);
+
+        let disallow_hash = hash_disallow_list(&inner.disallow);
+        let hash_gauge = gauge!("builder_validation_disallow_hash", "hash" => disallow_hash);
+        hash_gauge.set(1.0);
+
         Self { inner }
     }
 
@@ -229,7 +239,7 @@ where
                 expected: header.gas_limit(),
             }))
         } else if header.gas_used() != message.gas_used {
-            return Err(ValidationApiError::GasUsedMismatch(GotExpected {
+            Err(ValidationApiError::GasUsedMismatch(GotExpected {
                 got: message.gas_used,
                 expected: header.gas_used(),
             }))
@@ -297,7 +307,7 @@ where
             }
         }
 
-        if balance_after >= balance_before + message.value {
+        if balance_after >= balance_before.saturating_add(message.value) {
             return Ok(())
         }
 
@@ -498,6 +508,22 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm> {
     metrics: ValidationMetrics,
 }
 
+/// Calculates a deterministic hash of the blocklist for change detection.
+///
+/// This function sorts addresses to ensure deterministic output regardless of
+/// insertion order, then computes a SHA256 hash of the concatenated addresses.
+fn hash_disallow_list(disallow: &HashSet<Address>) -> String {
+    let mut sorted: Vec<_> = disallow.iter().collect();
+    sorted.sort(); // sort for deterministic hashing
+
+    let mut hasher = Sha256::new();
+    for addr in sorted {
+        hasher.update(addr.as_slice());
+    }
+
+    format!("{:x}", hasher.finalize())
+}
+
 impl<Provider, E: ConfigureEvm> fmt::Debug for ValidationApiInner<Provider, E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidationApiInner").finish_non_exhaustive()
@@ -596,4 +622,64 @@ impl From<ValidationApiError> for ErrorObject<'static> {
 pub(crate) struct ValidationMetrics {
     /// The number of entries configured in the builder validation disallow list.
     pub(crate) disallow_size: Gauge,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hash_disallow_list;
+    use revm_primitives::Address;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_hash_disallow_list_deterministic() {
+        let mut addresses = HashSet::new();
+        addresses.insert(Address::from([1u8; 20]));
+        addresses.insert(Address::from([2u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses);
+        let hash2 = hash_disallow_list(&addresses);
+
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_disallow_list_different_content() {
+        let mut addresses1 = HashSet::new();
+        addresses1.insert(Address::from([1u8; 20]));
+
+        let mut addresses2 = HashSet::new();
+        addresses2.insert(Address::from([2u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses1);
+        let hash2 = hash_disallow_list(&addresses2);
+
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_disallow_list_order_independent() {
+        let mut addresses1 = HashSet::new();
+        addresses1.insert(Address::from([1u8; 20]));
+        addresses1.insert(Address::from([2u8; 20]));
+
+        let mut addresses2 = HashSet::new();
+        addresses2.insert(Address::from([2u8; 20])); // Different insertion order
+        addresses2.insert(Address::from([1u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses1);
+        let hash2 = hash_disallow_list(&addresses2);
+
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    //ensures parity with rbuilder hashing https://github.com/flashbots/rbuilder/blob/962c8444cdd490a216beda22c7eec164db9fc3ac/crates/rbuilder/src/live_builder/block_list_provider.rs#L248
+    fn test_disallow_list_hash_rbuilder_parity() {
+        let json = r#"["0x05E0b5B40B7b66098C2161A5EE11C5740A3A7C45","0x01e2919679362dFBC9ee1644Ba9C6da6D6245BB1","0x03893a7c7463AE47D46bc7f091665f1893656003","0x04DBA1194ee10112fE6C3207C0687DEf0e78baCf"]"#;
+        let blocklist: Vec<Address> = serde_json::from_str(json).unwrap();
+        let blocklist: HashSet<Address> = blocklist.into_iter().collect();
+        let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608";
+        let hash = hash_disallow_list(&blocklist);
+        assert_eq!(expected_hash, hash);
+    }
 }

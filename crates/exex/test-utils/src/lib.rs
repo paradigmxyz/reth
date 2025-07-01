@@ -41,7 +41,10 @@ use reth_node_builder::{
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
-    node::{EthereumAddOns, EthereumNetworkBuilder, EthereumPayloadBuilder},
+    node::{
+        EthereumAddOns, EthereumEngineValidatorBuilder, EthereumEthApiBuilder,
+        EthereumNetworkBuilder, EthereumPayloadBuilder,
+    },
     EthEngineTypes,
 };
 use reth_payload_builder::noop::NoopPayloadBuilderService;
@@ -120,14 +123,7 @@ impl NodeTypes for TestNode {
 
 impl<N> Node<N> for TestNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = EthEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-            Storage = EthStorage,
-        >,
-    >,
+    N: FullNodeTypes<Types = Self>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -139,6 +135,8 @@ where
     >;
     type AddOns = EthereumAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+        EthereumEthApiBuilder,
+        EthereumEngineValidatorBuilder,
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
@@ -258,7 +256,7 @@ pub async fn test_exex_context_with_chain_spec(
     let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
         db,
         chain_spec.clone(),
-        StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
+        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
     );
 
     let genesis_hash = init_genesis(&provider_factory)?;

@@ -111,7 +111,7 @@ where
         // Create the walker.
         let mut prefix_set = self.prefix_sets.account_prefix_set.clone();
         prefix_set.extend_keys(targets.keys().map(Nibbles::unpack));
-        let walker = TrieWalker::new(trie_cursor, prefix_set.freeze());
+        let walker = TrieWalker::state_trie(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
         let retainer = targets.keys().map(Nibbles::unpack).collect();
@@ -167,10 +167,7 @@ where
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
             (
-                updated_branch_nodes
-                    .iter()
-                    .map(|(path, node)| (path.clone(), node.hash_mask))
-                    .collect(),
+                updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
                 updated_branch_nodes
                     .into_iter()
                     .map(|(path, node)| (path, node.tree_mask))
@@ -282,7 +279,7 @@ where
         self.prefix_set.extend_keys(target_nibbles.clone());
 
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-        let walker = TrieWalker::new(trie_cursor, self.prefix_set.freeze());
+        let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set.freeze());
 
         let retainer = ProofRetainer::from_iter(target_nibbles);
         let mut hash_builder = HashBuilder::default()
@@ -308,10 +305,7 @@ where
         let (branch_node_hash_masks, branch_node_tree_masks) = if self.collect_branch_node_masks {
             let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
             (
-                updated_branch_nodes
-                    .iter()
-                    .map(|(path, node)| (path.clone(), node.hash_mask))
-                    .collect(),
+                updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
                 updated_branch_nodes
                     .into_iter()
                     .map(|(path, node)| (path, node.tree_mask))

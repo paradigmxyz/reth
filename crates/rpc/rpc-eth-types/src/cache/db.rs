@@ -5,12 +5,13 @@
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, DatabaseRef};
-use reth_storage_api::{HashedPostStateProvider, StateProvider};
+use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
     database::{BundleState, CacheDB},
+    primitives::HashMap,
     state::{AccountInfo, Bytecode},
-    Database,
+    Database, DatabaseCommit,
 };
 
 /// Helper alias type for the state's [`CacheDB`]
@@ -154,13 +155,6 @@ impl StateProvider for StateProviderTraitObjWrapper<'_> {
         self.0.storage(account, storage_key)
     }
 
-    fn bytecode_by_hash(
-        &self,
-        code_hash: &B256,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        self.0.bytecode_by_hash(code_hash)
-    }
-
     fn account_code(
         &self,
         addr: &Address,
@@ -174,6 +168,15 @@ impl StateProvider for StateProviderTraitObjWrapper<'_> {
 
     fn account_nonce(&self, addr: &Address) -> reth_errors::ProviderResult<Option<u64>> {
         self.0.account_nonce(addr)
+    }
+}
+
+impl BytecodeReader for StateProviderTraitObjWrapper<'_> {
+    fn bytecode_by_hash(
+        &self,
+        code_hash: &B256,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        self.0.bytecode_by_hash(code_hash)
     }
 }
 
@@ -218,5 +221,11 @@ impl<'a> DatabaseRef for StateCacheDbRefMutWrapper<'a, '_> {
 
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
         self.0.block_hash_ref(number)
+    }
+}
+
+impl DatabaseCommit for StateCacheDbRefMutWrapper<'_, '_> {
+    fn commit(&mut self, changes: HashMap<Address, revm::state::Account>) {
+        self.0.commit(changes)
     }
 }

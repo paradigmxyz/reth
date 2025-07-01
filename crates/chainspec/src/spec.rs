@@ -15,8 +15,7 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
+    eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -105,11 +104,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         hardforks,
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
-        deposit_contract: Some(DepositContract::new(
-            MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-            11052984,
-            b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
-        )),
+        deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
         blob_params: BlobScheduleBlobParams::default(),
@@ -1045,11 +1040,7 @@ mod tests {
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use std::{
-        collections::{BTreeMap, HashMap},
-        str::FromStr,
-        string::String,
-    };
+    use std::{collections::HashMap, str::FromStr};
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -2515,33 +2506,37 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn blob_params_from_genesis() {
         let s = r#"{
-         "cancun":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         },
-         "prague":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         }
-      }"#;
-        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
-        let hardfork_params = BlobScheduleBlobParams::from_schedule(&schedule);
+            "blobSchedule": {
+                "cancun":{
+                    "baseFeeUpdateFraction":3338477,
+                    "max":6,
+                    "target":3
+                },
+                "prague":{
+                    "baseFeeUpdateFraction":3338477,
+                    "max":6,
+                    "target":3
+                }
+            }
+        }"#;
+        let config: ChainConfig = serde_json::from_str(s).unwrap();
+        let hardfork_params = config.blob_schedule_blob_params();
         let expected = BlobScheduleBlobParams {
             cancun: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
             },
             prague: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
             },
-            scheduled: Default::default(),
+            ..Default::default()
         };
         assert_eq!(hardfork_params, expected);
     }

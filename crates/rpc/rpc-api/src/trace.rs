@@ -80,7 +80,7 @@ pub trait TraceApi {
     /// `indices` represent the index positions of the traces.
     ///
     /// Note: This expects a list of indices but only one is supported since this function returns a
-    /// single [LocalizedTransactionTrace].
+    /// single [`LocalizedTransactionTrace`].
     #[method(name = "get")]
     async fn trace_get(
         &self,

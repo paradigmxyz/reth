@@ -1,10 +1,18 @@
 //! Engine node related functionality.
 
+use crate::{
+    common::{Attached, LaunchContextWith, WithConfigs},
+    hooks::NodeHooks,
+    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
+    setup::build_networked_pipeline,
+    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
+};
 use alloy_consensus::BlockHeader;
-use futures::{future::Either, stream, stream_select, StreamExt};
+use futures::{stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_engine_local::{LocalEngineService, LocalPayloadAttributesBuilder};
+use reth_engine_local::{LocalMiner, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -12,7 +20,7 @@ use reth_engine_tree::{
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{NetworkSyncUpdater, SyncState};
+use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
@@ -23,23 +31,17 @@ use reth_node_core::{
     exit::NodeExitFuture,
     primitives::Head,
 };
-use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
+use reth_node_events::node;
+use reth_provider::{
+    providers::{BlockchainProvider, NodeTypesForProvider},
+    BlockNumReader,
+};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
 use std::sync::Arc;
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::{
-    common::{Attached, LaunchContextWith, WithConfigs},
-    hooks::NodeHooks,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
-    setup::build_networked_pipeline,
-    AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
-    NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
-};
 
 /// The engine node launcher.
 #[derive(Debug)]
@@ -126,21 +128,21 @@ where
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
-        // spawn exexs
-        let exex_manager_handle = ExExLauncher::new(
-            ctx.head(),
-            ctx.node_adapter().clone(),
-            installed_exex,
-            ctx.configs().clone(),
-        )
-        .launch()
-        .await?;
+        // Try to expire pre-merge transaction history if configured
+        ctx.expire_pre_merge_transactions()?;
+
+        // spawn exexs if any
+        let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 
         // create pipeline
-        let network_client = ctx.components().network().fetch_client().await?;
+        let network_handle = ctx.components().network().clone();
+        let network_client = network_handle.fetch_client().await?;
         let (consensus_engine_tx, consensus_engine_rx) = unbounded_channel();
 
         let node_config = ctx.node_config();
+
+        // We always assume that node is syncing after a restart
+        network_handle.update_sync_state(SyncState::Syncing);
 
         let max_block = ctx.max_block(network_client.clone()).await?;
 
@@ -150,9 +152,6 @@ where
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        // Configure the pipeline
-        let pipeline_exex_handle =
-            exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
         let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
@@ -164,7 +163,8 @@ where
             max_block,
             static_file_producer,
             ctx.components().evm_config().clone(),
-            pipeline_exex_handle,
+            maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
+            ctx.era_import_source(),
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
@@ -173,7 +173,7 @@ where
         let pipeline_events = pipeline.events();
 
         let mut pruner_builder = ctx.pruner_builder();
-        if let Some(exex_manager_handle) = &exex_manager_handle {
+        if let Some(exex_manager_handle) = &maybe_exex_manager_handle {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
@@ -212,60 +212,44 @@ where
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
-        let mut engine_service = if ctx.is_dev() {
-            let eth_service = LocalEngineService::new(
-                consensus.clone(),
-                ctx.provider_factory().clone(),
-                ctx.blockchain_db().clone(),
-                pruner,
-                ctx.components().payload_builder_handle().clone(),
-                engine_payload_validator,
-                engine_tree_config,
-                ctx.invalid_block_hook()?,
-                ctx.sync_metrics_tx(),
-                consensus_engine_tx.clone(),
-                Box::pin(consensus_engine_stream),
-                ctx.dev_mining_mode(ctx.components().pool()),
-                LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
-                ctx.components().evm_config().clone(),
-            );
+        let mut engine_service = EngineService::new(
+            consensus.clone(),
+            ctx.chain_spec(),
+            network_client.clone(),
+            Box::pin(consensus_engine_stream),
+            pipeline,
+            Box::new(ctx.task_executor().clone()),
+            ctx.provider_factory().clone(),
+            ctx.blockchain_db().clone(),
+            pruner,
+            ctx.components().payload_builder_handle().clone(),
+            engine_payload_validator,
+            engine_tree_config,
+            ctx.invalid_block_hook().await?,
+            ctx.sync_metrics_tx(),
+            ctx.components().evm_config().clone(),
+        );
 
-            Either::Left(eth_service)
-        } else {
-            let eth_service = EngineService::new(
-                consensus.clone(),
-                ctx.chain_spec(),
-                network_client.clone(),
-                Box::pin(consensus_engine_stream),
-                pipeline,
-                Box::new(ctx.task_executor().clone()),
-                ctx.provider_factory().clone(),
-                ctx.blockchain_db().clone(),
-                pruner,
-                ctx.components().payload_builder_handle().clone(),
-                engine_payload_validator,
-                engine_tree_config,
-                ctx.invalid_block_hook()?,
-                ctx.sync_metrics_tx(),
-                ctx.components().evm_config().clone(),
+        if ctx.is_dev() {
+            ctx.task_executor().spawn_critical(
+                "local engine",
+                LocalMiner::new(
+                    ctx.blockchain_db().clone(),
+                    LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
+                    beacon_engine_handle.clone(),
+                    ctx.dev_mining_mode(ctx.components().pool()),
+                    ctx.components().payload_builder_handle().clone(),
+                )
+                .run(),
             );
-
-            Either::Right(eth_service)
-        };
+        }
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
             event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
-            if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
-                Either::Left(
-                    ConsensusLayerHealthEvents::new(Box::new(ctx.blockchain_db().clone()))
-                        .map(Into::into),
-                )
-            } else {
-                Either::Right(stream::empty())
-            },
+            ctx.consensus_layer_events(),
             pruner_events.map(Into::into),
             static_file_producer_events.map(Into::into),
         );
@@ -284,7 +268,6 @@ where
 
         // Run consensus engine to completion
         let initial_target = ctx.initial_backfill_target()?;
-        let network_handle = ctx.components().network().clone();
         let mut built_payloads = ctx
             .components()
             .payload_builder_handle()
@@ -293,7 +276,9 @@ where
             .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
             .into_built_payload_stream()
             .fuse();
+
         let chainspec = ctx.chain_spec();
+        let provider = ctx.blockchain_db().clone();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
@@ -301,9 +286,7 @@ where
         ctx.task_executor().spawn_critical("consensus engine", async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
-                if let Either::Right(eth_service) = &mut engine_service {
-                    eth_service.orchestrator_mut().start_backfill_sync(initial_target);
-                }
+                engine_service.orchestrator_mut().start_backfill_sync(initial_target);
             }
 
             let mut res = Ok(());
@@ -314,9 +297,7 @@ where
                     payload = built_payloads.select_next_some() => {
                         if let Some(executed_block) = payload.executed_block() {
                             debug!(target: "reth::cli", block=?executed_block.recovered_block().num_hash(),  "inserting built payload");
-                            if let Either::Right(eth_service) = &mut engine_service {
-                                eth_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block).into());
-                            }
+                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block).into());
                         }
                     }
                     event = engine_service.next() => {
@@ -328,8 +309,6 @@ where
                                     debug!(target: "reth::cli", "Terminating after initial backfill");
                                     break
                                 }
-
-                                network_handle.update_sync_state(SyncState::Idle);
                             }
                             ChainEvent::BackfillSyncStarted => {
                                 network_handle.update_sync_state(SyncState::Syncing);
@@ -341,7 +320,9 @@ where
                             }
                             ChainEvent::Handler(ev) => {
                                 if let Some(head) = ev.canonical_header() {
-                                    let head_block = Head {
+                                    // Once we're progressing via live sync, we can consider the node is not syncing anymore
+                                    network_handle.update_sync_state(SyncState::Idle);
+                                                                        let head_block = Head {
                                         number: head.number(),
                                         hash: head.hash(),
                                         difficulty: head.difficulty(),
@@ -349,6 +330,13 @@ where
                                         total_difficulty: chainspec.final_paris_total_difficulty().filter(|_| chainspec.is_paris_active_at_block(head.number())).unwrap_or_default(),
                                     };
                                     network_handle.update_status(head_block);
+
+                                    let updated = BlockRangeUpdate {
+                                        earliest: provider.earliest_block_number().unwrap_or_default(),
+                                        latest:head.number(),
+                                        latest_hash:head.hash()
+                                    };
+                                    network_handle.update_block_range(updated);
                                 }
                                 event_sender.notify(ev);
                             }

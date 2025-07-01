@@ -1,5 +1,5 @@
-use alloy_consensus::{BlockHeader, Transaction, Typed2718};
-use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_consensus::{BlockHeader, Typed2718};
+use alloy_eips::{eip1898::LenientBlockNumberOrTag, BlockId};
 use alloy_network::{ReceiptResponse, TransactionResponse};
 use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use alloy_rpc_types_eth::{BlockTransactions, TransactionReceipt};
@@ -13,9 +13,10 @@ use alloy_rpc_types_trace::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, types::ErrorObjectOwned};
 use reth_rpc_api::{EthApiServer, OtterscanServer};
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction, TransactionCompat,
+    FullEthApiTypes, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use reth_rpc_eth_types::{utils::binary_search, EthApiError};
 use reth_rpc_server_types::result::internal_rpc_err;
@@ -67,6 +68,7 @@ impl<Eth> OtterscanServer<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::Netw
     for OtterscanApi<Eth>
 where
     Eth: EthApiServer<
+            RpcTxReq<Eth::NetworkTypes>,
             RpcTransaction<Eth::NetworkTypes>,
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
@@ -78,9 +80,9 @@ where
     /// Handler for `ots_getHeaderByNumber` and `erigon_getHeaderByNumber`
     async fn get_header_by_number(
         &self,
-        block_number: u64,
+        block_number: LenientBlockNumberOrTag,
     ) -> RpcResult<Option<RpcHeader<Eth::NetworkTypes>>> {
-        self.eth.header_by_number(BlockNumberOrTag::Number(block_number)).await
+        self.eth.header_by_number(block_number.into()).await
     }
 
     /// Handler for `ots_hasCode`
@@ -116,7 +118,6 @@ where
                             TransferKind::Create => OperationType::OpCreate,
                             TransferKind::Create2 => OperationType::OpCreate2,
                             TransferKind::SelfDestruct => OperationType::OpSelfDestruct,
-                            TransferKind::EofCreate => OperationType::OpEofCreate,
                         },
                     })
                     .collect::<Vec<_>>()
@@ -174,11 +175,11 @@ where
     /// Handler for `ots_getBlockDetails`
     async fn get_block_details(
         &self,
-        block_number: u64,
+        block_number: LenientBlockNumberOrTag,
     ) -> RpcResult<BlockDetails<RpcHeader<Eth::NetworkTypes>>> {
+        let block_number = block_number.into_inner();
+        let block = self.eth.block_by_number(block_number, true);
         let block_id = block_number.into();
-        let block = self.eth.block_by_number(block_id, true);
-        let block_id = block_id.into();
         let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
         self.block_details(
@@ -205,16 +206,16 @@ where
     /// Handler for `ots_getBlockTransactions`
     async fn get_block_transactions(
         &self,
-        block_number: u64,
+        block_number: LenientBlockNumberOrTag,
         page_number: usize,
         page_size: usize,
     ) -> RpcResult<
         OtsBlockTransactions<RpcTransaction<Eth::NetworkTypes>, RpcHeader<Eth::NetworkTypes>>,
     > {
-        let block_id = block_number.into();
+        let block_number = block_number.into_inner();
         // retrieve full block and its receipts
-        let block = self.eth.block_by_number(block_id, true);
-        let block_id = block_id.into();
+        let block = self.eth.block_by_number(block_number, true);
+        let block_id = block_number.into();
         let receipts = self.eth.block_receipts(block_id);
         let (block, receipts) = futures::try_join!(block, receipts)?;
 
@@ -240,15 +241,6 @@ where
 
         // Crop transactions
         *transactions = transactions.drain(page_start..page_end).collect::<Vec<_>>();
-
-        // The input field returns only the 4 bytes method selector instead of the entire
-        // calldata byte blob
-        // See also: <https://github.com/ledgerwatch/erigon/blob/aefb97b07d1c4fd32a66097a24eddd8f6ccacae0/turbo/jsonrpc/otterscan_api.go#L610-L617>
-        for tx in transactions.iter_mut() {
-            if tx.input().len() > 4 {
-                Eth::TransactionCompat::otterscan_api_truncate_input(tx);
-            }
-        }
 
         // Crop receipts and transform them into OtsTransactionReceipt
         let timestamp = Some(block.header.timestamp());
@@ -293,7 +285,7 @@ where
     async fn search_transactions_before(
         &self,
         _address: Address,
-        _block_number: u64,
+        _block_number: LenientBlockNumberOrTag,
         _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
@@ -303,7 +295,7 @@ where
     async fn search_transactions_after(
         &self,
         _address: Address,
-        _block_number: u64,
+        _block_number: LenientBlockNumberOrTag,
         _page_size: usize,
     ) -> RpcResult<TransactionsWithReceipts> {
         Err(internal_rpc_err("unimplemented"))
@@ -348,8 +340,11 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                |tx_info, inspector, _, _, _| {
-                    Ok(inspector.into_parity_builder().into_localized_transaction_traces(tx_info))
+                |tx_info, ctx| {
+                    Ok(ctx
+                        .inspector
+                        .into_parity_builder()
+                        .into_localized_transaction_traces(tx_info))
                 },
             )
             .await

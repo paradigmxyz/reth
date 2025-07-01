@@ -1,5 +1,5 @@
 use crate::utils::eth_payload_attributes;
-use alloy_eips::{calc_next_block_base_fee, eip2718::Encodable2718};
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{Address, B256, U256};
 use alloy_provider::{network::EthereumWallet, Provider, ProviderBuilder, SendableTx};
 use alloy_rpc_types_beacon::relay::{
@@ -9,7 +9,7 @@ use alloy_rpc_types_beacon::relay::{
 use alloy_rpc_types_engine::{BlobsBundleV1, ExecutionPayloadV3};
 use alloy_rpc_types_eth::TransactionRequest;
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_chainspec::{ChainSpecBuilder, EthChainSpec, MAINNET};
 use reth_e2e_test_utils::setup_engine;
 use reth_node_ethereum::EthereumNode;
 use reth_payload_primitives::BuiltPayload;
@@ -45,8 +45,14 @@ async fn test_fee_history() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) =
-        setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
@@ -92,14 +98,9 @@ async fn test_fee_history() -> eyre::Result<()> {
             .unwrap()
             .header;
         for block in (latest_block + 2 - block_count)..=latest_block {
-            let expected_base_fee = calc_next_block_base_fee(
-                prev_header.gas_used,
-                prev_header.gas_limit,
-                prev_header.base_fee_per_gas.unwrap(),
-                chain_spec.base_fee_params_at_block(block),
-            );
-
             let header = provider.get_block_by_number(block.into()).await?.unwrap().header;
+            let expected_base_fee =
+                chain_spec.next_block_base_fee(&prev_header, header.timestamp).unwrap();
 
             assert_eq!(header.base_fee_per_gas.unwrap(), expected_base_fee);
             assert_eq!(
@@ -127,8 +128,14 @@ async fn test_flashbots_validate_v3() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) =
-        setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))
@@ -203,8 +210,14 @@ async fn test_flashbots_validate_v4() -> eyre::Result<()> {
             .build(),
     );
 
-    let (mut nodes, _tasks, wallet) =
-        setup_engine::<EthereumNode>(1, chain_spec.clone(), false, eth_payload_attributes).await?;
+    let (mut nodes, _tasks, wallet) = setup_engine::<EthereumNode>(
+        1,
+        chain_spec.clone(),
+        false,
+        Default::default(),
+        eth_payload_attributes,
+    )
+    .await?;
     let mut node = nodes.pop().unwrap();
     let provider = ProviderBuilder::new()
         .wallet(EthereumWallet::new(wallet.wallet_gen().swap_remove(0)))

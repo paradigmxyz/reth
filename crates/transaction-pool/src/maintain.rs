@@ -100,7 +100,11 @@ pub fn maintain_transaction_pool_future<N, Client, P, St, Tasks>(
 ) -> BoxFuture<'static, ()>
 where
     N: NodePrimitives,
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Header = N::BlockHeader>
+        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
+        + Clone
+        + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -122,7 +126,11 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
     config: MaintainPoolConfig,
 ) where
     N: NodePrimitives,
-    Client: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider + Clone + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Header = N::BlockHeader>
+        + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
+        + Clone
+        + 'static,
     P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
@@ -137,8 +145,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
             block_gas_limit: latest.gas_limit(),
             last_seen_block_hash: latest.hash(),
             last_seen_block_number: latest.number(),
-            pending_basefee: latest
-                .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(latest.timestamp()))
+            pending_basefee: chain_spec
+                .next_block_base_fee(latest.header(), latest.timestamp())
                 .unwrap_or_default(),
             pending_blob_fee: latest
                 .maybe_next_block_blob_fee(chain_spec.blob_params_at_timestamp(latest.timestamp())),
@@ -317,11 +325,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `new_tip+1`
-                let pending_block_base_fee = new_tip
-                    .header()
-                    .next_block_base_fee(
-                        chain_spec.base_fee_params_at_timestamp(new_tip.timestamp()),
-                    )
+                let pending_block_base_fee = chain_spec
+                    .next_block_base_fee(new_tip.header(), new_tip.timestamp())
                     .unwrap_or_default();
                 let pending_block_blob_fee = new_tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(new_tip.timestamp()),
@@ -423,9 +428,8 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 let chain_spec = client.chain_spec();
 
                 // fees for the next block: `tip+1`
-                let pending_block_base_fee = tip
-                    .header()
-                    .next_block_base_fee(chain_spec.base_fee_params_at_timestamp(tip.timestamp()))
+                let pending_block_base_fee = chain_spec
+                    .next_block_base_fee(tip.header(), tip.timestamp())
                     .unwrap_or_default();
                 let pending_block_blob_fee = tip.header().maybe_next_block_blob_fee(
                     chain_spec.blob_params_at_timestamp(tip.timestamp()),
@@ -715,10 +719,9 @@ mod tests {
         blobstore::InMemoryBlobStore, validate::EthTransactionValidatorBuilder,
         CoinbaseTipOrdering, EthPooledTransaction, Pool, TransactionOrigin,
     };
-    use alloy_consensus::transaction::PooledTransaction;
     use alloy_eips::eip2718::Decodable2718;
     use alloy_primitives::{hex, U256};
-    use reth_ethereum_primitives::TransactionSigned;
+    use reth_ethereum_primitives::{PooledTransactionVariant, TransactionSigned};
     use reth_fs_util as fs;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
     use reth_tasks::TaskManager;
@@ -741,7 +744,7 @@ mod tests {
         let tx_bytes = hex!(
             "02f87201830655c2808505ef61f08482565f94388c818ca8b9251b393131c08a736a67ccb192978801049e39c4b5b1f580c001a01764ace353514e8abdfb92446de356b260e3c1225b73fc4c8876a6258d12a129a04f02294aa61ca7676061cd99f29275491218b4754b46a0248e5e42bc5091f507"
         );
-        let tx = PooledTransaction::decode_2718(&mut &tx_bytes[..]).unwrap();
+        let tx = PooledTransactionVariant::decode_2718(&mut &tx_bytes[..]).unwrap();
         let provider = MockEthProvider::default();
         let transaction = EthPooledTransaction::from_pooled(tx.try_into_recovered().unwrap());
         let tx_to_cmp = transaction.clone();

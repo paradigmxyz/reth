@@ -170,6 +170,12 @@ pub enum SparseTrieErrorKind {
     /// RLP error.
     #[error(transparent)]
     Rlp(#[from] alloy_rlp::Error),
+    /// Node not found in provider during revealing.
+    #[error("node {path:?} not found in provider during removal")]
+    NodeNotFoundInProvider {
+        /// Path to the missing node.
+        path: Nibbles,
+    },
     /// Other.
     #[error(transparent)]
     Other(#[from] Box<dyn core::error::Error + Send>),

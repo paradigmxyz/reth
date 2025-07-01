@@ -51,7 +51,7 @@ pub async fn new_tx_manager(
     (transactions, network)
 }
 
-/// Directly buffer hahs into tx fetcher for testing.
+/// Directly buffer hash into tx fetcher for testing.
 pub fn buffer_hash_to_tx_fetcher(
     tx_fetcher: &mut TransactionFetcher,
     hash: TxHash,

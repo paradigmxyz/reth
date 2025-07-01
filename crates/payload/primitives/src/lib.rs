@@ -1,4 +1,6 @@
-//! This crate defines abstractions to create and update payloads (blocks)
+//! Abstractions for working with execution payloads.
+//!
+//! This crate provides types and traits for execution and building payloads.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -22,8 +24,6 @@ pub use error::{
     PayloadBuilderError, VersionSpecificValidationError,
 };
 
-/// Contains traits to abstract over payload attributes types and default implementations of the
-/// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 mod traits;
 pub use traits::{
     BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
@@ -32,22 +32,32 @@ pub use traits::{
 mod payload;
 pub use payload::{ExecutionPayload, PayloadOrAttributes};
 
-/// The types that are used by the engine API.
+/// Core trait that defines the associated types for working with execution payloads.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
-    /// The execution payload type provided as input
+    /// The format for execution payload data that can be processed and validated.
+    ///
+    /// This type represents the canonical format for block data that includes
+    /// all necessary information for execution and validation.
     type ExecutionData: ExecutionPayload;
-    /// The built payload type.
+    /// The type representing a successfully built payload/block.
     type BuiltPayload: BuiltPayload + Clone + Unpin;
 
-    /// The RPC payload attributes type the CL node emits via the engine API.
+    /// Attributes that specify how a payload should be constructed.
+    ///
+    /// These attributes typically come from external sources (e.g., consensus layer over RPC such
+    /// as the Engine API) and contain parameters like timestamp, fee recipient, and randomness.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
-    /// The payload attributes type that contains information about a running payload job.
+    /// Extended attributes used internally during payload building.
+    ///
+    /// This type augments the basic payload attributes with additional information
+    /// needed during the building process, such as unique identifiers and parent
+    /// block references.
     type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
         + Clone
         + Unpin;
 
-    /// Converts a block into an execution payload.
+    /// Converts a sealed block into the execution payload format.
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
@@ -133,6 +143,19 @@ pub fn validate_payload_timestamp(
         //    the payload does not fall within the time frame of the Prague fork.
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
+
+    let is_osaka = chain_spec.is_osaka_active_at_timestamp(timestamp);
+    if version.is_v5() && !is_osaka {
+        // From the Engine API spec:
+        // <https://github.com/ethereum/execution-apis/blob/15399c2e2f16a5f800bf3f285640357e2c245ad9/src/engine/osaka.md#specification>
+        //
+        // For `engine_getPayloadV5`
+        //
+        // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
+        //    built payload does not fall within the time frame of the Osaka fork.
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
     Ok(())
 }
 
@@ -155,7 +178,10 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
                     .to_error(VersionSpecificValidationError::WithdrawalsNotSupportedInV1))
             }
         }
-        EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 |
+        EngineApiMessageVersion::V5 => {
             if is_shanghai_active && !has_withdrawals {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::NoWithdrawalsPostShanghai))
@@ -256,7 +282,7 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
                 ))
             }
         }
-        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 => {
+        EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4 | EngineApiMessageVersion::V5 => {
             if !has_parent_beacon_block_root {
                 return Err(validation_kind
                     .to_error(VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun))
@@ -350,12 +376,16 @@ pub enum EngineApiMessageVersion {
     /// Version 3
     ///
     /// Added in the Cancun hardfork.
-    #[default]
     V3 = 3,
     /// Version 4
     ///
     /// Added in the Prague hardfork.
+    #[default]
     V4 = 4,
+    /// Version 5
+    ///
+    /// Added in the Osaka hardfork.
+    V5 = 5,
 }
 
 impl EngineApiMessageVersion {
@@ -377,6 +407,11 @@ impl EngineApiMessageVersion {
     /// Returns true if the version is V4.
     pub const fn is_v4(&self) -> bool {
         matches!(self, Self::V4)
+    }
+
+    /// Returns true if the version is V5.
+    pub const fn is_v5(&self) -> bool {
+        matches!(self, Self::V5)
     }
 }
 

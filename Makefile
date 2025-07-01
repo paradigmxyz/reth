@@ -65,7 +65,7 @@ RUST_BUILD_FLAGS =
 # Enable static linking to ensure reproducibility across builds
 RUST_BUILD_FLAGS += --C target-feature=+crt-static
 # Set the linker to use static libgcc to ensure reproducibility across builds
-RUST_BUILD_FLAGS += -Clink-arg=-static-libgcc
+RUST_BUILD_FLAGS += -C link-arg=-static-libgcc
 # Remove build ID from the binary to ensure reproducibility across builds
 RUST_BUILD_FLAGS += -C link-arg=-Wl,--build-id=none
 # Remove metadata hash from symbol names to ensure reproducible builds
@@ -205,6 +205,18 @@ $(EF_TESTS_DIR):
 .PHONY: ef-tests
 ef-tests: $(EF_TESTS_DIR) ## Runs Ethereum Foundation tests.
 	cargo nextest run -p ef-tests --features ef-tests
+
+##@ reth-bench
+
+.PHONY: reth-bench
+reth-bench: ## Build the reth-bench binary into the `target` directory.
+	cargo build --manifest-path bin/reth-bench/Cargo.toml --features "$(FEATURES)" --profile "$(PROFILE)"
+
+.PHONY: install-reth-bech
+install-reth-bench: ## Build and install the reth binary under `~/.cargo/bin`.
+	cargo install --path bin/reth-bench --bin reth-bench --force --locked \
+		--features "$(FEATURES)" \
+		--profile "$(PROFILE)"
 
 ##@ Docker
 
@@ -356,7 +368,7 @@ db-tools: ## Compile MDBX debugging tools.
 .PHONY: update-book-cli
 update-book-cli: build-debug ## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./book/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
+	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.
@@ -391,6 +403,17 @@ clippy:
 	--benches \
 	--all-features \
 	-- -D warnings
+
+clippy-op-dev:
+	cargo +nightly clippy \
+	--bin op-reth \
+	--workspace \
+	--lib \
+	--examples \
+	--tests \
+	--benches \
+	--locked \
+	--all-features
 
 lint-codespell: ensure-codespell
 	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"

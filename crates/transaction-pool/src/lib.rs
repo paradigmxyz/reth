@@ -12,6 +12,127 @@
 //!    - monitoring memory footprint and enforce pool size limits
 //!    - storing blob data for transactions in a separate blobstore on insertion
 //!
+//! ## Transaction Flow: From Network/RPC to Pool
+//!
+//! Transactions enter the pool through two main paths:
+//!
+//! ### 1. Network Path (P2P)
+//!
+//! ```text
+//! Network Peer
+//!     ↓
+//! Transactions or NewPooledTransactionHashes message
+//!     ↓
+//! TransactionsManager (crates/net/network/src/transactions/mod.rs)
+//!     │
+//!     ├─→ For Transactions message:
+//!     │   ├─→ Validates message format
+//!     │   ├─→ Checks if transaction already known
+//!     │   ├─→ Marks peer as having seen the transaction
+//!     │   └─→ Queues for import
+//!     │
+//!     └─→ For NewPooledTransactionHashes message:
+//!         ├─→ Filters out already known transactions
+//!         ├─→ Queues unknown hashes for fetching
+//!         ├─→ Sends GetPooledTransactions request
+//!         ├─→ Receives PooledTransactions response
+//!         └─→ Queues fetched transactions for import
+//!             ↓
+//! pool.add_external_transactions() [Origin: External]
+//!     ↓
+//! Transaction Validation & Pool Addition
+//! ```
+//!
+//! ### 2. RPC Path (Local submission)
+//!
+//! ```text
+//! eth_sendRawTransaction RPC call
+//!     ├─→ Decodes raw bytes
+//!     └─→ Recovers sender
+//!         ↓
+//! pool.add_transaction() [Origin: Local]
+//!     ↓
+//! Transaction Validation & Pool Addition
+//! ```
+//!
+//! ### Transaction Origins
+//!
+//! - **Local**: Transactions submitted via RPC (trusted, may have different fee requirements)
+//! - **External**: Transactions from network peers (untrusted, subject to stricter validation)
+//! - **Private**: Local transactions that should not be propagated to the network
+//!
+//! ## Validation Process
+//!
+//! ### Stateless Checks  
+//!
+//! Ethereum transactions undergo several stateless checks:
+//!
+//! - **Transaction Type**: Fork-dependent support (Legacy always, EIP-2930/1559/4844/7702 need
+//!   activation)
+//! - **Size**: Input data ≤ 128KB (default)
+//! - **Gas**: Limit ≤ block gas limit
+//! - **Fees**: Priority fee ≤ max fee; local tx fee cap; external minimum priority fee
+//! - **Chain ID**: Must match current chain
+//! - **Intrinsic Gas**: Sufficient for data and access lists
+//! - **Blobs** (EIP-4844): Valid count, KZG proofs
+//!
+//! ### Stateful Checks
+//!
+//! 1. **Sender**: No bytecode (unless EIP-7702 delegated in Prague)
+//! 2. **Nonce**: ≥ account nonce
+//! 3. **Balance**: Covers value + (`gas_limit` × `max_fee_per_gas`)
+//!
+//! ### Common Errors
+//!
+//! - [`NonceNotConsistent`](reth_primitives_traits::transaction::error::InvalidTransactionError::NonceNotConsistent): Nonce too low
+//! - [`InsufficientFunds`](reth_primitives_traits::transaction::error::InvalidTransactionError::InsufficientFunds): Insufficient balance
+//! - [`ExceedsGasLimit`](crate::error::InvalidPoolTransactionError::ExceedsGasLimit): Gas limit too
+//!   high
+//! - [`SignerAccountHasBytecode`](reth_primitives_traits::transaction::error::InvalidTransactionError::SignerAccountHasBytecode): EOA has code
+//! - [`Underpriced`](crate::error::InvalidPoolTransactionError::Underpriced): Fee too low
+//! - [`ReplacementUnderpriced`](crate::error::PoolErrorKind::ReplacementUnderpriced): Replacement
+//!   transaction fee too low
+//! - Blob errors:
+//!   - [`MissingEip4844BlobSidecar`](crate::error::Eip4844PoolTransactionError::MissingEip4844BlobSidecar): Missing sidecar
+//!   - [`InvalidEip4844Blob`](crate::error::Eip4844PoolTransactionError::InvalidEip4844Blob):
+//!     Invalid blob proofs
+//!   - [`NoEip4844Blobs`](crate::error::Eip4844PoolTransactionError::NoEip4844Blobs): EIP-4844
+//!     transaction without blobs
+//!   - [`TooManyEip4844Blobs`](crate::error::Eip4844PoolTransactionError::TooManyEip4844Blobs): Too
+//!     many blobs
+//!
+//! ## Subpool Design
+//!
+//! The pool maintains four distinct subpools, each serving a specific purpose
+//!
+//! ### Subpools
+//!
+//! 1. **Pending**: Ready for inclusion (no gaps, sufficient balance/fees)
+//! 2. **Queued**: Future transactions (nonce gaps or insufficient balance)
+//! 3. **`BaseFee`**: Valid but below current base fee
+//! 4. **Blob**: EIP-4844 transactions not pending due to insufficient base fee or blob fee
+//!
+//! ### State Transitions
+//!
+//! Transactions move between subpools based on state changes:
+//!
+//! ```text
+//! Queued ─────────→ BaseFee/Blob ────────→ Pending
+//!   ↑                      ↑                       │
+//!   │                      │                       │
+//!   └────────────────────┴─────────────────────┘
+//!         (demotions due to state changes)
+//! ```
+//!
+//! **Promotions**: Nonce gaps filled, balance/fee improvements
+//! **Demotions**: Nonce gaps created, balance/fee degradation
+//!
+//! ## Pool Maintenance
+//!
+//! 1. **Block Updates**: Removes mined txs, updates accounts/fees, triggers movements
+//! 2. **Size Enforcement**: Discards worst transactions when limits exceeded
+//! 3. **Propagation**: External (always), Local (configurable), Private (never)
+//!
 //! ## Assumptions
 //!
 //! ### Transaction type
@@ -41,11 +162,7 @@
 //!
 //! ### State Changes
 //!
-//! Once a new block is mined, the pool needs to be updated with a changeset in order to:
-//!
-//!   - remove mined transactions
-//!   - update using account changes: balance changes
-//!   - base fee updates
+//! New blocks trigger pool updates via changesets (see Pool Maintenance).
 //!
 //! ## Implementation details
 //!
@@ -118,9 +235,10 @@
 //! use reth_transaction_pool::{TransactionValidationTaskExecutor, Pool};
 //! use reth_transaction_pool::blobstore::InMemoryBlobStore;
 //! use reth_transaction_pool::maintain::{maintain_transaction_pool_future};
+//! use alloy_consensus::Header;
 //!
 //!  async fn t<C, St>(client: C, stream: St)
-//!    where C: StateProviderFactory + BlockReaderIdExt + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
+//!    where C: StateProviderFactory + BlockReaderIdExt<Header = Header> + ChainSpecProvider<ChainSpec = ChainSpec> + Clone + 'static,
 //!     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
 //!     {
 //!     let blob_store = InMemoryBlobStore::default();
@@ -173,7 +291,10 @@ pub use crate::{
     },
 };
 use crate::{identifier::TransactionId, pool::PoolInner};
-use alloy_eips::eip4844::{BlobAndProofV1, BlobTransactionSidecar};
+use alloy_eips::{
+    eip4844::{BlobAndProofV1, BlobAndProofV2},
+    eip7594::BlobTransactionSidecarVariant,
+};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use aquamarine as _;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -203,9 +324,9 @@ mod traits;
 pub mod test_utils;
 
 /// Type alias for default ethereum transaction pool
-pub type EthTransactionPool<Client, S> = Pool<
-    TransactionValidationTaskExecutor<EthTransactionValidator<Client, EthPooledTransaction>>,
-    CoinbaseTipOrdering<EthPooledTransaction>,
+pub type EthTransactionPool<Client, S, T = EthPooledTransaction> = Pool<
+    TransactionValidationTaskExecutor<EthTransactionValidator<Client, T>>,
+    CoinbaseTipOrdering<T>,
     S,
 >;
 
@@ -245,10 +366,15 @@ where
     async fn validate_all(
         &self,
         origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = V::Transaction>,
+        transactions: impl IntoIterator<Item = V::Transaction> + Send,
     ) -> Vec<(TxHash, TransactionValidationOutcome<V::Transaction>)> {
-        futures_util::future::join_all(transactions.into_iter().map(|tx| self.validate(origin, tx)))
+        self.pool
+            .validator()
+            .validate_transactions_with_origin(origin, transactions)
             .await
+            .into_iter()
+            .map(|tx| (tx.tx_hash(), tx))
+            .collect()
     }
 
     /// Validates the given transaction
@@ -584,29 +710,36 @@ where
     fn get_blob(
         &self,
         tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         self.pool.blob_store().get(tx_hash)
     }
 
     fn get_all_blobs(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecar>)>, BlobStoreError> {
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
         self.pool.blob_store().get_all(tx_hashes)
     }
 
     fn get_all_blobs_exact(
         &self,
         tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecar>>, BlobStoreError> {
+    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
         self.pool.blob_store().get_exact(tx_hashes)
     }
 
-    fn get_blobs_for_versioned_hashes(
+    fn get_blobs_for_versioned_hashes_v1(
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        self.pool.blob_store().get_by_versioned_hashes(versioned_hashes)
+        self.pool.blob_store().get_by_versioned_hashes_v1(versioned_hashes)
+    }
+
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes_v2(versioned_hashes)
     }
 }
 

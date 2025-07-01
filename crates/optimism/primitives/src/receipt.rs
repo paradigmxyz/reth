@@ -2,7 +2,10 @@ use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, Receipt, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, Typed2718,
 };
-use alloy_eips::{eip2718::Eip2718Result, Decodable2718, Encodable2718};
+use alloy_eips::{
+    eip2718::{Eip2718Result, IsTyped2718},
+    Decodable2718, Encodable2718,
+};
 use alloy_primitives::{Bloom, Log};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use op_alloy_consensus::{OpDepositReceipt, OpTxType};
@@ -58,6 +61,17 @@ impl OpReceipt {
             Self::Eip1559(receipt) |
             Self::Eip7702(receipt) => receipt,
             Self::Deposit(receipt) => &mut receipt.inner,
+        }
+    }
+
+    /// Consumes this and returns the inner [`Receipt`].
+    pub fn into_receipt(self) -> Receipt {
+        match self {
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt,
+            Self::Deposit(receipt) => receipt.inner,
         }
     }
 
@@ -351,22 +365,36 @@ impl Typed2718 for OpReceipt {
     }
 }
 
+impl IsTyped2718 for OpReceipt {
+    fn is_type(type_id: u8) -> bool {
+        <OpTxType as IsTyped2718>::is_type(type_id)
+    }
+}
+
 impl InMemorySize for OpReceipt {
     fn size(&self) -> usize {
         self.as_receipt().size()
     }
 }
 
-impl reth_primitives_traits::Receipt for OpReceipt {}
-
 /// Trait for deposit receipt.
 pub trait DepositReceipt: reth_primitives_traits::Receipt {
-    /// Returns deposit receipt if it is a deposit transaction.
+    /// Converts a `Receipt` into a mutable Optimism deposit receipt.
     fn as_deposit_receipt_mut(&mut self) -> Option<&mut OpDepositReceipt>;
+
+    /// Extracts an Optimism deposit receipt from `Receipt`.
+    fn as_deposit_receipt(&self) -> Option<&OpDepositReceipt>;
 }
 
 impl DepositReceipt for OpReceipt {
     fn as_deposit_receipt_mut(&mut self) -> Option<&mut OpDepositReceipt> {
+        match self {
+            Self::Deposit(receipt) => Some(receipt),
+            _ => None,
+        }
+    }
+
+    fn as_deposit_receipt(&self) -> Option<&OpDepositReceipt> {
         match self {
             Self::Deposit(receipt) => Some(receipt),
             _ => None,
@@ -572,17 +600,17 @@ pub(super) mod serde_bincode_compat {
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::OpReceipt<'_>")]
-                reseipt: OpReceipt,
+                receipt: OpReceipt,
             }
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
             let mut data = Data {
-                reseipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+                receipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
             };
-            let success = data.reseipt.as_receipt_mut().status.coerce_status();
+            let success = data.receipt.as_receipt_mut().status.coerce_status();
             // // ensure we don't have an invalid poststate variant
-            data.reseipt.as_receipt_mut().status = success.into();
+            data.receipt.as_receipt_mut().status = success.into();
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
