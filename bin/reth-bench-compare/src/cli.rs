@@ -222,7 +222,6 @@ async fn run_benchmark_workflow(
 ) -> Result<()> {
     let refs = [&args.baseline_ref, &args.feature_ref];
     let ref_types = ["baseline", "feature"];
-    let mut baseline_csv_path: Option<PathBuf> = None;
 
     for (i, &git_ref) in refs.iter().enumerate() {
         let ref_type = ref_types[i];
@@ -256,20 +255,8 @@ async fn run_benchmark_workflow(
         // Run benchmark
         let output_dir = comparison_generator.get_ref_output_dir(ref_type);
 
-        if ref_type == "baseline" {
-            // Run baseline benchmark without comparison
-            benchmark_runner.run_benchmark(from_block, to_block, &output_dir).await?;
-            baseline_csv_path = Some(output_dir.join("combined_latency.csv"));
-        } else {
-            // Run feature benchmark with baseline comparison
-            if let Some(ref baseline_csv) = baseline_csv_path {
-                benchmark_runner
-                    .run_benchmark_with_baseline(from_block, to_block, &output_dir, baseline_csv)
-                    .await?;
-            } else {
-                return Err(eyre!("Baseline CSV not available for feature reference comparison"));
-            }
-        }
+        // Run benchmark (comparison logic is handled separately by ComparisonGenerator)
+        benchmark_runner.run_benchmark(from_block, to_block, &output_dir).await?;
 
         // Stop node
         node_manager.stop_node(&mut node_process).await?;
