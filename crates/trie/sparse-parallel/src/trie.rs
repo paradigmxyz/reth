@@ -112,9 +112,9 @@ impl ParallelSparseTrie {
     ///
     /// If we have an extension node 0x → 0x123 in the upper trie, and we're inserting nodes
     /// at 0x1234, 0x1235, and 0x1236:
-    /// - Incorrect: Create subtrie with path 0x12. subtrie.update_leaf would not be able to
+    /// - Incorrect: Create subtrie with path 0x12. `subtrie.update_leaf` would not be able to
     /// traverse here because it starts at the subtrie path.
-    /// - Correct: Create subtrie with path 0x123. Here subtrie.update_leaf would start at 0x123,
+    /// - Correct: Create subtrie with path 0x123. Here `subtrie.update_leaf` would start at 0x123,
     /// correctly find the branch node, and proceed normally.
     ///
     /// The method also handles path updates: if a subtrie exists with path 0x12345 and we
@@ -984,9 +984,8 @@ impl SparseSubtrie {
     /// Updates or inserts a leaf node at the specified key path with the provided RLP-encoded
     /// value.
     ///
-    /// This method updates the internal prefix set and, if the leaf did not previously exist,
-    /// adjusts the trie structure by inserting new leaf nodes, splitting branch nodes, or
-    /// collapsing extension nodes as needed.
+    /// If the leaf did not previously exist, this method adjusts the trie structure by inserting
+    /// new leaf nodes, splitting branch nodes, or collapsing extension nodes as needed.
     ///
     /// # Returns
     ///
@@ -1969,8 +1968,7 @@ mod tests {
             let idx = path_subtrie_index_unchecked(path);
             assert!(
                 trie.lower_subtries[idx].is_some(),
-                "Expected lower subtrie at path {:?} to exist",
-                path
+                "Expected lower subtrie at path {path:?} to exist",
             );
         }
 
@@ -1983,7 +1981,7 @@ mod tests {
             let idx = path_subtrie_index_unchecked(path);
             trie.lower_subtries[idx]
                 .as_ref()
-                .unwrap_or_else(|| panic!("Lower subtrie at path {:?} should exist", path))
+                .unwrap_or_else(|| panic!("Lower subtrie at path {path:?} should exist"))
         }
 
         /// Assert that a lower subtrie has a specific path field value
@@ -1998,13 +1996,13 @@ mod tests {
             let idx = path_subtrie_index_unchecked(&subtrie_prefix);
 
             let subtrie = trie.lower_subtries[idx].as_ref().unwrap_or_else(|| {
-                panic!("Lower subtrie at prefix {:?} should exist", subtrie_prefix)
+                panic!("Lower subtrie at prefix {subtrie_prefix:?} should exist")
             });
 
             assert_eq!(
                 subtrie.path, expected_path,
-                "Subtrie at prefix {:?} should have path {:?}, but has {:?}",
-                subtrie_prefix, expected_path, subtrie.path
+                "Subtrie at prefix {subtrie_prefix:?} should have path {expected_path:?}, but has {:?}",
+                subtrie.path
             );
         }
 
@@ -2062,14 +2060,11 @@ mod tests {
                     for bit in expected_mask_bits {
                         assert!(
                             state_mask.is_bit_set(*bit),
-                            "Expected branch at {:?} to have bit {} set, instead mask is: {:?}",
-                            path,
-                            bit,
-                            state_mask
+                            "Expected branch at {path:?} to have bit {bit} set, instead mask is: {state_mask:?}",
                         );
                     }
                 }
-                node => panic!("Expected branch node at {:?}, found {:?}", path, node),
+                node => panic!("Expected branch node at {path:?}, found {node:?}"),
             }
             self
         }
@@ -2079,11 +2074,10 @@ mod tests {
                 Some(SparseNode::Leaf { key, .. }) => {
                     assert_eq!(
                         *key, *expected_key,
-                        "Expected leaf at {:?} to have key {:?}, found {:?}",
-                        path, expected_key, key
+                        "Expected leaf at {path:?} to have key {expected_key:?}, found {key:?}",
                     );
                 }
-                node => panic!("Expected leaf node at {:?}, found {:?}", path, node),
+                node => panic!("Expected leaf node at {path:?}, found {node:?}"),
             }
             self
         }
@@ -2093,11 +2087,10 @@ mod tests {
                 Some(SparseNode::Extension { key, .. }) => {
                     assert_eq!(
                         *key, *expected_key,
-                        "Expected extension at {:?} to have key {:?}, found {:?}",
-                        path, expected_key, key
+                        "Expected extension at {path:?} to have key {expected_key:?}, found {key:?}",
                     );
                 }
-                node => panic!("Expected extension node at {:?}, found {:?}", path, node),
+                node => panic!("Expected extension node at {path:?}, found {node:?}"),
             }
             self
         }
@@ -2107,17 +2100,14 @@ mod tests {
             assert_eq!(
                 actual.map(|v| v.as_slice()),
                 Some(expected_value),
-                "Expected value at {:?} to be {:?}, found {:?}",
-                path,
-                expected_value,
-                actual
+                "Expected value at {path:?} to be {expected_value:?}, found {actual:?}",
             );
             self
         }
 
         fn has_no_value(self, path: &Nibbles) -> Self {
             let actual = self.subtrie.inner.values.get(path);
-            assert!(actual.is_none(), "Expected no value at {:?}, but found {:?}", path, actual);
+            assert!(actual.is_none(), "Expected no value at {path:?}, but found {actual:?}");
             self
         }
     }
