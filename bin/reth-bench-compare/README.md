@@ -26,7 +26,9 @@ reth-bench-compare \
   --blocks 100
 ```
 
-**Note**: The JWT secret file is automatically generated at `<datadir>/<chain>/jwt.hex` if not provided. For mainnet with default datadir, this would be `~/.local/share/reth/mainnet/jwt.hex` on Linux.
+**Notes**: 
+- The JWT secret file is automatically generated at `<datadir>/<chain>/jwt.hex` if not provided. For mainnet with default datadir, this would be `~/.local/share/reth/mainnet/jwt.hex` on Linux.
+- The `reth-bench` tool is automatically compiled and installed if not found in your PATH.
 
 ### Full Command with All Options
 
@@ -43,8 +45,7 @@ reth-bench-compare \
   --output-dir ./benchmark-comparison \
   --metrics-port 5005 \
   --sudo \
-  --draw \
-  --compile-reth-bench
+  --draw
 ```
 
 ### Using Tags
@@ -73,7 +74,6 @@ reth-bench-compare \
 | `--metrics-port` | Port for reth metrics endpoint | `5005` |
 | `--sudo` | Run reth binary with sudo (for elevated privileges) | `false` |
 | `--draw` | Generate comparison charts using Python script | `false` |
-| `--compile-reth-bench` | Compile reth-bench (by default, only reth is compiled) | `false` |
 | `--skip-git-validation` | Skip git working directory validation | `false` |
 | `--skip-compilation` | Skip reth compilation (use existing binaries) | `false` |
 
@@ -127,7 +127,7 @@ Feature Summary:
 2. **Clean Working Directory**: Git working directory must be clean (no uncommitted changes)
 3. **Reference Availability**: Both baseline and feature git references (branches/tags) must exist
 4. **Build Environment**: Must have make and rust toolchain available
-5. **reth-bench**: Available in PATH (optionally compiled by the tool)
+5. **reth-bench**: Automatically compiled and installed if not found in PATH
 6. **JWT Secret**: JWT secret file for engine API authentication (auto-generated if not provided)
 7. **Python & uv**: Required for chart generation (if using `--draw`)
 

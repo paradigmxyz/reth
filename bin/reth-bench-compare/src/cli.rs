@@ -61,10 +61,6 @@ pub struct Args {
     #[arg(long)]
     pub skip_compilation: bool,
 
-    /// Compile reth-bench (by default, only reth is compiled)
-    #[arg(long)]
-    pub compile_reth_bench: bool,
-
     /// Port for reth metrics endpoint
     #[arg(long, value_name = "PORT", default_value = "5005")]
     pub metrics_port: u16,
@@ -241,13 +237,13 @@ async fn run_benchmark_workflow(
         // Switch to target reference
         git_manager.switch_ref(git_ref)?;
 
-        // Compile reth (always) and reth-bench (only if requested)
+        // Compile reth (always) and ensure reth-bench is available
         if !args.skip_compilation {
             compilation_manager.compile_reth()?;
-            if args.compile_reth_bench {
-                compilation_manager.compile_reth_bench()?;
-            }
         }
+        
+        // Always ensure reth-bench is available (compile if not found)
+        compilation_manager.ensure_reth_bench_available()?;
 
         // Start reth node
         let mut node_process = node_manager.start_node().await?;
