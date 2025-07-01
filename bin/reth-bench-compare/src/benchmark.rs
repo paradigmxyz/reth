@@ -39,7 +39,7 @@ impl BenchmarkRunner {
 
         // Ensure output directory exists
         std::fs::create_dir_all(output_dir)
-            .wrap_err_with(|| format!("Failed to create output directory: {:?}", output_dir))?;
+            .wrap_err_with(|| format!("Failed to create output directory: {output_dir:?}"))?;
 
         // Build the reth-bench command
         let mut cmd = Command::new("reth-bench");
@@ -148,7 +148,7 @@ impl BenchmarkRunner {
 
             // Check that the file is not empty
             let metadata = std::fs::metadata(&file_path)
-                .wrap_err_with(|| format!("Failed to read metadata for {:?}", file_path))?;
+                .wrap_err_with(|| format!("Failed to read metadata for {file_path:?}"))?;
 
             if metadata.len() == 0 {
                 return Err(eyre!("Benchmark output file is empty: {:?}", file_path));
@@ -174,7 +174,7 @@ impl BenchmarkRunner {
 
         // Ensure output directory exists
         std::fs::create_dir_all(output_dir)
-            .wrap_err_with(|| format!("Failed to create output directory: {:?}", output_dir))?;
+            .wrap_err_with(|| format!("Failed to create output directory: {output_dir:?}"))?;
 
         // Verify baseline file exists
         if !baseline_csv.exists() {
