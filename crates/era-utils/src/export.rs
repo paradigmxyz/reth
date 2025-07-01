@@ -146,8 +146,7 @@ where
         let historical_root = headers
             .last()
             .map(|header| {
-                let header_converted: Header = header.clone().into();
-                let state_root = header_converted.state_root;
+                let state_root = header.state_root();
                 [state_root[0], state_root[1], state_root[2], state_root[3]]
             })
             .unwrap_or([0u8; 4]);
