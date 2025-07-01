@@ -41,4 +41,3 @@ proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
 rand_08.workspace = true
-pretty_assertions.workspace = true
