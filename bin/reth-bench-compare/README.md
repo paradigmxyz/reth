@@ -367,7 +367,25 @@ reth-bench-compare \
 # Profiles will be saved to:
 # - reth-bench-compare/profiles/v1-4-8.json.gz
 # - reth-bench-compare/profiles/my-performance-improvement.json.gz
+
+# Automatic samply servers will be started:
+# - Baseline: http://127.0.0.1:3000
+# - Feature:  http://127.0.0.1:3001
 ```
+
+### Automatic Profile Servers
+
+When profiling is enabled, the tool automatically starts two `samply load` servers at the end of the benchmark run:
+
+- **Baseline Profile**: `http://127.0.0.1:3000` - Shows the baseline reference profile
+- **Feature Profile**: `http://127.0.0.1:3001` - Shows the feature reference profile
+
+The servers keep running until you press **Ctrl+C** to exit the tool. Open the URLs in your browser to interactively explore the CPU profiles, compare call stacks, and analyze performance differences.
+
+**The tool will wait for you to:**
+1. Open the profile URLs in your browser
+2. Analyze the performance data
+3. Press Ctrl+C when you're done to stop the servers and exit
 
 ### System Requirements for Profiling
 
