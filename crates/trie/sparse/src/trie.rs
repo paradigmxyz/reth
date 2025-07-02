@@ -2058,6 +2058,8 @@ impl SparseTrieUpdates {
     }
 
     /// Clears the updates, but keeps the backing data structures allocated.
+    ///
+    /// Sets `wiped` to `false`.
     pub fn clear(&mut self) {
         self.updated_nodes.clear();
         self.removed_nodes.clear();
