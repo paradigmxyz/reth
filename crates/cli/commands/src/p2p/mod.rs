@@ -20,6 +20,22 @@ use reth_node_core::{
 pub mod bootnode;
 mod rlpx;
 
+#[derive(Debug, Clone, Parser)]
+pub struct DownloadArgs {
+    /// The number of retries per request
+    #[arg(long, default_value = "5")]
+    retries: usize,
+
+    #[command(flatten)]
+    network: NetworkArgs,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
+
+    #[command(flatten)]
+    db: DatabaseArgs,
+}
+
 /// `reth p2p` command
 #[derive(Debug, Parser)]
 pub struct Command<C: ChainSpecParser> {
@@ -39,19 +55,6 @@ pub struct Command<C: ChainSpecParser> {
     )]
     chain: Arc<C::ChainSpec>,
 
-    /// The number of retries per request
-    #[arg(long, default_value = "5")]
-    retries: usize,
-
-    #[command(flatten)]
-    network: NetworkArgs,
-
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
-
     #[command(subcommand)]
     command: Subcommands,
 }
@@ -61,12 +64,16 @@ pub struct Command<C: ChainSpecParser> {
 pub enum Subcommands {
     /// Download block header
     Header {
+        #[command(flatten)]
+        args: DownloadArgs,
         /// The header number or hash
         #[arg(value_parser = hash_or_num_value_parser)]
         id: BlockHashOrNumber,
     },
     /// Download block body
     Body {
+        #[command(flatten)]
+        args: DownloadArgs,
         /// The block number or hash
         #[arg(value_parser = hash_or_num_value_parser)]
         id: BlockHashOrNumber,
@@ -75,11 +82,21 @@ pub enum Subcommands {
     Rlpx(rlpx::Command),
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
-    /// Execute `p2p` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
-        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
-        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
+impl DownloadArgs {
+    pub async fn setup<C, N>(
+        &self,
+        chain: Arc<C>,
+        config: Option<PathBuf>,
+    ) -> eyre::Result<(
+        Arc<reth_network::NetworkHandle<N::NetworkPrimitives>>,
+        reth_network::FetchClient<N::NetworkPrimitives>,
+    )>
+    where
+        C: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
+        N: CliNodeTypes<ChainSpec = C>,
+    {
+        let data_dir = self.datadir.clone().resolve_datadir(chain.chain());
+        let config_path = config.unwrap_or_else(|| data_dir.config());
 
         // Load configuration
         let mut config = Config::from_path(&config_path).unwrap_or_default();
@@ -99,35 +116,54 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             self.network.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
         let p2p_secret_key = get_secret_key(&secret_key_path)?;
         let rlpx_socket = (self.network.addr, self.network.port).into();
-        let boot_nodes = self.chain.bootnodes().unwrap_or_default();
+        let boot_nodes = chain.bootnodes().unwrap_or_default();
 
         let net = NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(None))
             .external_ip_resolver(self.network.nat)
-            .disable_discv4_discovery_if(self.chain.chain().is_optimism())
+            .disable_discv4_discovery_if(chain.chain().is_optimism())
             .boot_nodes(boot_nodes.clone())
             .apply(|builder| {
                 self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
             })
-            .build_with_noop_provider(self.chain)
+            .build_with_noop_provider(chain)
             .manager()
             .await?;
         let network = net.handle().clone();
+        let handle = Arc::new(network);
         tokio::task::spawn(net);
 
-        let fetch_client = network.fetch_client().await?;
-        let retries = self.retries.max(1);
-        let backoff = ConstantBuilder::default().with_max_times(retries);
+        let fetch_client = handle.fetch_client().await?;
 
+        Ok((handle, fetch_client))
+    }
+
+    pub fn backoff(&self) -> ConstantBuilder {
+        ConstantBuilder::default().with_max_times(self.retries.max(1))
+    }
+}
+
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
+    /// Execute `p2p` command
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         match self.command {
-            Subcommands::Header { id } => {
+            Subcommands::Header { args, id } => {
+                let (_network, fetch_client) =
+                    args.setup::<C::ChainSpec, N>(self.chain.clone(), self.config).await?;
+                let backoff = args.backoff();
+
                 let header = (move || get_single_header(fetch_client.clone(), id))
                     .retry(backoff)
                     .notify(|err, _| println!("Error requesting header: {err}. Retrying..."))
                     .await?;
                 println!("Successfully downloaded header: {header:?}");
             }
-            Subcommands::Body { id } => {
+
+            Subcommands::Body { args, id } => {
+                let (_network, fetch_client) =
+                    args.setup::<C::ChainSpec, N>(self.chain.clone(), self.config).await?;
+                let backoff = args.backoff();
+
                 let hash = match id {
                     BlockHashOrNumber::Hash(hash) => hash,
                     BlockHashOrNumber::Number(number) => {
