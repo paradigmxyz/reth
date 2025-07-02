@@ -205,7 +205,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
 
         if let Err(e) = git_manager_cleanup.switch_branch(&original_branch_cleanup) {
             eprintln!("Failed to restore original branch: {e}");
-            eprintln!("You may need to manually run: git checkout {}", original_branch_cleanup);
+            eprintln!("You may need to manually run: git checkout {original_branch_cleanup}");
         }
         std::process::exit(1);
     })?;
