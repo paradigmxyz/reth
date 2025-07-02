@@ -165,8 +165,9 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
 
     // Initialize managers
     let git_manager = GitManager::new()?;
-    let compilation_manager = CompilationManager::new(git_manager.repo_root().to_string());
-    let node_manager = NodeManager::new(&args);
+    let output_dir = args.output_dir_path();
+    let compilation_manager = CompilationManager::new(git_manager.repo_root().to_string(), output_dir.clone());
+    let mut node_manager = NodeManager::new(&args);
     let benchmark_runner = BenchmarkRunner::new(&args);
     let mut comparison_generator = ComparisonGenerator::new(&args);
 
@@ -200,7 +201,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     let result = run_benchmark_workflow(
         &git_manager,
         &compilation_manager,
-        &node_manager,
+        &mut node_manager,
         &benchmark_runner,
         &mut comparison_generator,
         &args,
@@ -222,7 +223,7 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
 async fn run_benchmark_workflow(
     git_manager: &GitManager,
     compilation_manager: &CompilationManager,
-    node_manager: &NodeManager,
+    node_manager: &mut NodeManager,
     benchmark_runner: &BenchmarkRunner,
     comparison_generator: &mut ComparisonGenerator,
     args: &Args,
@@ -239,14 +240,17 @@ async fn run_benchmark_workflow(
 
         // Compile reth (always) and ensure reth-bench is available
         if !args.skip_compilation {
-            compilation_manager.compile_reth()?;
+            compilation_manager.compile_reth(git_ref)?;
         }
 
         // Always ensure reth-bench is available (compile if not found)
         compilation_manager.ensure_reth_bench_available()?;
 
+        // Get the binary path for this git reference
+        let binary_path = compilation_manager.get_binary_path(git_ref);
+
         // Start reth node
-        let mut node_process = node_manager.start_node().await?;
+        let mut node_process = node_manager.start_node(&binary_path).await?;
 
         // Wait for node to be ready and get its current tip (wherever it is)
         let current_tip = node_manager.wait_for_node_ready_and_get_tip().await?;

@@ -19,6 +19,7 @@ pub struct NodeManager {
     chain: Chain,
     use_sudo: bool,
     http_client: Client,
+    binary_path: Option<std::path::PathBuf>,
 }
 
 impl NodeManager {
@@ -33,23 +34,28 @@ impl NodeManager {
                 .timeout(Duration::from_secs(30))
                 .build()
                 .expect("Failed to create HTTP client"),
+            binary_path: None,
         }
     }
 
-    /// Start a reth node and return the process handle
-    pub async fn start_node(&self) -> Result<tokio::process::Child> {
+    /// Start a reth node using the specified binary path and return the process handle
+    pub async fn start_node(&mut self, binary_path: &std::path::Path) -> Result<tokio::process::Child> {
+        // Store the binary path for later use (e.g., in unwind_to_block)
+        self.binary_path = Some(binary_path.to_path_buf());
         if self.use_sudo {
             info!("Starting reth node with sudo...");
         } else {
             info!("Starting reth node...");
         }
 
+        let binary_path_str = binary_path.to_string_lossy();
+        
         let mut cmd = if self.use_sudo {
             let mut sudo_cmd = tokio::process::Command::new("sudo");
-            sudo_cmd.args(["./target/profiling/reth", "node"]);
+            sudo_cmd.args([&*binary_path_str, "node"]);
             sudo_cmd
         } else {
-            let mut reth_cmd = tokio::process::Command::new("./target/profiling/reth");
+            let mut reth_cmd = tokio::process::Command::new(&*binary_path_str);
             reth_cmd.arg("node");
             reth_cmd
         };
@@ -81,7 +87,7 @@ impl NodeManager {
             .spawn()
             .wrap_err("Failed to start reth node")?;
 
-        info!("Reth node started with PID: {:?}", child.id());
+        info!("Reth node started with PID: {:?} (binary: {})", child.id(), binary_path_str);
 
         // Stream stdout and stderr with prefixes at debug level
         if let Some(stdout) = child.stdout.take() {
@@ -211,12 +217,17 @@ impl NodeManager {
             info!("Unwinding node to block: {}", block_number);
         }
 
+        // Use the binary path from the last start_node call, or fallback to default
+        let binary_path = self.binary_path.as_ref()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "./target/profiling/reth".to_string());
+
         let mut cmd = if self.use_sudo {
             let mut sudo_cmd = std::process::Command::new("sudo");
-            sudo_cmd.args(["./target/profiling/reth", "stage", "unwind"]);
+            sudo_cmd.args([&binary_path, "stage", "unwind"]);
             sudo_cmd
         } else {
-            let mut reth_cmd = std::process::Command::new("./target/profiling/reth");
+            let mut reth_cmd = std::process::Command::new(&binary_path);
             reth_cmd.args(["stage", "unwind"]);
             reth_cmd
         };

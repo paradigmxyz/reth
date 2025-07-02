@@ -1,24 +1,49 @@
 //! Compilation operations for reth and reth-bench.
 
 use eyre::{eyre, Result, WrapErr};
-use std::process::Command;
+use std::{fs, path::PathBuf, process::Command};
 use tracing::{debug, error, info, warn};
 
 /// Manages compilation operations for reth components
 #[derive(Debug)]
 pub struct CompilationManager {
     repo_root: String,
+    output_dir: PathBuf,
 }
 
 impl CompilationManager {
     /// Create a new CompilationManager
-    pub fn new(repo_root: String) -> Self {
-        Self { repo_root }
+    pub fn new(repo_root: String, output_dir: PathBuf) -> Self {
+        Self { repo_root, output_dir }
     }
 
-    /// Compile reth using `make profiling`
-    pub fn compile_reth(&self) -> Result<()> {
-        info!("Compiling reth with profiling configuration...");
+    /// Get the path for a cached binary based on git reference
+    fn get_cached_binary_path(&self, git_ref: &str) -> PathBuf {
+        let sanitized_ref = git_ref.replace('/', "-").replace('\\', "-");
+        self.output_dir.join("bin").join(format!("reth_{}", sanitized_ref))
+    }
+
+    /// Check if a cached binary exists for the given git reference
+    pub fn has_cached_binary(&self, git_ref: &str) -> bool {
+        let binary_path = self.get_cached_binary_path(git_ref);
+        binary_path.exists()
+    }
+
+    /// Get the path to the cached binary (for use by NodeManager)
+    pub fn get_binary_path(&self, git_ref: &str) -> PathBuf {
+        self.get_cached_binary_path(git_ref)
+    }
+
+    /// Compile reth using `make profiling` and cache the binary
+    pub fn compile_reth(&self, git_ref: &str) -> Result<()> {
+        // Check if we already have a cached binary
+        let cached_path = self.get_cached_binary_path(git_ref);
+        if cached_path.exists() {
+            info!("Using cached binary for {}: {:?}", git_ref, cached_path);
+            return Ok(());
+        }
+
+        info!("Compiling reth with profiling configuration for {}...", git_ref);
 
         let output = Command::new("make")
             .arg("profiling")
@@ -64,6 +89,32 @@ impl CompilationManager {
         }
 
         info!("Reth compilation completed successfully");
+
+        // Copy the compiled binary to cache
+        let source_path = PathBuf::from(&self.repo_root).join("target/profiling/reth");
+        if !source_path.exists() {
+            return Err(eyre!("Compiled binary not found at {:?}", source_path));
+        }
+
+        // Create bin directory if it doesn't exist
+        let bin_dir = self.output_dir.join("bin");
+        fs::create_dir_all(&bin_dir)
+            .wrap_err("Failed to create bin directory")?;
+
+        // Copy binary to cache
+        fs::copy(&source_path, &cached_path)
+            .wrap_err("Failed to copy binary to cache")?;
+
+        // Make the cached binary executable
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = fs::metadata(&cached_path)?.permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&cached_path, perms)?;
+        }
+
+        info!("Cached compiled binary at: {:?}", cached_path);
         Ok(())
     }
 

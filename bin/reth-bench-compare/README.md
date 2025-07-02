@@ -92,6 +92,9 @@ The tool generates timestamped output directories with:
 
 ```
 reth-bench-compare/
+├── bin/                         # Cached compiled binaries
+│   ├── reth_main               # Compiled binary for 'main' reference
+│   └── reth_my-optimization    # Compiled binary for 'my-optimization' reference
 └── 20240101_120000/
     ├── main/                    # Actual branch/tag/commit name
     │   ├── combined_latency.csv
@@ -149,6 +152,7 @@ Feature Summary:
 - **Lock File Cleanup**: Automatically removes database and static file locks after node shutdown
 - **Validation**: Validates git state, reference existence, and build requirements before starting
 - **Error Recovery**: Comprehensive error handling with clear recovery instructions
+- **Binary Caching**: Compiled binaries are cached per git reference to speed up repeated benchmarks
 
 ## Workflow Details
 
@@ -160,7 +164,9 @@ For each git reference, the tool:
    - Handles detached HEAD state for tags and commits
 
 2. **Compilation**:
-   - Runs `make profiling` to build optimized reth binary
+   - Checks for cached binary in `reth-bench-compare/bin/reth_<REF>`
+   - If not cached, runs `make profiling` to build optimized reth binary
+   - Copies compiled binary to cache for future runs
    - Optionally compiles reth-bench if requested
    - Verifies successful compilation
 
