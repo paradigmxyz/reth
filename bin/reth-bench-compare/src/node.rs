@@ -273,7 +273,7 @@ impl NodeManager {
             let pgid = -(pid as i32);
             let nix_pgid = Pid::from_raw(pgid);
             kill(nix_pgid, Signal::SIGINT)
-                .wrap_err_with(|| format!("Failed to send SIGINT to process group {}", pid))?;
+                .wrap_err_with(|| format!("Failed to send SIGINT to process group {pid}"))?;
         }
 
         #[cfg(not(unix))]
