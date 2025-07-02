@@ -81,14 +81,13 @@ impl CompilationManager {
 
         info!("Compiling reth with profiling configuration for {}...", git_ref);
 
-        // Debug log the make command
-        debug!("Executing make command: make profiling (in directory: {})", self.repo_root);
+        let mut cmd = Command::new("make");
+        cmd.arg("profiling").current_dir(&self.repo_root);
 
-        let output = Command::new("make")
-            .arg("profiling")
-            .current_dir(&self.repo_root)
-            .output()
-            .wrap_err("Failed to execute make profiling command")?;
+        // Debug log the command
+        debug!("Executing make command: {:?}", cmd);
+
+        let output = cmd.output().wrap_err("Failed to execute make profiling command")?;
 
         // Print stdout and stderr with prefixes at debug level
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -191,13 +190,13 @@ impl CompilationManager {
     pub fn install_samply(&self) -> Result<()> {
         info!("Installing samply via cargo...");
 
-        // Debug log the cargo install command
-        debug!("Executing cargo command: cargo install --locked samply");
+        let mut cmd = Command::new("cargo");
+        cmd.args(["install", "--locked", "samply"]);
 
-        let output = Command::new("cargo")
-            .args(["install", "--locked", "samply"])
-            .output()
-            .wrap_err("Failed to execute cargo install samply command")?;
+        // Debug log the command
+        debug!("Executing cargo command: {:?}", cmd);
+
+        let output = cmd.output().wrap_err("Failed to execute cargo install samply command")?;
 
         // Print stdout and stderr with prefixes at debug level
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -269,14 +268,13 @@ impl CompilationManager {
     pub fn compile_reth_bench(&self) -> Result<()> {
         info!("Compiling and installing reth-bench...");
 
-        // Debug log the make install-reth-bench command
-        debug!("Executing make command: make install-reth-bench (in directory: {})", self.repo_root);
+        let mut cmd = Command::new("make");
+        cmd.arg("install-reth-bench").current_dir(&self.repo_root);
 
-        let output = Command::new("make")
-            .arg("install-reth-bench")
-            .current_dir(&self.repo_root)
-            .output()
-            .wrap_err("Failed to execute make install-reth-bench command")?;
+        // Debug log the command
+        debug!("Executing make command: {:?}", cmd);
+
+        let output = cmd.output().wrap_err("Failed to execute make install-reth-bench command")?;
 
         // Print stdout and stderr with prefixes at debug level
         let stdout = String::from_utf8_lossy(&output.stdout);
