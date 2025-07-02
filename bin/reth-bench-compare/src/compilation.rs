@@ -168,6 +168,86 @@ impl CompilationManager {
         }
     }
 
+    /// Check if samply is available in PATH
+    pub fn is_samply_available(&self) -> bool {
+        match Command::new("which").arg("samply").output() {
+            Ok(output) => {
+                if output.status.success() {
+                    let path = String::from_utf8_lossy(&output.stdout);
+                    info!("Found samply: {}", path.trim());
+                    true
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Install samply using cargo
+    pub fn install_samply(&self) -> Result<()> {
+        info!("Installing samply via cargo...");
+
+        let output = Command::new("cargo")
+            .args(["install", "--locked", "samply"])
+            .output()
+            .wrap_err("Failed to execute cargo install samply command")?;
+
+        // Print stdout and stderr with prefixes at debug level
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+
+        for line in stdout.lines() {
+            if !line.trim().is_empty() {
+                debug!("[CARGO-SAMPLY] {}", line);
+            }
+        }
+
+        for line in stderr.lines() {
+            if !line.trim().is_empty() {
+                debug!("[CARGO-SAMPLY] {}", line);
+            }
+        }
+
+        if !output.status.success() {
+            // Print all output when installation fails
+            error!("Cargo install samply failed with exit code: {:?}", output.status.code());
+
+            if !stdout.trim().is_empty() {
+                error!("Cargo stdout:");
+                for line in stdout.lines() {
+                    error!("  {}", line);
+                }
+            }
+
+            if !stderr.trim().is_empty() {
+                error!("Cargo stderr:");
+                for line in stderr.lines() {
+                    error!("  {}", line);
+                }
+            }
+
+            return Err(eyre!(
+                "samply installation failed with exit code: {:?}",
+                output.status.code()
+            ));
+        }
+
+        info!("samply installation completed successfully");
+        Ok(())
+    }
+
+    /// Ensure samply is available, installing if necessary
+    pub fn ensure_samply_available(&self) -> Result<()> {
+        if self.is_samply_available() {
+            info!("samply is already available");
+            Ok(())
+        } else {
+            warn!("samply not found in PATH, installing...");
+            self.install_samply()
+        }
+    }
+
     /// Ensure reth-bench is available, compiling if necessary
     pub fn ensure_reth_bench_available(&self) -> Result<()> {
         if self.is_reth_bench_available() {

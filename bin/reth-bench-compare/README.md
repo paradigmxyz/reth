@@ -83,6 +83,7 @@ reth-bench-compare \
 | `--metrics-port` | Port for reth metrics endpoint | `5005` |
 | `--sudo` | Run reth binary with sudo (for elevated privileges) | `false` |
 | `--draw` | Generate comparison charts using Python script | `false` |
+| `--profile` | Enable CPU profiling with samply during benchmark runs | `false` |
 | `--skip-git-validation` | Skip git working directory validation | `false` |
 
 ## Output
@@ -94,6 +95,9 @@ reth-bench-compare/
 ├── bin/                         # Cached compiled binaries
 │   ├── reth_main               # Compiled binary for 'main' reference
 │   └── reth_my-optimization    # Compiled binary for 'my-optimization' reference
+├── profiles/                    # CPU profiling data (if --profile used)
+│   ├── main.json.gz            # Samply profile for 'main' reference
+│   └── my-optimization.json.gz # Samply profile for 'my-optimization' reference
 └── results/                     # Benchmark results directory
     └── 20240101_120000/         # Timestamped results
         ├── main/                    # Actual branch/tag/commit name
@@ -144,6 +148,7 @@ Feature Summary:
 5. **reth-bench**: Automatically compiled and installed if not found in PATH
 6. **JWT Secret**: JWT secret file for engine API authentication (auto-generated if not provided)
 7. **Python & uv**: Required for chart generation (if using `--draw`)
+8. **samply**: Automatically installed via cargo if profiling is enabled (if using `--profile`)
 
 ## Safety Features
 
@@ -316,3 +321,56 @@ RUST_LOG=debug,reth_bench_compare=trace reth-bench-compare \
   --jwt-secret ~/chain/reth/data/jwt.hex \
   --blocks 10
 ```
+
+## CPU Profiling with Samply
+
+The tool supports CPU profiling using [samply](https://github.com/mstange/samply), a command-line CPU profiler built on the Firefox Profiler.
+
+### Enable Profiling
+
+```bash
+reth-bench-compare \
+  --baseline-ref main \
+  --feature-ref my-optimization \
+  --blocks 100 \
+  --profile
+```
+
+### How It Works
+
+When `--profile` is enabled:
+
+1. **Automatic Installation**: samply is automatically installed via `cargo install --locked samply` if not found
+2. **Profile Collection**: Each reth node is run with `samply record --save-only` during benchmarking
+3. **Rate Detection**: Automatically detects and uses the system's `perf_event_max_sample_rate` for optimal sampling
+4. **File Organization**: Profile data is saved to `reth-bench-compare/profiles/REF.json.gz`
+
+### Analyzing Profiles
+
+Profile files can be opened in the [Firefox Profiler](https://profiler.firefox.com/):
+
+1. Open https://profiler.firefox.com/ in Firefox
+2. Click "Load a profile from file"
+3. Select the `.json.gz` file from `reth-bench-compare/profiles/`
+4. Analyze CPU usage, call stacks, and performance bottlenecks
+
+### Example with Profiling
+
+```bash
+# Run comparison with profiling enabled
+reth-bench-compare \
+  --baseline-ref v1.4.8 \
+  --feature-ref my-performance-improvement \
+  --blocks 200 \
+  --profile
+
+# Profiles will be saved to:
+# - reth-bench-compare/profiles/v1-4-8.json.gz
+# - reth-bench-compare/profiles/my-performance-improvement.json.gz
+```
+
+### System Requirements for Profiling
+
+- **Linux**: Requires access to `perf_events` (may need elevated privileges on some systems)
+- **macOS**: Works out of the box with system profiling tools
+- **Permissions**: May require `sudo` for system-level profiling on some configurations

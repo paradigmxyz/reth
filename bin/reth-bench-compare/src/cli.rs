@@ -76,6 +76,10 @@ pub struct Args {
     #[arg(long)]
     pub draw: bool,
 
+    /// Enable CPU profiling with samply during benchmark runs
+    #[arg(long)]
+    pub profile: bool,
+
     #[command(flatten)]
     pub logs: LogArgs,
 }
@@ -245,11 +249,16 @@ async fn run_benchmark_workflow(
         // Always ensure reth-bench is available (compile if not found)
         compilation_manager.ensure_reth_bench_available()?;
 
+        // Ensure samply is available if profiling is enabled
+        if args.profile {
+            compilation_manager.ensure_samply_available()?;
+        }
+
         // Get the binary path for this git reference
         let binary_path = compilation_manager.get_cached_binary_path(git_ref);
 
         // Start reth node
-        let mut node_process = node_manager.start_node(&binary_path).await?;
+        let mut node_process = node_manager.start_node(&binary_path, git_ref).await?;
 
         // Wait for node to be ready and get its current tip (wherever it is)
         let current_tip = node_manager.wait_for_node_ready_and_get_tip().await?;
