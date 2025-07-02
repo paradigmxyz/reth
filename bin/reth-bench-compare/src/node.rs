@@ -91,42 +91,70 @@ impl NodeManager {
                 samply_cmd.args(["--rate", &rate]);
             }
 
-            // Add separator and reth command
-            samply_cmd.args(["--", &*binary_path_str, "node"]);
+            // Build the complete reth command with all arguments
+            let mut reth_args = vec![&*binary_path_str, "node"];
+
+            // Add chain argument (skip for mainnet as it's the default)
+            let chain_str = self.chain.to_string();
+            if chain_str != "mainnet" {
+                reth_args.extend_from_slice(&["--chain", &chain_str]);
+            }
+
+            // Add datadir if specified
+            if let Some(ref datadir) = self.datadir {
+                reth_args.extend_from_slice(&["--datadir", datadir]);
+            }
+
+            // Add reth-specific arguments
+            let metrics_arg = format!("0.0.0.0:{}", self.metrics_port);
+            reth_args.extend_from_slice(&[
+                "--engine.accept-execution-requests-hash",
+                "--metrics",
+                &metrics_arg,
+                "--http",
+                "--http.api",
+                "eth",
+            ]);
+
+            // Add separator and complete reth command
+            samply_cmd.arg("--");
+            samply_cmd.args(&reth_args);
             samply_cmd
         } else {
-            if self.use_sudo {
+            let mut reth_cmd = if self.use_sudo {
                 info!("Starting reth node with sudo...");
                 let mut sudo_cmd = tokio::process::Command::new("sudo");
                 sudo_cmd.args([&*binary_path_str, "node"]);
                 sudo_cmd
             } else {
                 info!("Starting reth node...");
-                let mut reth_cmd = tokio::process::Command::new(&*binary_path_str);
-                reth_cmd.arg("node");
-                reth_cmd
+                let mut cmd = tokio::process::Command::new(&*binary_path_str);
+                cmd.arg("node");
+                cmd
+            };
+
+            // Add chain argument (skip for mainnet as it's the default)
+            let chain_str = self.chain.to_string();
+            if chain_str != "mainnet" {
+                reth_cmd.args(["--chain", &chain_str]);
             }
+
+            // Add datadir if specified
+            if let Some(ref datadir) = self.datadir {
+                reth_cmd.args(["--datadir", datadir]);
+            }
+
+            reth_cmd.args([
+                "--engine.accept-execution-requests-hash",
+                "--metrics",
+                &format!("0.0.0.0:{}", self.metrics_port),
+                "--http",
+                "--http.api",
+                "eth",
+            ]);
+
+            reth_cmd
         };
-
-        // Add chain argument (skip for mainnet as it's the default)
-        let chain_str = self.chain.to_string();
-        if chain_str != "mainnet" {
-            cmd.args(["--chain", &chain_str]);
-        }
-
-        // Add datadir if specified
-        if let Some(ref datadir) = self.datadir {
-            cmd.args(["--datadir", datadir]);
-        }
-
-        cmd.args([
-            "--engine.accept-execution-requests-hash",
-            "--metrics",
-            &format!("0.0.0.0:{}", self.metrics_port),
-            "--http",
-            "--http.api",
-            "eth",
-        ]);
 
         let mut child = cmd
             .stdout(std::process::Stdio::piped())
