@@ -691,4 +691,168 @@ where
             }
         }
     }
+
+    /// Test helper to check connection status
+    #[cfg(test)]
+    pub async fn is_connected(&self) -> bool {
+        self.conn.read().await.is_some()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures_util::{SinkExt, StreamExt};
+    use reth_network_api::noop::NoopNetwork;
+    use reth_provider::noop::NoopProvider;
+    use reth_transaction_pool::noop::NoopTransactionPool;
+    use serde_json::json;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::tungstenite::protocol::{frame::Utf8Bytes, Message};
+
+    const TEST_HOST: &str = "127.0.0.1";
+    const TEST_PORT: u16 = 0; // Let OS choose port
+
+    async fn setup_mock_server() -> (String, tokio::task::JoinHandle<()>) {
+        let listener = TcpListener::bind((TEST_HOST, TEST_PORT)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let handle = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut ws_stream = tokio_tungstenite::accept_async(stream).await.unwrap();
+
+            // Handle login
+            if let Some(Ok(Message::Text(text))) = ws_stream.next().await {
+                let value: serde_json::Value = serde_json::from_str(&text).unwrap();
+                if value["emit"][0] == "hello" {
+                    let response = json!({
+                        "emit": ["ready", []]
+                    });
+                    ws_stream
+                        .send(Message::Text(Utf8Bytes::from(response.to_string())))
+                        .await
+                        .unwrap();
+                }
+            }
+
+            // Handle ping
+            while let Some(Ok(msg)) = ws_stream.next().await {
+                if let Message::Text(text) = msg {
+                    if text.contains("node-ping") {
+                        let pong = json!({
+                            "emit": ["node-pong", {"id": "test-node"}]
+                        });
+                        ws_stream
+                            .send(Message::Text(Utf8Bytes::from(pong.to_string())))
+                            .await
+                            .unwrap();
+                    }
+                }
+            }
+        });
+
+        (addr.to_string(), handle)
+    }
+
+    #[tokio::test]
+    async fn test_connection_and_login() {
+        let (server_url, server_handle) = setup_mock_server().await;
+        let ethstats_url = format!("test-node:test-secret@{}", server_url);
+
+        let network = NoopNetwork::default();
+        let provider = NoopProvider::default();
+        let pool = NoopTransactionPool::default();
+
+        let service = EthStatsService::new(&ethstats_url, network, provider, pool)
+            .await
+            .expect("Service should connect");
+
+        // Verify connection was established
+        assert!(service.is_connected().await, "Service should be connected");
+
+        // Clean up server
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_ping_pong_flow() {
+        let (server_url, server_handle) = setup_mock_server().await;
+        let ethstats_url = format!("test-node:test-secret@{}", server_url);
+
+        let network = NoopNetwork::default();
+        let provider = NoopProvider::default();
+        let pool = NoopTransactionPool::default();
+
+        let service = EthStatsService::new(&ethstats_url, network, provider, pool)
+            .await
+            .expect("Service should connect");
+
+        // Clone the last_ping before moving service
+        let last_ping = service.last_ping.clone();
+        
+        // Spawn the service in the background
+        let service_handle = tokio::spawn(service.run());
+        
+        // Wait for the ping to be sent and pong received
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        
+        // Verify ping was acknowledged
+        let last_ping_guard = last_ping.lock().await;
+        assert!(last_ping_guard.is_none(), "Ping should have been acknowledged");
+
+        // Clean up
+        service_handle.abort();
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_history_command_handling() {
+        let (server_url, server_handle) = setup_mock_server().await;
+        let ethstats_url = format!("test-node:test-secret@{}", server_url);
+
+        let network = NoopNetwork::default();
+        let provider = NoopProvider::default();
+        let pool = NoopTransactionPool::default();
+
+        let service = EthStatsService::new(&ethstats_url, network, provider, pool)
+            .await
+            .expect("Service should connect");
+
+        // Simulate receiving a history command
+        let history_cmd = json!({
+            "emit": ["history", {"list": [1, 2, 3]}]
+        });
+
+        service.handle_message(history_cmd).await.expect("History command should be handled");
+
+        // Clean up server
+        server_handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_invalid_url_handling() {
+        let network = NoopNetwork::default();
+        let provider = NoopProvider::default();
+        let pool = NoopTransactionPool::default();
+
+        // Test missing secret
+        let result = EthStatsService::new(
+            "test-node@localhost",
+            network.clone(),
+            provider.clone(),
+            pool.clone(),
+        )
+        .await;
+        assert!(
+            matches!(result, Err(EthStatsError::InvalidUrl(_))),
+            "Should detect invalid URL format"
+        );
+
+        // Test invalid URL format
+        let result = EthStatsService::new("invalid-url", network, provider, pool).await;
+        assert!(
+            matches!(result, Err(EthStatsError::InvalidUrl(_))),
+            "Should detect invalid URL format"
+        );
+    }
 }
