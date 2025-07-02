@@ -2924,16 +2924,12 @@ mod tests {
         if should_succeed {
             assert!(
                 result.is_ok(),
-                "Expected transaction with priority fee {} to be accepted when minimum is {}",
-                priority_fee,
-                minimal_priority_fee
+                "Expected transaction with priority fee {priority_fee} to be accepted when minimum is {minimal_priority_fee}",
             );
         } else {
             assert!(
                 matches!(result, Err(InsertErr::PriorityFeeBelowMinimum { .. })),
-                "Expected transaction with priority fee {} to be rejected when minimum is {}",
-                priority_fee,
-                minimal_priority_fee
+                "Expected transaction with priority fee {priority_fee} to be rejected when minimum is {minimal_priority_fee}",
             );
         }
     }
