@@ -42,7 +42,7 @@ reth-bench-compare \
   --blocks 100 \
   --rpc-url https://reth-ethereum.ithaca.xyz/rpc \
   --jwt-secret ~/chain/reth/data/jwt.hex \
-  --output-dir ./benchmark-comparison \
+  --output-dir ./reth-bench-compare \
   --metrics-port 5005 \
   --sudo \
   --draw
@@ -79,7 +79,7 @@ reth-bench-compare \
 | `--datadir.static-files` | Path to store static files | Uses datadir |
 | `--blocks` | Number of blocks to benchmark | `100` |
 | `--rpc-url` | RPC endpoint for fetching block data | `https://reth-ethereum.ithaca.xyz/rpc` |
-| `--output-dir` | Output directory for results | `./benchmark-comparison` |
+| `--output-dir` | Output directory for results | `./reth-bench-compare` |
 | `--metrics-port` | Port for reth metrics endpoint | `5005` |
 | `--sudo` | Run reth binary with sudo (for elevated privileges) | `false` |
 | `--draw` | Generate comparison charts using Python script | `false` |
@@ -91,7 +91,7 @@ reth-bench-compare \
 The tool generates timestamped output directories with:
 
 ```
-benchmark-comparison/
+reth-bench-compare/
 └── 20240101_120000/
     ├── main/                    # Actual branch/tag/commit name
     │   ├── combined_latency.csv

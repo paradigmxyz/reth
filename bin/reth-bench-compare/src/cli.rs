@@ -50,7 +50,7 @@ pub struct Args {
     pub jwt_secret: Option<PathBuf>,
 
     /// Output directory for benchmark results
-    #[arg(long, value_name = "PATH", default_value = "./benchmark-comparison")]
+    #[arg(long, value_name = "PATH", default_value = "./reth-bench-compare")]
     pub output_dir: String,
 
     /// Skip git branch validation (useful for testing)
