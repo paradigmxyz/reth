@@ -57,7 +57,6 @@ pub struct Args {
     #[arg(long)]
     pub skip_git_validation: bool,
 
-
     /// Port for reth metrics endpoint
     #[arg(long, value_name = "PORT", default_value = "5005")]
     pub metrics_port: u16,
