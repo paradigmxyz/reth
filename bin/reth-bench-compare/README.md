@@ -368,17 +368,19 @@ reth-bench-compare \
 # - reth-bench-compare/profiles/v1-4-8.json.gz
 # - reth-bench-compare/profiles/my-performance-improvement.json.gz
 
-# Automatic samply servers will be started:
-# - Baseline: http://127.0.0.1:3000
-# - Feature:  http://127.0.0.1:3001
+# Automatic samply servers will be started on available ports:
+# - Baseline: http://127.0.0.1:<port1>
+# - Feature:  http://127.0.0.1:<port2>
 ```
 
 ### Automatic Profile Servers
 
-When profiling is enabled, the tool automatically starts two `samply load` servers at the end of the benchmark run:
+When profiling is enabled, the tool automatically starts two `samply load` servers at the end of the benchmark run on dynamically allocated ports:
 
-- **Baseline Profile**: `http://127.0.0.1:3000` - Shows the baseline reference profile
-- **Feature Profile**: `http://127.0.0.1:3001` - Shows the feature reference profile
+- **Baseline Profile**: `http://127.0.0.1:<port1>` - Shows the baseline reference profile  
+- **Feature Profile**: `http://127.0.0.1:<port2>` - Shows the feature reference profile
+
+The tool automatically finds two consecutive available ports starting from 3000 to avoid conflicts.
 
 The servers keep running until you press **Ctrl+C** to exit the tool. Open the URLs in your browser to interactively explore the CPU profiles, compare call stacks, and analyze performance differences.
 
