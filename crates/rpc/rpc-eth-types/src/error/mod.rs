@@ -922,10 +922,14 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
             InvalidPoolTransactionError::Overdraft { cost, balance } => {
                 Self::Invalid(RpcInvalidTransactionError::InsufficientFunds { cost, balance })
-            },
-            InvalidPoolTransactionError::PriorityFeeBelowMinimum { priority_fee, minimal_priority_fee } => {
-                Self::Invalid(RpcInvalidTransactionError::PriorityFeeBelowMinimum { priority_fee, minimal_priority_fee })
             }
+            InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                priority_fee,
+                minimal_priority_fee,
+            } => Self::Invalid(RpcInvalidTransactionError::PriorityFeeBelowMinimum {
+                priority_fee,
+                minimal_priority_fee,
+            }),
         }
     }
 }

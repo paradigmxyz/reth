@@ -771,8 +771,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_code_hash: Option<B256>,
     ) -> Result<(), PoolError> {
         // Short circuit if the sender has neither delegation nor pending delegation.
-        if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY))
-            && !self.all_transactions.auths.contains_key(&transaction.sender_id())
+        if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY)) &&
+            !self.all_transactions.auths.contains_key(&transaction.sender_id())
         {
             return Ok(())
         }
