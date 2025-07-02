@@ -151,6 +151,12 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
+        // Set process group for better signal handling when profiling
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
+        }
+
         Ok(cmd)
     }
 
@@ -262,10 +268,12 @@ impl NodeManager {
             
             #[cfg(unix)]
             {
-                // Use nix crate to send SIGINT when profiling on Unix systems
-                let nix_pid = Pid::from_raw(pid as i32);
-                kill(nix_pid, Signal::SIGINT)
-                    .wrap_err_with(|| format!("Failed to send SIGINT to process {}", pid))?;
+                // Use nix crate to send SIGINT to the process group when profiling on Unix systems
+                // Mimic Ctrl-C: negative value == process group id
+                let pgid = -(pid as i32);
+                let nix_pgid = Pid::from_raw(pgid);
+                kill(nix_pgid, Signal::SIGINT)
+                    .wrap_err_with(|| format!("Failed to send SIGINT to process group {}", pid))?;
             }
             
             #[cfg(not(unix))]
