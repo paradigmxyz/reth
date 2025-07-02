@@ -8,6 +8,7 @@ use reth_cli_runner::CliContext;
 use reth_node_core::args::{DatadirArgs, LogArgs};
 use reth_tracing::FileWorkerGuard;
 use std::path::PathBuf;
+use tokio::process::Command;
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -305,7 +306,7 @@ async fn run_benchmark_workflow(
 
     // Start samply servers if profiling was enabled
     if args.profile {
-        start_samply_servers(&args).await?;
+        start_samply_servers(args).await?;
     }
 
     Ok(())
@@ -338,7 +339,7 @@ async fn generate_comparison_charts(
     let script_path = "bin/reth-bench/scripts/compare_newpayload_latency.py";
 
     info!("Running Python comparison script with uv...");
-    let mut cmd = tokio::process::Command::new("uv");
+    let mut cmd = Command::new("uv");
     cmd.args([
         "run",
         script_path,
@@ -398,11 +399,11 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
     }
 
     // Get samply path
-    let samply_path = get_samply_path()?;
+    let samply_path = get_samply_path().await?;
 
     // Start baseline server on port 3000
     info!("Starting samply server for baseline '{}' on port 3000", args.baseline_ref);
-    let mut baseline_cmd = tokio::process::Command::new(&samply_path);
+    let mut baseline_cmd = Command::new(&samply_path);
     baseline_cmd
         .args(["load", "--port", "3000", &baseline_profile.to_string_lossy()])
         .stdout(std::process::Stdio::null())
@@ -417,7 +418,7 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
 
     // Start feature server on port 3001
     info!("Starting samply server for feature '{}' on port 3001", args.feature_ref);
-    let mut feature_cmd = tokio::process::Command::new(&samply_path);
+    let mut feature_cmd = Command::new(&samply_path);
     feature_cmd
         .args(["load", "--port", "3001", &feature_profile.to_string_lossy()])
         .stdout(std::process::Stdio::null())
@@ -473,10 +474,11 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
 }
 
 /// Get the absolute path to samply using 'which' command
-fn get_samply_path() -> Result<String> {
-    let output = std::process::Command::new("which")
+async fn get_samply_path() -> Result<String> {
+    let output = Command::new("which")
         .arg("samply")
         .output()
+        .await
         .wrap_err("Failed to execute 'which samply' command")?;
 
     if !output.status.success() {

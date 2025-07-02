@@ -8,6 +8,7 @@ use serde_json::{json, Value};
 use std::{fs, path::PathBuf, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader as AsyncBufReader},
+    process::Command,
     time::{sleep, timeout},
 };
 use tracing::{debug, error, info, warn};
@@ -56,10 +57,11 @@ impl NodeManager {
     }
 
     /// Get the absolute path to samply using 'which' command
-    fn get_samply_path(&self) -> Result<String> {
-        let output = std::process::Command::new("which")
+    async fn get_samply_path(&self) -> Result<String> {
+        let output = Command::new("which")
             .arg("samply")
             .output()
+            .await
             .wrap_err("Failed to execute 'which samply' command")?;
 
         if !output.status.success() {
@@ -109,11 +111,11 @@ impl NodeManager {
     }
 
     /// Create a command for profiling mode
-    fn create_profiling_command(
+    async fn create_profiling_command(
         &self,
         git_ref: &str,
         reth_args: &[String],
-    ) -> Result<tokio::process::Command> {
+    ) -> Result<Command> {
         // Create profiles directory if it doesn't exist
         let profile_dir = self.output_dir.join("profiles");
         fs::create_dir_all(&profile_dir).wrap_err("Failed to create profiles directory")?;
@@ -123,14 +125,14 @@ impl NodeManager {
         info!("Profile output: {:?}", profile_path);
 
         // Get absolute path to samply
-        let samply_path = self.get_samply_path()?;
+        let samply_path = self.get_samply_path().await?;
 
         let mut cmd = if self.use_sudo {
-            let mut sudo_cmd = tokio::process::Command::new("sudo");
+            let mut sudo_cmd = Command::new("sudo");
             sudo_cmd.arg(&samply_path);
             sudo_cmd
         } else {
-            tokio::process::Command::new(&samply_path)
+            Command::new(&samply_path)
         };
 
         // Add samply arguments
@@ -149,18 +151,18 @@ impl NodeManager {
     }
 
     /// Create a command for direct reth execution
-    fn create_direct_command(&self, reth_args: &[String]) -> tokio::process::Command {
+    fn create_direct_command(&self, reth_args: &[String]) -> Command {
         let binary_path = &reth_args[0];
 
         if self.use_sudo {
             info!("Starting reth node with sudo...");
-            let mut cmd = tokio::process::Command::new("sudo");
+            let mut cmd = Command::new("sudo");
             cmd.args(reth_args);
 
             cmd
         } else {
             info!("Starting reth node...");
-            let mut cmd = tokio::process::Command::new(binary_path);
+            let mut cmd = Command::new(binary_path);
             cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
 
             cmd
@@ -180,7 +182,7 @@ impl NodeManager {
         let (reth_args, _) = self.build_reth_args(&binary_path_str);
 
         let mut cmd = if self.enable_profiling {
-            self.create_profiling_command(git_ref, &reth_args)?
+            self.create_profiling_command(git_ref, &reth_args).await?
         } else {
             self.create_direct_command(&reth_args)
         };
@@ -272,7 +274,7 @@ impl NodeManager {
                 if lock_file.exists() {
                     if self.use_sudo {
                         // Use sudo to remove the lock file
-                        match tokio::process::Command::new("sudo")
+                        match Command::new("sudo")
                             .args(["rm", "-f", &lock_file.to_string_lossy()])
                             .spawn()
                         {
@@ -331,11 +333,11 @@ impl NodeManager {
             .unwrap_or_else(|| "./target/profiling/reth".to_string());
 
         let mut cmd = if self.use_sudo {
-            let mut sudo_cmd = std::process::Command::new("sudo");
+            let mut sudo_cmd = Command::new("sudo");
             sudo_cmd.args([&binary_path, "stage", "unwind"]);
             sudo_cmd
         } else {
-            let mut reth_cmd = std::process::Command::new(&binary_path);
+            let mut reth_cmd = Command::new(&binary_path);
             reth_cmd.args(["stage", "unwind"]);
             reth_cmd
         };
@@ -356,7 +358,7 @@ impl NodeManager {
         // Debug log the command
         debug!("Executing reth unwind command: {:?}", cmd);
 
-        let output = cmd.output().wrap_err("Failed to execute unwind command")?;
+        let output = cmd.output().await.wrap_err("Failed to execute unwind command")?;
 
         // Print stdout and stderr with prefixes at debug level
         let stdout = String::from_utf8_lossy(&output.stdout);
