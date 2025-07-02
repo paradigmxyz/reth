@@ -129,12 +129,12 @@ impl ComparisonGenerator {
         // Replace filesystem-unfriendly characters
         let sanitized_name = ref_name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-");
 
-        self.output_dir.join(&self.timestamp).join(&sanitized_name)
+        self.output_dir.join("results").join(&self.timestamp).join(&sanitized_name)
     }
 
     /// Get the main output directory for this comparison run
     pub fn get_output_dir(&self) -> PathBuf {
-        self.output_dir.join(&self.timestamp)
+        self.output_dir.join("results").join(&self.timestamp)
     }
 
     /// Add benchmark results for a reference
@@ -389,7 +389,7 @@ impl ComparisonGenerator {
 
     /// Write comparison reports to files
     async fn write_comparison_reports(&self, report: &ComparisonReport) -> Result<()> {
-        let report_dir = self.output_dir.join(&self.timestamp);
+        let report_dir = self.output_dir.join("results").join(&self.timestamp);
         fs::create_dir_all(&report_dir)
             .wrap_err_with(|| format!("Failed to create report directory: {report_dir:?}"))?;
 

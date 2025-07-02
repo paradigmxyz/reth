@@ -95,16 +95,17 @@ reth-bench-compare/
 ├── bin/                         # Cached compiled binaries
 │   ├── reth_main               # Compiled binary for 'main' reference
 │   └── reth_my-optimization    # Compiled binary for 'my-optimization' reference
-└── 20240101_120000/
-    ├── main/                    # Actual branch/tag/commit name
-    │   ├── combined_latency.csv
-    │   └── total_gas.csv
-    ├── my-optimization/         # Actual branch/tag/commit name
-    │   ├── combined_latency.csv
-    │   └── total_gas.csv
-    ├── comparison_report.json
-    ├── per_block_comparison.csv
-    └── latency_comparison.png (if --draw used)
+└── results/                     # Benchmark results directory
+    └── 20240101_120000/         # Timestamped results
+        ├── main/                    # Actual branch/tag/commit name
+        │   ├── combined_latency.csv
+        │   └── total_gas.csv
+        ├── my-optimization/         # Actual branch/tag/commit name
+        │   ├── combined_latency.csv
+        │   └── total_gas.csv
+        ├── comparison_report.json
+        ├── per_block_comparison.csv
+        └── latency_comparison.png (if --draw used)
 ```
 
 Note: Reference names are sanitized for filesystem compatibility (e.g., `feature/new-api` becomes `feature-new-api`).
