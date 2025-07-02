@@ -208,15 +208,12 @@ impl ParallelSparseTrie {
 
         // Traverse the upper subtrie to find the node to update or the subtrie to update.
         //
-        // First we check the upper subtrie, and if we would update solely the upper subtrie, we
-        // call update_leaf on the upper subtrie.
-        //
         // We stop when the next node to traverse would be in a lower subtrie, or if there are no
         // more nodes to traverse.
         while let Some(current) = next.filter(|next| next.len() < UPPER_TRIE_MAX_DEPTH) {
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie
-            match self.upper_subtrie.next_node(current, &full_path, &provider)? {
+            match self.upper_subtrie.update_next_node(current, &full_path, &provider)? {
                 LeafUpdateStep::Continue { next_node } => {
                     next = Some(next_node);
                 }
@@ -1003,7 +1000,7 @@ impl SparseSubtrie {
         // Here we are starting at the root of the subtrie, and traversing from there.
         let mut current = Some(self.path);
         while let Some(current_path) = current {
-            match self.next_node(current_path, &full_path, &provider)? {
+            match self.update_next_node(current_path, &full_path, &provider)? {
                 LeafUpdateStep::Continue { next_node } => {
                     current = Some(next_node);
                 }
@@ -1022,7 +1019,7 @@ impl SparseSubtrie {
     ///
     /// Returns a `LeafUpdateStep` containing the next node to process (if any) and
     /// the paths of nodes that were inserted during this step.
-    fn next_node(
+    fn update_next_node(
         &mut self,
         mut current: Nibbles,
         path: &Nibbles,
