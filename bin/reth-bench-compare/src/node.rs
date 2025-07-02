@@ -2,6 +2,10 @@
 
 use crate::{cli::Args, git::sanitize_git_ref};
 use eyre::{eyre, Result, WrapErr};
+#[cfg(unix)]
+use nix::sys::signal::{kill, Signal};
+#[cfg(unix)]
+use nix::unistd::Pid;
 use reqwest::Client;
 use reth_chainspec::Chain;
 use serde_json::{json, Value};
@@ -256,16 +260,27 @@ impl NodeManager {
         if self.enable_profiling {
             info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
             
-            // Use external kill command to send SIGINT when profiling
-            let output = tokio::process::Command::new("kill")
-                .args(["-INT", &pid.to_string()])
-                .output()
-                .await
-                .wrap_err("Failed to execute kill command")?;
-                
-            if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(eyre!("Failed to send SIGINT to process {}: {}", pid, stderr));
+            #[cfg(unix)]
+            {
+                // Use nix crate to send SIGINT when profiling on Unix systems
+                let nix_pid = Pid::from_raw(pid as i32);
+                kill(nix_pid, Signal::SIGINT)
+                    .wrap_err_with(|| format!("Failed to send SIGINT to process {}", pid))?;
+            }
+            
+            #[cfg(not(unix))]
+            {
+                // On non-Unix systems, fall back to using external kill command
+                let output = Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .output()
+                    .await
+                    .wrap_err("Failed to execute taskkill command")?;
+                    
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(eyre!("Failed to kill process {}: {}", pid, stderr));
+                }
             }
         } else {
             info!("Stopping reth node with SIGKILL (PID: {})...", pid);
