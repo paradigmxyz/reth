@@ -210,7 +210,9 @@ impl ParallelSparseTrie {
         //
         // We stop when the next node to traverse would be in a lower subtrie, or if there are no
         // more nodes to traverse.
-        while let Some(current) = next.filter(|next| SparseSubtrieType::path_len_is_upper(next.len())) {
+        while let Some(current) =
+            next.filter(|next| SparseSubtrieType::path_len_is_upper(next.len()))
+        {
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie
             match self.upper_subtrie.update_next_node(current, &full_path, &provider)? {
@@ -234,7 +236,8 @@ impl ParallelSparseTrie {
                 continue
             }
 
-            let node = self.upper_subtrie.nodes.remove(node_path).expect("node belongs to upper subtrie");
+            let node =
+                self.upper_subtrie.nodes.remove(node_path).expect("node belongs to upper subtrie");
 
             // If it's a leaf node, extract its value before getting mutable reference to subtrie
             let leaf_value = if let SparseNode::Leaf { key, .. } = &node {
@@ -242,7 +245,11 @@ impl ParallelSparseTrie {
                 leaf_full_path.extend(key);
                 Some((
                     leaf_full_path,
-                    self.upper_subtrie.inner.values.remove(&leaf_full_path).expect("leaf nodes have associated values entries"),
+                    self.upper_subtrie
+                        .inner
+                        .values
+                        .remove(&leaf_full_path)
+                        .expect("leaf nodes have associated values entries"),
                 ))
             } else {
                 None
@@ -1094,7 +1101,14 @@ impl SparseSubtrie {
                     // correctly.
                     if self.inner.updates.is_some() {
                         // Check if the extension node child is a hash that needs to be revealed
-                        if self.nodes.get(&current).unwrap().is_hash() {
+                        if self
+                            .nodes
+                            .get(&current)
+                            .expect(
+                                "node must exist, extension nodes are only created with children",
+                            )
+                            .is_hash()
+                        {
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.blinded_node(&current)?
                             {
