@@ -224,7 +224,7 @@ impl ParallelSparseTrie {
                     new_nodes.extend(inserted_nodes);
                     next = None;
                 }
-                LeafUpdateStep::NoOp => {
+                LeafUpdateStep::NodeNotFound => {
                     next = None;
                 }
             }
@@ -1007,7 +1007,7 @@ impl SparseSubtrie {
                 LeafUpdateStep::Continue { next_node } => {
                     current = Some(next_node);
                 }
-                LeafUpdateStep::Complete { .. } | LeafUpdateStep::NoOp => {
+                LeafUpdateStep::Complete { .. } | LeafUpdateStep::NodeNotFound => {
                     current = None;
                 }
             }
@@ -1032,7 +1032,7 @@ impl SparseSubtrie {
         debug_assert!(current.starts_with(&self.path));
         debug_assert!(path.starts_with(&current));
         let Some(node) = self.nodes.get_mut(&current) else {
-            return Ok(LeafUpdateStep::NoOp);
+            return Ok(LeafUpdateStep::NodeNotFound);
         };
         match node {
             SparseNode::Empty => {
@@ -1749,7 +1749,7 @@ impl SparseSubtrieInner {
 }
 
 /// Represents the outcome of processing a node during leaf insertion
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum LeafUpdateStep {
     /// Continue traversing to the next node
     Continue {
@@ -1761,8 +1761,9 @@ pub enum LeafUpdateStep {
         /// The node paths that were inserted during this step
         inserted_nodes: Vec<Nibbles>,
     },
-    /// No operation needed (node doesn't exist)
-    NoOp,
+    /// The node was not found
+    #[default]
+    NodeNotFound,
 }
 
 impl LeafUpdateStep {
@@ -1774,12 +1775,6 @@ impl LeafUpdateStep {
     /// Creates a step indicating completion with inserted nodes
     pub const fn complete_with_insertions(inserted_nodes: Vec<Nibbles>) -> Self {
         Self::Complete { inserted_nodes }
-    }
-}
-
-impl Default for LeafUpdateStep {
-    fn default() -> Self {
-        Self::NoOp
     }
 }
 
