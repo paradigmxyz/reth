@@ -7,7 +7,7 @@ use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::{DatadirArgs, LogArgs};
 use reth_tracing::FileWorkerGuard;
-use std::path::PathBuf;
+use std::{net::TcpListener, path::PathBuf};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
@@ -398,14 +398,18 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
         return Ok(());
     }
 
+    // Find two consecutive available ports starting from 3000
+    let (baseline_port, feature_port) = find_consecutive_ports(3000)?;
+    info!("Found available ports: {} and {}", baseline_port, feature_port);
+
     // Get samply path
     let samply_path = get_samply_path().await?;
 
-    // Start baseline server on port 3000
-    info!("Starting samply server for baseline '{}' on port 3000", args.baseline_ref);
+    // Start baseline server
+    info!("Starting samply server for baseline '{}' on port {}", args.baseline_ref, baseline_port);
     let mut baseline_cmd = Command::new(&samply_path);
     baseline_cmd
-        .args(["load", "--port", "3000", &baseline_profile.to_string_lossy()])
+        .args(["load", "--port", &baseline_port.to_string(), &baseline_profile.to_string_lossy()])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
@@ -416,11 +420,11 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
     let mut baseline_child =
         baseline_cmd.spawn().wrap_err("Failed to start samply server for baseline")?;
 
-    // Start feature server on port 3001
-    info!("Starting samply server for feature '{}' on port 3001", args.feature_ref);
+    // Start feature server
+    info!("Starting samply server for feature '{}' on port {}", args.feature_ref, feature_port);
     let mut feature_cmd = Command::new(&samply_path);
     feature_cmd
-        .args(["load", "--port", "3001", &feature_profile.to_string_lossy()])
+        .args(["load", "--port", &feature_port.to_string(), &feature_profile.to_string_lossy()])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
@@ -436,8 +440,8 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
 
     // Print access information
     println!("\n=== SAMPLY PROFILE SERVERS STARTED ===");
-    println!("Baseline '{}': http://127.0.0.1:3000", args.baseline_ref);
-    println!("Feature  '{}': http://127.0.0.1:3001", args.feature_ref);
+    println!("Baseline '{}': http://127.0.0.1:{}", args.baseline_ref, baseline_port);
+    println!("Feature  '{}': http://127.0.0.1:{}", args.feature_ref, feature_port);
     println!("\nOpen the URLs in your browser to view the profiles.");
     println!("Press Ctrl+C to stop the servers and exit.");
     println!("=========================================\n");
@@ -471,6 +475,22 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
 
     info!("Samply servers stopped.");
     Ok(())
+}
+
+/// Find two consecutive available ports starting from the given port
+fn find_consecutive_ports(start_port: u16) -> Result<(u16, u16)> {
+    for port in start_port..=65533 {
+        // Check if both port and port+1 are available
+        if is_port_available(port) && is_port_available(port + 1) {
+            return Ok((port, port + 1));
+        }
+    }
+    Err(eyre!("Could not find two consecutive available ports starting from {}", start_port))
+}
+
+/// Check if a port is available by attempting to bind to it
+fn is_port_available(port: u16) -> bool {
+    TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
 /// Get the absolute path to samply using 'which' command
