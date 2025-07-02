@@ -196,8 +196,13 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     let original_branch_cleanup = original_branch.clone();
     ctrlc::set_handler(move || {
         eprintln!("Received interrupt signal, cleaning up...");
+        
+        // Give a moment for any ongoing git operations to complete
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        
         if let Err(e) = git_manager_cleanup.switch_branch(&original_branch_cleanup) {
             eprintln!("Failed to restore original branch: {e}");
+            eprintln!("You may need to manually run: git checkout {}", original_branch_cleanup);
         }
         std::process::exit(1);
     })?;

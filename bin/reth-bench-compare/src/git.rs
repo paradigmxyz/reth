@@ -193,19 +193,64 @@ impl GitManager {
         Ok(())
     }
 
+    /// Remove Git lock files if they exist
+    fn cleanup_git_locks(&self) -> Result<()> {
+        let lock_files = [
+            "index.lock",
+            "HEAD.lock", 
+            "config.lock",
+            "refs/heads/master.lock",
+            "refs/heads/main.lock",
+        ];
+
+        let git_dir = std::path::Path::new(&self.repo_root).join(".git");
+        
+        for lock_file in &lock_files {
+            let lock_path = git_dir.join(lock_file);
+            if lock_path.exists() {
+                warn!("Removing stale Git lock file: {:?}", lock_path);
+                if let Err(e) = std::fs::remove_file(&lock_path) {
+                    warn!("Failed to remove lock file {:?}: {}", lock_path, e);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
     /// Switch to the specified git branch (for restoration after benchmarking)
     pub fn switch_branch(&self, branch: &str) -> Result<()> {
         info!("Switching to branch: {}", branch);
 
-        let output = Command::new("git")
+        // First attempt
+        let mut output = Command::new("git")
             .args(["checkout", branch])
             .current_dir(&self.repo_root)
             .output()
             .wrap_err_with(|| format!("Failed to switch to branch '{branch}'"))?;
 
+        // If first attempt fails due to lock files, clean them and retry
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(eyre!("Failed to switch to branch '{}': {}", branch, stderr));
+            if stderr.contains("index.lock") || stderr.contains(".lock") {
+                warn!("Git operation failed due to lock files, attempting cleanup...");
+                self.cleanup_git_locks()?;
+                
+                // Wait a moment for filesystem to settle
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                
+                // Retry the operation
+                output = Command::new("git")
+                    .args(["checkout", branch])
+                    .current_dir(&self.repo_root)
+                    .output()
+                    .wrap_err_with(|| format!("Failed to switch to branch '{branch}' after cleanup"))?;
+            }
+            
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(eyre!("Failed to switch to branch '{}': {}", branch, stderr));
+            }
         }
 
         // Verify we're on the correct branch
