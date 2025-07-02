@@ -222,12 +222,12 @@ impl SparseTrie {
 
     /// Returns a [`SparseTrie::Blind`] based on this one. If this instance was revealed, or was
     /// itself a `Blind` with a pre-allocated [`RevealedSparseTrie`], this will return
-    /// a `Blind` carrying a reset pre-allocated [`RevealedSparseTrie`].
-    pub fn blinded(self) -> Self {
+    /// a `Blind` carrying a cleared pre-allocated [`RevealedSparseTrie`].
+    pub fn clear(self) -> Self {
         match self {
             Self::Blind(_) => self,
             Self::Revealed(mut trie) => {
-                trie.reset();
+                trie.clear();
                 Self::Blind(Some(trie))
             }
         }
@@ -424,14 +424,9 @@ impl RevealedSparseTrie {
     /// If `retain_updates` is true, the trie will record branch node updates and deletions.
     /// This information can then be used to efficiently update an external database.
     pub fn with_updates(mut self, retain_updates: bool) -> Self {
-        self.updates = retain_updates.then(|| {
-            self.updates
-                .map(|mut u| {
-                    u.clear();
-                    u
-                })
-                .unwrap_or_default()
-        });
+        if retain_updates {
+            self.updates = Some(SparseTrieUpdates::default());
+        }
         self
     }
 
@@ -794,7 +789,7 @@ impl RevealedSparseTrie {
     /// with only an empty root node. This is used when a storage root is deleted.
     ///
     /// This should not be used when intending to re-use the trie for a fresh account/storage root;
-    /// use [`Self::reset`] for that.
+    /// use [`Self::clear`] for that.
     ///
     /// Note: All previously tracked changes to the trie are also removed.
     pub fn wipe(&mut self) {
@@ -808,7 +803,7 @@ impl RevealedSparseTrie {
     /// allocated. A [`SparseNode::Empty`] is inserted at the root.
     ///
     /// This is useful for reusing the trie without needing to reallocate memory.
-    pub fn reset(&mut self) {
+    pub fn clear(&mut self) {
         self.nodes.clear();
         self.nodes.insert(Nibbles::default(), SparseNode::Empty);
 
@@ -816,9 +811,7 @@ impl RevealedSparseTrie {
         self.branch_node_hash_masks.clear();
         self.values.clear();
         self.prefix_set.clear();
-        if let Some(updates) = self.updates.as_mut() {
-            updates.clear()
-        }
+        self.updates = None;
         self.rlp_buf.clear();
     }
 
@@ -3705,7 +3698,7 @@ mod tests {
     }
 
     #[test]
-    fn sparse_trie_reset() {
+    fn sparse_trie_clear() {
         // tests that if we fill a sparse trie with some nodes and then clear it, it has the same
         // contents as an empty sparse trie
         let provider = DefaultBlindedProvider;
@@ -3724,7 +3717,7 @@ mod tests {
             .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value, &provider)
             .unwrap();
 
-        sparse.reset();
+        sparse.clear();
 
         let empty_trie = RevealedSparseTrie::default();
         assert_eq!(empty_trie, sparse);

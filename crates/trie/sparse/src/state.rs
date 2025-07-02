@@ -81,9 +81,9 @@ impl SparseStateTrie {
         self
     }
 
-    /// Takes the `SparseTrie` from within the state root and resets it if it is not blinded.
-    pub fn take_reset_accounts_trie(&mut self) -> SparseTrie {
-        core::mem::take(&mut self.state).blinded()
+    /// Takes the `SparseTrie` from within the state root and clears it if it is not blinded.
+    pub fn take_cleared_accounts_trie(&mut self) -> SparseTrie {
+        core::mem::take(&mut self.state).clear()
     }
 
     /// Returns `true` if account was already revealed.
@@ -575,7 +575,6 @@ impl SparseStateTrie {
         Ok(Some(root_node))
     }
 
-    #[cfg(test)]
     /// Wipe the storage trie at the provided address.
     pub fn wipe_storage(&mut self, address: B256) -> SparseStateTrieResult<()> {
         if let Some(trie) = self.storages.get_mut(&address) {

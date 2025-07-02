@@ -68,7 +68,7 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A reset sparse trie, kept around to be re-used for the state root computation so that
+    /// A cleared sparse trie, kept around to be re-used for the state root computation so that
     /// allocations can be minimized.
     sparse_trie: Option<SparseTrie>,
     _marker: std::marker::PhantomData<N>,
