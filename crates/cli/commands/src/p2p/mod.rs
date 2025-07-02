@@ -16,8 +16,8 @@ use reth_node_core::{
     utils::get_single_header,
 };
 
-mod bootnode;
-mod rlpx;
+pub mod bootnode;
+pub mod rlpx;
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
@@ -70,9 +70,9 @@ pub enum Subcommands {
         #[arg(value_parser = hash_or_num_value_parser)]
         id: BlockHashOrNumber,
     },
-    // RLPx utilities
+    /// RLPx utilities
     Rlpx(rlpx::Command),
-    // Bootnode command
+    /// Bootnode command
     Bootnode(bootnode::Command),
 }
 
