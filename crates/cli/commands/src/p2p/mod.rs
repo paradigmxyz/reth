@@ -16,7 +16,7 @@ use reth_node_core::{
     utils::get_single_header,
 };
 
-pub mod bootnode;
+mod bootnode;
 mod rlpx;
 
 /// `reth p2p` command
@@ -72,6 +72,8 @@ pub enum Subcommands {
     },
     // RLPx utilities
     Rlpx(rlpx::Command),
+    // Bootnode command
+    Bootnode(bootnode::Command),
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
@@ -159,6 +161,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 println!("Successfully downloaded body: {body:?}")
             }
             Subcommands::Rlpx(command) => {
+                command.execute().await?;
+            }
+            Subcommands::Bootnode(command) => {
                 command.execute().await?;
             }
         }
