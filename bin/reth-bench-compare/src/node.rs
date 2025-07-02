@@ -1,11 +1,11 @@
 //! Node management for starting, stopping, and controlling reth instances.
 
-use crate::cli::Args;
+use crate::{cli::Args, git::sanitize_git_ref};
 use eyre::{eyre, Result, WrapErr};
 use reqwest::Client;
 use reth_chainspec::Chain;
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::{fs, path::PathBuf, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader as AsyncBufReader},
     time::{sleep, timeout},
@@ -20,6 +20,8 @@ pub struct NodeManager {
     use_sudo: bool,
     http_client: Client,
     binary_path: Option<std::path::PathBuf>,
+    enable_profiling: bool,
+    output_dir: PathBuf,
 }
 
 impl NodeManager {
@@ -35,32 +37,82 @@ impl NodeManager {
                 .build()
                 .expect("Failed to create HTTP client"),
             binary_path: None,
+            enable_profiling: args.profile,
+            output_dir: args.output_dir_path(),
         }
+    }
+
+    /// Get the perf event max sample rate from the system
+    fn get_perf_sample_rate(&self) -> Option<String> {
+        let perf_rate_file = "/proc/sys/kernel/perf_event_max_sample_rate";
+        if let Ok(content) = fs::read_to_string(perf_rate_file) {
+            let rate = content.trim();
+            if !rate.is_empty() {
+                info!("Detected perf_event_max_sample_rate: {}", rate);
+                return Some(rate.to_string());
+            }
+        }
+        None
+    }
+
+    /// Get the profile output path for a git reference
+    fn get_profile_path(&self, git_ref: &str) -> PathBuf {
+        let profile_dir = self.output_dir.join("profiles");
+        profile_dir.join(format!("{}.json.gz", sanitize_git_ref(git_ref)))
     }
 
     /// Start a reth node using the specified binary path and return the process handle
     pub async fn start_node(
         &mut self,
         binary_path: &std::path::Path,
+        git_ref: &str,
     ) -> Result<tokio::process::Child> {
         // Store the binary path for later use (e.g., in unwind_to_block)
         self.binary_path = Some(binary_path.to_path_buf());
-        if self.use_sudo {
-            info!("Starting reth node with sudo...");
-        } else {
-            info!("Starting reth node...");
-        }
-
+        
         let binary_path_str = binary_path.to_string_lossy();
 
-        let mut cmd = if self.use_sudo {
-            let mut sudo_cmd = tokio::process::Command::new("sudo");
-            sudo_cmd.args([&*binary_path_str, "node"]);
-            sudo_cmd
+        let mut cmd = if self.enable_profiling {
+            // Create profiles directory if it doesn't exist
+            let profile_dir = self.output_dir.join("profiles");
+            fs::create_dir_all(&profile_dir)
+                .wrap_err("Failed to create profiles directory")?;
+
+            let profile_path = self.get_profile_path(git_ref);
+            info!("Starting reth node with samply profiling...");
+            info!("Profile output: {:?}", profile_path);
+
+            let mut samply_cmd = if self.use_sudo {
+                let mut sudo_cmd = tokio::process::Command::new("sudo");
+                sudo_cmd.arg("samply");
+                sudo_cmd
+            } else {
+                tokio::process::Command::new("samply")
+            };
+
+            // Add samply arguments
+            samply_cmd.args(["record", "--save-only", "-o", &profile_path.to_string_lossy()]);
+
+            // Add rate argument if available
+            if let Some(rate) = self.get_perf_sample_rate() {
+                samply_cmd.args(["--rate", &rate]);
+            }
+
+            // Add separator and reth command
+            samply_cmd.args(["--", &*binary_path_str, "node"]);
+            samply_cmd
         } else {
-            let mut reth_cmd = tokio::process::Command::new(&*binary_path_str);
-            reth_cmd.arg("node");
-            reth_cmd
+            if self.use_sudo {
+                info!("Starting reth node with sudo...");
+                let mut sudo_cmd = tokio::process::Command::new("sudo");
+                sudo_cmd.args([&*binary_path_str, "node"]);
+                sudo_cmd
+            } else {
+                info!("Starting reth node...");
+                let mut reth_cmd = tokio::process::Command::new(&*binary_path_str);
+                reth_cmd.arg("node");
+                reth_cmd
+            }
         };
 
         // Add chain argument (skip for mainnet as it's the default)
