@@ -8,8 +8,8 @@ use alloy_rpc_types_beacon::relay::{
     BuilderBlockValidationRequestV5,
 };
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
-    PraguePayloadFields,
+    BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
+    ExecutionPayloadSidecar, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use core::fmt;
@@ -366,6 +366,29 @@ where
 
         Ok(versioned_hashes)
     }
+    /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
+    pub fn validate_blobs_bundl_v2(
+        &self,
+        mut blobs_bundle: BlobsBundleV2,
+    ) -> Result<Vec<B256>, ValidationApiError> {
+        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len() ||
+            blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
+        {
+            return Err(ValidationApiError::InvalidBlobsBundle)
+        }
+
+        let versioned_hashes = blobs_bundle
+            .commitments
+            .iter()
+            .map(|c| kzg_to_versioned_hash(c.as_slice()))
+            .collect::<Vec<_>>();
+
+        let sidecar = blobs_bundle.pop_sidecar(blobs_bundle.blobs.len());
+
+        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
+
+        Ok(versioned_hashes)
+    }
 
     /// Core logic for validating the builder submission v3
     async fn validate_builder_submission_v3(
@@ -399,6 +422,34 @@ where
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
                     versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
+                },
+                PraguePayloadFields {
+                    requests: RequestsOrHash::Requests(
+                        request.request.execution_requests.to_requests(),
+                    ),
+                },
+            ),
+        })?;
+
+        self.validate_message_against_block(
+            block,
+            request.request.message,
+            request.registered_gas_limit,
+        )
+        .await
+    }
+
+    /// Core logic for validating the builder submission v5
+    async fn validate_builder_submission_v5(
+        &self,
+        request: BuilderBlockValidationRequestV5,
+    ) -> Result<(), ValidationApiError> {
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V3(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: self.validate_blobs_bundl_v2(request.request.blobs_bundle)?,
                 },
                 PraguePayloadFields {
                     requests: RequestsOrHash::Requests(
