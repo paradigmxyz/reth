@@ -1,5 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory},
+    traits::SparseTrieInterface,
     LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};

@@ -5,16 +5,13 @@ use alloy_primitives::B256;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{Nibbles, TrieNode};
 
-use crate::{
-    blinded::BlindedProvider,
-    SparseTrieUpdates, TrieMasks,
-};
+use crate::{blinded::BlindedProvider, SparseTrieUpdates, TrieMasks};
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
 /// while providing a unified interface for the core trie operations needed by the
-/// SparseTrie enum.
+/// [`crate::SparseTrie`] enum.
 pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Debug {
     /// Reveals a trie node if it has not been revealed before.
     ///
@@ -57,7 +54,6 @@ pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Deb
         &mut self,
         path: Nibbles,
         value: Vec<u8>,
-        masks: TrieMasks,
         provider: P,
     ) -> SparseTrieResult<()>;
 
@@ -74,7 +70,11 @@ pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Deb
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if the removal failed.
-    fn remove_leaf<P: BlindedProvider>(&mut self, path: &Nibbles, provider: P) -> SparseTrieResult<()>;
+    fn remove_leaf<P: BlindedProvider>(
+        &mut self,
+        path: &Nibbles,
+        provider: P,
+    ) -> SparseTrieResult<()>;
 
     /// Calculates and returns the root hash of the trie.
     ///
