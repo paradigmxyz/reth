@@ -61,4 +61,4 @@ docs/vocs/node_modules
 recipe.json
 
 # Benchmark comparison output directory
-benchmark-comparison/
+reth-bench-compare/
