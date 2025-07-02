@@ -35,7 +35,7 @@ use reth_node_builder::{
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
 use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
-use reth_rpc_builder::config::RethRpcServerConfig;
+use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -188,13 +188,16 @@ where
     }
 }
 
-impl<N, EthB, EV, EB> EthereumAddOns<N, EthB, EV, EB>
+impl<N, EthB, EV, EB, RpcMiddleware> EthereumAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
     /// Replace the engine API builder.
-    pub fn with_engine_api<T>(self, engine_api_builder: T) -> EthereumAddOns<N, EthB, EV, T>
+    pub fn with_engine_api<T>(
+        self,
+        engine_api_builder: T,
+    ) -> EthereumAddOns<N, EthB, EV, T, RpcMiddleware>
     where
         T: Send,
     {
@@ -206,7 +209,7 @@ where
     pub fn with_engine_validator<T>(
         self,
         engine_validator_builder: T,
-    ) -> EthereumAddOns<N, EthB, T, EB>
+    ) -> EthereumAddOns<N, EthB, T, EB, RpcMiddleware>
     where
         T: Send,
     {
@@ -224,7 +227,8 @@ where
     }
 }
 
-impl<N, EthB, EV, EB> NodeAddOns<N> for EthereumAddOns<N, EthB, EV, EB>
+impl<N, EthB, EV, EB, RpcMiddleware> NodeAddOns<N>
+    for EthereumAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -239,6 +243,7 @@ where
     EB: EngineApiBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
+    RpcMiddleware: RethRpcMiddleware,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
