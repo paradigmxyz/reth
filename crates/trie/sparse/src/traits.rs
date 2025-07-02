@@ -1,21 +1,56 @@
 //! Traits for sparse trie implementations.
 
+use core::fmt::{Debug, Display};
+
 use alloc::vec::Vec;
 use alloy_primitives::B256;
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{Nibbles, TrieNode};
 
-use crate::{
-    blinded::BlindedProvider,
-    SparseTrieUpdates, TrieMasks,
-};
+use crate::{blinded::BlindedProvider, SparseTrieUpdates, TrieMasks};
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
 /// while providing a unified interface for the core trie operations needed by the
-/// SparseTrie enum.
-pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Debug {
+/// [`crate::SparseTrie`] enum.
+pub trait SparseTrieInterface: Default + Clone + Debug + Display {
+    /// Creates a new revealed sparse trie from the given root node.
+    ///
+    /// This function initializes the internal structures and then reveals the root.
+    /// It is a convenient method to create a trie when you already have the root node available.
+    ///
+    /// # Returns
+    ///
+    /// Self if successful, or an error if revealing fails.
+    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self>;
+
+    /// Configures the trie to retain information about updates.
+    ///
+    /// If `retain_updates` is true, the trie will record branch node updates
+    /// and deletions. This information can be used to efficiently update
+    /// an external database.
+    ///
+    /// # Arguments
+    ///
+    /// * `retain_updates` - Whether to track updates
+    ///
+    /// # Returns
+    ///
+    /// Self for method chaining.
+    fn with_updates(self, retain_updates: bool) -> Self;
+
+    /// Configures the trie to have the given root node revealed.
+    fn with_root(
+        self,
+        root: TrieNode,
+        masks: TrieMasks,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self>;
+
+    /// Reserves capacity for at least `additional` more trie nodes.
+    fn reserve_nodes(&mut self, additional: usize);
+
     /// Reveals a trie node if it has not been revealed before.
     ///
     /// This function decodes a trie node and inserts it into the trie structure.
@@ -45,9 +80,8 @@ pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Deb
     ///
     /// # Arguments
     ///
-    /// * `path` - The full path to the leaf
+    /// * `full_path` - The full path to the leaf
     /// * `value` - The new value for the leaf
-    /// * `masks` - Trie masks for branch nodes (may be ignored by some implementations)
     /// * `provider` - The blinded provider for resolving missing nodes
     ///
     /// # Returns
@@ -55,9 +89,8 @@ pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Deb
     /// `Ok(())` if successful, or an error if the update failed.
     fn update_leaf<P: BlindedProvider>(
         &mut self,
-        path: Nibbles,
+        full_path: Nibbles,
         value: Vec<u8>,
-        masks: TrieMasks,
         provider: P,
     ) -> SparseTrieResult<()>;
 
@@ -68,13 +101,17 @@ pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Deb
     ///
     /// # Arguments
     ///
-    /// * `path` - The full path to the leaf to remove
+    /// * `full_path` - The full path to the leaf to remove
     /// * `provider` - The blinded provider for resolving missing nodes
     ///
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if the removal failed.
-    fn remove_leaf<P: BlindedProvider>(&mut self, path: &Nibbles, provider: P) -> SparseTrieResult<()>;
+    fn remove_leaf<P: BlindedProvider>(
+        &mut self,
+        full_path: &Nibbles,
+        provider: P,
+    ) -> SparseTrieResult<()>;
 
     /// Calculates and returns the root hash of the trie.
     ///
@@ -86,20 +123,26 @@ pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Deb
     /// The root hash of the trie.
     fn root(&mut self) -> B256;
 
-    /// Configures the trie to retain information about updates.
+    /// Recalculates and updates the RLP hashes of subtries deeper than a certain level. The level
+    /// is defined in the implementation.
     ///
-    /// If `retain_updates` is true, the trie will record branch node updates
-    /// and deletions. This information can be used to efficiently update
-    /// an external database.
+    /// The root node is considered to be at level 0. This method is useful for optimizing
+    /// hash recalculations after localized changes to the trie structure.
+    fn update_subtrie_hashes(&mut self);
+
+    /// Retrieves a reference to the leaf value stored at the given key path, if it is revealed.
     ///
-    /// # Arguments
+    /// This method efficiently retrieves values from the trie without traversing
+    /// the entire node structure, as values are stored in a separate map.
     ///
-    /// * `retain_updates` - Whether to track updates
+    /// Note: a value can exist in the full trie and this function still returns `None`
+    /// because the value has not been revealed.
     ///
-    /// # Returns
-    ///
-    /// Self for method chaining.
-    fn with_updates(self, retain_updates: bool) -> Self;
+    /// Hence a `None` indicates two possibilities:
+    /// - The value does not exists in the trie, so it cannot be revealed
+    /// - The value has not yet been revealed. In order to determine which is true, one would need
+    ///   an exclusion proof.
+    fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>>;
 
     /// Consumes and returns the currently accumulated trie updates.
     ///
@@ -110,4 +153,19 @@ pub trait SparseTrieInterface: Default + Clone + PartialEq + Eq + core::fmt::Deb
     ///
     /// The accumulated updates, or an empty set if updates weren't being tracked.
     fn take_updates(&mut self) -> SparseTrieUpdates;
+
+    /// Removes all nodes and values from the trie, resetting it to a blank state
+    /// with only an empty root node. This is used when a storage root is deleted.
+    ///
+    /// This should not be used when intending to re-use the trie for a fresh account/storage root;
+    /// use `clear` for that.
+    ///
+    /// Note: All previously tracked changes to the trie are also removed.
+    fn wipe(&mut self);
+
+    /// This clears all data structures in the sparse trie, keeping the backing data structures
+    /// allocated. A [`crate::SparseNode::Empty`] is inserted at the root.
+    ///
+    /// This is useful for reusing the trie without needing to reallocate memory.
+    fn clear(&mut self);
 }
