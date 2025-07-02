@@ -153,7 +153,7 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        // take the account trie so that we can re-use its already allocated datastructures.
+        // take the account trie so that we can re-use its already allocated data structures.
         let trie = self.trie.take_reset_accounts_trie();
 
         Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
