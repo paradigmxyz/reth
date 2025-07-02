@@ -1,7 +1,7 @@
 //! Node management for starting, stopping, and controlling reth instances.
 
 use crate::{cli::Args, git::sanitize_git_ref};
-use eyre::{eyre, Result, WrapErr};
+use eyre::{eyre, OptionExt, Result, WrapErr};
 #[cfg(unix)]
 use nix::sys::signal::{kill, Signal};
 #[cfg(unix)]
@@ -81,7 +81,6 @@ impl NodeManager {
             return Err(eyre!("which samply returned empty path"));
         }
 
-        info!("Found samply at: {}", samply_path);
         Ok(samply_path)
     }
 
@@ -205,7 +204,11 @@ impl NodeManager {
             .spawn()
             .wrap_err("Failed to start reth node")?;
 
-        info!("Reth node started with PID: {:?} (binary: {})", child.id(), binary_path_str);
+        info!(
+            "Reth node started with PID: {:?} (binary: {})",
+            child.id().ok_or_eyre("Reth node is not running")?,
+            binary_path_str
+        );
 
         // Stream stdout and stderr with prefixes at debug level
         if let Some(stdout) = child.stdout.take() {
@@ -245,7 +248,6 @@ impl NodeManager {
             loop {
                 // Try to get tip from local RPC first
                 if let Ok(tip) = self.get_tip_from_rpc("http://localhost:8545").await {
-                    info!("Node RPC is ready at block: {}", tip);
                     return Ok(tip);
                 }
 
@@ -263,7 +265,7 @@ impl NodeManager {
     pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
         let pid = child.id().expect("Child process ID should be available");
         info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
-        
+
         #[cfg(unix)]
         {
             // Use nix crate to send SIGINT to the process group on Unix systems
@@ -273,7 +275,7 @@ impl NodeManager {
             kill(nix_pgid, Signal::SIGINT)
                 .wrap_err_with(|| format!("Failed to send SIGINT to process group {}", pid))?;
         }
-        
+
         #[cfg(not(unix))]
         {
             // On non-Unix systems, fall back to using external kill command
@@ -282,7 +284,7 @@ impl NodeManager {
                 .output()
                 .await
                 .wrap_err("Failed to execute taskkill command")?;
-                
+
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(eyre!("Failed to kill process {}: {}", pid, stderr));
@@ -290,8 +292,7 @@ impl NodeManager {
         }
 
         // Wait for the process to exit
-        let status = child.wait().await.wrap_err("Failed to wait for reth process to exit")?;
-        info!("Reth node (PID: {}) exited with status: {:?}", pid, status);
+        child.wait().await.wrap_err("Failed to wait for reth process to exit")?;
 
         Ok(())
     }
@@ -376,7 +377,7 @@ impl NodeManager {
             return Err(eyre!("Unwind command failed with exit code: {:?}", output.status.code()));
         }
 
-        info!("Successfully unwound to block: {}", block_number);
+        info!("Unwound to block: {}", block_number);
         Ok(())
     }
 

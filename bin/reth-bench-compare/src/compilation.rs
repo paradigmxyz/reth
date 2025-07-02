@@ -245,7 +245,6 @@ impl CompilationManager {
     /// Ensure samply is available, installing if necessary
     pub fn ensure_samply_available(&self) -> Result<()> {
         if self.is_samply_available() {
-            info!("samply is already available");
             Ok(())
         } else {
             warn!("samply not found in PATH, installing...");
@@ -256,7 +255,6 @@ impl CompilationManager {
     /// Ensure reth-bench is available, compiling if necessary
     pub fn ensure_reth_bench_available(&self) -> Result<()> {
         if self.is_reth_bench_available() {
-            info!("reth-bench is already available");
             Ok(())
         } else {
             warn!("reth-bench not found in PATH, compiling and installing...");
