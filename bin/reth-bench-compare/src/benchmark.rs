@@ -16,6 +16,7 @@ use tracing::{debug, error, info};
 pub struct BenchmarkRunner {
     rpc_url: String,
     jwt_secret: String,
+    wait_time: Option<String>,
 }
 
 impl BenchmarkRunner {
@@ -24,6 +25,7 @@ impl BenchmarkRunner {
         Self {
             rpc_url: args.rpc_url.clone(),
             jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
+            wait_time: args.wait_time.clone(),
         }
     }
 
@@ -58,6 +60,11 @@ impl BenchmarkRunner {
             "--output",
             &output_dir.to_string_lossy(),
         ]);
+
+        // Add wait-time argument if provided
+        if let Some(ref wait_time) = self.wait_time {
+            cmd.args(["--wait-time", wait_time]);
+        }
 
         cmd.stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -132,5 +139,36 @@ impl BenchmarkRunner {
 
         info!("Benchmark completed");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::Args;
+    use clap::Parser;
+
+    #[test]
+    fn test_wait_time_argument_passed() {
+        // Test with wait-time provided
+        let args = Args::try_parse_from([
+            "reth-bench-compare",
+            "--baseline-ref", "main",
+            "--feature-ref", "test",
+            "--wait-time", "200ms"
+        ]).unwrap();
+        
+        let runner = BenchmarkRunner::new(&args);
+        assert_eq!(runner.wait_time, Some("200ms".to_string()));
+
+        // Test without wait-time
+        let args = Args::try_parse_from([
+            "reth-bench-compare",
+            "--baseline-ref", "main",
+            "--feature-ref", "test"
+        ]).unwrap();
+        
+        let runner = BenchmarkRunner::new(&args);
+        assert_eq!(runner.wait_time, None);
     }
 }

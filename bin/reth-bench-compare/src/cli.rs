@@ -80,6 +80,10 @@ pub struct Args {
     #[arg(long)]
     pub profile: bool,
 
+    /// Wait time between engine API calls (passed to reth-bench)
+    #[arg(long, value_name = "DURATION")]
+    pub wait_time: Option<String>,
+
     #[command(flatten)]
     pub logs: LogArgs,
 }
