@@ -135,7 +135,7 @@ pub struct AddOnsContext<'a, N: FullNodeComponents> {
 /// - Access all node components and configuration during initialization
 /// - Return a handle for managing the launched services (e.g. handle to rpc server)
 ///
-/// ## How it fits into NodeBuilder
+/// ## How it fits into `NodeBuilder`
 ///
 /// In the node builder pattern, add-ons are the final layer that gets applied after all core
 /// components are configured and started. The builder flow typically follows:
