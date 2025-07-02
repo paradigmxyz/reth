@@ -18,7 +18,7 @@ use reth_node_core::{
 };
 
 pub mod bootnode;
-mod rlpx;
+pub mod rlpx;
 
 /// `reth p2p` command
 #[derive(Debug, Parser)]
@@ -71,8 +71,10 @@ pub enum Subcommands {
         #[arg(value_parser = hash_or_num_value_parser)]
         id: BlockHashOrNumber,
     },
-    // RLPx utilities
+    /// RLPx utilities
     Rlpx(rlpx::Command),
+    /// Bootnode command
+    Bootnode(bootnode::Command),
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
@@ -160,6 +162,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 println!("Successfully downloaded body: {body:?}")
             }
             Subcommands::Rlpx(command) => {
+                command.execute().await?;
+            }
+            Subcommands::Bootnode(command) => {
                 command.execute().await?;
             }
         }
