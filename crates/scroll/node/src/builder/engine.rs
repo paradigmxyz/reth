@@ -87,7 +87,7 @@ where
         // ensure block data hint is present pre euclid.
         let is_euclid_active =
             self.chainspec.is_euclid_active_at_timestamp(attributes.payload_attributes.timestamp);
-        if !is_euclid_active && attributes.block_data_hint.is_none() {
+        if !is_euclid_active && attributes.block_data_hint.is_empty() {
             return Err(EngineObjectValidationError::InvalidParams(
                 "Missing block data hint Pre-Euclid".to_string().into(),
             ));

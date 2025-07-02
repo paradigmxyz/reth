@@ -263,22 +263,26 @@ impl<Txs> ScrollBuilder<'_, Txs> {
             builder.finish(state_provider)?;
 
         // set the block fields using the hints from the payload attributes.
-        if let Some(block_data) = &ctx.config.attributes.block_data_hint {
-            let (mut scroll_block, senders) = block.split();
-            scroll_block = scroll_block.map_header(|mut header| {
-                header.extra_data = block_data.extra_data.clone();
-                header.state_root = block_data.state_root;
-                header.difficulty = block_data.difficulty;
-                if let Some(coinbase) = block_data.coinbase {
-                    header.beneficiary = coinbase;
-                }
-                if let Some(nonce) = block_data.nonce {
-                    header.nonce = nonce.into();
-                }
-                header
-            });
-            block = RecoveredBlock::new_unhashed(scroll_block, senders)
-        }
+        let (mut scroll_block, senders) = block.split();
+        scroll_block = scroll_block.map_header(|mut header| {
+            if let Some(extra_data) = &ctx.config.attributes.block_data_hint.extra_data {
+                header.extra_data = extra_data.clone();
+            }
+            if let Some(state_root) = ctx.config.attributes.block_data_hint.state_root {
+                header.state_root = state_root;
+            }
+            if let Some(coinbase) = ctx.config.attributes.block_data_hint.coinbase {
+                header.beneficiary = coinbase;
+            }
+            if let Some(nonce) = ctx.config.attributes.block_data_hint.nonce {
+                header.nonce = nonce.into()
+            }
+            if let Some(difficulty) = ctx.config.attributes.block_data_hint.difficulty {
+                header.difficulty = difficulty;
+            }
+            header
+        });
+        block = RecoveredBlock::new_unhashed(scroll_block, senders);
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         tracing::debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");

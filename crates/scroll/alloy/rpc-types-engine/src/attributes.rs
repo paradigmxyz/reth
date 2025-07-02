@@ -15,9 +15,9 @@ pub struct ScrollPayloadAttributes {
     pub transactions: Option<Vec<Bytes>>,
     /// Indicates whether the payload building job should happen with or without pool transactions.
     pub no_tx_pool: bool,
-    /// The pre-Euclid block data hint, necessary for the block builder to derive the correct block
-    /// hash.
-    pub block_data_hint: Option<BlockDataHint>,
+    /// The block data hint, used pre-Euclid by the block builder to derive the correct block
+    /// hash and post-Euclid by the sequencer to set the difficulty of the block.
+    pub block_data_hint: BlockDataHint,
     /// The gas limit for the block building task.
     pub gas_limit: Option<u64>,
 }
@@ -27,27 +27,43 @@ pub struct ScrollPayloadAttributes {
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct BlockDataHint {
-    /// The extra data for the block.
-    pub extra_data: Bytes,
-    /// The state root for the block.
-    pub state_root: B256,
+    /// The optional extra data for the block.
+    pub extra_data: Option<Bytes>,
+    /// The optional state root for the block.
+    pub state_root: Option<B256>,
     /// The optional coinbase for the block.
     pub coinbase: Option<Address>,
     /// The optional nonce for the block.
     pub nonce: Option<u64>,
-    /// The difficulty for the block.
-    pub difficulty: U256,
+    /// The optional difficulty for the block.
+    pub difficulty: Option<U256>,
+}
+
+impl BlockDataHint {
+    /// Returns an empty [`BlockDataHint`] with all fields set to `None`.
+    pub fn none() -> Self {
+        Self::default()
+    }
+
+    /// Returns `true` if the [`BlockDataHint`] is empty.
+    pub const fn is_empty(&self) -> bool {
+        self.extra_data.is_none() &&
+            self.state_root.is_none() &&
+            self.coinbase.is_none() &&
+            self.nonce.is_none() &&
+            self.difficulty.is_none()
+    }
 }
 
 #[cfg(feature = "arbitrary")]
 impl<'a> arbitrary::Arbitrary<'a> for BlockDataHint {
     fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
         Ok(Self {
-            extra_data: Bytes::arbitrary(u)?,
-            state_root: B256::arbitrary(u)?,
+            extra_data: Some(Bytes::arbitrary(u)?),
+            state_root: Some(B256::arbitrary(u)?),
             coinbase: Some(Address::arbitrary(u)?),
             nonce: Some(u64::arbitrary(u)?),
-            difficulty: U256::arbitrary(u)?,
+            difficulty: Some(U256::arbitrary(u)?),
         })
     }
 }
@@ -65,7 +81,7 @@ impl<'a> arbitrary::Arbitrary<'a> for ScrollPayloadAttributes {
             },
             transactions: Some(Vec::arbitrary(u)?),
             no_tx_pool: bool::arbitrary(u)?,
-            block_data_hint: Some(BlockDataHint::arbitrary(u)?),
+            block_data_hint: BlockDataHint::arbitrary(u)?,
             gas_limit: Some(u64::arbitrary(u)?),
         })
     }
@@ -89,13 +105,13 @@ mod test {
             },
             transactions: Some(vec![b"hello".to_vec().into()]),
             no_tx_pool: true,
-            block_data_hint: Some(BlockDataHint {
-                extra_data: b"world".into(),
-                state_root: B256::random(),
+            block_data_hint: BlockDataHint {
+                extra_data: Some(b"world".into()),
+                state_root: Some(B256::random()),
                 coinbase: Some(Address::random()),
                 nonce: Some(0x12345),
-                difficulty: U256::from(10),
-            }),
+                difficulty: Some(U256::from(10)),
+            },
             gas_limit: Some(10_000_000),
         };
 
