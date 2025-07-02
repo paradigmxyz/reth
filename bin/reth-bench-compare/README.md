@@ -84,7 +84,6 @@ reth-bench-compare \
 | `--sudo` | Run reth binary with sudo (for elevated privileges) | `false` |
 | `--draw` | Generate comparison charts using Python script | `false` |
 | `--skip-git-validation` | Skip git working directory validation | `false` |
-| `--skip-compilation` | Skip reth compilation (use existing binaries) | `false` |
 
 ## Output
 
@@ -300,7 +299,6 @@ reth-bench-compare \
   --feature-ref test \
   --jwt-secret ~/chain/reth/data/jwt.hex \
   --skip-git-validation \
-  --skip-compilation \
   --blocks 10
 
 # Verbose output to see all subprocess logs
