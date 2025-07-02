@@ -2976,3 +2976,44 @@ mod tests {
         assert!(leaf_2_subtrie.nodes.get(&leaf_2_path).unwrap().hash().is_some());
     }
 }
+
+impl reth_trie_sparse::SparseTrieInterface for ParallelSparseTrie {
+    fn reveal_node(
+        &mut self,
+        path: Nibbles,
+        node: TrieNode,
+        masks: TrieMasks,
+    ) -> SparseTrieResult<()> {
+        self.reveal_node(path, node, masks)
+    }
+
+    fn update_leaf<P: reth_trie_sparse::blinded::BlindedProvider>(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+        masks: TrieMasks,
+        provider: P,
+    ) -> SparseTrieResult<()> {
+        self.update_leaf(path, value, masks, provider)
+    }
+
+    fn remove_leaf<P: reth_trie_sparse::blinded::BlindedProvider>(
+        &mut self,
+        path: &Nibbles,
+        provider: P,
+    ) -> SparseTrieResult<()> {
+        self.remove_leaf(path, provider)
+    }
+
+    fn root(&mut self) -> B256 {
+        self.root()
+    }
+
+    fn with_updates(self, retain_updates: bool) -> Self {
+        self.with_updates(retain_updates)
+    }
+
+    fn take_updates(&mut self) -> reth_trie_sparse::SparseTrieUpdates {
+        self.take_updates()
+    }
+}

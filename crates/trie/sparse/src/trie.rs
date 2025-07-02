@@ -3797,3 +3797,40 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
         assert_eq!(alternate_printed, expected);
     }
 }
+
+impl crate::SparseTrieInterface for RevealedSparseTrie {
+    fn reveal_node(
+        &mut self,
+        path: Nibbles,
+        node: TrieNode,
+        masks: TrieMasks,
+    ) -> SparseTrieResult<()> {
+        self.reveal_node(path, node, masks)
+    }
+
+    fn update_leaf<P: BlindedProvider>(
+        &mut self,
+        path: Nibbles,
+        value: Vec<u8>,
+        _masks: TrieMasks,
+        provider: P,
+    ) -> SparseTrieResult<()> {
+        self.update_leaf(path, value, provider)
+    }
+
+    fn remove_leaf<P: BlindedProvider>(&mut self, path: &Nibbles, provider: P) -> SparseTrieResult<()> {
+        self.remove_leaf(path, provider)
+    }
+
+    fn root(&mut self) -> B256 {
+        self.root()
+    }
+
+    fn with_updates(self, retain_updates: bool) -> Self {
+        self.with_updates(retain_updates)
+    }
+
+    fn take_updates(&mut self) -> SparseTrieUpdates {
+        self.take_updates()
+    }
+}
