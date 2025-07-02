@@ -303,6 +303,11 @@ async fn run_benchmark_workflow(
         generate_comparison_charts(comparison_generator, args).await?;
     }
 
+    // Start samply servers if profiling was enabled
+    if args.profile {
+        start_samply_servers(&args).await?;
+    }
+
     Ok(())
 }
 
@@ -365,4 +370,121 @@ async fn generate_comparison_charts(
 
     info!("Comparison chart generated: {:?}", chart_output);
     Ok(())
+}
+
+/// Start samply servers for viewing profiles
+async fn start_samply_servers(args: &Args) -> Result<()> {
+    use crate::git::sanitize_git_ref;
+    
+    info!("Starting samply servers for profile viewing...");
+
+    let output_dir = args.output_dir_path();
+    let profiles_dir = output_dir.join("profiles");
+
+    // Build profile paths
+    let baseline_profile = profiles_dir.join(format!("{}.json.gz", sanitize_git_ref(&args.baseline_ref)));
+    let feature_profile = profiles_dir.join(format!("{}.json.gz", sanitize_git_ref(&args.feature_ref)));
+
+    // Check if profiles exist
+    if !baseline_profile.exists() {
+        warn!("Baseline profile not found: {:?}", baseline_profile);
+        return Ok(());
+    }
+    if !feature_profile.exists() {
+        warn!("Feature profile not found: {:?}", feature_profile);
+        return Ok(());
+    }
+
+    // Get samply path
+    let samply_path = get_samply_path()?;
+
+    // Start baseline server on port 3000
+    info!("Starting samply server for baseline '{}' on port 3000", args.baseline_ref);
+    let mut baseline_cmd = tokio::process::Command::new(&samply_path);
+    baseline_cmd
+        .args(["load", "--port", "3000", &baseline_profile.to_string_lossy()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    
+    let mut baseline_child = baseline_cmd
+        .spawn()
+        .wrap_err("Failed to start samply server for baseline")?;
+
+    // Start feature server on port 3001
+    info!("Starting samply server for feature '{}' on port 3001", args.feature_ref);
+    let mut feature_cmd = tokio::process::Command::new(&samply_path);
+    feature_cmd
+        .args(["load", "--port", "3001", &feature_profile.to_string_lossy()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    
+    let mut feature_child = feature_cmd
+        .spawn()
+        .wrap_err("Failed to start samply server for feature")?;
+
+    // Give servers time to start
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    // Print access information
+    println!("\n=== SAMPLY PROFILE SERVERS STARTED ===");
+    println!("Baseline '{}': http://127.0.0.1:3000", args.baseline_ref);
+    println!("Feature  '{}': http://127.0.0.1:3001", args.feature_ref);
+    println!("\nOpen the URLs in your browser to view the profiles.");
+    println!("Press Ctrl+C to stop the servers and exit.");
+    println!("=========================================\n");
+
+    // Wait for Ctrl+C or process termination
+    let ctrl_c = tokio::signal::ctrl_c();
+    let baseline_wait = baseline_child.wait();
+    let feature_wait = feature_child.wait();
+    
+    tokio::select! {
+        _ = ctrl_c => {
+            info!("Received Ctrl+C, shutting down samply servers...");
+        }
+        result = baseline_wait => {
+            match result {
+                Ok(status) => info!("Baseline samply server exited with status: {}", status),
+                Err(e) => warn!("Baseline samply server error: {}", e),
+            }
+        }
+        result = feature_wait => {
+            match result {
+                Ok(status) => info!("Feature samply server exited with status: {}", status),
+                Err(e) => warn!("Feature samply server error: {}", e),
+            }
+        }
+    }
+
+    // Ensure both processes are terminated
+    let _ = baseline_child.kill().await;
+    let _ = feature_child.kill().await;
+    
+    info!("Samply servers stopped.");
+    Ok(())
+}
+
+/// Get the absolute path to samply using 'which' command
+fn get_samply_path() -> Result<String> {
+    let output = std::process::Command::new("which")
+        .arg("samply")
+        .output()
+        .wrap_err("Failed to execute 'which samply' command")?;
+
+    if !output.status.success() {
+        return Err(eyre!("samply not found in PATH"));
+    }
+
+    let samply_path = String::from_utf8(output.stdout)
+        .wrap_err("samply path is not valid UTF-8")?
+        .trim()
+        .to_string();
+
+    if samply_path.is_empty() {
+        return Err(eyre!("which samply returned empty path"));
+    }
+
+    Ok(samply_path)
 }
