@@ -75,7 +75,7 @@ impl SparseStateTrie {
         self
     }
 
-    /// Set the state root to the given `SparseTrie`.
+    /// Set the accounts trie to the given `SparseTrie`.
     pub fn with_accounts_trie(mut self, trie: SparseTrie) -> Self {
         self.state = trie;
         self
