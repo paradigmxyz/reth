@@ -166,7 +166,8 @@ For each git reference, the tool:
 
 2. **Compilation**:
    - Checks for cached binary in `reth-bench-compare/bin/reth_<REF>`
-   - If not cached, runs `make profiling` to build optimized reth binary
+   - Verifies cached binary's commit SHA matches current git commit using `--version`
+   - If not cached or commit mismatch, runs `make profiling` to build optimized reth binary
    - Copies compiled binary to cache for future runs
    - Optionally compiles reth-bench if requested
    - Verifies successful compilation

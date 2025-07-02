@@ -3,18 +3,20 @@
 use eyre::{eyre, Result, WrapErr};
 use std::{fs, path::PathBuf, process::Command};
 use tracing::{debug, error, info, warn};
+use crate::git::GitManager;
 
 /// Manages compilation operations for reth components
 #[derive(Debug)]
 pub struct CompilationManager {
     repo_root: String,
     output_dir: PathBuf,
+    git_manager: GitManager,
 }
 
 impl CompilationManager {
     /// Create a new CompilationManager
-    pub fn new(repo_root: String, output_dir: PathBuf) -> Self {
-        Self { repo_root, output_dir }
+    pub fn new(repo_root: String, output_dir: PathBuf, git_manager: GitManager) -> Result<Self> {
+        Ok(Self { repo_root, output_dir, git_manager })
     }
 
     /// Get the path for a cached binary based on git reference
@@ -34,13 +36,55 @@ impl CompilationManager {
         self.get_cached_binary_path(git_ref)
     }
 
+    /// Check if a cached binary's commit matches the current git commit
+    fn check_cached_binary_commit(&self, binary_path: &PathBuf) -> Result<Option<String>> {
+        if !binary_path.exists() {
+            return Ok(None);
+        }
+
+        // Run the binary with --version
+        let output = Command::new(binary_path)
+            .arg("--version")
+            .output()
+            .wrap_err("Failed to execute cached binary with --version")?;
+
+        if !output.status.success() {
+            warn!("Cached binary failed to run --version, will recompile");
+            return Ok(None);
+        }
+
+        let version_output = String::from_utf8_lossy(&output.stdout);
+        
+        // Parse the commit SHA from the version output
+        // Looking for line: "Commit SHA: 30110bca049a7d50ca53c6378e693287bcddaf5a"
+        for line in version_output.lines() {
+            if let Some(sha) = line.strip_prefix("Commit SHA: ") {
+                return Ok(Some(sha.trim().to_string()));
+            }
+        }
+
+        warn!("Could not find commit SHA in cached binary version output");
+        Ok(None)
+    }
+
     /// Compile reth using `make profiling` and cache the binary
     pub fn compile_reth(&self, git_ref: &str) -> Result<()> {
-        // Check if we already have a cached binary
         let cached_path = self.get_cached_binary_path(git_ref);
-        if cached_path.exists() {
-            info!("Using cached binary for {}: {:?}", git_ref, cached_path);
-            return Ok(());
+        
+        // Check if we have a cached binary with matching commit
+        if let Some(cached_commit) = self.check_cached_binary_commit(&cached_path)? {
+            let current_commit = self.git_manager.get_current_commit()?;
+            
+            if cached_commit == current_commit {
+                info!("Using cached binary for {} (commit: {})", git_ref, &cached_commit[..8]);
+                return Ok(());
+            } else {
+                info!("Cached binary commit mismatch for {} (cached: {}, current: {})", 
+                    git_ref, &cached_commit[..8], &current_commit[..8]);
+                info!("Recompiling...");
+            }
+        } else {
+            info!("No valid cached binary found for {}, compiling...", git_ref);
         }
 
         info!("Compiling reth with profiling configuration for {}...", git_ref);

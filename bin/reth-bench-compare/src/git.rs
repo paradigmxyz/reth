@@ -222,6 +222,26 @@ impl GitManager {
         Ok(())
     }
 
+    /// Get the current commit hash
+    pub fn get_current_commit(&self) -> Result<String> {
+        let output = Command::new("git")
+            .args(["rev-parse", "HEAD"])
+            .current_dir(&self.repo_root)
+            .output()
+            .wrap_err("Failed to get current commit")?;
+
+        if !output.status.success() {
+            return Err(eyre!("Failed to get current commit hash"));
+        }
+
+        let commit_hash = String::from_utf8(output.stdout)
+            .wrap_err("Commit hash is not valid UTF-8")?
+            .trim()
+            .to_string();
+
+        Ok(commit_hash)
+    }
+
     /// Get the repository root path
     pub fn repo_root(&self) -> &str {
         &self.repo_root
