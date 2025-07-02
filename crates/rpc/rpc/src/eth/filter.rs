@@ -1598,4 +1598,80 @@ mod tests {
         let result = cached_mode.next().await.expect("next should succeed");
         assert!(result.is_none());
     }
+
+    #[tokio::test]
+    async fn test_non_consecutive_headers_after_bloom_filter() {
+        let provider = MockEthProvider::default();
+
+        // Create 4 headers where only blocks 100 and 102 will match bloom filter
+        let mut expected_hashes = vec![];
+
+        for i in 100u64..=103 {
+            let header = alloy_consensus::Header {
+                number: i,
+                // Set bloom to match filter only for blocks 100 and 102
+                logs_bloom: if i == 100 || i == 102 {
+                    alloy_primitives::Bloom::from([1u8; 256])
+                } else {
+                    alloy_primitives::Bloom::default()
+                },
+                ..Default::default()
+            };
+
+            let hash = header.hash_slow();
+            expected_hashes.push(hash);
+
+            let block = reth_ethereum_primitives::Block {
+                header,
+                body: reth_ethereum_primitives::BlockBody::default(),
+            };
+            provider.add_block(hash, block);
+        }
+
+        // Add receipts with logs only to blocks that match bloom
+        let mock_log = alloy_primitives::Log {
+            address: alloy_primitives::Address::ZERO,
+            data: alloy_primitives::LogData::new_unchecked(vec![], alloy_primitives::Bytes::new()),
+        };
+
+        let receipt = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 21_000,
+            logs: vec![mock_log],
+            success: true,
+        };
+
+        provider.add_receipts(100, vec![receipt.clone()]);
+        provider.add_receipts(101, vec![]);
+        provider.add_receipts(102, vec![receipt.clone()]);
+        provider.add_receipts(103, vec![]);
+
+        let eth_api = build_test_eth_api(provider);
+        let eth_filter = EthFilter::new(
+            eth_api,
+            EthFilterConfig::default(),
+            Box::new(TokioTaskExecutor::default()),
+        );
+
+        // Use default filter which will match any non-empty bloom
+        let filter = Filter::default();
+
+        // Get logs in the range - this will trigger the bloom filtering
+        let logs = eth_filter
+            .inner
+            .clone()
+            .get_logs_in_block_range(filter, 100, 103, QueryLimits::default())
+            .await
+            .expect("should succeed");
+
+        // We should get logs from blocks 100 and 102 only (bloom filtered)
+        assert_eq!(logs.len(), 2);
+
+        assert_eq!(logs[0].block_number, Some(100));
+        assert_eq!(logs[1].block_number, Some(102));
+
+        // Each block hash should be the hash of its own header, not derived from any other header
+        assert_eq!(logs[0].block_hash, Some(expected_hashes[0])); // block 100
+        assert_eq!(logs[1].block_hash, Some(expected_hashes[2])); // block 102
+    }
 }
