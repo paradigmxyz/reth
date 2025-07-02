@@ -196,10 +196,10 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     let original_branch_cleanup = original_branch.clone();
     ctrlc::set_handler(move || {
         eprintln!("Received interrupt signal, cleaning up...");
-        
+
         // Give a moment for any ongoing git operations to complete
         std::thread::sleep(std::time::Duration::from_millis(200));
-        
+
         if let Err(e) = git_manager_cleanup.switch_branch(&original_branch_cleanup) {
             eprintln!("Failed to restore original branch: {e}");
             eprintln!("You may need to manually run: git checkout {}", original_branch_cleanup);
@@ -375,15 +375,17 @@ async fn generate_comparison_charts(
 /// Start samply servers for viewing profiles
 async fn start_samply_servers(args: &Args) -> Result<()> {
     use crate::git::sanitize_git_ref;
-    
+
     info!("Starting samply servers for profile viewing...");
 
     let output_dir = args.output_dir_path();
     let profiles_dir = output_dir.join("profiles");
 
     // Build profile paths
-    let baseline_profile = profiles_dir.join(format!("{}.json.gz", sanitize_git_ref(&args.baseline_ref)));
-    let feature_profile = profiles_dir.join(format!("{}.json.gz", sanitize_git_ref(&args.feature_ref)));
+    let baseline_profile =
+        profiles_dir.join(format!("{}.json.gz", sanitize_git_ref(&args.baseline_ref)));
+    let feature_profile =
+        profiles_dir.join(format!("{}.json.gz", sanitize_git_ref(&args.feature_ref)));
 
     // Check if profiles exist
     if !baseline_profile.exists() {
@@ -409,10 +411,9 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
 
     // Debug log the command
     debug!("Executing samply load command: {:?}", baseline_cmd);
-    
-    let mut baseline_child = baseline_cmd
-        .spawn()
-        .wrap_err("Failed to start samply server for baseline")?;
+
+    let mut baseline_child =
+        baseline_cmd.spawn().wrap_err("Failed to start samply server for baseline")?;
 
     // Start feature server on port 3001
     info!("Starting samply server for feature '{}' on port 3001", args.feature_ref);
@@ -425,10 +426,9 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
 
     // Debug log the command
     debug!("Executing samply load command: {:?}", feature_cmd);
-    
-    let mut feature_child = feature_cmd
-        .spawn()
-        .wrap_err("Failed to start samply server for feature")?;
+
+    let mut feature_child =
+        feature_cmd.spawn().wrap_err("Failed to start samply server for feature")?;
 
     // Give servers time to start
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -445,7 +445,7 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
     let ctrl_c = tokio::signal::ctrl_c();
     let baseline_wait = baseline_child.wait();
     let feature_wait = feature_child.wait();
-    
+
     tokio::select! {
         _ = ctrl_c => {
             info!("Received Ctrl+C, shutting down samply servers...");
@@ -467,7 +467,7 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
     // Ensure both processes are terminated
     let _ = baseline_child.kill().await;
     let _ = feature_child.kill().await;
-    
+
     info!("Samply servers stopped.");
     Ok(())
 }

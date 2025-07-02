@@ -197,14 +197,14 @@ impl GitManager {
     fn cleanup_git_locks(&self) -> Result<()> {
         let lock_files = [
             "index.lock",
-            "HEAD.lock", 
+            "HEAD.lock",
             "config.lock",
             "refs/heads/master.lock",
             "refs/heads/main.lock",
         ];
 
         let git_dir = std::path::Path::new(&self.repo_root).join(".git");
-        
+
         for lock_file in &lock_files {
             let lock_path = git_dir.join(lock_file);
             if lock_path.exists() {
@@ -214,7 +214,7 @@ impl GitManager {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -235,18 +235,20 @@ impl GitManager {
             if stderr.contains("index.lock") || stderr.contains(".lock") {
                 warn!("Git operation failed due to lock files, attempting cleanup...");
                 self.cleanup_git_locks()?;
-                
+
                 // Wait a moment for filesystem to settle
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                
+
                 // Retry the operation
                 output = Command::new("git")
                     .args(["checkout", branch])
                     .current_dir(&self.repo_root)
                     .output()
-                    .wrap_err_with(|| format!("Failed to switch to branch '{branch}' after cleanup"))?;
+                    .wrap_err_with(|| {
+                        format!("Failed to switch to branch '{branch}' after cleanup")
+                    })?;
             }
-            
+
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 return Err(eyre!("Failed to switch to branch '{}': {}", branch, stderr));
