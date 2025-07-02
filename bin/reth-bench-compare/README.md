@@ -44,6 +44,7 @@ reth-bench-compare \
   --jwt-secret ~/chain/reth/data/jwt.hex \
   --output-dir ./reth-bench-compare \
   --metrics-port 5005 \
+  --wait-time 100ms \
   --sudo \
   --draw
 ```
@@ -84,6 +85,7 @@ reth-bench-compare \
 | `--sudo` | Run reth binary with sudo (for elevated privileges) | `false` |
 | `--draw` | Generate comparison charts using Python script | `false` |
 | `--profile` | Enable CPU profiling with samply during benchmark runs | `false` |
+| `--wait-time` | Wait time between engine API calls (passed to reth-bench) | None |
 | `--skip-git-validation` | Skip git working directory validation | `false` |
 
 ## Output
