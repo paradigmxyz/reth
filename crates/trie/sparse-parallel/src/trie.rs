@@ -186,7 +186,7 @@ impl ParallelSparseTrie {
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
-        provider: impl BlindedProvider + Clone,
+        provider: impl BlindedProvider,
     ) -> SparseTrieResult<()> {
         self.prefix_set.insert(full_path);
         let existing = self.upper_subtrie.inner.values.insert(full_path, value.clone());
@@ -202,7 +202,7 @@ impl ParallelSparseTrie {
         // lower subtrie if necessary.
         //
         // We use `next` to keep track of the next node that we need to traverse to, and
-        // `inserted_nodes` to keep track of any nodes that were created during the traversal.
+        // `new_nodes` to keep track of any nodes that were created during the traversal.
         let mut new_nodes = Vec::new();
         let mut next = Some(Nibbles::default());
 
@@ -210,7 +210,7 @@ impl ParallelSparseTrie {
         //
         // We stop when the next node to traverse would be in a lower subtrie, or if there are no
         // more nodes to traverse.
-        while let Some(current) = next.filter(|next| next.len() < UPPER_TRIE_MAX_DEPTH) {
+        while let Some(current) = next.filter(|next| SparseSubtrieType::path_len_is_upper(next.len())) {
             // Traverse the next node, keeping track of any changed nodes and the next step in the
             // trie
             match self.upper_subtrie.update_next_node(current, &full_path, &provider)? {
@@ -234,7 +234,7 @@ impl ParallelSparseTrie {
                 continue
             }
 
-            let node = self.upper_subtrie.nodes.remove(node_path).unwrap();
+            let node = self.upper_subtrie.nodes.remove(node_path).expect("node belongs to upper subtrie");
 
             // If it's a leaf node, extract its value before getting mutable reference to subtrie
             let leaf_value = if let SparseNode::Leaf { key, .. } = &node {
@@ -242,7 +242,7 @@ impl ParallelSparseTrie {
                 leaf_full_path.extend(key);
                 Some((
                     leaf_full_path,
-                    self.upper_subtrie.inner.values.remove(&leaf_full_path).unwrap(),
+                    self.upper_subtrie.inner.values.remove(&leaf_full_path).expect("leaf nodes have associated values entries"),
                 ))
             } else {
                 None
@@ -261,8 +261,8 @@ impl ParallelSparseTrie {
         }
 
         // If we reached the max depth of the upper trie, we may have had more nodes to insert.
-        if let Some(next_path) = next.filter(|n| n.len() >= UPPER_TRIE_MAX_DEPTH) {
-            // Use get_or_create_lower_subtrie to ensure the subtrie has the correct path.
+        if let Some(next_path) = next.filter(|n| !SparseSubtrieType::path_len_is_upper(n.len())) {
+            // Use subtrie_for_path to ensure the subtrie has the correct path.
             //
             // The next_path here represents where we need to continue traversal, which may
             // be longer than 2 nibbles if we're following an extension node.
