@@ -69,11 +69,11 @@ impl CompilationManager {
 
     /// Check if reth-bench is available in PATH
     pub fn is_reth_bench_available(&self) -> bool {
-        match Command::new("reth-bench").arg("--version").output() {
+        match Command::new("command").args(["-v", "reth-bench"]).output() {
             Ok(output) => {
                 if output.status.success() {
-                    let version = String::from_utf8_lossy(&output.stdout);
-                    info!("Found reth-bench: {}", version.trim());
+                    let path = String::from_utf8_lossy(&output.stdout);
+                    info!("Found reth-bench: {}", path);
                     true
                 } else {
                     false
