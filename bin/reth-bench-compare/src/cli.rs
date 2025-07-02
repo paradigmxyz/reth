@@ -57,9 +57,6 @@ pub struct Args {
     #[arg(long)]
     pub skip_git_validation: bool,
 
-    /// Skip reth compilation (use existing binaries)
-    #[arg(long)]
-    pub skip_compilation: bool,
 
     /// Port for reth metrics endpoint
     #[arg(long, value_name = "PORT", default_value = "5005")]
@@ -242,10 +239,8 @@ async fn run_benchmark_workflow(
         // Switch to target reference
         git_manager.switch_ref(git_ref)?;
 
-        // Compile reth (always) and ensure reth-bench is available
-        if !args.skip_compilation {
-            compilation_manager.compile_reth(git_ref)?;
-        }
+        // Compile reth (with caching) and ensure reth-bench is available
+        compilation_manager.compile_reth(git_ref)?;
 
         // Always ensure reth-bench is available (compile if not found)
         compilation_manager.ensure_reth_bench_available()?;
