@@ -1,6 +1,6 @@
 //! Compilation operations for reth and reth-bench.
 
-use crate::git::GitManager;
+use crate::git::{sanitize_git_ref, GitManager};
 use eyre::{eyre, Result, WrapErr};
 use std::{fs, path::PathBuf, process::Command};
 use tracing::{debug, error, info, warn};
@@ -19,21 +19,9 @@ impl CompilationManager {
         Ok(Self { repo_root, output_dir, git_manager })
     }
 
-    /// Get the path for a cached binary based on git reference
-    fn get_cached_binary_path(&self, git_ref: &str) -> PathBuf {
-        let sanitized_ref = git_ref.replace('/', "-").replace('\\', "-");
-        self.output_dir.join("bin").join(format!("reth_{}", sanitized_ref))
-    }
-
-    /// Check if a cached binary exists for the given git reference
-    pub fn has_cached_binary(&self, git_ref: &str) -> bool {
-        let binary_path = self.get_cached_binary_path(git_ref);
-        binary_path.exists()
-    }
-
-    /// Get the path to the cached binary (for use by NodeManager)
-    pub fn get_binary_path(&self, git_ref: &str) -> PathBuf {
-        self.get_cached_binary_path(git_ref)
+    /// Get the path to the cached binary
+    pub fn get_cached_binary_path(&self, git_ref: &str) -> PathBuf {
+        self.output_dir.join("bin").join(format!("reth_{}", sanitize_git_ref(git_ref)))
     }
 
     /// Check if a cached binary's commit matches the current git commit
