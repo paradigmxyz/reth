@@ -191,7 +191,7 @@ impl NodeManager {
         let mut child = cmd
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
+            .kill_on_drop(!self.enable_profiling) // Don't kill on drop when profiling
             .spawn()
             .wrap_err("Failed to start reth node")?;
 
@@ -252,12 +252,27 @@ impl NodeManager {
     /// Stop the reth node gracefully
     pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
         let pid = child.id().expect("Child process ID should be available");
-        info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
-
-        // Use tokio's built-in kill for graceful shutdown
-        // TODO: Should use SIGINT instead of SIGKILL for graceful shutdown, but
-        // programmatic SIGINT doesn't work for some reason (manual `kill -2 PID` works fine)
-        child.kill().await.wrap_err("Failed to kill reth process")?;
+        
+        if self.enable_profiling {
+            info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
+            
+            // Use external kill command to send SIGINT when profiling
+            let output = tokio::process::Command::new("kill")
+                .args(["-INT", &pid.to_string()])
+                .output()
+                .await
+                .wrap_err("Failed to execute kill command")?;
+                
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(eyre!("Failed to send SIGINT to process {}: {}", pid, stderr));
+            }
+        } else {
+            info!("Stopping reth node with SIGKILL (PID: {})...", pid);
+            
+            // Use tokio's built-in kill for non-profiling mode
+            child.kill().await.wrap_err("Failed to kill reth process")?;
+        }
 
         // Wait for the process to exit
         let status = child.wait().await.wrap_err("Failed to wait for reth process to exit")?;
