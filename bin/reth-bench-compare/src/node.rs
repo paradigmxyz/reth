@@ -39,7 +39,10 @@ impl NodeManager {
     }
 
     /// Start a reth node using the specified binary path and return the process handle
-    pub async fn start_node(&mut self, binary_path: &std::path::Path) -> Result<tokio::process::Child> {
+    pub async fn start_node(
+        &mut self,
+        binary_path: &std::path::Path,
+    ) -> Result<tokio::process::Child> {
         // Store the binary path for later use (e.g., in unwind_to_block)
         self.binary_path = Some(binary_path.to_path_buf());
         if self.use_sudo {
@@ -49,7 +52,7 @@ impl NodeManager {
         }
 
         let binary_path_str = binary_path.to_string_lossy();
-        
+
         let mut cmd = if self.use_sudo {
             let mut sudo_cmd = tokio::process::Command::new("sudo");
             sudo_cmd.args([&*binary_path_str, "node"]);
@@ -218,7 +221,9 @@ impl NodeManager {
         }
 
         // Use the binary path from the last start_node call, or fallback to default
-        let binary_path = self.binary_path.as_ref()
+        let binary_path = self
+            .binary_path
+            .as_ref()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "./target/profiling/reth".to_string());
 
