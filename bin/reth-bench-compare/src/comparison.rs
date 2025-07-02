@@ -135,8 +135,6 @@ impl ComparisonGenerator {
 
     /// Add benchmark results for a reference
     pub fn add_ref_results(&mut self, ref_type: &str, output_path: &Path) -> Result<()> {
-        info!("Loading benchmark results for {} reference", ref_type);
-
         let ref_name = match ref_type {
             "baseline" => &self.baseline_ref_name,
             "feature" => &self.feature_ref_name,
@@ -150,6 +148,8 @@ impl ComparisonGenerator {
             "feature" => self.feature_results = Some(results),
             _ => return Err(eyre!("Unknown reference type: {}", ref_type)),
         }
+
+        info!("Loaded benchmark results for {} reference", ref_type);
 
         Ok(())
     }

@@ -130,33 +130,7 @@ impl BenchmarkRunner {
             return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
         }
 
-        // Verify that expected output files were created
-        self.verify_benchmark_output(output_dir)?;
-
         info!("Benchmark completed successfully");
-        Ok(())
-    }
-
-    /// Verify that the benchmark produced expected output files
-    fn verify_benchmark_output(&self, output_dir: &Path) -> Result<()> {
-        let expected_files = ["combined_latency.csv", "total_gas.csv"];
-
-        for filename in &expected_files {
-            let file_path = output_dir.join(filename);
-            if !file_path.exists() {
-                return Err(eyre!("Expected benchmark output file not found: {:?}", file_path));
-            }
-
-            // Check that the file is not empty
-            let metadata = std::fs::metadata(&file_path)
-                .wrap_err_with(|| format!("Failed to read metadata for {file_path:?}"))?;
-
-            if metadata.len() == 0 {
-                return Err(eyre!("Benchmark output file is empty: {:?}", file_path));
-            }
-        }
-
-        info!("Verified benchmark output files");
         Ok(())
     }
 }

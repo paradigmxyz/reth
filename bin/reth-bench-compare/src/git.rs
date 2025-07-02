@@ -27,8 +27,14 @@ impl GitManager {
             .trim()
             .to_string();
 
-        info!("Detected git repository at: {}", repo_root);
-        Ok(Self { repo_root })
+        let manager = Self { repo_root };
+        info!(
+            "Detected git repository at: {}, current branch: {}",
+            manager.repo_root(),
+            manager.get_current_branch()?
+        );
+
+        Ok(manager)
     }
 
     /// Get the current git branch name
@@ -84,8 +90,6 @@ impl GitManager {
 
     /// Fetch all refs from remote to ensure we have latest branches and tags
     pub fn fetch_all(&self) -> Result<()> {
-        info!("Fetching latest refs from remote...");
-
         let output = Command::new("git")
             .args(["fetch", "--all", "--tags", "--quiet", "--force"])
             .current_dir(&self.repo_root)
@@ -99,7 +103,7 @@ impl GitManager {
                 warn!("Git fetch encountered issues (continuing anyway): {}", stderr);
             }
         } else {
-            info!("Successfully fetched latest refs");
+            info!("Fetched latest refs");
         }
 
         Ok(())
@@ -164,8 +168,6 @@ impl GitManager {
 
     /// Switch to the specified git reference (branch, tag, or commit)
     pub fn switch_ref(&self, git_ref: &str) -> Result<()> {
-        info!("Switching to git reference: {}", git_ref);
-
         let output = Command::new("git")
             .args(["checkout", git_ref])
             .current_dir(&self.repo_root)
@@ -189,7 +191,7 @@ impl GitManager {
             return Err(eyre!("Failed to verify git checkout"));
         }
 
-        info!("Successfully switched to reference: {}", git_ref);
+        info!("Switched to reference: {}", git_ref);
         Ok(())
     }
 

@@ -122,8 +122,6 @@ impl Args {
 
 /// Validate that the RPC endpoint chain ID matches the specified chain
 async fn validate_rpc_chain_id(rpc_url: &str, expected_chain: &Chain) -> Result<()> {
-    info!("Validating RPC endpoint chain ID...");
-
     // Create Alloy provider
     let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
     let provider = ProviderBuilder::new().connect_http(url);
@@ -149,7 +147,7 @@ async fn validate_rpc_chain_id(rpc_url: &str, expected_chain: &Chain) -> Result<
         ));
     }
 
-    info!("✓ RPC endpoint chain ID {} matches expected chain {}", rpc_chain_id, expected_chain);
+    info!("Validated RPC endpoint chain ID");
     Ok(())
 }
 
