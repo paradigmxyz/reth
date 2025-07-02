@@ -267,6 +267,14 @@ pub enum InvalidPoolTransactionError {
     /// invocation.
     #[error("intrinsic gas too low")]
     IntrinsicGasTooLow,
+    /// The transaction priority fee is below the minimum required priority fee.
+    #[error("transaction priority fee {priority_fee} below minimum required priority fee {minimal_priority_fee}")]
+    PriorityFeeBelowMinimum {
+        /// Transaction priority fee.
+        priority_fee: u128,
+        /// Minimum required priority fee.
+        minimal_priority_fee: u128,
+    },
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -381,6 +389,7 @@ impl InvalidPoolTransactionError {
                 Eip7702PoolTransactionError::InflightTxLimitReached => false,
                 Eip7702PoolTransactionError::AuthorityReserved => false,
             },
+            Self::PriorityFeeBelowMinimum { .. } => false,
         }
     }
 

@@ -63,7 +63,7 @@
 //!
 //! ## Validation Process
 //!
-//! ### Stateless Checks  
+//! ### Stateless Checks
 //!
 //! Ethereum transactions undergo several stateless checks:
 //!
@@ -273,7 +273,8 @@
 pub use crate::{
     blobstore::{BlobStore, BlobStoreError},
     config::{
-        LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
+        LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
+        DEFAULT_MINIMAL_PRIORITY_FEE, DEFAULT_PRICE_BUMP,
         DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
         REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,

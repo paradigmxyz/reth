@@ -19,7 +19,7 @@ use crate::{
     },
     traits::{BestTransactionsAttributes, BlockInfo, PoolSize},
     PoolConfig, PoolResult, PoolTransaction, PoolUpdateKind, PriceBumpConfig, TransactionOrdering,
-    ValidPoolTransaction, U256,
+    ValidPoolTransaction, DEFAULT_MINIMAL_PRIORITY_FEE, U256,
 };
 use alloy_consensus::constants::{
     EIP1559_TX_TYPE_ID, EIP2930_TX_TYPE_ID, EIP4844_TX_TYPE_ID, EIP7702_TX_TYPE_ID, KECCAK_EMPTY,
@@ -743,6 +743,19 @@ impl<T: TransactionOrdering> TxPool<T> {
                             transaction.tx_type(),
                         ),
                     )),
+                    InsertErr::PriorityFeeBelowMinimum {
+                        transaction,
+                        priority_fee,
+                        minimal_priority_fee,
+                    } => Err(PoolError::new(
+                        *transaction.hash(),
+                        PoolErrorKind::InvalidTransaction(
+                            InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                                priority_fee,
+                                minimal_priority_fee,
+                            },
+                        ),
+                    )),
                 }
             }
         }
@@ -758,8 +771,8 @@ impl<T: TransactionOrdering> TxPool<T> {
         on_chain_code_hash: Option<B256>,
     ) -> Result<(), PoolError> {
         // Short circuit if the sender has neither delegation nor pending delegation.
-        if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY)) &&
-            !self.all_transactions.auths.contains_key(&transaction.sender_id())
+        if (on_chain_code_hash.is_none() || on_chain_code_hash == Some(KECCAK_EMPTY))
+            && !self.all_transactions.auths.contains_key(&transaction.sender_id())
         {
             return Ok(())
         }
@@ -1197,6 +1210,8 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     ///
     /// Transactions with a lower base fee will never be included by the chain
     minimal_protocol_basefee: u64,
+    /// Minimum priority fee required for transaction acceptance into the pool.
+    minimal_priority_fee: u64,
     /// The max gas limit of the block
     block_gas_limit: u64,
     /// Max number of executable transaction slots guaranteed per account
@@ -1231,6 +1246,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
             price_bumps: config.price_bumps,
             local_transactions_config: config.local_transactions_config.clone(),
             minimal_protocol_basefee: config.minimal_protocol_basefee,
+            minimal_priority_fee: config.minimal_priority_fee,
             block_gas_limit: config.gas_limit,
             ..Default::default()
         }
@@ -1670,10 +1686,19 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 })
             }
         }
+
         if transaction.gas_limit() > self.block_gas_limit {
             return Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas {
                 block_gas_limit: self.block_gas_limit,
                 tx_gas_limit: transaction.gas_limit(),
+                transaction: Arc::new(transaction),
+            })
+        }
+
+        if transaction.priority_fee_or_price() < self.minimal_priority_fee as u128 {
+            return Err(InsertErr::PriorityFeeBelowMinimum {
+                priority_fee: transaction.priority_fee_or_price(),
+                minimal_priority_fee: self.minimal_priority_fee as u128,
                 transaction: Arc::new(transaction),
             })
         }
@@ -1997,6 +2022,7 @@ impl<T: PoolTransaction> Default for AllTransactions<T> {
         Self {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
+            minimal_priority_fee: DEFAULT_MINIMAL_PRIORITY_FEE,
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             by_hash: Default::default(),
             txs: Default::default(),
@@ -2060,6 +2086,12 @@ pub(crate) enum InsertErr<T: PoolTransaction> {
     },
     /// Thrown if the mutual exclusivity constraint (blob vs normal transaction) is violated.
     TxTypeConflict { transaction: Arc<ValidPoolTransaction<T>> },
+    /// Transaction priority fee is below the minimum required priority fee.
+    PriorityFeeBelowMinimum {
+        transaction: Arc<ValidPoolTransaction<T>>,
+        priority_fee: u128,
+        minimal_priority_fee: u128,
+    },
 }
 
 /// Transaction was successfully inserted into the pool
@@ -2873,6 +2905,52 @@ mod tests {
             pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce),
             Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas { .. })
         ));
+    }
+
+    /// Helper function to test priority fee validation
+    fn test_priority_fee_validation(
+        priority_fee: u128,
+        minimal_priority_fee: u64,
+        should_succeed: bool,
+    ) {
+        let on_chain_balance = U256::from(1_000);
+        let on_chain_nonce = 0;
+        let mut f = MockTransactionFactory::default();
+        let mut pool = AllTransactions { minimal_priority_fee, ..Default::default() };
+
+        let tx = MockTransaction::eip1559().with_priority_fee(priority_fee);
+        let result = pool.insert_tx(f.validated(tx), on_chain_balance, on_chain_nonce);
+
+        if should_succeed {
+            assert!(
+                result.is_ok(),
+                "Expected transaction with priority fee {} to be accepted when minimum is {}",
+                priority_fee,
+                minimal_priority_fee
+            );
+        } else {
+            assert!(
+                matches!(result, Err(InsertErr::PriorityFeeBelowMinimum { .. })),
+                "Expected transaction with priority fee {} to be rejected when minimum is {}",
+                priority_fee,
+                minimal_priority_fee
+            );
+        }
+    }
+
+    #[test]
+    fn reject_tx_priority_fee_below_minimum() {
+        test_priority_fee_validation(99, 100, false);
+    }
+
+    #[test]
+    fn test_eq_minimal_priority_fee() {
+        test_priority_fee_validation(100, 100, true);
+    }
+
+    #[test]
+    fn accept_tx_priority_fee_above_minimum() {
+        test_priority_fee_validation(101, 100, true);
     }
 
     #[test]

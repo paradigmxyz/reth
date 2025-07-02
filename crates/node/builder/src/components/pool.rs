@@ -59,6 +59,8 @@ pub struct PoolBuilderConfigOverrides {
     pub max_account_slots: Option<usize>,
     /// Minimum base fee required by the protocol.
     pub minimal_protocol_basefee: Option<u64>,
+    /// Minimum priority fee required for transaction acceptance into the pool.
+    pub minimal_priority_fee: Option<u64>,
     /// Addresses that will be considered as local. Above exemptions apply.
     pub local_addresses: HashSet<Address>,
     /// Additional tasks to validate new transactions.
@@ -75,6 +77,7 @@ impl PoolBuilderConfigOverrides {
             blob_limit,
             max_account_slots,
             minimal_protocol_basefee,
+            minimal_priority_fee,
             local_addresses,
             additional_validation_tasks: _,
         } = self;
@@ -96,6 +99,9 @@ impl PoolBuilderConfigOverrides {
         }
         if let Some(minimal_protocol_basefee) = minimal_protocol_basefee {
             config.minimal_protocol_basefee = minimal_protocol_basefee;
+        }
+        if let Some(minimal_priority_fee) = minimal_priority_fee {
+            config.minimal_priority_fee = minimal_priority_fee;
         }
         config.local_transactions_config.local_addresses.extend(local_addresses);
 
@@ -289,12 +295,14 @@ mod tests {
             pending_limit: Some(SubPoolLimit::default()),
             max_account_slots: Some(100),
             minimal_protocol_basefee: Some(1000),
+            minimal_priority_fee: Some(1000),
             ..Default::default()
         };
 
         let updated_config = overrides.apply(base_config);
         assert_eq!(updated_config.max_account_slots, 100);
         assert_eq!(updated_config.minimal_protocol_basefee, 1000);
+        assert_eq!(updated_config.minimal_priority_fee, 1000);
     }
 
     #[test]
