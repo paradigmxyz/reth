@@ -307,7 +307,7 @@ where
             }
         }
 
-        if balance_after >= balance_before + message.value {
+        if balance_after >= balance_before.saturating_add(message.value) {
             return Ok(())
         }
 

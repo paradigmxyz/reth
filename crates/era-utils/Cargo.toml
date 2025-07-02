@@ -11,15 +11,19 @@ exclude.workspace = true
 
 [dependencies]
 # alloy
+alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp.workspace = true
 
 # reth
 reth-db-api.workspace = true
 reth-era.workspace = true
 reth-era-downloader.workspace = true
 reth-etl.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-fs-util.workspace = true
 reth-provider.workspace = true
+reth-stages-types.workspace = true
 reth-storage-api.workspace = true
 reth-primitives-traits.workspace = true
 
@@ -41,6 +45,7 @@ reth-db-common.workspace = true
 # async
 tokio.workspace = true
 tokio.features = ["fs", "io-util", "macros", "rt-multi-thread"]
+tokio-util.workspace = true
 futures.workspace = true
 bytes.workspace = true
 

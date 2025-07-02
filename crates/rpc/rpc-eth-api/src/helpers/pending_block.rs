@@ -5,6 +5,7 @@ use super::SpawnBlocking;
 use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
+use alloy_primitives::U256;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -18,6 +19,7 @@ use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
@@ -41,6 +43,7 @@ pub trait LoadPendingBlock:
             Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
         Error: FromEvmError<Self::Evm>,
+        RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
     > + RpcNodeCore<
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
@@ -76,9 +79,7 @@ pub trait LoadPendingBlock:
         >,
         Self::Error,
     > {
-        if let Some(block) =
-            self.provider().pending_block_with_senders().map_err(Self::Error::from_eth_err)?
-        {
+        if let Some(block) = self.provider().pending_block().map_err(Self::Error::from_eth_err)? {
             if let Some(receipts) = self
                 .provider()
                 .receipts_by_block(block.hash().into())
@@ -154,7 +155,7 @@ pub trait LoadPendingBlock:
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.evm_env.block_env.number == pending_block.block.number() &&
+                if pending.evm_env.block_env.number == U256::from(pending_block.block.number()) &&
                     parent.hash() == pending_block.block.parent_hash() &&
                     now <= pending_block.expires_at
                 {

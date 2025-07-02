@@ -345,6 +345,12 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
         self.provider()?.last_block_number()
     }
 
+    fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
+        // earliest history height tracks the lowest block number that has __not__ been expired, in
+        // other words, the first/earlierst available block.
+        Ok(self.static_file_provider.earliest_history_height())
+    }
+
     fn block_number(&self, hash: B256) -> ProviderResult<Option<BlockNumber>> {
         self.provider()?.block_number(hash)
     }
@@ -365,12 +371,8 @@ impl<N: ProviderNodeTypes> BlockReader for ProviderFactory<N> {
         self.provider()?.block(id)
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         self.provider()?.pending_block()
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        self.provider()?.pending_block_with_senders()
     }
 
     fn pending_block_and_receipts(

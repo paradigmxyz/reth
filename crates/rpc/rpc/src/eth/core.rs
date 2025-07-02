@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::{eth::EthTxBuilder, EthApiBuilder};
+use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
@@ -19,7 +19,8 @@ use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderReceipt,
+    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderHeader,
+    ProviderReceipt,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -65,7 +66,7 @@ pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig> {
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
     /// Transaction RPC response builder.
-    pub tx_resp_builder: EthTxBuilder,
+    pub tx_resp_builder: EthRpcConverter,
 }
 
 impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
@@ -73,7 +74,7 @@ where
     Provider: BlockReader,
 {
     fn clone(&self) -> Self {
-        Self { inner: self.inner.clone(), tx_resp_builder: EthTxBuilder }
+        Self { inner: self.inner.clone(), tx_resp_builder: self.tx_resp_builder.clone() }
     }
 }
 
@@ -127,7 +128,7 @@ where
         max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
+        fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
         evm_config: EvmConfig,
         proof_permits: usize,
     ) -> Self {
@@ -147,7 +148,7 @@ where
             proof_permits,
         );
 
-        Self { inner: Arc::new(inner), tx_resp_builder: EthTxBuilder }
+        Self { inner: Arc::new(inner), tx_resp_builder: Default::default() }
     }
 }
 
@@ -158,9 +159,9 @@ where
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
-    type TransactionCompat = EthTxBuilder;
+    type RpcConvert = EthRpcConverter;
 
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+    fn tx_resp_builder(&self) -> &Self::RpcConvert {
         &self.tx_resp_builder
     }
 }
@@ -276,7 +277,7 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
     /// A pool dedicated to CPU heavy blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
-    fee_history_cache: FeeHistoryCache,
+    fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
     /// The type that defines how to configure the EVM
     evm_config: EvmConfig,
 
@@ -303,7 +304,7 @@ where
         max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache,
+        fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
         evm_config: EvmConfig,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
@@ -411,7 +412,7 @@ where
 
     /// Returns a handle to the fee history cache.
     #[inline]
-    pub const fn fee_history_cache(&self) -> &FeeHistoryCache {
+    pub const fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
         &self.fee_history_cache
     }
 
@@ -470,7 +471,7 @@ mod tests {
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
-    use reth_chainspec::{BaseFeeParams, ChainSpec, ChainSpecProvider};
+    use reth_chainspec::{ChainSpec, ChainSpecProvider, EthChainSpec};
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
@@ -582,11 +583,11 @@ mod tests {
 
         // Add final base fee (for the next block outside of the request)
         let last_header = last_header.unwrap();
-        base_fees_per_gas.push(BaseFeeParams::ethereum().next_block_base_fee(
-            last_header.gas_used,
-            last_header.gas_limit,
-            last_header.base_fee_per_gas.unwrap_or_default(),
-        ) as u128);
+        let spec = mock_provider.chain_spec();
+        base_fees_per_gas.push(
+            spec.next_block_base_fee(&last_header, last_header.timestamp).unwrap_or_default()
+                as u128,
+        );
 
         let eth_api = build_test_eth_api(mock_provider);
 
@@ -596,7 +597,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             U64::from(1),
             BlockNumberOrTag::Latest,
@@ -618,7 +619,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(newest_block + 1),
             newest_block.into(),
@@ -641,7 +642,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(1),
             (newest_block + 1000).into(),
@@ -664,7 +665,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _>>::fee_history(
+        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(0),
             newest_block.into(),

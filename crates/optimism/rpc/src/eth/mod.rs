@@ -8,6 +8,7 @@ mod block;
 mod call;
 mod pending_block;
 
+use crate::{eth::transaction::OpTxInfoMapper, OpEthApiError, SequencerClient};
 use alloy_primitives::U256;
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
@@ -24,7 +25,7 @@ use reth_rpc_eth_api::{
         AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcNodeCore, RpcNodeCoreExt,
+    EthApiTypes, FromEvmError, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{
@@ -36,9 +37,7 @@ use reth_tasks::{
     TaskSpawner,
 };
 use reth_transaction_pool::TransactionPool;
-use std::{fmt, marker::PhantomData, sync::Arc};
-
-use crate::{OpEthApiError, SequencerClient};
+use std::{fmt, fmt::Formatter, marker::PhantomData, sync::Arc};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
@@ -66,8 +65,8 @@ impl<T> OpNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
 pub struct OpEthApi<N: OpNodeCore, NetworkT = Optimism> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N>>,
-    /// Marker for the network types.
-    _nt: PhantomData<NetworkT>,
+    /// Converter for RPC types.
+    tx_resp_builder: RpcConverter<NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>,
 }
 
 impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
@@ -77,13 +76,11 @@ impl<N: OpNodeCore, NetworkT> OpEthApi<N, NetworkT> {
         sequencer_client: Option<SequencerClient>,
         min_suggested_priority_fee: U256,
     ) -> Self {
+        let inner =
+            Arc::new(OpEthApiInner { eth_api, sequencer_client, min_suggested_priority_fee });
         Self {
-            inner: Arc::new(OpEthApiInner {
-                eth_api,
-                sequencer_client,
-                min_suggested_priority_fee,
-            }),
-            _nt: PhantomData,
+            inner: inner.clone(),
+            tx_resp_builder: RpcConverter::with_mapper(OpTxInfoMapper::new(inner)),
         }
     }
 }
@@ -112,16 +109,18 @@ where
 
 impl<N, NetworkT> EthApiTypes for OpEthApi<N, NetworkT>
 where
-    Self: Send + Sync + std::fmt::Debug,
+    Self: Send + Sync + fmt::Debug,
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network + Clone + std::fmt::Debug,
+    NetworkT: op_alloy_network::Network + Clone + fmt::Debug,
+    <N as RpcNodeCore>::Evm: fmt::Debug,
+    <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
     type Error = OpEthApiError;
     type NetworkTypes = NetworkT;
-    type TransactionCompat = Self;
+    type RpcConvert = RpcConverter<NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N>>;
 
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
-        self
+    fn tx_resp_builder(&self) -> &Self::RpcConvert {
+        &self.tx_resp_builder
     }
 }
 
@@ -202,6 +201,8 @@ where
     Self: Send + Sync + Clone + 'static,
     N: OpNodeCore,
     NetworkT: op_alloy_network::Network,
+    <N as RpcNodeCore>::Evm: fmt::Debug,
+    <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -234,14 +235,13 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         self.inner.eth_api.fee_history_cache()
     }
 
     async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
-        let base_tip = self.inner.eth_api.gas_oracle().suggest_tip_cap().await?;
         let min_tip = U256::from(self.inner.min_suggested_priority_fee);
-        Ok(base_tip.max(min_tip))
+        self.inner.eth_api.gas_oracle().op_suggest_tip_cap(min_tip).await.map_err(Into::into)
     }
 }
 
@@ -252,6 +252,8 @@ where
         Pool: TransactionPool,
     >,
     NetworkT: op_alloy_network::Network,
+    <N as RpcNodeCore>::Evm: fmt::Debug,
+    <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
 }
 
@@ -268,7 +270,11 @@ where
 
 impl<N, NetworkT> EthFees for OpEthApi<N, NetworkT>
 where
-    Self: LoadFee,
+    Self: LoadFee<
+        Provider: ChainSpecProvider<
+            ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>,
+        >,
+    >,
     N: OpNodeCore,
 {
 }
@@ -305,7 +311,7 @@ impl<N: OpNodeCore, NetworkT> fmt::Debug for OpEthApi<N, NetworkT> {
 }
 
 /// Container type `OpEthApi`
-struct OpEthApiInner<N: OpNodeCore> {
+pub struct OpEthApiInner<N: OpNodeCore> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -315,6 +321,12 @@ struct OpEthApiInner<N: OpNodeCore> {
     ///
     /// See also <https://github.com/ethereum-optimism/op-geth/blob/d4e0fe9bb0c2075a9bff269fb975464dd8498f75/eth/gasprice/optimism-gasprice.go#L38-L38>
     min_suggested_priority_fee: U256,
+}
+
+impl<N: OpNodeCore> fmt::Debug for OpEthApiInner<N> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OpEthApiInner").finish()
+    }
 }
 
 impl<N: OpNodeCore> OpEthApiInner<N> {

@@ -19,6 +19,7 @@ reth-network-api = { workspace = true, optional = true }
 reth-eth-wire = { workspace = true, optional = true }
 reth-provider = { workspace = true, optional = true }
 reth-db = { workspace = true, optional = true, features = ["mdbx"] }
+reth-codecs = { workspace = true, optional = true }
 reth-storage-api = { workspace = true, optional = true }
 reth-node-api = { workspace = true, optional = true }
 reth-node-core = { workspace = true, optional = true }
@@ -33,8 +34,10 @@ reth-rpc-eth-types = { workspace = true, optional = true }
 reth-rpc-builder = { workspace = true, optional = true }
 reth-exex = { workspace = true, optional = true }
 reth-trie = { workspace = true, optional = true }
+reth-trie-db = { workspace = true, optional = true }
 reth-node-builder = { workspace = true, optional = true }
 reth-tasks = { workspace = true, optional = true }
+reth-cli-util = { workspace = true, optional = true }
 
 # reth-ethereum
 reth-ethereum-primitives.workspace = true
@@ -73,6 +76,7 @@ arbitrary = [
     "reth-transaction-pool?/arbitrary",
     "reth-eth-wire?/arbitrary",
     "alloy-rpc-types-engine?/arbitrary",
+    "reth-codecs?/arbitrary",
 ]
 
 test-utils = [
@@ -90,6 +94,8 @@ test-utils = [
     "reth-transaction-pool?/test-utils",
     "reth-evm-ethereum?/test-utils",
     "reth-node-builder?/test-utils",
+    "reth-trie-db?/test-utils",
+    "reth-codecs?/test-utils",
 ]
 
 full = [
@@ -104,7 +110,7 @@ full = [
     "network",
 ]
 
-cli = ["dep:reth-ethereum-cli"]
+cli = ["dep:reth-ethereum-cli", "dep:reth-cli-util"]
 consensus = [
     "dep:reth-consensus",
     "dep:reth-consensus-common",
@@ -121,7 +127,7 @@ node = [
     "dep:reth-node-ethereum",
     "dep:reth-node-builder",
     "rpc",
-    "trie",
+    "trie-db",
 ]
 pool = ["dep:reth-transaction-pool"]
 rpc = [
@@ -136,6 +142,7 @@ rpc = [
 tasks = ["dep:reth-tasks"]
 js-tracer = ["rpc", "reth-rpc/js-tracer"]
 network = ["dep:reth-network", "tasks", "dep:reth-network-api", "dep:reth-eth-wire"]
-provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db"]
+provider = ["storage-api", "tasks", "dep:reth-provider", "dep:reth-db", "dep:reth-codecs"]
 storage-api = ["dep:reth-storage-api"]
 trie = ["dep:reth-trie"]
+trie-db = ["trie", "dep:reth-trie-db"]

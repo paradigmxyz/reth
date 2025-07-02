@@ -29,9 +29,9 @@ use reth_primitives_traits::{
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
-    BlockBodyIndicesProvider, DBProvider, DatabaseProviderFactory, HashedPostStateProvider,
-    NodePrimitivesProvider, StageCheckpointReader, StateCommitmentProvider, StateProofProvider,
-    StorageRootProvider,
+    BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
+    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader,
+    StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -669,11 +669,7 @@ impl<ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
         }
     }
 
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
-        Ok(None)
-    }
-
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }
 
@@ -880,7 +876,13 @@ where
         let lock = self.accounts.lock();
         Ok(lock.get(&account).and_then(|account| account.storage.get(&storage_key)).copied())
     }
+}
 
+impl<T, ChainSpec> BytecodeReader for MockEthProvider<T, ChainSpec>
+where
+    T: NodePrimitives,
+    ChainSpec: Send + Sync,
+{
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         let lock = self.accounts.lock();
         Ok(lock.values().find_map(|account| {
@@ -921,7 +923,9 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
 
                 self.history_by_block_hash(hash)
             }
-            BlockNumberOrTag::Earliest => self.history_by_block_number(0),
+            BlockNumberOrTag::Earliest => {
+                self.history_by_block_number(self.earliest_block_number()?)
+            }
             BlockNumberOrTag::Pending => self.pending(),
             BlockNumberOrTag::Number(num) => self.history_by_block_number(num),
         }

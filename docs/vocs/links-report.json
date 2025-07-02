@@ -1,0 +1,17 @@
+{
+  "timestamp": "2025-06-23T11:20:27.303Z",
+  "totalFiles": 106,
+  "totalLinks": 150,
+  "brokenLinks": [
+    {
+      "file": "docs/pages/index.mdx",
+      "link": "/introduction/benchmarks",
+      "line": 110,
+      "reason": "Absolute path not found: /introduction/benchmarks"
+    }
+  ],
+  "summary": {
+    "brokenCount": 1,
+    "validCount": 149
+  }
+}

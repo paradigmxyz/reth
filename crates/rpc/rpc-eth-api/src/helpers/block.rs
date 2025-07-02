@@ -13,7 +13,7 @@ use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
-use reth_rpc_types_compat::block::from_block;
+use reth_rpc_convert::RpcConvert;
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::sync::Arc;
@@ -59,7 +59,9 @@ pub trait EthBlocks: LoadBlock {
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = from_block((*block).clone(), full.into(), self.tx_resp_builder())?;
+            let block = block.clone_into_rpc_block(full.into(), |tx, tx_info| {
+                self.tx_resp_builder().fill(tx, tx_info)
+            })?;
             Ok(Some(block))
         }
     }
@@ -233,10 +235,8 @@ pub trait LoadBlock:
         async move {
             if block_id.is_pending() {
                 // Pending block can be fetched directly without need for caching
-                if let Some(pending_block) = self
-                    .provider()
-                    .pending_block_with_senders()
-                    .map_err(Self::Error::from_eth_err)?
+                if let Some(pending_block) =
+                    self.provider().pending_block().map_err(Self::Error::from_eth_err)?
                 {
                     return Ok(Some(Arc::new(pending_block)));
                 }

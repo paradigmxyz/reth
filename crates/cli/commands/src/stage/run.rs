@@ -16,7 +16,6 @@ use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_eth_wire::NetPrimitivesFor;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
@@ -103,12 +102,11 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `stage` command
-    pub async fn execute<N, Comp, F, P>(self, ctx: CliContext, components: F) -> eyre::Result<()>
+    pub async fn execute<N, Comp, F>(self, ctx: CliContext, components: F) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         Comp: CliNodeComponents<N>,
         F: FnOnce(Arc<C::ChainSpec>) -> Comp,
-        P: NetPrimitivesFor<N::Primitives>,
     {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -174,7 +172,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                     let network = self
                         .network
-                        .network_config::<P>(
+                        .network_config::<N::NetworkPrimitives>(
                             &config,
                             provider_factory.chain_spec(),
                             p2p_secret_key,
@@ -186,7 +184,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
                     // Use `to` as the tip for the stage
-                    let tip: P::BlockHeader = loop {
+                    let tip = loop {
                         match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
                             Ok(header) => {
                                 if let Some(header) = header.into_data() {
@@ -229,7 +227,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
                     let network = self
                         .network
-                        .network_config::<P>(
+                        .network_config::<N::NetworkPrimitives>(
                             &config,
                             provider_factory.chain_spec(),
                             p2p_secret_key,
@@ -271,7 +269,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                             max_cumulative_gas: None,
                             max_duration: None,
                         },
-                        config.stages.merkle.clean_threshold,
+                        config.stages.merkle.incremental_threshold,
                         ExExManagerHandle::empty(),
                     )),
                     None,
@@ -299,7 +297,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     None,
                 ),
                 StageEnum::Merkle => (
-                    Box::new(MerkleStage::new_execution(config.stages.merkle.clean_threshold)),
+                    Box::new(MerkleStage::new_execution(
+                        config.stages.merkle.rebuild_threshold,
+                        config.stages.merkle.incremental_threshold,
+                    )),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
                 StageEnum::AccountHistory => (
