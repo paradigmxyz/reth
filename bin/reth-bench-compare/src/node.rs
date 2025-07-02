@@ -87,7 +87,6 @@ impl NodeManager {
     /// Create a command for profiling mode
     fn create_profiling_command(
         &self,
-        binary_path_str: &str,
         git_ref: &str,
         reth_args: &[String],
     ) -> Result<tokio::process::Command> {
@@ -125,7 +124,7 @@ impl NodeManager {
     /// Create a command for direct reth execution
     fn create_direct_command(&self, reth_args: &[String]) -> tokio::process::Command {
         let binary_path = &reth_args[0];
-        
+
         if self.use_sudo {
             info!("Starting reth node with sudo...");
             let mut cmd = tokio::process::Command::new("sudo");
@@ -152,7 +151,7 @@ impl NodeManager {
         let (reth_args, _) = self.build_reth_args(&binary_path_str);
 
         let mut cmd = if self.enable_profiling {
-            self.create_profiling_command(&binary_path_str, git_ref, &reth_args)?
+            self.create_profiling_command(git_ref, &reth_args)?
         } else {
             self.create_direct_command(&reth_args)
         };
@@ -365,33 +364,6 @@ impl NodeManager {
 
         info!("Successfully unwound to block: {}", block_number);
         Ok(())
-    }
-
-    /// Get chain tip from node metrics endpoint
-    #[allow(dead_code)]
-    async fn get_tip_from_metrics(&self) -> Result<u64> {
-        let url = format!("http://localhost:{}/metrics", self.metrics_port);
-        let response = self.http_client.get(&url).send().await.wrap_err("Failed to get metrics")?;
-
-        if !response.status().is_success() {
-            return Err(eyre!("Metrics endpoint returned error: {}", response.status()));
-        }
-
-        let body = response.text().await.wrap_err("Failed to read metrics response")?;
-
-        // Parse prometheus metrics to find the chain tip
-        // Look for a metric like: reth_blockchain_tip_number
-        for line in body.lines() {
-            if line.starts_with("reth_blockchain_tip_number") && !line.starts_with('#') {
-                if let Some(value_str) = line.split_whitespace().last() {
-                    if let Ok(value) = value_str.parse::<f64>() {
-                        return Ok(value as u64);
-                    }
-                }
-            }
-        }
-
-        Err(eyre!("Could not find chain tip in metrics"))
     }
 
     /// Get chain tip from RPC endpoint
