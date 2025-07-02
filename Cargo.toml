@@ -489,9 +489,9 @@ alloy-rpc-client = { version = "1.0.16", default-features = false }
 alloy-rpc-types = { version = "1.0.16", features = ["eth"], default-features = false }
 alloy-rpc-types-admin = { version = "1.0.16", default-features = false }
 alloy-rpc-types-anvil = { version = "1.0.16", default-features = false }
-alloy-rpc-types-beacon = { version = "1.0.16", default-features = false }
+alloy-rpc-types-beacon = { version = "1.0.17", default-features = false }
 alloy-rpc-types-debug = { version = "1.0.16", default-features = false }
-alloy-rpc-types-engine = { version = "1.0.16", default-features = false }
+alloy-rpc-types-engine = { version = "1.0.17", default-features = false }
 alloy-rpc-types-eth = { version = "1.0.16", default-features = false }
 alloy-rpc-types-mev = { version = "1.0.16", default-features = false }
 alloy-rpc-types-trace = { version = "1.0.16", default-features = false }

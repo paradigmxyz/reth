@@ -5,6 +5,7 @@ use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
+    BuilderBlockValidationRequestV5,
 };
 use alloy_rpc_types_engine::{
     BlobsBundleV1, CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
@@ -470,6 +471,24 @@ where
 
         self.task_spawner.spawn_blocking(Box::pin(async move {
             let result = Self::validate_builder_submission_v4(&this, request)
+                .await
+                .map_err(ErrorObject::from);
+            let _ = tx.send(result);
+        }));
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+    }
+
+    /// Validates a block submitted to the relay
+    async fn validate_builder_submission_v5(
+        &self,
+        request: BuilderBlockValidationRequestV5,
+    ) -> RpcResult<()> {
+        let this = self.clone();
+        let (tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = Self::validate_builder_submission_v5(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);
