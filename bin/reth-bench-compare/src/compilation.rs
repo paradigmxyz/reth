@@ -126,7 +126,7 @@ impl CompilationManager {
             return Err(eyre!("Compilation failed with exit code: {:?}", output.status.code()));
         }
 
-        info!("Reth compilation completed successfully");
+        info!("Reth compilation completed");
 
         // Copy the compiled binary to cache
         let source_path = PathBuf::from(&self.repo_root).join("target/profiling/reth");
@@ -238,7 +238,7 @@ impl CompilationManager {
             ));
         }
 
-        info!("samply installation completed successfully");
+        info!("Samply installation completed");
         Ok(())
     }
 
@@ -314,7 +314,7 @@ impl CompilationManager {
             ));
         }
 
-        info!("reth-bench compilation completed successfully");
+        info!("Reth-bench compilation completed");
         Ok(())
     }
 }

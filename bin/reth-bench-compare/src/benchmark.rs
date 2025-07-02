@@ -130,7 +130,7 @@ impl BenchmarkRunner {
             return Err(eyre!("reth-bench failed with exit code: {:?}", status.code()));
         }
 
-        info!("Benchmark completed successfully");
+        info!("Benchmark completed");
         Ok(())
     }
 }

@@ -223,7 +223,6 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     // Handle any errors from the workflow
     result?;
 
-    info!("Benchmark comparison completed successfully!");
     Ok(())
 }
 
