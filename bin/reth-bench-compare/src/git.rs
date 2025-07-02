@@ -247,3 +247,8 @@ impl GitManager {
         &self.repo_root
     }
 }
+
+/// Sanitize a git reference for use in file names.
+pub fn sanitize_git_ref(git_ref: &str) -> String {
+    git_ref.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-")
+}

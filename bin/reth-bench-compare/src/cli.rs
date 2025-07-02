@@ -167,9 +167,9 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     let git_manager = GitManager::new()?;
     let output_dir = args.output_dir_path();
     let compilation_manager = CompilationManager::new(
-        git_manager.repo_root().to_string(), 
+        git_manager.repo_root().to_string(),
         output_dir.clone(),
-        git_manager.clone()
+        git_manager.clone(),
     )?;
     let mut node_manager = NodeManager::new(&args);
     let benchmark_runner = BenchmarkRunner::new(&args);
@@ -251,7 +251,7 @@ async fn run_benchmark_workflow(
         compilation_manager.ensure_reth_bench_available()?;
 
         // Get the binary path for this git reference
-        let binary_path = compilation_manager.get_binary_path(git_ref);
+        let binary_path = compilation_manager.get_cached_binary_path(git_ref);
 
         // Start reth node
         let mut node_process = node_manager.start_node(&binary_path).await?;

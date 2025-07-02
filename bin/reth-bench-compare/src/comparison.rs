@@ -1,6 +1,6 @@
 //! Results comparison and report generation.
 
-use crate::cli::Args;
+use crate::{cli::Args, git::sanitize_git_ref};
 use chrono::{DateTime, Utc};
 use csv::Reader;
 use eyre::{eyre, Result, WrapErr};
@@ -125,11 +125,7 @@ impl ComparisonGenerator {
             _ => ref_type, // fallback to the provided string
         };
 
-        // Sanitize the reference name for use as a directory name
-        // Replace filesystem-unfriendly characters
-        let sanitized_name = ref_name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-");
-
-        self.output_dir.join("results").join(&self.timestamp).join(&sanitized_name)
+        self.output_dir.join("results").join(&self.timestamp).join(sanitize_git_ref(ref_name))
     }
 
     /// Get the main output directory for this comparison run
