@@ -28,6 +28,9 @@ serde_json.workspace = true
 # Process management
 ctrlc = "3.4"
 
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal"] }
+
 # Time handling
 chrono = "0.4"
 
