@@ -63,9 +63,8 @@ impl BenchmarkRunner {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
-        // Format command nicely for logging
-        info!("Executing: reth-bench new-payload-fcu --rpc-url {} --jwt-secret {} --from {} --to {} --output {}", 
-            self.rpc_url, self.jwt_secret, from_block, to_block, output_dir.display());
+        // Debug log the command
+        debug!("Executing reth-bench command: {:?}", cmd);
 
         // Execute the benchmark
         let mut child = cmd.spawn().wrap_err("Failed to start reth-bench process")?;

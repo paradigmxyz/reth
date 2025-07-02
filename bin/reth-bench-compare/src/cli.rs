@@ -407,8 +407,8 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
 
-    // Debug log the baseline samply load command
-    debug!("Executing samply load command: {} load --port 3000 {}", samply_path, baseline_profile.to_string_lossy());
+    // Debug log the command
+    debug!("Executing samply load command: {:?}", baseline_cmd);
     
     let mut baseline_child = baseline_cmd
         .spawn()
@@ -423,8 +423,8 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
 
-    // Debug log the feature samply load command
-    debug!("Executing samply load command: {} load --port 3001 {}", samply_path, feature_profile.to_string_lossy());
+    // Debug log the command
+    debug!("Executing samply load command: {:?}", feature_cmd);
     
     let mut feature_child = feature_cmd
         .spawn()
