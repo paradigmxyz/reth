@@ -153,21 +153,28 @@ mod tests {
         // Test with wait-time provided
         let args = Args::try_parse_from([
             "reth-bench-compare",
-            "--baseline-ref", "main",
-            "--feature-ref", "test",
-            "--wait-time", "200ms"
-        ]).unwrap();
-        
+            "--baseline-ref",
+            "main",
+            "--feature-ref",
+            "test",
+            "--wait-time",
+            "200ms",
+        ])
+        .unwrap();
+
         let runner = BenchmarkRunner::new(&args);
         assert_eq!(runner.wait_time, Some("200ms".to_string()));
 
         // Test without wait-time
         let args = Args::try_parse_from([
             "reth-bench-compare",
-            "--baseline-ref", "main",
-            "--feature-ref", "test"
-        ]).unwrap();
-        
+            "--baseline-ref",
+            "main",
+            "--feature-ref",
+            "test",
+        ])
+        .unwrap();
+
         let runner = BenchmarkRunner::new(&args);
         assert_eq!(runner.wait_time, None);
     }
