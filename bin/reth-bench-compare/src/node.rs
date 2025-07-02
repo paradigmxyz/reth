@@ -145,9 +145,6 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
-        // Debug log the command
-        debug!("Executing samply command: {:?}", cmd);
-
         Ok(cmd)
     }
 
@@ -159,19 +156,13 @@ impl NodeManager {
             info!("Starting reth node with sudo...");
             let mut cmd = tokio::process::Command::new("sudo");
             cmd.args(reth_args);
-            
-            // Debug log the command
-            debug!("Executing reth command: {:?}", cmd);
-            
+
             cmd
         } else {
             info!("Starting reth node...");
             let mut cmd = tokio::process::Command::new(binary_path);
             cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
-            
-            // Debug log the command
-            debug!("Executing reth command: {:?}", cmd);
-            
+
             cmd
         }
     }
@@ -193,6 +184,7 @@ impl NodeManager {
         } else {
             self.create_direct_command(&reth_args)
         };
+        debug!("Executing reth command: {cmd:?}");
 
         let mut child = cmd
             .stdout(std::process::Stdio::piped())
