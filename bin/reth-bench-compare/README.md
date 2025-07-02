@@ -154,7 +154,7 @@ Feature Summary:
 
 - **Git State Protection**: Automatically restores original branch on completion or interruption
 - **Process Cleanup**: Handles Ctrl+C gracefully, cleaning up processes and git state
-- **Lock File Cleanup**: Automatically removes database and static file locks after node shutdown
+- **Graceful Shutdown**: Uses SIGINT for proper process termination when profiling
 - **Validation**: Validates git state, reference existence, and build requirements before starting
 - **Error Recovery**: Comprehensive error handling with clear recovery instructions
 - **Binary Caching**: Compiled binaries are cached per git reference to speed up repeated benchmarks
@@ -187,8 +187,7 @@ For each git reference, the tool:
    - Verifies output file generation
 
 5. **Cleanup**:
-   - Stops reth node (attempting graceful shutdown)
-   - Removes database and static file locks
+   - Stops reth node gracefully using SIGINT (when profiling) or SIGKILL
    - Unwinds node state to original tip
    - Restores original git branch
 

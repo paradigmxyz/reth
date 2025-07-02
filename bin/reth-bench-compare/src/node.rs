@@ -15,7 +15,7 @@ use tokio::{
     process::Command,
     time::{sleep, timeout},
 };
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// Manages reth node lifecycle and operations
 pub struct NodeManager {
@@ -201,7 +201,7 @@ impl NodeManager {
         let mut child = cmd
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
-            .kill_on_drop(!self.enable_profiling) // Don't kill on drop when profiling
+            .kill_on_drop(true) // Kill on drop so that on Ctrl-C for parent process we stop all child processes
             .spawn()
             .wrap_err("Failed to start reth node")?;
 
@@ -262,95 +262,36 @@ impl NodeManager {
     /// Stop the reth node gracefully
     pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
         let pid = child.id().expect("Child process ID should be available");
+        info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
         
-        if self.enable_profiling {
-            info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
-            
-            #[cfg(unix)]
-            {
-                // Use nix crate to send SIGINT to the process group when profiling on Unix systems
-                // Mimic Ctrl-C: negative value == process group id
-                let pgid = -(pid as i32);
-                let nix_pgid = Pid::from_raw(pgid);
-                kill(nix_pgid, Signal::SIGINT)
-                    .wrap_err_with(|| format!("Failed to send SIGINT to process group {}", pid))?;
+        #[cfg(unix)]
+        {
+            // Use nix crate to send SIGINT to the process group on Unix systems
+            // Mimic Ctrl-C: negative value == process group id
+            let pgid = -(pid as i32);
+            let nix_pgid = Pid::from_raw(pgid);
+            kill(nix_pgid, Signal::SIGINT)
+                .wrap_err_with(|| format!("Failed to send SIGINT to process group {}", pid))?;
+        }
+        
+        #[cfg(not(unix))]
+        {
+            // On non-Unix systems, fall back to using external kill command
+            let output = Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/F"])
+                .output()
+                .await
+                .wrap_err("Failed to execute taskkill command")?;
+                
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(eyre!("Failed to kill process {}: {}", pid, stderr));
             }
-            
-            #[cfg(not(unix))]
-            {
-                // On non-Unix systems, fall back to using external kill command
-                let output = Command::new("taskkill")
-                    .args(["/PID", &pid.to_string(), "/F"])
-                    .output()
-                    .await
-                    .wrap_err("Failed to execute taskkill command")?;
-                    
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(eyre!("Failed to kill process {}: {}", pid, stderr));
-                }
-            }
-        } else {
-            info!("Stopping reth node with SIGKILL (PID: {})...", pid);
-            
-            // Use tokio's built-in kill for non-profiling mode
-            child.kill().await.wrap_err("Failed to kill reth process")?;
         }
 
         // Wait for the process to exit
         let status = child.wait().await.wrap_err("Failed to wait for reth process to exit")?;
         info!("Reth node (PID: {}) exited with status: {:?}", pid, status);
-
-        // Manually delete the storage lock files to ensure clean shutdown
-        if let Some(ref datadir) = self.datadir {
-            let lock_files = vec![
-                std::path::Path::new(datadir).join("db").join("lock"),
-                std::path::Path::new(datadir).join("static_files").join("lock"),
-            ];
-
-            for lock_file in lock_files {
-                if lock_file.exists() {
-                    if self.use_sudo {
-                        // Use sudo to remove the lock file
-                        match Command::new("sudo")
-                            .args(["rm", "-f", &lock_file.to_string_lossy()])
-                            .spawn()
-                        {
-                            Ok(mut child) => match child.wait().await {
-                                Ok(status) if status.success() => {
-                                    info!("Removed storage lock file with sudo: {:?}", lock_file);
-                                }
-                                Ok(status) => {
-                                    warn!("Failed to remove storage lock file with sudo {:?}: exit status {:?}", lock_file, status);
-                                }
-                                Err(e) => {
-                                    warn!(
-                                        "Failed to wait for sudo rm process {:?}: {}",
-                                        lock_file, e
-                                    );
-                                }
-                            },
-                            Err(e) => {
-                                warn!(
-                                    "Failed to spawn sudo rm for storage lock file {:?}: {}",
-                                    lock_file, e
-                                );
-                            }
-                        }
-                    } else {
-                        // Remove without sudo
-                        match std::fs::remove_file(&lock_file) {
-                            Ok(()) => {
-                                info!("Removed storage lock file: {:?}", lock_file);
-                            }
-                            Err(e) => {
-                                warn!("Failed to remove storage lock file {:?}: {}", lock_file, e);
-                            }
-                        }
-                    }
-                }
-            }
-        }
 
         Ok(())
     }
