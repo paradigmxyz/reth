@@ -678,13 +678,23 @@ impl ParallelSparseTrie {
         self.prefix_set = unchanged_prefix_set;
 
         // Update subtrie hashes in parallel
-        // TODO: call `update_hashes` on each subtrie in parallel
         let (tx, rx) = mpsc::channel();
-        for ChangedSubtrie { index, mut subtrie, mut prefix_set } in subtries {
-            subtrie.update_hashes(&mut prefix_set);
-            tx.send((index, subtrie)).unwrap();
-        }
+
+        let handles: Vec<_> = subtries
+            .into_iter()
+            .map(|ChangedSubtrie { index, mut subtrie, mut prefix_set }| {
+                let tx = tx.clone();
+                std::thread::spawn(move || {
+                    subtrie.update_hashes(&mut prefix_set);
+                    tx.send((index, subtrie)).unwrap();
+                })
+            })
+            .collect();
+
         drop(tx);
+        for handle in handles {
+            handle.join().unwrap();
+        }
 
         // Return updated subtries back to the trie
         for (index, subtrie) in rx {
