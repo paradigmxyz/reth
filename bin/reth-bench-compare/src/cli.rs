@@ -2,13 +2,13 @@
 
 use alloy_provider::{Provider, ProviderBuilder};
 use clap::Parser;
-use eyre::{eyre, Result};
+use eyre::{eyre, Result, WrapErr};
 use reth_chainspec::Chain;
 use reth_cli_runner::CliContext;
 use reth_node_core::args::{DatadirArgs, LogArgs};
 use reth_tracing::FileWorkerGuard;
 use std::path::PathBuf;
-use tracing::info;
+use tracing::{debug, info, warn};
 
 use crate::{
     benchmark::BenchmarkRunner, comparison::ComparisonGenerator, compilation::CompilationManager,
@@ -406,6 +406,9 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
+
+    // Debug log the baseline samply load command
+    debug!("Executing samply load command: {} load --port 3000 {}", samply_path, baseline_profile.to_string_lossy());
     
     let mut baseline_child = baseline_cmd
         .spawn()
@@ -419,6 +422,9 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
+
+    // Debug log the feature samply load command
+    debug!("Executing samply load command: {} load --port 3001 {}", samply_path, feature_profile.to_string_lossy());
     
     let mut feature_child = feature_cmd
         .spawn()

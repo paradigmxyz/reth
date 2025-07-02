@@ -81,6 +81,9 @@ impl CompilationManager {
 
         info!("Compiling reth with profiling configuration for {}...", git_ref);
 
+        // Debug log the make command
+        debug!("Executing make command: make profiling (in directory: {})", self.repo_root);
+
         let output = Command::new("make")
             .arg("profiling")
             .current_dir(&self.repo_root)
@@ -188,6 +191,9 @@ impl CompilationManager {
     pub fn install_samply(&self) -> Result<()> {
         info!("Installing samply via cargo...");
 
+        // Debug log the cargo install command
+        debug!("Executing cargo command: cargo install --locked samply");
+
         let output = Command::new("cargo")
             .args(["install", "--locked", "samply"])
             .output()
@@ -262,6 +268,9 @@ impl CompilationManager {
     /// Compile and install reth-bench using `make install-reth-bench`
     pub fn compile_reth_bench(&self) -> Result<()> {
         info!("Compiling and installing reth-bench...");
+
+        // Debug log the make install-reth-bench command
+        debug!("Executing make command: make install-reth-bench (in directory: {})", self.repo_root);
 
         let output = Command::new("make")
             .arg("install-reth-bench")

@@ -145,6 +145,20 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
+        // Debug log the complete samply command
+        let mut cmd_parts = if self.use_sudo {
+            vec!["sudo".to_string(), samply_path.clone()]
+        } else {
+            vec![samply_path.clone()]
+        };
+        cmd_parts.extend_from_slice(&["record".to_string(), "--save-only".to_string(), "-o".to_string(), profile_path.to_string_lossy().to_string()]);
+        if let Some(rate) = self.get_perf_sample_rate() {
+            cmd_parts.extend_from_slice(&["--rate".to_string(), rate]);
+        }
+        cmd_parts.push("--".to_string());
+        cmd_parts.extend(reth_args.iter().cloned());
+        debug!("Executing samply command: {}", cmd_parts.join(" "));
+
         Ok(cmd)
     }
 
@@ -156,11 +170,21 @@ impl NodeManager {
             info!("Starting reth node with sudo...");
             let mut cmd = tokio::process::Command::new("sudo");
             cmd.args(reth_args);
+            
+            // Debug log the complete sudo command
+            let mut cmd_parts = vec!["sudo".to_string()];
+            cmd_parts.extend(reth_args.iter().cloned());
+            debug!("Executing reth command: {}", cmd_parts.join(" "));
+            
             cmd
         } else {
             info!("Starting reth node...");
             let mut cmd = tokio::process::Command::new(binary_path);
             cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
+            
+            // Debug log the complete reth command
+            debug!("Executing reth command: {}", reth_args.join(" "));
+            
             cmd
         }
     }
@@ -349,6 +373,22 @@ impl NodeManager {
         }
 
         cmd.args(["to-block", &block_number.to_string()]);
+
+        // Debug log the complete unwind command
+        let mut cmd_parts = if self.use_sudo {
+            vec!["sudo".to_string(), binary_path.clone()]
+        } else {
+            vec![binary_path.clone()]
+        };
+        cmd_parts.extend_from_slice(&["stage".to_string(), "unwind".to_string()]);
+        if chain_str != "mainnet" {
+            cmd_parts.extend_from_slice(&["--chain".to_string(), chain_str.clone()]);
+        }
+        if let Some(ref datadir) = self.datadir {
+            cmd_parts.extend_from_slice(&["--datadir".to_string(), datadir.clone()]);
+        }
+        cmd_parts.extend_from_slice(&["to-block".to_string(), block_number.to_string()]);
+        debug!("Executing reth unwind command: {}", cmd_parts.join(" "));
 
         let output = cmd.output().wrap_err("Failed to execute unwind command")?;
 
