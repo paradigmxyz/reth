@@ -166,12 +166,11 @@ impl CompilationManager {
 
     /// Check if reth-bench is available in PATH
     pub fn is_reth_bench_available(&self) -> bool {
-        println!("output: {:?}", Command::new("which").arg("reth-bench").output());
         match Command::new("which").arg("reth-bench").output() {
             Ok(output) => {
                 if output.status.success() {
                     let path = String::from_utf8_lossy(&output.stdout);
-                    info!("Found reth-bench: {}", path);
+                    info!("Found reth-bench: {}", path.trim());
                     true
                 } else {
                     false
