@@ -55,6 +55,30 @@ impl NodeManager {
         None
     }
 
+    /// Get the absolute path to samply using 'which' command
+    fn get_samply_path(&self) -> Result<String> {
+        let output = std::process::Command::new("which")
+            .arg("samply")
+            .output()
+            .wrap_err("Failed to execute 'which samply' command")?;
+
+        if !output.status.success() {
+            return Err(eyre!("samply not found in PATH"));
+        }
+
+        let samply_path = String::from_utf8(output.stdout)
+            .wrap_err("samply path is not valid UTF-8")?
+            .trim()
+            .to_string();
+
+        if samply_path.is_empty() {
+            return Err(eyre!("which samply returned empty path"));
+        }
+
+        info!("Found samply at: {}", samply_path);
+        Ok(samply_path)
+    }
+
     /// Build reth arguments as a vector of strings
     fn build_reth_args(&self, binary_path_str: &str) -> (Vec<String>, String) {
         let mut reth_args = vec![binary_path_str.to_string(), "node".to_string()];
@@ -98,12 +122,15 @@ impl NodeManager {
         info!("Starting reth node with samply profiling...");
         info!("Profile output: {:?}", profile_path);
 
+        // Get absolute path to samply
+        let samply_path = self.get_samply_path()?;
+
         let mut cmd = if self.use_sudo {
             let mut sudo_cmd = tokio::process::Command::new("sudo");
-            sudo_cmd.arg("samply");
+            sudo_cmd.arg(&samply_path);
             sudo_cmd
         } else {
-            tokio::process::Command::new("samply")
+            tokio::process::Command::new(&samply_path)
         };
 
         // Add samply arguments
