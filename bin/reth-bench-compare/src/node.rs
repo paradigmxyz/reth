@@ -55,6 +55,90 @@ impl NodeManager {
         None
     }
 
+    /// Build reth arguments as a vector of strings
+    fn build_reth_args(&self, binary_path_str: &str) -> (Vec<String>, String) {
+        let mut reth_args = vec![binary_path_str.to_string(), "node".to_string()];
+
+        // Add chain argument (skip for mainnet as it's the default)
+        let chain_str = self.chain.to_string();
+        if chain_str != "mainnet" {
+            reth_args.extend_from_slice(&["--chain".to_string(), chain_str.clone()]);
+        }
+
+        // Add datadir if specified
+        if let Some(ref datadir) = self.datadir {
+            reth_args.extend_from_slice(&["--datadir".to_string(), datadir.clone()]);
+        }
+
+        // Add reth-specific arguments
+        let metrics_arg = format!("0.0.0.0:{}", self.metrics_port);
+        reth_args.extend_from_slice(&[
+            "--engine.accept-execution-requests-hash".to_string(),
+            "--metrics".to_string(),
+            metrics_arg,
+            "--http".to_string(),
+            "--http.api".to_string(),
+            "eth".to_string(),
+        ]);
+
+        (reth_args, chain_str)
+    }
+
+    /// Create a command for profiling mode
+    fn create_profiling_command(
+        &self,
+        binary_path_str: &str,
+        git_ref: &str,
+        reth_args: &[String],
+    ) -> Result<tokio::process::Command> {
+        // Create profiles directory if it doesn't exist
+        let profile_dir = self.output_dir.join("profiles");
+        fs::create_dir_all(&profile_dir).wrap_err("Failed to create profiles directory")?;
+
+        let profile_path = profile_dir.join(format!("{}.json.gz", sanitize_git_ref(git_ref)));
+        info!("Starting reth node with samply profiling...");
+        info!("Profile output: {:?}", profile_path);
+
+        let mut cmd = if self.use_sudo {
+            let mut sudo_cmd = tokio::process::Command::new("sudo");
+            sudo_cmd.arg("samply");
+            sudo_cmd
+        } else {
+            tokio::process::Command::new("samply")
+        };
+
+        // Add samply arguments
+        cmd.args(["record", "--save-only", "-o", &profile_path.to_string_lossy()]);
+
+        // Add rate argument if available
+        if let Some(rate) = self.get_perf_sample_rate() {
+            cmd.args(["--rate", &rate]);
+        }
+
+        // Add separator and complete reth command
+        cmd.arg("--");
+        cmd.args(reth_args);
+
+        Ok(cmd)
+    }
+
+    /// Create a command for direct reth execution
+    fn create_direct_command(&self, reth_args: &[String]) -> tokio::process::Command {
+        let binary_path = &reth_args[0];
+        
+        if self.use_sudo {
+            info!("Starting reth node with sudo...");
+            let mut cmd = tokio::process::Command::new("sudo");
+            cmd.args(reth_args);
+            cmd
+        } else {
+            info!("Starting reth node...");
+            let mut cmd = tokio::process::Command::new(binary_path);
+            cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
+            cmd
+        }
+    }
+
     /// Start a reth node using the specified binary path and return the process handle
     pub async fn start_node(
         &mut self,
@@ -65,95 +149,12 @@ impl NodeManager {
         self.binary_path = Some(binary_path.to_path_buf());
 
         let binary_path_str = binary_path.to_string_lossy();
+        let (reth_args, _) = self.build_reth_args(&binary_path_str);
 
         let mut cmd = if self.enable_profiling {
-            // Create profiles directory if it doesn't exist
-            let profile_dir = self.output_dir.join("profiles");
-            fs::create_dir_all(&profile_dir).wrap_err("Failed to create profiles directory")?;
-
-            let profile_path = profile_dir.join(format!("{}.json.gz", sanitize_git_ref(git_ref)));
-            info!("Starting reth node with samply profiling...");
-            info!("Profile output: {:?}", profile_path);
-
-            let mut samply_cmd = if self.use_sudo {
-                let mut sudo_cmd = tokio::process::Command::new("sudo");
-                sudo_cmd.arg("samply");
-                sudo_cmd
-            } else {
-                tokio::process::Command::new("samply")
-            };
-
-            // Add samply arguments
-            samply_cmd.args(["record", "--save-only", "-o", &profile_path.to_string_lossy()]);
-
-            // Add rate argument if available
-            if let Some(rate) = self.get_perf_sample_rate() {
-                samply_cmd.args(["--rate", &rate]);
-            }
-
-            // Build the complete reth command with all arguments
-            let mut reth_args = vec![&*binary_path_str, "node"];
-
-            // Add chain argument (skip for mainnet as it's the default)
-            let chain_str = self.chain.to_string();
-            if chain_str != "mainnet" {
-                reth_args.extend_from_slice(&["--chain", &chain_str]);
-            }
-
-            // Add datadir if specified
-            if let Some(ref datadir) = self.datadir {
-                reth_args.extend_from_slice(&["--datadir", datadir]);
-            }
-
-            // Add reth-specific arguments
-            let metrics_arg = format!("0.0.0.0:{}", self.metrics_port);
-            reth_args.extend_from_slice(&[
-                "--engine.accept-execution-requests-hash",
-                "--metrics",
-                &metrics_arg,
-                "--http",
-                "--http.api",
-                "eth",
-            ]);
-
-            // Add separator and complete reth command
-            samply_cmd.arg("--");
-            samply_cmd.args(&reth_args);
-            samply_cmd
+            self.create_profiling_command(&binary_path_str, git_ref, &reth_args)?
         } else {
-            let mut reth_cmd = if self.use_sudo {
-                info!("Starting reth node with sudo...");
-                let mut sudo_cmd = tokio::process::Command::new("sudo");
-                sudo_cmd.args([&*binary_path_str, "node"]);
-                sudo_cmd
-            } else {
-                info!("Starting reth node...");
-                let mut cmd = tokio::process::Command::new(&*binary_path_str);
-                cmd.arg("node");
-                cmd
-            };
-
-            // Add chain argument (skip for mainnet as it's the default)
-            let chain_str = self.chain.to_string();
-            if chain_str != "mainnet" {
-                reth_cmd.args(["--chain", &chain_str]);
-            }
-
-            // Add datadir if specified
-            if let Some(ref datadir) = self.datadir {
-                reth_cmd.args(["--datadir", datadir]);
-            }
-
-            reth_cmd.args([
-                "--engine.accept-execution-requests-hash",
-                "--metrics",
-                &format!("0.0.0.0:{}", self.metrics_port),
-                "--http",
-                "--http.api",
-                "eth",
-            ]);
-
-            reth_cmd
+            self.create_direct_command(&reth_args)
         };
 
         let mut child = cmd
