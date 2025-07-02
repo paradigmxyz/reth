@@ -267,7 +267,7 @@ impl GitManager {
             ));
         }
 
-        info!("Successfully switched to branch: {}", branch);
+        info!("Switched to branch: {}", branch);
         Ok(())
     }
 
