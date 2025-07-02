@@ -166,7 +166,11 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     // Initialize managers
     let git_manager = GitManager::new()?;
     let output_dir = args.output_dir_path();
-    let compilation_manager = CompilationManager::new(git_manager.repo_root().to_string(), output_dir.clone());
+    let compilation_manager = CompilationManager::new(
+        git_manager.repo_root().to_string(), 
+        output_dir.clone(),
+        git_manager.clone()
+    )?;
     let mut node_manager = NodeManager::new(&args);
     let benchmark_runner = BenchmarkRunner::new(&args);
     let mut comparison_generator = ComparisonGenerator::new(&args);
