@@ -55,12 +55,6 @@ impl NodeManager {
         None
     }
 
-    /// Get the profile output path for a git reference
-    fn get_profile_path(&self, git_ref: &str) -> PathBuf {
-        let profile_dir = self.output_dir.join("profiles");
-        profile_dir.join(format!("{}.json.gz", sanitize_git_ref(git_ref)))
-    }
-
     /// Start a reth node using the specified binary path and return the process handle
     pub async fn start_node(
         &mut self,
@@ -69,16 +63,15 @@ impl NodeManager {
     ) -> Result<tokio::process::Child> {
         // Store the binary path for later use (e.g., in unwind_to_block)
         self.binary_path = Some(binary_path.to_path_buf());
-        
+
         let binary_path_str = binary_path.to_string_lossy();
 
         let mut cmd = if self.enable_profiling {
             // Create profiles directory if it doesn't exist
             let profile_dir = self.output_dir.join("profiles");
-            fs::create_dir_all(&profile_dir)
-                .wrap_err("Failed to create profiles directory")?;
+            fs::create_dir_all(&profile_dir).wrap_err("Failed to create profiles directory")?;
 
-            let profile_path = self.get_profile_path(git_ref);
+            let profile_path = profile_dir.join(format!("{}.json.gz", sanitize_git_ref(git_ref)));
             info!("Starting reth node with samply profiling...");
             info!("Profile output: {:?}", profile_path);
 
