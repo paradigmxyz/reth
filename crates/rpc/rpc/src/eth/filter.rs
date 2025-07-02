@@ -590,17 +590,12 @@ where
         {
             let headers = self.provider().headers_range(from..=to)?;
 
-            let mut headers_iter = headers
-                .into_iter()
-                .filter(|header| filter.matches_bloom(header.logs_bloom()))
-                .peekable();
+            let headers_iter =
+                headers.into_iter().filter(|header| filter.matches_bloom(header.logs_bloom()));
 
-            while let Some(header) = headers_iter.next() {
-                let block_hash = match headers_iter.peek() {
-                    Some(child_header) => child_header.parent_hash(),
-                    None => header.hash_slow(),
-                };
-
+            for header in headers_iter {
+                // Calculate hash for each header since filtered headers may not be consecutive
+                let block_hash = header.hash_slow();
                 matching_headers.push(SealedHeader::new(header, block_hash));
             }
         }
