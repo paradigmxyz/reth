@@ -1,9 +1,9 @@
 //! Compilation operations for reth and reth-bench.
 
+use crate::git::GitManager;
 use eyre::{eyre, Result, WrapErr};
 use std::{fs, path::PathBuf, process::Command};
 use tracing::{debug, error, info, warn};
-use crate::git::GitManager;
 
 /// Manages compilation operations for reth components
 #[derive(Debug)]
@@ -54,7 +54,7 @@ impl CompilationManager {
         }
 
         let version_output = String::from_utf8_lossy(&output.stdout);
-        
+
         // Parse the commit SHA from the version output
         // Looking for line: "Commit SHA: 30110bca049a7d50ca53c6378e693287bcddaf5a"
         for line in version_output.lines() {
@@ -70,17 +70,21 @@ impl CompilationManager {
     /// Compile reth using `make profiling` and cache the binary
     pub fn compile_reth(&self, git_ref: &str) -> Result<()> {
         let cached_path = self.get_cached_binary_path(git_ref);
-        
+
         // Check if we have a cached binary with matching commit
         if let Some(cached_commit) = self.check_cached_binary_commit(&cached_path)? {
             let current_commit = self.git_manager.get_current_commit()?;
-            
+
             if cached_commit == current_commit {
                 info!("Using cached binary for {} (commit: {})", git_ref, &cached_commit[..8]);
                 return Ok(());
             } else {
-                info!("Cached binary commit mismatch for {} (cached: {}, current: {})", 
-                    git_ref, &cached_commit[..8], &current_commit[..8]);
+                info!(
+                    "Cached binary commit mismatch for {} (cached: {}, current: {})",
+                    git_ref,
+                    &cached_commit[..8],
+                    &current_commit[..8]
+                );
                 info!("Recompiling...");
             }
         } else {
@@ -142,12 +146,10 @@ impl CompilationManager {
 
         // Create bin directory if it doesn't exist
         let bin_dir = self.output_dir.join("bin");
-        fs::create_dir_all(&bin_dir)
-            .wrap_err("Failed to create bin directory")?;
+        fs::create_dir_all(&bin_dir).wrap_err("Failed to create bin directory")?;
 
         // Copy binary to cache
-        fs::copy(&source_path, &cached_path)
-            .wrap_err("Failed to copy binary to cache")?;
+        fs::copy(&source_path, &cached_path).wrap_err("Failed to copy binary to cache")?;
 
         // Make the cached binary executable
         #[cfg(unix)]
@@ -164,8 +166,8 @@ impl CompilationManager {
 
     /// Check if reth-bench is available in PATH
     pub fn is_reth_bench_available(&self) -> bool {
-        println!("output: {:?}", Command::new("command").args(["-v", "reth-bench"]).output());
-        match Command::new("command").args(["-v", "reth-bench"]).output() {
+        println!("output: {:?}", Command::new("which").arg("reth-bench").output());
+        match Command::new("which").arg("reth-bench").output() {
             Ok(output) => {
                 if output.status.success() {
                     let path = String::from_utf8_lossy(&output.stdout);
