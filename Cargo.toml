@@ -450,24 +450,24 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "27.0.1", default-features = false }
-revm-bytecode = { version = "6.0.0", default-features = false }
-revm-database = { version = "7.0.0", default-features = false }
-revm-state = { version = "7.0.0", default-features = false }
+revm = { version = "27.0.2", default-features = false }
+revm-bytecode = { version = "6.0.1", default-features = false }
+revm-database = { version = "7.0.1", default-features = false }
+revm-state = { version = "7.0.1", default-features = false }
 revm-primitives = { version = "20.0.0", default-features = false }
-revm-interpreter = { version = "23.0.0", default-features = false }
-revm-inspector = { version = "8.0.1", default-features = false }
-revm-context = { version = "8.0.1", default-features = false }
-revm-context-interface = { version = "8.0.0", default-features = false }
-revm-database-interface = { version = "7.0.0", default-features = false }
-op-revm = { version = "8.0.1", default-features = false }
+revm-interpreter = { version = "23.0.1", default-features = false }
+revm-inspector = { version = "8.0.2", default-features = false }
+revm-context = { version = "8.0.2", default-features = false }
+revm-context-interface = { version = "8.0.1", default-features = false }
+revm-database-interface = { version = "7.0.1", default-features = false }
+op-revm = { version = "8.0.2", default-features = false }
 revm-inspectors = "0.26.5"
 
 # eth
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.2.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.13", default-features = false }
+alloy-evm = { version = "0.14", default-features = false }
 alloy-primitives = { version = "1.2.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.2.0"
@@ -505,7 +505,7 @@ alloy-transport-ipc = { version = "1.0.16", default-features = false }
 alloy-transport-ws = { version = "1.0.16", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.13", default-features = false }
+alloy-op-evm = { version = "0.14", default-features = false }
 alloy-op-hardforks = "0.2.2"
 op-alloy-rpc-types = { version = "0.18.7", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.18.7", default-features = false }
