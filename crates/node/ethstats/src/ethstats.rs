@@ -785,13 +785,13 @@ mod tests {
 
         // Clone the last_ping before moving service
         let last_ping = service.last_ping.clone();
-        
+
         // Spawn the service in the background
         let service_handle = tokio::spawn(service.run());
-        
+
         // Wait for the ping to be sent and pong received
         tokio::time::sleep(Duration::from_secs(1)).await;
-        
+
         // Verify ping was acknowledged
         let last_ping_guard = last_ping.lock().await;
         assert!(last_ping_guard.is_none(), "Ping should have been acknowledged");
@@ -850,24 +850,5 @@ mod tests {
             matches!(result, Err(EthStatsError::InvalidUrl(_))),
             "Should detect invalid URL format"
         );
-    }
-
-    #[tokio::test]
-    async fn continuous_test_until_quit() {
-        use tracing::Level;
-
-        let url = "Reth/v1.5.0-stable-61e38f9/macos/rustc1.86.0:a38e1e50b1b82fa@localhost:3000";
-        let network = NoopNetwork::default();
-        let provider = NoopProvider::default();
-        let pool = NoopTransactionPool::default();
-
-        let _ =
-            tracing_subscriber::fmt().with_max_level(Level::DEBUG).with_test_writer().try_init();
-
-        let service =
-            EthStatsService::new(url, network, provider, pool).await.expect("Failed to connect");
-        
-        println!("Test running. Press Ctrl+C to stop...");
-        service.run().await;
     }
 }
