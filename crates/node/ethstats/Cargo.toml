@@ -32,3 +32,6 @@ tracing.workspace = true
 url.workspace = true
 chrono.workspace = true
 thiserror = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+tracing-subscriber.workspace = true

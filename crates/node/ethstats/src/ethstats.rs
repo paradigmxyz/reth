@@ -567,18 +567,14 @@ where
                 loop {
                     let conn = conn.read().await;
                     if let Some(conn) = conn.as_ref() {
-                        match timeout(READ_TIMEOUT, conn.read_json()).await {
-                            Ok(Ok(msg)) => {
+                        match conn.read_json().await {
+                            Ok(msg) => {
                                 if message_tx.send(msg).await.is_err() {
                                     break;
                                 }
                             }
-                            Ok(Err(e)) => {
+                            Err(e) => {
                                 tracing::error!("Read error: {}", e);
-                                break;
-                            }
-                            Err(_) => {
-                                tracing::warn!("Read timeout");
                                 break;
                             }
                         }
@@ -757,7 +753,7 @@ mod tests {
     #[tokio::test]
     async fn test_connection_and_login() {
         let (server_url, server_handle) = setup_mock_server().await;
-        let ethstats_url = format!("test-node:test-secret@{}", server_url);
+        let ethstats_url = format!("test-node:test-secret@{server_url}");
 
         let network = NoopNetwork::default();
         let provider = NoopProvider::default();
@@ -777,7 +773,7 @@ mod tests {
     #[tokio::test]
     async fn test_ping_pong_flow() {
         let (server_url, server_handle) = setup_mock_server().await;
-        let ethstats_url = format!("test-node:test-secret@{}", server_url);
+        let ethstats_url = format!("test-node:test-secret@{server_url}");
 
         let network = NoopNetwork::default();
         let provider = NoopProvider::default();
@@ -808,7 +804,7 @@ mod tests {
     #[tokio::test]
     async fn test_history_command_handling() {
         let (server_url, server_handle) = setup_mock_server().await;
-        let ethstats_url = format!("test-node:test-secret@{}", server_url);
+        let ethstats_url = format!("test-node:test-secret@{server_url}");
 
         let network = NoopNetwork::default();
         let provider = NoopProvider::default();
@@ -854,5 +850,24 @@ mod tests {
             matches!(result, Err(EthStatsError::InvalidUrl(_))),
             "Should detect invalid URL format"
         );
+    }
+
+    #[tokio::test]
+    async fn continuous_test_until_quit() {
+        use tracing::Level;
+
+        let url = "Reth/v1.5.0-stable-61e38f9/macos/rustc1.86.0:a38e1e50b1b82fa@localhost:3000";
+        let network = NoopNetwork::default();
+        let provider = NoopProvider::default();
+        let pool = NoopTransactionPool::default();
+
+        let _ =
+            tracing_subscriber::fmt().with_max_level(Level::DEBUG).with_test_writer().try_init();
+
+        let service =
+            EthStatsService::new(url, network, provider, pool).await.expect("Failed to connect");
+        
+        println!("Test running. Press Ctrl+C to stop...");
+        service.run().await;
     }
 }
