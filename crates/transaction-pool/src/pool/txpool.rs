@@ -1670,7 +1670,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 })
             }
         }
-
         if transaction.gas_limit() > self.block_gas_limit {
             return Err(InsertErr::TxGasLimitMoreThanAvailableBlockGas {
                 block_gas_limit: self.block_gas_limit,

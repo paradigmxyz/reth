@@ -63,7 +63,7 @@
 //!
 //! ## Validation Process
 //!
-//! ### Stateless Checks
+//! ### Stateless Checks  
 //!
 //! Ethereum transactions undergo several stateless checks:
 //!
