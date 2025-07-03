@@ -590,12 +590,25 @@ where
         {
             let headers = self.provider().headers_range(from..=to)?;
 
-            let headers_iter =
-                headers.into_iter().filter(|header| filter.matches_bloom(header.logs_bloom()));
+            let mut headers_iter = headers
+                .into_iter()
+                .filter(|header| filter.matches_bloom(header.logs_bloom()))
+                .peekable();
 
-            for header in headers_iter {
-                // Calculate hash for each header since filtered headers may not be consecutive
-                let block_hash = header.hash_slow();
+            while let Some(header) = headers_iter.next() {
+                let current_number = header.number();
+
+                let block_hash = match headers_iter.peek() {
+                    Some(next_header) if next_header.number() == current_number + 1 => {
+                        // Headers are consecutive, use the more efficient parent_hash
+                        next_header.parent_hash()
+                    }
+                    _ => {
+                        // Headers not consecutive or last header, calculate hash
+                        header.hash_slow()
+                    }
+                };
+
                 matching_headers.push(SealedHeader::new(header, block_hash));
             }
         }
@@ -1605,10 +1618,12 @@ mod tests {
 
         // Create 4 headers where only blocks 100 and 102 will match bloom filter
         let mut expected_hashes = vec![];
+        let mut prev_hash = alloy_primitives::B256::default();
 
         for i in 100u64..=103 {
             let header = alloy_consensus::Header {
                 number: i,
+                parent_hash: prev_hash,
                 // Set bloom to match filter only for blocks 100 and 102
                 logs_bloom: if i == 100 || i == 102 {
                     alloy_primitives::Bloom::from([1u8; 256])
@@ -1620,6 +1635,7 @@ mod tests {
 
             let hash = header.hash_slow();
             expected_hashes.push(hash);
+            prev_hash = hash;
 
             let block = reth_ethereum_primitives::Block {
                 header,
