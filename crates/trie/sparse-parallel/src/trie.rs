@@ -769,13 +769,28 @@ impl ParallelSparseTrie {
         // Update the prefix set with the keys that didn't have matching subtries
         self.prefix_set = unchanged_prefix_set;
 
-        // Update subtrie hashes in parallel
-        // TODO: call `update_hashes` on each subtrie in parallel
         let (tx, rx) = mpsc::channel();
+
+        #[cfg(not(feature = "std"))]
+        // Update subtrie hashes serially if nostd
         for ChangedSubtrie { index, mut subtrie, mut prefix_set } in subtries {
             subtrie.update_hashes(&mut prefix_set);
             tx.send((index, subtrie)).unwrap();
         }
+
+        #[cfg(feature = "std")]
+        // Update subtrie hashes in parallel
+        {
+            use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            subtries
+                .into_par_iter()
+                .map(|ChangedSubtrie { index, mut subtrie, mut prefix_set }| {
+                    subtrie.update_hashes(&mut prefix_set);
+                    (index, subtrie)
+                })
+                .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
+        }
+
         drop(tx);
 
         // Return updated subtries back to the trie
@@ -3746,7 +3761,7 @@ mod tests {
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
         // First, add multiple leaves that will create a subtrie structure
-        // All leaves share the prefix [0x1, 0x2] to ensure they create a branch ndoe and subtrie
+        // All leaves share the prefix [0x1, 0x2] to ensure they create a branch node and subtrie
         //
         // This should result in a trie with the following structure
         // 0x: Extension { key: 0x12 }
