@@ -4,7 +4,7 @@ Each label in the repository has a description attached that describes what the 
 
 There are 7 label categories in the repository:
 
-- **Area labels**: These labels denote the general area of the project an issue or PR affects. These start with [`A-`][area].
+- **Area labels**: These labels denote the general area of the project that an issue or PR affects. These start with [`A-`][area].
 - **Category labels**: These labels denote the type of issue or change being made, for example https://github.com/paradigmxyz/reth/labels/C-bug or https://github.com/paradigmxyz/reth/labels/C-enhancement. These start with [`C-`][category].
 - **Difficulty labels**: These are reserved for the very easy or very hard issues. Any issue without one of these labels can be considered to be of "average difficulty". They start with [`D-`][difficulty].
 - **Meta labels**: These start with [`M-`][meta] and convey meaning to the core contributors, usually about the release process.
