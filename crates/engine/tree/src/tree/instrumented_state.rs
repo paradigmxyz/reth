@@ -191,8 +191,6 @@ impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
     }
 }
 
-impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {}
-
 impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         let start = Instant::now();

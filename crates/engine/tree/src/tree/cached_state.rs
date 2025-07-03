@@ -162,8 +162,6 @@ pub(crate) enum SlotStatus {
     Value(StorageValue),
 }
 
-impl<S: StateProvider> StateProvider for CachedStateProvider<S> {}
-
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         if let Some(res) = self.caches.code_cache.get(code_hash) {

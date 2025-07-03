@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
+    HashedPostStateProvider, ProviderError, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
@@ -430,12 +430,6 @@ impl<Provider: StateCommitmentProvider> HashedPostStateProvider
             <Provider::StateCommitment as StateCommitment>::KeyHasher,
         >(bundle_state.state())
     }
-}
-
-impl<
-        Provider: DBProvider + BlockNumReader + BlockHashReader + StateCommitmentProvider + AccountReader,
-    > StateProvider for HistoricalStateProviderRef<'_, Provider>
-{
 }
 
 impl<Provider: DBProvider + BlockNumReader + StateCommitmentProvider> BytecodeReader

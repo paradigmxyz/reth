@@ -169,8 +169,6 @@ impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
     }
 }
 
-impl StateProvider for StateProviderTraitObjWrapper<'_> {}
-
 impl BytecodeReader for StateProviderTraitObjWrapper<'_> {
     fn bytecode_by_hash(
         &self,

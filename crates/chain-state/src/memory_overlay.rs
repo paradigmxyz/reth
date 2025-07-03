@@ -222,8 +222,6 @@ impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRe
     }
 }
 
-impl<N: NodePrimitives> StateProvider for MemoryOverlayStateProviderRef<'_, N> {}
-
 impl<N: NodePrimitives> BytecodeReader for MemoryOverlayStateProviderRef<'_, N> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         for block in &self.in_memory {
