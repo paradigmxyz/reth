@@ -409,6 +409,10 @@ impl Default for RevealedSparseTrie {
 }
 
 impl SparseTrieInterface for RevealedSparseTrie {
+    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self> {
+        Self::default().with_root(root, masks, retain_updates)
+    }
+
     fn with_root(
         mut self,
         root: TrieNode,
@@ -420,7 +424,7 @@ impl SparseTrieInterface for RevealedSparseTrie {
         // A fresh/cleared `RevealedSparseTrie` has a `SparseNode::Empty` at its root. Delete that
         // so we can reveal the new root node.
         let path = Nibbles::default();
-        let _removed_root = self.nodes.remove(&path).unwrap();
+        let _removed_root = self.nodes.remove(&path).expect("root node should exist");
         debug_assert_eq!(_removed_root, SparseNode::Empty);
 
         self.reveal_node(path, root, masks)?;
