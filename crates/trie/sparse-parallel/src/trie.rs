@@ -519,7 +519,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
     }
 
     fn wipe(&mut self) {
-        todo!()
+        self.upper_subtrie.wipe();
+        self.lower_subtries = [const { None }; NUM_LOWER_SUBTRIES];
+        self.prefix_set = PrefixSetMut::all();
+        self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
     }
 
     fn clear(&mut self) {
@@ -1422,14 +1425,16 @@ impl SparseSubtrie {
         self.inner.updates.take().unwrap_or_default()
     }
 
+    /// Removes all nodes and values from the subtrie, resetting it to a blank state
+    /// with only an empty root node. This is used when a storage root is deleted.
+    fn wipe(&mut self) {
+        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        self.inner.clear();
+    }
+
     /// Clears the subtrie, keeping the data structures allocated.
     fn clear(&mut self) {
         self.nodes.clear();
-        self.inner.branch_node_tree_masks.clear();
-        self.inner.branch_node_hash_masks.clear();
-        self.inner.values.clear();
-        self.inner.updates = None;
-        self.inner.buffers.clear();
     }
 }
 
@@ -1762,6 +1767,15 @@ impl SparseSubtrieInner {
             ?node_type,
             "Added node to RLP node stack"
         );
+    }
+
+    /// Clears the subtrie, keeping the data structures allocated.
+    fn clear(&mut self) {
+        self.branch_node_tree_masks.clear();
+        self.branch_node_hash_masks.clear();
+        self.values.clear();
+        self.updates = None;
+        self.buffers.clear();
     }
 }
 
