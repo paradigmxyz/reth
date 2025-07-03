@@ -39,7 +39,7 @@ use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
     CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
     ChainStateBlockReader, ChainStateBlockWriter, ChangeSetReader, DatabaseProviderFactory,
-    HeaderProvider, PruneCheckpointReader, ReceiptProvider, StageCheckpointReader, StateProvider,
+    HeaderProvider, PruneCheckpointReader, ReceiptProvider, StageCheckpointReader,
     StateProviderBox, StateProviderFactory, StateReader, StateRootProvider, StorageReader,
     TransactionVariant, TransactionsProvider,
 };
@@ -848,12 +848,28 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
     }
 }
 
-impl<P, Node, N> StateProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> BytecodeReader for AlloyRethStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
 {
+    fn bytecode_by_hash(&self, _code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
+        // Cannot fetch bytecode by hash via RPC
+        Err(ProviderError::UnsupportedProvider)
+    }
+}
+
+impl<P, Node, N> AccountReader for AlloyRethStateProvider<P, Node, N>
+where
+    P: Provider<N> + Clone + 'static,
+    N: Network,
+    Node: NodeTypes,
+{
+    fn basic_account(&self, address: &Address) -> Result<Option<Account>, ProviderError> {
+        self.get_account(*address)
+    }
+
     fn storage(
         &self,
         address: Address,
@@ -898,29 +914,6 @@ where
 
     fn account_nonce(&self, addr: &Address) -> Result<Option<u64>, ProviderError> {
         self.get_account(*addr).map(|acc| acc.map(|a| a.nonce))
-    }
-}
-
-impl<P, Node, N> BytecodeReader for AlloyRethStateProvider<P, Node, N>
-where
-    P: Provider<N> + Clone + 'static,
-    N: Network,
-    Node: NodeTypes,
-{
-    fn bytecode_by_hash(&self, _code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
-        // Cannot fetch bytecode by hash via RPC
-        Err(ProviderError::UnsupportedProvider)
-    }
-}
-
-impl<P, Node, N> AccountReader for AlloyRethStateProvider<P, Node, N>
-where
-    P: Provider<N> + Clone + 'static,
-    N: Network,
-    Node: NodeTypes,
-{
-    fn basic_account(&self, address: &Address) -> Result<Option<Account>, ProviderError> {
-        self.get_account(*address)
     }
 }
 

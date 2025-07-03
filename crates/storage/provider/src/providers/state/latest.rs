@@ -219,6 +219,7 @@ delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvid
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_storage_api::StateProvider;
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
