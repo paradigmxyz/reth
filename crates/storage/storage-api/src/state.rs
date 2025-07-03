@@ -29,7 +29,6 @@ pub trait StateReader: Send + Sync {
 pub type StateProviderBox = Box<dyn StateProvider>;
 
 /// An abstraction for a type that provides state data.
-#[auto_impl(&, Arc, Box)]
 pub trait StateProvider:
     BlockHashReader
     + AccountReader
@@ -40,6 +39,19 @@ pub trait StateProvider:
     + HashedPostStateProvider
     + Send
     + Sync
+{
+}
+
+impl<T> StateProvider for T where
+    T: BlockHashReader
+        + AccountReader
+        + BytecodeReader
+        + StateRootProvider
+        + StorageRootProvider
+        + StateProofProvider
+        + HashedPostStateProvider
+        + Send
+        + Sync
 {
 }
 
