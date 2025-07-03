@@ -7,7 +7,7 @@ use proptest::{prelude::*, test_runner::TestRunner};
 use rand::{seq::IteratorRandom, Rng};
 use reth_testing_utils::generators;
 use reth_trie::Nibbles;
-use reth_trie_sparse::{blinded::DefaultBlindedProvider, RevealedSparseTrie};
+use reth_trie_sparse::{blinded::DefaultBlindedProvider, RevealedSparseTrie, SparseTrieInterface};
 
 fn update_rlp_node_level(c: &mut Criterion) {
     let mut rng = generators::rng();

@@ -1,5 +1,6 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory},
+    traits::SparseTrieInterface,
     LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
@@ -583,12 +584,12 @@ impl SparseStateTrie {
         Ok(())
     }
 
-    /// Calculates the hashes of the nodes below the provided level.
+    /// Calculates the hashes of subtries.
     ///
     /// If the trie has not been revealed, this function does nothing.
-    pub fn calculate_below_level(&mut self, level: usize) {
+    pub fn calculate_subtries(&mut self) {
         if let SparseTrie::Revealed(trie) = &mut self.state {
-            trie.update_rlp_node_level(level);
+            trie.update_subtrie_hashes();
         }
     }
 
