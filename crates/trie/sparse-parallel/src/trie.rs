@@ -523,7 +523,12 @@ impl SparseTrieInterface for ParallelSparseTrie {
     }
 
     fn clear(&mut self) {
-        todo!()
+        self.upper_subtrie.clear();
+        for subtrie in self.lower_subtries.iter_mut().flatten() {
+            subtrie.clear();
+        }
+        self.prefix_set.clear();
+        self.updates = None;
     }
 }
 
@@ -1416,6 +1421,16 @@ impl SparseSubtrie {
     fn take_updates(&mut self) -> SparseTrieUpdates {
         self.inner.updates.take().unwrap_or_default()
     }
+
+    /// Clears the subtrie, keeping the data structures allocated.
+    fn clear(&mut self) {
+        self.nodes.clear();
+        self.inner.branch_node_tree_masks.clear();
+        self.inner.branch_node_hash_masks.clear();
+        self.inner.values.clear();
+        self.inner.updates = None;
+        self.inner.buffers.clear();
+    }
 }
 
 /// Helper type for [`SparseSubtrie`] to mutably access only a subset of fields from the original
@@ -1839,6 +1854,17 @@ pub struct SparseSubtrieBuffers {
     branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
     /// Reusable RLP buffer
     rlp_buf: Vec<u8>,
+}
+
+impl SparseSubtrieBuffers {
+    /// Clears all buffers.
+    fn clear(&mut self) {
+        self.path_stack.clear();
+        self.rlp_node_stack.clear();
+        self.branch_child_buf.clear();
+        self.branch_value_stack_buf.clear();
+        self.rlp_buf.clear();
+    }
 }
 
 /// RLP node path stack item.
