@@ -241,10 +241,10 @@ mod tests {
     use std::hash::DefaultHasher;
 
     use super::*;
-    use reth_evm::EvmInternals;
+    use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
     use reth_revm::db::EmptyDB;
-    use revm::{context::JournalTr, precompile::PrecompileOutput, Journal};
-    use revm_primitives::{hardfork::SpecId, U256};
+    use revm::{context::TxEnv, precompile::PrecompileOutput};
+    use revm_primitives::hardfork::SpecId;
 
     #[test]
     fn test_cache_key_ref_hash() {
@@ -290,6 +290,7 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_map_separate_addresses() {
+        let mut evm = EthEvmFactory::default().create_evm(EmptyDB::default(), EvmEnv::default());
         let input_data = b"same_input";
         let gas_limit = 100_000;
 
@@ -337,41 +338,56 @@ mod tests {
             None,
         );
 
+        let precompile1_address = Address::with_last_byte(1);
+        let precompile2_address = Address::with_last_byte(2);
+
+        evm.precompiles_mut().apply_precompile(&precompile1_address, |_| Some(wrapped_precompile1));
+        evm.precompiles_mut().apply_precompile(&precompile2_address, |_| Some(wrapped_precompile2));
+
         // first invocation of precompile1 (cache miss)
-        let result1 = wrapped_precompile1
-            .call(PrecompileInput {
-                data: input_data,
-                gas: gas_limit,
+        let result1 = evm
+            .transact_raw(TxEnv {
                 caller: Address::ZERO,
-                value: U256::ZERO,
-                internals: EvmInternals::new(&mut Journal::<_>::new(EmptyDB::new())),
+                gas_limit,
+                data: input_data.into(),
+                kind: precompile1_address.into(),
+                ..Default::default()
             })
+            .unwrap()
+            .result
+            .into_output()
             .unwrap();
-        assert_eq!(result1.bytes.as_ref(), b"output_from_precompile_1");
+        assert_eq!(result1.as_ref(), b"output_from_precompile_1");
 
         // first invocation of precompile2 with the same input (should be a cache miss)
         // if cache was incorrectly shared, we'd get precompile1's result
-        let result2 = wrapped_precompile2
-            .call(PrecompileInput {
-                data: input_data,
-                gas: gas_limit,
+        let result2 = evm
+            .transact_raw(TxEnv {
                 caller: Address::ZERO,
-                value: U256::ZERO,
-                internals: EvmInternals::new(&mut Journal::<_>::new(EmptyDB::new())),
+                gas_limit,
+                data: input_data.into(),
+                kind: precompile2_address.into(),
+                ..Default::default()
             })
+            .unwrap()
+            .result
+            .into_output()
             .unwrap();
-        assert_eq!(result2.bytes.as_ref(), b"output_from_precompile_2");
+        assert_eq!(result2.as_ref(), b"output_from_precompile_2");
 
         // second invocation of precompile1 (should be a cache hit)
-        let result3 = wrapped_precompile1
-            .call(PrecompileInput {
-                data: input_data,
-                gas: gas_limit,
+        let result3 = evm
+            .transact_raw(TxEnv {
                 caller: Address::ZERO,
-                value: U256::ZERO,
-                internals: EvmInternals::new(&mut Journal::<_>::new(EmptyDB::new())),
+                gas_limit,
+                data: input_data.into(),
+                kind: precompile1_address.into(),
+                ..Default::default()
             })
+            .unwrap()
+            .result
+            .into_output()
             .unwrap();
-        assert_eq!(result3.bytes.as_ref(), b"output_from_precompile_1");
+        assert_eq!(result3.as_ref(), b"output_from_precompile_1");
     }
 }
