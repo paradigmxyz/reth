@@ -20,52 +20,20 @@ use reth_node_core::{
 pub mod bootnode;
 mod rlpx;
 
-#[derive(Debug, Clone, Parser)]
-pub struct DownloadArgs {
-    /// The number of retries per request
-    #[arg(long, default_value = "5")]
-    retries: usize,
-
-    #[command(flatten)]
-    network: NetworkArgs,
-
-    #[command(flatten)]
-    datadir: DatadirArgs,
-
-    #[command(flatten)]
-    db: DatabaseArgs,
-}
-
 /// `reth p2p` command
 #[derive(Debug, Parser)]
 pub struct Command<C: ChainSpecParser> {
-    /// The path to the configuration file to use.
-    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
-    config: Option<PathBuf>,
-
-    /// The chain this node is running.
-    ///
-    /// Possible values are either a built-in chain or the path to a chain specification file.
-    #[arg(
-        long,
-        value_name = "CHAIN_OR_PATH",
-        long_help = C::help_message(),
-        default_value = C::SUPPORTED_CHAINS[0],
-        value_parser = C::parser()
-    )]
-    chain: Arc<C::ChainSpec>,
-
     #[command(subcommand)]
-    command: Subcommands,
+    command: Subcommands<C>,
 }
 
 /// `reth p2p` subcommands
 #[derive(Subcommand, Debug)]
-pub enum Subcommands {
+pub enum Subcommands<C: ChainSpecParser> {
     /// Download block header
     Header {
         #[command(flatten)]
-        args: DownloadArgs,
+        args: DownloadArgs<C>,
         /// The header number or hash
         #[arg(value_parser = hash_or_num_value_parser)]
         id: BlockHashOrNumber,
@@ -73,7 +41,7 @@ pub enum Subcommands {
     /// Download block body
     Body {
         #[command(flatten)]
-        args: DownloadArgs,
+        args: DownloadArgs<C>,
         /// The block number or hash
         #[arg(value_parser = hash_or_num_value_parser)]
         id: BlockHashOrNumber,
@@ -82,74 +50,14 @@ pub enum Subcommands {
     Rlpx(rlpx::Command),
 }
 
-impl DownloadArgs {
-    pub async fn setup<C, N>(
-        &self,
-        chain: Arc<C>,
-        config: Option<PathBuf>,
-    ) -> eyre::Result<(
-        Arc<reth_network::NetworkHandle<N::NetworkPrimitives>>,
-        reth_network::FetchClient<N::NetworkPrimitives>,
-    )>
-    where
-        C: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
-        N: CliNodeTypes<ChainSpec = C>,
-    {
-        let data_dir = self.datadir.clone().resolve_datadir(chain.chain());
-        let config_path = config.unwrap_or_else(|| data_dir.config());
-
-        // Load configuration
-        let mut config = Config::from_path(&config_path).unwrap_or_default();
-
-        config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
-
-        if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
-            eyre::bail!(
-                "No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`"
-            )
-        }
-
-        config.peers.trusted_nodes_only = self.network.trusted_only;
-
-        let default_secret_key_path = data_dir.p2p_secret();
-        let secret_key_path =
-            self.network.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
-        let p2p_secret_key = get_secret_key(&secret_key_path)?;
-        let rlpx_socket = (self.network.addr, self.network.port).into();
-        let boot_nodes = chain.bootnodes().unwrap_or_default();
-
-        let net = NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key)
-            .peer_config(config.peers_config_with_basic_nodes_from_file(None))
-            .external_ip_resolver(self.network.nat)
-            .disable_discv4_discovery_if(chain.chain().is_optimism())
-            .boot_nodes(boot_nodes.clone())
-            .apply(|builder| {
-                self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
-            })
-            .build_with_noop_provider(chain)
-            .manager()
-            .await?;
-        let network = net.handle().clone();
-        let handle = Arc::new(network);
-        tokio::task::spawn(net);
-
-        let fetch_client = handle.fetch_client().await?;
-
-        Ok((handle, fetch_client))
-    }
-
-    pub fn backoff(&self) -> ConstantBuilder {
-        ConstantBuilder::default().with_max_times(self.retries.max(1))
-    }
-}
-
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `p2p` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         match self.command {
             Subcommands::Header { args, id } => {
-                let (_network, fetch_client) =
-                    args.setup::<C::ChainSpec, N>(self.chain.clone(), self.config).await?;
+                let handle =
+                    args.setup::<N>().await?;
+                let fetch_client = handle.fetch_client().await?;
                 let backoff = args.backoff();
 
                 let header = (move || get_single_header(fetch_client.clone(), id))
@@ -160,8 +68,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
 
             Subcommands::Body { args, id } => {
-                let (_network, fetch_client) =
-                    args.setup::<C::ChainSpec, N>(self.chain.clone(), self.config).await?;
+                let handle =
+                    args.setup::<N>().await?;
+                let fetch_client = handle.fetch_client().await?;
                 let backoff = args.backoff();
 
                 let hash = match id {
@@ -207,6 +116,97 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
-        Some(&self.chain)
+        match &self.command {
+            Subcommands::Header { args, .. } => Some(&args.chain),
+            Subcommands::Body { args, .. } => Some(&args.chain),
+            Subcommands::Rlpx(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Parser)]
+pub struct DownloadArgs<C: ChainSpecParser> {
+    /// The number of retries per request
+    #[arg(long, default_value = "5")]
+    retries: usize,
+
+    #[command(flatten)]
+    network: NetworkArgs,
+
+    #[command(flatten)]
+    datadir: DatadirArgs,
+
+    #[command(flatten)]
+    db: DatabaseArgs,
+
+    /// The path to the configuration file to use.
+    #[arg(long, value_name = "FILE", verbatim_doc_comment)]
+    config: Option<PathBuf>,
+
+    /// The chain this node is running.
+    ///
+    /// Possible values are either a built-in chain or the path to a chain specification file.
+    #[arg(
+        long,
+        value_name = "CHAIN_OR_PATH",
+        long_help = C::help_message(),
+        default_value = C::SUPPORTED_CHAINS[0],
+        value_parser = C::parser()
+    )]
+    chain: Arc<C::ChainSpec>,
+}
+
+impl<C: ChainSpecParser> DownloadArgs<C> {
+    pub async fn setup<N>(
+        &self,
+    ) -> eyre::Result<
+        reth_network::NetworkHandle<N::NetworkPrimitives>,
+    >
+    where
+        C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
+        N: CliNodeTypes<ChainSpec = C::ChainSpec>,
+    {
+        let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
+        let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
+
+        // Load configuration
+        let mut config = Config::from_path(&config_path).unwrap_or_default();
+
+        config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
+
+        if config.peers.trusted_nodes.is_empty() && self.network.trusted_only {
+            eyre::bail!(
+                "No trusted nodes. Set trusted peer with `--trusted-peer <enode record>` or set `--trusted-only` to `false`"
+            )
+        }
+
+        config.peers.trusted_nodes_only = self.network.trusted_only;
+
+        let default_secret_key_path = data_dir.p2p_secret();
+        let secret_key_path =
+            self.network.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
+        let p2p_secret_key = get_secret_key(&secret_key_path)?;
+        let rlpx_socket = (self.network.addr, self.network.port).into();
+        let boot_nodes = self.chain.bootnodes().unwrap_or_default();
+
+        let net = NetworkConfigBuilder::<N::NetworkPrimitives>::new(p2p_secret_key)
+            .peer_config(config.peers_config_with_basic_nodes_from_file(None))
+            .external_ip_resolver(self.network.nat)
+            .disable_discv4_discovery_if(self.chain.chain().is_optimism())
+            .boot_nodes(boot_nodes.clone())
+            .apply(|builder| {
+                self.network.discovery.apply_to_builder(builder, rlpx_socket, boot_nodes)
+            })
+            .build_with_noop_provider(self.chain.clone())
+            .manager()
+            .await?;
+        let handle = net.handle().clone();
+        tokio::task::spawn(net);
+
+        Ok(handle)
+    }
+
+    pub fn backoff(&self) -> ConstantBuilder {
+        ConstantBuilder::default().with_max_times(self.retries.max(1))
     }
 }
