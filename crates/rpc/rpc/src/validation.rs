@@ -372,7 +372,7 @@ where
     /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
     pub fn validate_blobs_bundle_v2(
         &self,
-        mut blobs_bundle: BlobsBundleV2,
+        blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
         if blobs_bundle.proofs.len() != blobs_bundle.blobs.len() * CELLS_PER_EXT_BLOB ||
             blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
@@ -386,7 +386,7 @@ where
             .map(|c| kzg_to_versioned_hash(c.as_slice()))
             .collect::<Vec<_>>();
 
-        let sidecar = blobs_bundle
+        blobs_bundle
             .try_into_sidecar()
             .map_err(|_| InvalidBlobsBundle)?
             .validate(&versioned_hashes, EnvKzgSettings::default().get())?;
