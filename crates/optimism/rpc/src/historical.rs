@@ -182,7 +182,7 @@ where
                             .await
                         {
                             let payload =
-                                jsonrpsee_types::ResponsePayload::success(raw.to_string()).into();
+                                jsonrpsee_types::ResponsePayload::success(raw).into();
                             return MethodResponse::response(req.id, payload, usize::MAX);
                         }
                     }
