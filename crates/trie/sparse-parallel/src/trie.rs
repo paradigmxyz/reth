@@ -3898,8 +3898,10 @@ mod tests {
         let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0], 1);
         let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x1], 2);
 
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[
+            (leaf1_path, value1.clone()),
+            (leaf2_path, value2.clone()),
+        ]);
 
         // Verify upper trie has extension with the full common prefix
         ctx.assert_upper_subtrie(&trie).has_extension(
@@ -3951,9 +3953,7 @@ mod tests {
         }
 
         // Insert all leaves
-        for (path, value) in &leaves {
-            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
-        }
+        ctx.insert_leaves(&mut trie, &leaves);
 
         // Verify upper trie structure
         ctx.assert_upper_subtrie(&trie)
@@ -4003,9 +4003,7 @@ mod tests {
         ];
 
         // Insert all leaves
-        for (path, value) in &leaves {
-            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
-        }
+        ctx.insert_leaves(&mut trie, &leaves);
 
         // Verify upper trie has extension then branch
         ctx.assert_upper_subtrie(&trie)
