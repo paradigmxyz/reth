@@ -5,7 +5,7 @@ use crate::{
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
+    StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
     TransactionVariant, TransactionsProvider,
 };
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
@@ -452,8 +452,6 @@ impl<C: Send + Sync, N: NodePrimitives> HashedPostStateProvider for NoopProvider
         HashedPostState::default()
     }
 }
-
-impl<C: Send + Sync, N: NodePrimitives> StateProvider for NoopProvider<C, N> {}
 
 impl<C: Send + Sync, N: NodePrimitives> BytecodeReader for NoopProvider<C, N> {
     fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {

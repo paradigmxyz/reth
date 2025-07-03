@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, StateProvider, StateRootProvider,
+    HashedPostStateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -175,11 +175,6 @@ impl<Provider: DBProvider + StateCommitmentProvider> HashedPostStateProvider
             <Provider::StateCommitment as StateCommitment>::KeyHasher,
         >(bundle_state.state())
     }
-}
-
-impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProvider
-    for LatestStateProviderRef<'_, Provider>
-{
 }
 
 impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> BytecodeReader
