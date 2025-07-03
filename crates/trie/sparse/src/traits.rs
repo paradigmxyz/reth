@@ -3,11 +3,15 @@
 use core::fmt::Debug;
 
 use alloc::vec::Vec;
-use alloy_primitives::B256;
+use alloy_primitives::{
+    map::{HashMap, HashSet},
+    B256,
+};
+use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{Nibbles, TrieNode};
 
-use crate::{blinded::BlindedProvider, SparseTrieUpdates, TrieMasks};
+use crate::blinded::BlindedProvider;
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
@@ -29,9 +33,7 @@ pub trait SparseTrieInterface: Default + Debug {
     /// # Returns
     ///
     /// Self if successful, or an error if revealing fails.
-    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self> {
-        Self::default().with_root(root, masks, retain_updates)
-    }
+    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self>;
 
     /// Configures the trie to have the given root node revealed.
     ///
@@ -175,6 +177,30 @@ pub trait SparseTrieInterface: Default + Debug {
     ///   an exclusion proof.
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>>;
 
+    /// Attempts to find a leaf node at the specified path.
+    ///
+    /// This method traverses the trie from the root down to the given path, checking
+    /// if a leaf exists at that path. It can be used to verify the existence of a leaf
+    /// or to generate an exclusion proof (proof that a leaf does not exist).
+    ///
+    /// # Parameters
+    ///
+    /// - `full_path`: The path to search for.
+    /// - `expected_value`: Optional expected value. If provided, will verify the leaf value
+    ///   matches.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(LeafLookup::Exists)` if the leaf exists with the expected value.
+    /// - `Ok(LeafLookup::NonExistent)` if the leaf definitely does not exist (exclusion proof).
+    /// - `Err(LeafLookupError)` if the search encountered a blinded node or found a different
+    ///   value.
+    fn find_leaf(
+        &self,
+        full_path: &Nibbles,
+        expected_value: Option<&Vec<u8>>,
+    ) -> Result<LeafLookup, LeafLookupError>;
+
     /// Consumes and returns the currently accumulated trie updates.
     ///
     /// This is useful when you want to apply the updates to an external database
@@ -199,4 +225,83 @@ pub trait SparseTrieInterface: Default + Debug {
     ///
     /// This is useful for reusing the trie without needing to reallocate memory.
     fn clear(&mut self);
+}
+
+/// Struct for passing around branch node mask information.
+///
+/// Branch nodes can have up to 16 children (one for each nibble).
+/// The masks represent which children are stored in different ways:
+/// - `hash_mask`: Indicates which children are stored as hashes in the database
+/// - `tree_mask`: Indicates which children are complete subtrees stored in the database
+///
+/// These masks are essential for efficient trie traversal and serialization, as they
+/// determine how nodes should be encoded and stored on disk.
+#[derive(Debug)]
+pub struct TrieMasks {
+    /// Branch node hash mask, if any.
+    ///
+    /// When a bit is set, the corresponding child node's hash is stored in the trie.
+    ///
+    /// This mask enables selective hashing of child nodes.
+    pub hash_mask: Option<TrieMask>,
+    /// Branch node tree mask, if any.
+    ///
+    /// When a bit is set, the corresponding child subtree is stored in the database.
+    pub tree_mask: Option<TrieMask>,
+}
+
+impl TrieMasks {
+    /// Helper function, returns both fields `hash_mask` and `tree_mask` as [`None`]
+    pub const fn none() -> Self {
+        Self { hash_mask: None, tree_mask: None }
+    }
+}
+
+/// Tracks modifications to the sparse trie structure.
+///
+/// Maintains references to both modified and pruned/removed branches, enabling
+/// one to make batch updates to a persistent database.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct SparseTrieUpdates {
+    /// Collection of updated intermediate nodes indexed by full path.
+    pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    /// Collection of removed intermediate nodes indexed by full path.
+    pub removed_nodes: HashSet<Nibbles>,
+    /// Flag indicating whether the trie was wiped.
+    pub wiped: bool,
+}
+
+/// Error type for a leaf lookup operation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafLookupError {
+    /// The path leads to a blinded node, cannot determine if leaf exists.
+    /// This means the witness is not complete.
+    BlindedNode {
+        /// Path to the blinded node.
+        path: Nibbles,
+        /// Hash of the blinded node.
+        hash: B256,
+    },
+    /// The path leads to a leaf with a different value than expected.
+    /// This means the witness is malformed.
+    ValueMismatch {
+        /// Path to the leaf.
+        path: Nibbles,
+        /// Expected value.
+        expected: Option<Vec<u8>>,
+        /// Actual value found.
+        actual: Vec<u8>,
+    },
+}
+
+/// Success value for a leaf lookup operation
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LeafLookup {
+    /// Leaf exists with expected value.
+    Exists,
+    /// Leaf does not exist (exclusion proof found).
+    NonExistent {
+        /// Path where the search diverged from the target path.
+        diverged_at: Nibbles,
+    },
 }

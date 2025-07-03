@@ -104,8 +104,7 @@ where
     }
 
     /// Was the account witness for `address` complete?
-    pub fn check_valid_account_witness(&self, _address: B256) -> bool {
-        /*
+    pub fn check_valid_account_witness(&self, address: B256) -> bool {
         let path = Nibbles::unpack(address);
         let trie = match self.state_trie_ref() {
             Some(t) => t,
@@ -116,13 +115,10 @@ where
             trie.find_leaf(&path, None),
             Ok(LeafLookup::Exists | LeafLookup::NonExistent { .. })
         )
-        */
-        todo!()
     }
 
     /// Was the storage-slot witness for (`address`,`slot`) complete?
-    pub fn check_valid_storage_witness(&self, _address: B256, _slot: B256) -> bool {
-        /*
+    pub fn check_valid_storage_witness(&self, address: B256, slot: B256) -> bool {
         let path = Nibbles::unpack(slot);
         let trie = match self.storage_trie_ref(&address) {
             Some(t) => t,
@@ -133,8 +129,6 @@ where
             trie.find_leaf(&path, None),
             Ok(LeafLookup::Exists | LeafLookup::NonExistent { .. })
         )
-        */
-        todo!()
     }
 
     /// Returns `true` if storage slot for account was already revealed.
