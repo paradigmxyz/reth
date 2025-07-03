@@ -3614,7 +3614,7 @@ mod tests {
 
         // First add leaf 0x1345 - this should create a leaf in upper trie at 0x
         let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x3, 0x4, 0x5], 1);
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[(leaf1_path, value1.clone())]);
 
         // Verify upper trie has a leaf at the root with key 1345
         ctx.assert_upper_subtrie(&trie)
@@ -3622,14 +3622,14 @@ mod tests {
 
         // Add leaf 0x1234 - this should go first in the upper subtrie
         let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 2);
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[(leaf2_path, value2.clone())]);
 
         // Upper trie should now have a branch at 0x1
         ctx.assert_upper_subtrie(&trie).has_branch(&Nibbles::from_nibbles([0x1]), &[0x2, 0x3]);
 
         // Add leaf 0x1245 - this should cause a branch and create the 0x12 subtrie
         let (leaf3_path, value3) = ctx.create_test_leaf([0x1, 0x2, 0x4, 0x5], 3);
-        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[(leaf3_path, value3.clone())]);
 
         // Verify lower subtrie at 0x12 exists with correct structure
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
@@ -3641,7 +3641,7 @@ mod tests {
 
         // Add leaf 0x1334 - this should create another lower subtrie
         let (leaf4_path, value4) = ctx.create_test_leaf([0x1, 0x3, 0x3, 0x4], 4);
-        trie.update_leaf(leaf4_path, value4.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[(leaf4_path, value4.clone())]);
 
         // Verify lower subtrie at 0x13 exists with correct values
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x3]))
@@ -3676,7 +3676,7 @@ mod tests {
         // First insert a leaf that ends exactly at the boundary (2 nibbles)
         let (first_leaf_path, first_value) = ctx.create_test_leaf([0x1, 0x2, 0x2, 0x4], 1);
 
-        trie.update_leaf(first_leaf_path, first_value.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[(first_leaf_path, first_value.clone())]);
 
         // In an empty trie, the first leaf becomes the root, regardless of path length
         ctx.assert_upper_subtrie(&trie)
@@ -3686,7 +3686,7 @@ mod tests {
         // Now insert another leaf that shares the same 2-nibble prefix
         let (second_leaf_path, second_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 2);
 
-        trie.update_leaf(second_leaf_path, second_value.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[(second_leaf_path, second_value.clone())]);
 
         // Now both leaves should be in a lower subtrie at index [0x1, 0x2]
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
@@ -3749,7 +3749,7 @@ mod tests {
         let updated_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
         let (_, updated_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 100);
 
-        trie.update_leaf(updated_path, updated_value.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[(updated_path, updated_value.clone())]);
 
         // Verify the subtrie structure is maintained and value is updated
         // The branch structure should remain the same and all values should be present
@@ -3763,7 +3763,7 @@ mod tests {
         // Add a new leaf that extends an existing branch
         let (new_leaf_path, new_leaf_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x6], 200);
 
-        trie.update_leaf(new_leaf_path, new_leaf_value.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[(new_leaf_path, new_leaf_value.clone())]);
 
         // Verify the branch at [0x1, 0x2, 0x3] now has an additional child
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
@@ -3856,10 +3856,12 @@ mod tests {
         let (leaf3_path, value3) = ctx.create_test_leaf([0x2], 3);
         let (leaf4_path, value4) = ctx.create_test_leaf([0x3], 4);
 
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf4_path, value4.clone(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut trie, &[
+            (leaf1_path, value1.clone()),
+            (leaf2_path, value2.clone()),
+            (leaf3_path, value3.clone()),
+            (leaf4_path, value4.clone()),
+        ]);
 
         // Verify upper trie has a branch at root with 4 children
         ctx.assert_upper_subtrie(&trie)
