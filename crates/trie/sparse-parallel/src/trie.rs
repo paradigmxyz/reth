@@ -90,7 +90,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
-        if let Some(subtrie) = self.lower_subtrie_for_path(&path) {
+        if let Some(subtrie) = self.lower_subtrie_for_path_mut(&path) {
             return subtrie.reveal_node(path, &node, masks);
         }
 
@@ -113,7 +113,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                         if branch.state_mask.is_bit_set(idx) {
                             let mut child_path = path;
                             child_path.push_unchecked(idx);
-                            self.lower_subtrie_for_path(&child_path)
+                            self.lower_subtrie_for_path_mut(&child_path)
                                 .expect("child_path must have a lower subtrie")
                                 .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
                             stack_ptr += 1;
@@ -124,7 +124,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
             TrieNode::Extension(ext) => {
                 let mut child_path = path;
                 child_path.extend(&ext.key);
-                if let Some(subtrie) = self.lower_subtrie_for_path(&child_path) {
+                if let Some(subtrie) = self.lower_subtrie_for_path_mut(&child_path) {
                     subtrie.reveal_node_or_hash(child_path, &ext.child)?;
                 }
             }
@@ -208,7 +208,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
             };
 
             // Get or create the subtrie with the exact node path (not truncated to 2 nibbles).
-            let subtrie = self.subtrie_for_path(node_path);
+            let subtrie = self.subtrie_for_path_mut(node_path);
 
             // Insert the leaf value if we have one
             if let Some((leaf_full_path, value)) = leaf_value {
@@ -225,7 +225,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
             //
             // The next_path here represents where we need to continue traversal, which may
             // be longer than 2 nibbles if we're following an extension node.
-            let subtrie = self.subtrie_for_path(&next_path);
+            let subtrie = self.subtrie_for_path_mut(&next_path);
 
             // Create an empty root at the subtrie path if the subtrie is empty
             if subtrie.nodes.is_empty() {
@@ -373,7 +373,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     "Branch node has only one child",
                 );
 
-                let remaining_child_subtrie = self.subtrie_for_path(&remaining_child_path);
+                let remaining_child_subtrie = self.subtrie_for_path_mut(&remaining_child_path);
 
                 // If the remaining child node is not yet revealed then we have to reveal it here,
                 // otherwise it's not possible to know how to collapse the branch.
@@ -440,7 +440,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 SparseNode::new_branch(state_mask)
             };
 
-            let branch_subtrie = self.subtrie_for_path(branch_path);
+            let branch_subtrie = self.subtrie_for_path_mut(branch_path);
             branch_subtrie.nodes.insert(*branch_path, new_branch_node.clone());
             branch_parent_node = Some(new_branch_node);
         };
@@ -451,7 +451,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         if let (Some(ext_path), Some(SparseNode::Extension { key: shortkey, .. })) =
             (ext_grandparent_path, &ext_grandparent_node)
         {
-            let ext_subtrie = self.subtrie_for_path(&ext_path);
+            let ext_subtrie = self.subtrie_for_path_mut(&ext_path);
             let branch_path = branch_parent_path.as_ref().unwrap();
 
             if let Some(new_ext_node) = Self::extension_changes_on_leaf_removal(
@@ -510,7 +510,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
     }
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
-        todo!()
+        self.subtrie_for_path(full_path).and_then(|subtrie| subtrie.inner.values.get(full_path))
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
@@ -532,13 +532,24 @@ impl SparseTrieInterface for ParallelSparseTrie {
 }
 
 impl ParallelSparseTrie {
+    /// Returns a reference to the lower `SparseSubtrie` for the given path, or None if the
+    /// path belongs to the upper trie or a lower subtrie for the path doesn't exist.
+    fn lower_subtrie_for_path(&self, path: &Nibbles) -> Option<&SparseSubtrie> {
+        match SparseSubtrieType::from_path(path) {
+            SparseSubtrieType::Upper => None,
+            SparseSubtrieType::Lower(idx) => {
+                self.lower_subtries[idx].as_ref().map(|subtrie| subtrie.as_ref())
+            }
+        }
+    }
+
     /// Returns a mutable reference to the lower `SparseSubtrie` for the given path, or None if the
     /// path belongs to the upper trie.
     ///
     /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
     /// does exist, but its path field is longer than the given path, then the field will be set
     /// to the given path.
-    fn lower_subtrie_for_path(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
+    fn lower_subtrie_for_path_mut(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
@@ -561,13 +572,29 @@ impl ParallelSparseTrie {
     /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
     /// does exist, but its path field is longer than the given path, then the field will be set
     /// to the given path.
-    fn subtrie_for_path(&mut self, path: &Nibbles) -> &mut Box<SparseSubtrie> {
+    fn subtrie_for_path(&self, path: &Nibbles) -> Option<&SparseSubtrie> {
+        // We can't just call `lower_subtrie_for_path` and return `upper_subtrie` if it returns
+        // None, because Rust complains about double mutable borrowing `self`.
+        if SparseSubtrieType::path_len_is_upper(path.len()) {
+            Some(&self.upper_subtrie)
+        } else {
+            self.lower_subtrie_for_path(path)
+        }
+    }
+
+    /// Returns a mutable reference to either the lower or upper `SparseSubtrie` for the given path,
+    /// depending on the path's length.
+    ///
+    /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
+    /// does exist, but its path field is longer than the given path, then the field will be set
+    /// to the given path.
+    fn subtrie_for_path_mut(&mut self, path: &Nibbles) -> &mut Box<SparseSubtrie> {
         // We can't just call `lower_subtrie_for_path` and return `upper_subtrie` if it returns
         // None, because Rust complains about double mutable borrowing `self`.
         if SparseSubtrieType::path_len_is_upper(path.len()) {
             &mut self.upper_subtrie
         } else {
-            self.lower_subtrie_for_path(path).unwrap()
+            self.lower_subtrie_for_path_mut(path).unwrap()
         }
     }
 
@@ -648,7 +675,7 @@ impl ParallelSparseTrie {
         }
 
         if let SparseNode::Leaf { key, .. } = new_parent_node {
-            let Some(prev_child_subtrie) = self.lower_subtrie_for_path(prev_child_path) else {
+            let Some(prev_child_subtrie) = self.lower_subtrie_for_path_mut(prev_child_path) else {
                 return;
             };
 
@@ -672,7 +699,7 @@ impl ParallelSparseTrie {
     ///
     /// - If the removed node was not a leaf or extension.
     fn remove_node(&mut self, path: &Nibbles) {
-        let subtrie = self.subtrie_for_path(path);
+        let subtrie = self.subtrie_for_path_mut(path);
         let node = subtrie.nodes.remove(path);
 
         let Some(idx) = SparseSubtrieType::from_path(path).lower_index() else {
@@ -2187,7 +2214,7 @@ mod tests {
         let mut trie = ParallelSparseTrie::default().with_updates(true);
 
         for (path, node) in nodes {
-            let subtrie = trie.subtrie_for_path(&path);
+            let subtrie = trie.subtrie_for_path_mut(&path);
             if let SparseNode::Leaf { key, .. } = &node {
                 let mut full_key = path;
                 full_key.extend(key);
@@ -3141,7 +3168,7 @@ mod tests {
         // Verify initial state - the lower subtrie's path should be 0x123
         let lower_subtrie_root_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         assert_matches!(
-            trie.lower_subtrie_for_path(&lower_subtrie_root_path),
+            trie.lower_subtrie_for_path_mut(&lower_subtrie_root_path),
             Some(subtrie)
             if subtrie.path == lower_subtrie_root_path
         );
