@@ -533,6 +533,14 @@ impl SparseTrieInterface for ParallelSparseTrie {
         self.prefix_set.clear();
         self.updates = None;
     }
+
+    fn find_leaf(
+        &self,
+        _full_path: &Nibbles,
+        _expected_value: Option<&Vec<u8>>,
+    ) -> Result<reth_trie_sparse::LeafLookup, reth_trie_sparse::LeafLookupError> {
+        todo!()
+    }
 }
 
 impl ParallelSparseTrie {
