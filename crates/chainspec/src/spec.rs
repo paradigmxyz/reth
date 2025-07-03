@@ -1,6 +1,5 @@
 pub use alloy_eips::eip1559::BaseFeeParams;
 use alloy_evm::eth::spec::EthExecutorSpec;
-use itertools::Itertools;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
@@ -474,16 +473,28 @@ impl ChainSpec {
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
-        let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
-            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
-            // fork filter.
-            Some(match condition {
-                ForkCondition::Block(block) |
-                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
-                ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
-                _ => return None,
+        let forks = self
+            .hardforks
+            .forks_iter()
+            .filter_map(|(_, condition)| {
+                // We filter out TTD-based forks w/o a pre-known block since those do not show up in
+                // the fork filter.
+                Some(match condition {
+                    ForkCondition::Block(block) |
+                    ForkCondition::TTD { fork_block: Some(block), .. } => {
+                        ForkFilterKey::Block(block)
+                    }
+                    ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
+                    _ => return None,
+                })
             })
-        });
+            // also need to include BPOs as orkFilterKey::Time(
+            .chain(
+                self.blob_params
+                    .scheduled
+                    .iter()
+                    .map(|(activation, _)| ForkFilterKey::Time(*activation)),
+            );
 
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
@@ -525,13 +536,15 @@ impl ChainSpec {
 
         let bpo_forks = self.blob_params.scheduled.iter().map(|(activation, _)| *activation);
 
-        let timestamp_forks = self
+        let mut timestamp_forks = self
             .hardforks
             .forks_iter()
             .filter_map(|(_, cond)| cond.as_timestamp())
             .chain(bpo_forks)
             .filter(|time| time > &self.genesis.timestamp)
-            .sorted();
+            .collect::<Vec<_>>();
+        // sort because bpo can happen in between
+        timestamp_forks.sort();
 
         // timestamp are ALWAYS applied after the merge.
         //
@@ -1812,6 +1825,106 @@ Post-merge hard forks (timestamp based):
                 ForkId { hash: ForkHash::from(genesis_hash), next: expected_timestamp };
             assert_eq!(got_forkid, expected_forkid);
         }
+    }
+
+    /// Tests that time-based forks which are active at genesis are not included in forkid hash.
+    ///
+    /// This is based off of the test vectors here:
+    /// <https://github.com/ethereum/go-ethereum/blob/2e02c1ffd9dffd1ec9e43c6b66f6c9bd1e556a0b/core/forkid/forkid_test.go#L390-L440>
+    #[test]
+    fn test_devent_bpo_fork_id() {
+        let s = r#"{
+  "config": {
+    "chainId": 7092821360,
+    "homesteadBlock": 0,
+    "eip150Block": 0,
+    "eip155Block": 0,
+    "eip158Block": 0,
+    "byzantiumBlock": 0,
+    "constantinopleBlock": 0,
+    "petersburgBlock": 0,
+    "istanbulBlock": 0,
+    "berlinBlock": 0,
+    "londonBlock": 0,
+    "mergeNetsplitBlock": 0,
+    "terminalTotalDifficulty": 0,
+    "terminalTotalDifficultyPassed": true,
+    "shanghaiTime": 0,
+    "cancunTime": 0,
+    "blobSchedule": {
+      "cancun": {
+        "target": 3,
+        "max": 6,
+        "baseFeeUpdateFraction": 3338477
+      },
+      "prague": {
+        "target": 6,
+        "max": 9,
+        "baseFeeUpdateFraction": 5007716
+      },
+      "osaka": {
+        "target": 6,
+        "max": 9,
+        "baseFeeUpdateFraction": 5007716
+      },
+      "bpo1": {
+        "target": 9,
+        "max": 12,
+        "baseFeeUpdateFraction": 5007716
+      },
+      "bpo2": {
+        "target": 12,
+        "max": 15,
+        "baseFeeUpdateFraction": 5007716
+      },
+      "bpo3": {
+        "target": 15,
+        "max": 18,
+        "baseFeeUpdateFraction": 5007716
+      },
+      "bpo4": {
+        "target": 6,
+        "max": 9,
+        "baseFeeUpdateFraction": 5007716
+      },
+      "bpo5": {
+        "target": 15,
+        "max": 20,
+        "baseFeeUpdateFraction": 5007716
+      }
+    },
+    "depositContractAddress": "0x00000000219ab540356cBB839Cbe05303d7705Fa",
+    "pragueTime": 0,
+    "osakaTime": 1751030304,
+    "bpo1Time": 1751128608,
+    "bpo2Time": 1751226912,
+    "bpo3Time": 1751325216,
+    "bpo4Time": 1751423520,
+    "bpo5Time": 1751540256
+  },
+  "alloc": {},
+  "coinbase": "0x0000000000000000000000000000000000000000",
+  "difficulty": "0x0",
+  "extraData": "",
+  "gasLimit": "0x2255100",
+  "nonce": "0x1234",
+  "mixhash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+  "timestamp": "1750931940"
+}
+"#;
+
+        let genesis: Genesis = serde_json::from_str(s).unwrap();
+        let chainspec = ChainSpec::from(genesis);
+        let head = Head {
+            number: 100,
+            // random
+            hash: b256!("0x078dc6061b1d8eaa8493384b59c9c65ceb917201221d08b80c4de6770b6ec7e7"),
+            difficulty: Default::default(),
+            total_difficulty: Default::default(),
+            timestamp: 1751540257,
+        };
+        let _fork_id = chainspec.fork_id(&head);
     }
 
     /// Checks that the fork is not active at a terminal ttd block.
