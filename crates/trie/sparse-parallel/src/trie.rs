@@ -570,12 +570,10 @@ impl ParallelSparseTrie {
         }
     }
 
-    /// Returns a mutable reference to either the lower or upper `SparseSubtrie` for the given path,
+    /// Returns a reference to either the lower or upper `SparseSubtrie` for the given path,
     /// depending on the path's length.
     ///
-    /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
-    /// does exist, but its path field is longer than the given path, then the field will be set
-    /// to the given path.
+    /// Returns `None` if a lower subtrie does not exist for the given path.
     fn subtrie_for_path(&self, path: &Nibbles) -> Option<&SparseSubtrie> {
         // We can't just call `lower_subtrie_for_path` and return `upper_subtrie` if it returns
         // None, because Rust complains about double mutable borrowing `self`.
