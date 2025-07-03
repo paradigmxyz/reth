@@ -29,7 +29,9 @@ pub trait SparseTrieInterface: Default + Clone + Debug + Display {
     /// # Returns
     ///
     /// Self if successful, or an error if revealing fails.
-    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self>;
+    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self> {
+        Self::default().with_root(root, masks, retain_updates)
+    }
 
     /// Configures the trie to have the given root node revealed.
     ///
