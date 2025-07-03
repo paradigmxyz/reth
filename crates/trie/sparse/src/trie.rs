@@ -1,4 +1,7 @@
-use crate::blinded::{BlindedProvider, RevealedNode};
+use crate::{
+    blinded::{BlindedProvider, RevealedNode},
+    LeafLookup, LeafLookupError, SparseTrieUpdates, TrieMasks,
+};
 use alloc::{
     borrow::Cow,
     boxed::Box,
@@ -21,36 +24,6 @@ use reth_trie_common::{
 };
 use smallvec::SmallVec;
 use tracing::trace;
-
-/// Struct for passing around branch node mask information.
-///
-/// Branch nodes can have up to 16 children (one for each nibble).
-/// The masks represent which children are stored in different ways:
-/// - `hash_mask`: Indicates which children are stored as hashes in the database
-/// - `tree_mask`: Indicates which children are complete subtrees stored in the database
-///
-/// These masks are essential for efficient trie traversal and serialization, as they
-/// determine how nodes should be encoded and stored on disk.
-#[derive(Debug)]
-pub struct TrieMasks {
-    /// Branch node hash mask, if any.
-    ///
-    /// When a bit is set, the corresponding child node's hash is stored in the trie.
-    ///
-    /// This mask enables selective hashing of child nodes.
-    pub hash_mask: Option<TrieMask>,
-    /// Branch node tree mask, if any.
-    ///
-    /// When a bit is set, the corresponding child subtree is stored in the database.
-    pub tree_mask: Option<TrieMask>,
-}
-
-impl TrieMasks {
-    /// Helper function, returns both fields `hash_mask` and `tree_mask` as [`None`]
-    pub const fn none() -> Self {
-        Self { hash_mask: None, tree_mask: None }
-    }
-}
 
 /// A sparse trie that is either in a "blind" state (no nodes are revealed, root node hash is
 /// unknown) or in a "revealed" state (root node has been revealed and the trie can be updated).
@@ -1265,41 +1238,6 @@ impl RevealedSparseTrie {
     }
 }
 
-/// Error type for a leaf lookup operation
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LeafLookupError {
-    /// The path leads to a blinded node, cannot determine if leaf exists.
-    /// This means the witness is not complete.
-    BlindedNode {
-        /// Path to the blinded node.
-        path: Nibbles,
-        /// Hash of the blinded node.
-        hash: B256,
-    },
-    /// The path leads to a leaf with a different value than expected.
-    /// This means the witness is malformed.
-    ValueMismatch {
-        /// Path to the leaf.
-        path: Nibbles,
-        /// Expected value.
-        expected: Option<Vec<u8>>,
-        /// Actual value found.
-        actual: Vec<u8>,
-    },
-}
-
-/// Success value for a leaf lookup operation
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LeafLookup {
-    /// Leaf exists with expected value.
-    Exists,
-    /// Leaf does not exist (exclusion proof found).
-    NonExistent {
-        /// Path where the search diverged from the target path.
-        diverged_at: Nibbles,
-    },
-}
-
 impl RevealedSparseTrie {
     /// Attempts to find a leaf node at the specified path.
     ///
@@ -2028,20 +1966,6 @@ pub struct RlpNodeStackItem {
     pub rlp_node: RlpNode,
     /// Type of the node.
     pub node_type: SparseNodeType,
-}
-
-/// Tracks modifications to the sparse trie structure.
-///
-/// Maintains references to both modified and pruned/removed branches, enabling
-/// one to make batch updates to a persistent database.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SparseTrieUpdates {
-    /// Collection of updated intermediate nodes indexed by full path.
-    pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    /// Collection of removed intermediate nodes indexed by full path.
-    pub removed_nodes: HashSet<Nibbles>,
-    /// Flag indicating whether the trie was wiped.
-    pub wiped: bool,
 }
 
 impl SparseTrieUpdates {
