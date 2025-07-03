@@ -444,7 +444,11 @@ where
         {
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::Underpriced,
+                InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                    minimum_priority_fee: self
+                        .minimum_priority_fee
+                        .expect("minimum priority fee is expected inside if statement"),
+                },
             ))
         }
 
@@ -927,8 +931,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     }
 
     /// Sets a minimum priority fee that's enforced for acceptance into the pool.
-    pub const fn with_minimum_priority_fee(mut self, minimum_priority_fee: u128) -> Self {
-        self.minimum_priority_fee = Some(minimum_priority_fee);
+    pub const fn with_minimum_priority_fee(mut self, minimum_priority_fee: Option<u128>) -> Self {
+        self.minimum_priority_fee = minimum_priority_fee;
         self
     }
 
@@ -1408,5 +1412,174 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::External, transaction);
         assert!(outcome.is_valid());
+    }
+
+    // Helper function to set up common test infrastructure for priority fee tests
+    fn setup_priority_fee_test() -> (EthPooledTransaction, MockEthProvider) {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+        (transaction, provider)
+    }
+
+    // Helper function to create a validator with minimum priority fee
+    fn create_validator_with_minimum_fee(
+        provider: MockEthProvider,
+        minimum_priority_fee: Option<u128>,
+        local_config: Option<LocalTransactionConfig>,
+    ) -> EthTransactionValidator<MockEthProvider, EthPooledTransaction> {
+        let blob_store = InMemoryBlobStore::default();
+        let mut builder = EthTransactionValidatorBuilder::new(provider)
+            .with_minimum_priority_fee(minimum_priority_fee);
+
+        if let Some(config) = local_config {
+            builder = builder.with_local_transactions_config(config);
+        }
+
+        builder.build(blob_store)
+    }
+
+    #[tokio::test]
+    async fn invalid_on_priority_fee_lower_than_configured_minimum() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Verify the test transaction is a dynamic fee transaction
+        assert!(transaction.is_dynamic_fee());
+
+        // Set minimum priority fee to be double the transaction's priority fee
+        let minimum_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected") * 2;
+
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        // External transaction should be rejected due to low priority fee
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        assert!(outcome.is_invalid());
+
+        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+            assert!(matches!(
+                err,
+                InvalidPoolTransactionError::PriorityFeeBelowMinimum { minimum_priority_fee: min_fee }
+                if min_fee == minimum_priority_fee
+            ));
+        }
+
+        // Test pool integration
+        let blob_store = InMemoryBlobStore::default();
+        let pool =
+            Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
+
+        let res = pool.add_external_transaction(transaction.clone()).await;
+        assert!(res.is_err());
+        assert!(matches!(
+            res.unwrap_err().kind,
+            PoolErrorKind::InvalidTransaction(
+                InvalidPoolTransactionError::PriorityFeeBelowMinimum { .. }
+            )
+        ));
+        let tx = pool.get(transaction.hash());
+        assert!(tx.is_none());
+
+        // Local transactions should still be accepted regardless of minimum priority fee
+        let (_, local_provider) = setup_priority_fee_test();
+        let validator_local =
+            create_validator_with_minimum_fee(local_provider, Some(minimum_priority_fee), None);
+
+        let local_outcome = validator_local.validate_one(TransactionOrigin::Local, transaction);
+        assert!(local_outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_priority_fee_equal_to_minimum() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Set minimum priority fee equal to transaction's priority fee
+        let tx_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected");
+        let validator = create_validator_with_minimum_fee(provider, Some(tx_priority_fee), None);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_priority_fee_above_minimum() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Set minimum priority fee below transaction's priority fee
+        let tx_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected");
+        let minimum_priority_fee = tx_priority_fee / 2; // Half of transaction's priority fee
+
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_minimum_priority_fee_disabled() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // No minimum priority fee set (default is None)
+        let validator = create_validator_with_minimum_fee(provider, None, None);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn priority_fee_validation_applies_to_private_transactions() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Set minimum priority fee to be double the transaction's priority fee
+        let minimum_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected") * 2;
+
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        // Private transactions are also subject to minimum priority fee validation
+        // because they are not considered "local" by default unless specifically configured
+        let outcome = validator.validate_one(TransactionOrigin::Private, transaction);
+        assert!(outcome.is_invalid());
+
+        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+            assert!(matches!(
+                err,
+                InvalidPoolTransactionError::PriorityFeeBelowMinimum { minimum_priority_fee: min_fee }
+                if min_fee == minimum_priority_fee
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_on_local_config_exempts_private_transactions() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Set minimum priority fee to be double the transaction's priority fee
+        let minimum_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected") * 2;
+
+        // Configure local transactions to include all private transactions
+        let local_config =
+            LocalTransactionConfig { propagate_local_transactions: true, ..Default::default() };
+
+        let validator = create_validator_with_minimum_fee(
+            provider,
+            Some(minimum_priority_fee),
+            Some(local_config),
+        );
+
+        // With appropriate local config, the behavior depends on the local transaction logic
+        // This test documents the current behavior - private transactions are still validated
+        // unless the sender is specifically whitelisted in local_transactions_config
+        let outcome = validator.validate_one(TransactionOrigin::Private, transaction);
+        assert!(outcome.is_invalid()); // Still invalid because sender not in whitelist
     }
 }

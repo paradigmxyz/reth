@@ -10,11 +10,10 @@ use reth_transaction_pool::{
     maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
-    LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
-    DEFAULT_MINIMAL_PRIORITY_FEE, DEFAULT_PRICE_BUMP, DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
-    MAX_NEW_PENDING_TXS_NOTIFICATIONS, REPLACE_BLOB_PRICE_BUMP,
-    TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
-    TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
+    DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
+    REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
+    TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 use std::time::Duration;
 
@@ -67,9 +66,9 @@ pub struct TxPoolArgs {
     pub minimal_protocol_basefee: u64,
 
     /// Minimum priority fee required for transaction acceptance into the pool.
-    /// Transactions with priority fee below this value will be rejected. Set to 0 to disable.
-    #[arg(long = "txpool.minimal-priority-fee", default_value_t = DEFAULT_MINIMAL_PRIORITY_FEE)]
-    pub minimal_priority_fee: u64,
+    /// Transactions with priority fee below this value will be rejected.
+    #[arg(long = "txpool.minimum-priority-fee")]
+    pub minimum_priority_fee: Option<u128>,
 
     /// The default enforced gas limit for transactions entering the pool
     #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT_30M)]
@@ -150,7 +149,7 @@ impl Default for TxPoolArgs {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            minimal_priority_fee: DEFAULT_MINIMAL_PRIORITY_FEE,
+            minimum_priority_fee: None,
             enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             max_tx_gas_limit: None,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
@@ -202,7 +201,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 replace_blob_tx_price_bump: self.blob_transaction_price_bump,
             },
             minimal_protocol_basefee: self.minimal_protocol_basefee,
-            minimal_priority_fee: self.minimal_priority_fee,
+            minimum_priority_fee: self.minimum_priority_fee,
             gas_limit: self.enforced_gas_limit,
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,

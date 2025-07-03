@@ -23,9 +23,6 @@ pub const DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS: usize = 1;
 /// Default price bump (in %) for the transaction pool underpriced check.
 pub const DEFAULT_PRICE_BUMP: u128 = 10;
 
-/// The default minimum priority fee required for transaction acceptance into the pool.
-pub const DEFAULT_MINIMAL_PRIORITY_FEE: u64 = 0;
-
 /// Replace blob price bump (in %) for the transaction pool underpriced check.
 ///
 /// This enforces that a blob transaction requires a 100% price bump to be replaced
@@ -54,7 +51,7 @@ pub struct PoolConfig {
     /// Minimum base fee required by the protocol.
     pub minimal_protocol_basefee: u64,
     /// Minimum priority fee required for transaction acceptance into the pool.
-    pub minimal_priority_fee: u64,
+    pub minimum_priority_fee: Option<u128>,
     /// The max gas limit for transactions in the pool
     pub gas_limit: u64,
     /// How to handle locally received transactions:
@@ -92,7 +89,7 @@ impl Default for PoolConfig {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            minimal_priority_fee: DEFAULT_MINIMAL_PRIORITY_FEE,
+            minimum_priority_fee: None,
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
