@@ -42,6 +42,10 @@ pub trait SparseTrieInterface: Default + Debug {
     /// # Returns
     ///
     /// Self if successful, or an error if revealing fails.
+    ///
+    /// # Panics
+    ///
+    /// May panic if the trie is not new/cleared, and has already revealed nodes.
     fn with_root(
         self,
         root: TrieNode,
