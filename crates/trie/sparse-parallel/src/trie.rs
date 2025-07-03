@@ -689,7 +689,7 @@ impl ParallelSparseTrie {
         #[cfg(feature = "std")]
         // Update subtrie hashes in parallel
         {
-            use rayon::iter::{ParallelBridge, ParallelIterator};
+            use rayon::iter::{IntoParallelIterator, ParallelIterator};
             subtries
                 .into_iter()
                 .par_bridge()
