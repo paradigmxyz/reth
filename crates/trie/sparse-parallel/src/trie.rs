@@ -691,8 +691,7 @@ impl ParallelSparseTrie {
         {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
             subtries
-                .into_iter()
-                .par_bridge()
+                .into_par_iter()
                 .map(|ChangedSubtrie { index, mut subtrie, mut prefix_set }| {
                     subtrie.update_hashes(&mut prefix_set);
                     (index, subtrie)
