@@ -92,6 +92,11 @@ pub struct DebugArgs {
         verbatim_doc_comment
     )]
     pub healthy_node_rpc_url: Option<String>,
+
+    /// The URL of the ethstats server to connect to.
+    /// Example: `nodename:secret@host:port`
+    #[arg(long = "debug.ethstats", help_heading = "Debug")]
+    pub ethstats: Option<String>,
 }
 
 impl Default for DebugArgs {
@@ -109,6 +114,7 @@ impl Default for DebugArgs {
             engine_api_store: None,
             invalid_block_hook: Some(InvalidBlockSelection::default()),
             healthy_node_rpc_url: None,
+            ethstats: None,
         }
     }
 }

@@ -186,15 +186,15 @@ where
             id: id.clone(),
             secret: secret.clone(),
             info: NodeInfo {
-                name: "Reth".to_string(),
-                node: id.clone(),
+                name: id.clone(),
+                node: network_status.client_version.clone(),
                 port: 30303,
                 network: self.network.chain_id().to_string(),
                 protocol,
                 api: "No".to_string(),
                 os: std::env::consts::OS.into(),
                 os_ver: std::env::consts::ARCH.into(),
-                client: network_status.client_version.clone(),
+                client: "0.1.1".to_string(),
                 history: true,
             },
         };
