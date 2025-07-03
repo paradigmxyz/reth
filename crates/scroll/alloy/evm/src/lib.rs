@@ -183,7 +183,7 @@ where
         // disable the nonce check
         core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
 
-        let res = self.transact(ScrollTransactionIntoTxEnv::from(tx));
+        let mut res = self.transact(ScrollTransactionIntoTxEnv::from(tx));
 
         // swap back to the previous gas limit
         core::mem::swap(&mut self.block.gas_limit, &mut gas_limit);
@@ -191,6 +191,17 @@ where
         core::mem::swap(&mut self.block.basefee, &mut basefee);
         // swap back to the previous nonce check flag
         core::mem::swap(&mut self.cfg.disable_nonce_check, &mut disable_nonce_check);
+
+        // NOTE: We assume that only the contract storage is modified. Revm currently marks the
+        // caller and block beneficiary accounts as "touched" when we do the above transact calls,
+        // and includes them in the result.
+        //
+        // We're doing this state cleanup to make sure that changeset only includes the changed
+        // contract storage.
+        // Specifically prevents incorrect nonce increment for system contract caller.
+        if let Ok(res) = &mut res {
+            res.state.retain(|addr, _| *addr == contract);
+        }
 
         res
     }
