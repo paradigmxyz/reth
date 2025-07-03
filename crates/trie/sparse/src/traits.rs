@@ -69,7 +69,7 @@ pub trait SparseTrieInterface: Default + Clone + Debug {
     /// # Arguments
     ///
     /// * `additional` - The number of additional trie nodes to reserve capacity for.
-    fn reserve_nodes(&mut self, additional: usize);
+    fn reserve_nodes(&mut self, additional: usize) {}
 
     /// Reveals a trie node if it has not been revealed before.
     ///

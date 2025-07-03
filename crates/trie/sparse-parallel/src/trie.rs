@@ -80,10 +80,6 @@ impl SparseTrieInterface for ParallelSparseTrie {
         self
     }
 
-    fn reserve_nodes(&mut self, additional: usize) {
-        todo!()
-    }
-
     fn reveal_node(
         &mut self,
         path: Nibbles,
