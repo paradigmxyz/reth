@@ -3783,7 +3783,7 @@ mod tests {
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
 
         // First, add multiple leaves that will create a subtrie structure
-        // All leaves share the prefix [0x1, 0x2] to ensure they create a branch ndoe and subtrie
+        // All leaves share the prefix [0x1, 0x2] to ensure they create a branch node and subtrie
         //
         // This should result in a trie with the following structure
         // 0x: Extension { key: 0x12 }
