@@ -11,7 +11,8 @@ use std::sync::Arc;
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct LocalPayloadAttributesBuilder<ChainSpec> {
-    chain_spec: Arc<ChainSpec>,
+    /// The chainspec
+    pub chain_spec: Arc<ChainSpec>,
 }
 
 impl<ChainSpec> LocalPayloadAttributesBuilder<ChainSpec> {

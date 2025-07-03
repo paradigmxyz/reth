@@ -461,7 +461,7 @@ revm-context = { version = "8.0.1", default-features = false }
 revm-context-interface = { version = "8.0.0", default-features = false }
 revm-database-interface = { version = "7.0.0", default-features = false }
 op-revm = { version = "8.0.1", default-features = false }
-revm-inspectors = "0.26.0"
+revm-inspectors = "0.26.5"
 
 # eth
 alloy-chains = { version = "0.2.0", default-features = false }
