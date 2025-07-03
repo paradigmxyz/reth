@@ -20,10 +20,34 @@ pub trait SparseTrieInterface: Default + Clone + Debug + Display {
     /// This function initializes the internal structures and then reveals the root.
     /// It is a convenient method to create a trie when you already have the root node available.
     ///
+    /// # Arguments
+    ///
+    /// * `root` - The root node of the trie
+    /// * `masks` - Trie masks for root branch node
+    /// * `retain_updates` - Whether to track updates
+    ///
     /// # Returns
     ///
     /// Self if successful, or an error if revealing fails.
     fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self>;
+
+    /// Configures the trie to have the given root node revealed.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - The root node to reveal
+    /// * `masks` - Trie masks for root branch node
+    /// * `retain_updates` - Whether to track updates
+    ///
+    /// # Returns
+    ///
+    /// Self if successful, or an error if revealing fails.
+    fn with_root(
+        self,
+        root: TrieNode,
+        masks: TrieMasks,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self>;
 
     /// Configures the trie to retain information about updates.
     ///
@@ -40,15 +64,11 @@ pub trait SparseTrieInterface: Default + Clone + Debug + Display {
     /// Self for method chaining.
     fn with_updates(self, retain_updates: bool) -> Self;
 
-    /// Configures the trie to have the given root node revealed.
-    fn with_root(
-        self,
-        root: TrieNode,
-        masks: TrieMasks,
-        retain_updates: bool,
-    ) -> SparseTrieResult<Self>;
-
-    /// Reserves capacity for at least `additional` more trie nodes.
+    /// Reserves capacity for additional trie nodes.
+    ///
+    /// # Arguments
+    ///
+    /// * `additional` - The number of additional trie nodes to reserve capacity for.
     fn reserve_nodes(&mut self, additional: usize);
 
     /// Reveals a trie node if it has not been revealed before.
@@ -130,10 +150,15 @@ pub trait SparseTrieInterface: Default + Clone + Debug + Display {
     /// hash recalculations after localized changes to the trie structure.
     fn update_subtrie_hashes(&mut self);
 
-    /// Retrieves a reference to the leaf value stored at the given key path, if it is revealed.
+    /// Retrieves a reference to the leaf value at the specified path.
     ///
-    /// This method efficiently retrieves values from the trie without traversing
-    /// the entire node structure, as values are stored in a separate map.
+    /// # Arguments
+    ///
+    /// * `full_path` - The full path to the leaf value
+    ///
+    /// # Returns
+    ///
+    /// A reference to the leaf value stored at the given full path, if it is revealed.
     ///
     /// Note: a value can exist in the full trie and this function still returns `None`
     /// because the value has not been revealed.
@@ -142,7 +167,7 @@ pub trait SparseTrieInterface: Default + Clone + Debug + Display {
     /// - The value does not exists in the trie, so it cannot be revealed
     /// - The value has not yet been revealed. In order to determine which is true, one would need
     ///   an exclusion proof.
-    fn get_leaf_value(&self, path: &Nibbles) -> Option<&Vec<u8>>;
+    fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>>;
 
     /// Consumes and returns the currently accumulated trie updates.
     ///
