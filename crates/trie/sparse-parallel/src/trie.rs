@@ -4876,6 +4876,7 @@ mod tests {
 
     #[test]
     fn parallel_sparse_trie_reveal_node_1() {
+        let ctx = ParallelSparseTrieTestContext;
         let key1 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x00]));
         let key2 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x01]));
         let key3 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x02]));
@@ -4925,19 +4926,15 @@ mod tests {
         }
 
         // Check that the branch node exists with only two nibbles set
-        assert_eq!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b101.into()))
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_branch(&Nibbles::default(), &[0, 2]);
 
         // Insert the leaf for the second key
-        sparse.update_leaf(key2(), value_encoded(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut sparse, &[(key2(), value_encoded())]);
 
         // Check that the branch node was updated and another nibble was set
-        assert_eq!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_branch(&Nibbles::default(), &[0, 1, 2]);
 
         // Generate the proof for the third key and reveal it in the sparse trie
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
@@ -4960,10 +4957,8 @@ mod tests {
         }
 
         // Check that nothing changed in the branch node
-        assert_eq!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_branch(&Nibbles::default(), &[0, 1, 2]);
 
         // Generate the nodes for the full trie with all three key using the hash builder, and
         // compare them to the sparse trie
@@ -4979,6 +4974,7 @@ mod tests {
 
     #[test]
     fn parallel_sparse_trie_reveal_node_2() {
+        let ctx = ParallelSparseTrieTestContext;
         let key1 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x00, 0x00]));
         let key2 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x01, 0x01]));
         let key3 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x01, 0x02]));
@@ -5024,19 +5020,15 @@ mod tests {
         }
 
         // Check that the branch node exists
-        assert_eq!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b11.into()))
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_branch(&Nibbles::default(), &[0, 1]);
 
         // Remove the leaf for the first key
         sparse.remove_leaf(&key1(), DefaultBlindedProvider).unwrap();
 
         // Check that the branch node was turned into an extension node
-        assert_eq!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles_unchecked([0x01]));
 
         // Generate the proof for the third key and reveal it in the sparse trie
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
@@ -5059,14 +5051,13 @@ mod tests {
         }
 
         // Check that nothing changed in the extension node
-        assert_eq!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles_unchecked([0x01]));
     }
 
     #[test]
     fn parallel_sparse_trie_reveal_node_3() {
+        let ctx = ParallelSparseTrieTestContext;
         let key1 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x00, 0x01]));
         let key2 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x00, 0x02]));
         let key3 = || pad_nibbles_right(Nibbles::from_nibbles_unchecked([0x01, 0x00]));
@@ -5096,19 +5087,15 @@ mod tests {
         .unwrap();
 
         // Check that the root extension node exists
-        assert_matches!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None }) if *key == Nibbles::from_nibbles([0x00])
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x00]));
 
         // Insert the leaf with a different prefix
-        sparse.update_leaf(key3(), value_encoded(), DefaultBlindedProvider).unwrap();
+        ctx.insert_leaves(&mut sparse, &[(key3(), value_encoded())]);
 
         // Check that the extension node was turned into a branch node
-        assert_matches!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_branch(&Nibbles::default(), &[0, 1]);
 
         // Generate the proof for the first key and reveal it in the sparse trie
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
@@ -5131,9 +5118,7 @@ mod tests {
         }
 
         // Check that the branch node wasn't overwritten by the extension node in the proof
-        assert_matches!(
-            sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
-        );
+        ctx.assert_upper_subtrie(&sparse)
+            .has_branch(&Nibbles::default(), &[0, 1]);
     }
 }
