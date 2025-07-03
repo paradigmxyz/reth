@@ -1,7 +1,10 @@
+use crate::validation::ValidationApiError::InvalidBlobsBundle;
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
+use alloy_eips::{
+    eip4844::kzg_to_versioned_hash, eip7594::CELLS_PER_EXT_BLOB, eip7685::RequestsOrHash,
+};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
@@ -367,14 +370,14 @@ where
         Ok(versioned_hashes)
     }
     /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
-    pub fn validate_blobs_bundl_v2(
+    pub fn validate_blobs_bundle_v2(
         &self,
         mut blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        if blobs_bundle.commitments.len() != blobs_bundle.proofs.len() ||
+        if blobs_bundle.proofs.len() != blobs_bundle.blobs.len() * CELLS_PER_EXT_BLOB ||
             blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
         {
-            return Err(ValidationApiError::InvalidBlobsBundle)
+            return Err(ValidationApiError::InvalidBlobsBundle);
         }
 
         let versioned_hashes = blobs_bundle
@@ -383,9 +386,10 @@ where
             .map(|c| kzg_to_versioned_hash(c.as_slice()))
             .collect::<Vec<_>>();
 
-        let sidecar = blobs_bundle.pop_sidecar(blobs_bundle.blobs.len());
-
-        sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
+        let sidecar = blobs_bundle
+            .try_into_sidecar()
+            .map_err(|_| InvalidBlobsBundle)?
+            .validate(&versioned_hashes, EnvKzgSettings::default().get())?;
 
         Ok(versioned_hashes)
     }
@@ -449,7 +453,8 @@ where
             sidecar: ExecutionPayloadSidecar::v4(
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
-                    versioned_hashes: self.validate_blobs_bundl_v2(request.request.blobs_bundle)?,
+                    versioned_hashes: self
+                        .validate_blobs_bundle_v2(request.request.blobs_bundle)?,
                 },
                 PraguePayloadFields {
                     requests: RequestsOrHash::Requests(
