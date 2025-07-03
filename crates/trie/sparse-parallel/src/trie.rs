@@ -1944,7 +1944,6 @@ mod tests {
         map::{foldhash::fast::RandomState, B256Set, DefaultHashBuilder, HashMap},
         B256, U256,
     };
-    use std::collections::BTreeMap;
     use alloy_rlp::{Decodable, Encodable};
     use alloy_trie::{BranchNodeCompact, Nibbles};
     use assert_matches::assert_matches;
@@ -1969,6 +1968,7 @@ mod tests {
         blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
         SparseNode, SparseTrieInterface, TrieMasks,
     };
+    use std::collections::BTreeMap;
 
     /// Mock blinded provider for testing that allows pre-setting nodes at specific paths.
     ///
@@ -4554,7 +4554,10 @@ mod tests {
         let sparse_updates = sparse.updates.as_ref().unwrap();
 
         pretty_assertions::assert_eq!(sparse_root, hash_builder_root);
-        pretty_assertions::assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        pretty_assertions::assert_eq!(
+            sparse_updates.updated_nodes,
+            hash_builder_updates.account_nodes
+        );
         assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
@@ -4585,34 +4588,60 @@ mod tests {
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), DefaultBlindedProvider)
+            .update_leaf(
+                Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]),
+                value.clone(),
+                DefaultBlindedProvider,
+            )
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), DefaultBlindedProvider)
+            .update_leaf(
+                Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]),
+                value.clone(),
+                DefaultBlindedProvider,
+            )
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), DefaultBlindedProvider)
+            .update_leaf(
+                Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]),
+                value.clone(),
+                DefaultBlindedProvider,
+            )
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), DefaultBlindedProvider)
+            .update_leaf(
+                Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]),
+                value.clone(),
+                DefaultBlindedProvider,
+            )
             .unwrap();
         sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), DefaultBlindedProvider)
+            .update_leaf(
+                Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]),
+                value.clone(),
+                DefaultBlindedProvider,
+            )
             .unwrap();
-        sparse.update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, DefaultBlindedProvider).unwrap();
+        sparse
+            .update_leaf(
+                Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]),
+                value,
+                DefaultBlindedProvider,
+            )
+            .unwrap();
 
         // For ParallelSparseTrie, we need to collect nodes from both upper and lower subtries
         let mut all_nodes = std::collections::BTreeMap::new();
-        
+
         // Add upper subtrie nodes
-        for (path, node) in sparse.upper_subtrie.nodes.iter() {
-            all_nodes.insert(path.clone(), node.clone());
+        for (path, node) in &sparse.upper_subtrie.nodes {
+            all_nodes.insert(*path, node.clone());
         }
-        
+
         // Add lower subtrie nodes
         for subtrie in sparse.lower_subtries.iter().flatten() {
-            for (path, node) in subtrie.nodes.iter() {
-                all_nodes.insert(path.clone(), node.clone());
+            for (path, node) in &subtrie.nodes {
+                all_nodes.insert(*path, node.clone());
             }
         }
 
@@ -4670,20 +4699,22 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), DefaultBlindedProvider).unwrap();
+        sparse
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), DefaultBlindedProvider)
+            .unwrap();
 
         // Collect nodes again after removal
         let mut all_nodes_after = BTreeMap::new();
-        
+
         // Add upper subtrie nodes
-        for (path, node) in sparse.upper_subtrie.nodes.iter() {
-            all_nodes_after.insert(path.clone(), node.clone());
+        for (path, node) in &sparse.upper_subtrie.nodes {
+            all_nodes_after.insert(*path, node.clone());
         }
-        
+
         // Add lower subtrie nodes
         for subtrie in sparse.lower_subtries.iter().flatten() {
-            for (path, node) in subtrie.nodes.iter() {
-                all_nodes_after.insert(path.clone(), node.clone());
+            for (path, node) in &subtrie.nodes {
+                all_nodes_after.insert(*path, node.clone());
             }
         }
 
@@ -4736,20 +4767,22 @@ mod tests {
             ])
         );
 
-        sparse.remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), DefaultBlindedProvider).unwrap();
+        sparse
+            .remove_leaf(&Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), DefaultBlindedProvider)
+            .unwrap();
 
         // Collect nodes again after second removal
         let mut all_nodes_final = BTreeMap::new();
-        
+
         // Add upper subtrie nodes
-        for (path, node) in sparse.upper_subtrie.nodes.iter() {
-            all_nodes_final.insert(path.clone(), node.clone());
+        for (path, node) in &sparse.upper_subtrie.nodes {
+            all_nodes_final.insert(*path, node.clone());
         }
-        
+
         // Add lower subtrie nodes
         for subtrie in sparse.lower_subtries.iter().flatten() {
-            for (path, node) in subtrie.nodes.iter() {
-                all_nodes_final.insert(path.clone(), node.clone());
+            for (path, node) in &subtrie.nodes {
+                all_nodes_final.insert(*path, node.clone());
             }
         }
 
@@ -4871,7 +4904,10 @@ mod tests {
 
         // Removing a non-existent leaf should be a noop
         let sparse_old = sparse.clone();
-        assert_matches!(sparse.remove_leaf(&Nibbles::from_nibbles([0x2]), DefaultBlindedProvider), Ok(()));
+        assert_matches!(
+            sparse.remove_leaf(&Nibbles::from_nibbles([0x2]), DefaultBlindedProvider),
+            Ok(())
+        );
         assert_eq!(sparse, sparse_old);
     }
 
