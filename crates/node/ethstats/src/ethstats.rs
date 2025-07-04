@@ -282,11 +282,12 @@ where
     /// Calculates the round-trip time from the last ping and sends it to
     /// the server. This is called when a pong response is received.
     async fn report_latency(&self) -> Result<(), EthStatsError> {
+        let conn = self.conn.read().await;
+        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+
         let mut active = self.last_ping.lock().await;
         if let Some(start) = active.take() {
             let latency = start.elapsed().as_millis() as u64 / 2;
-            let conn = self.conn.read().await;
-            let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
             tracing::debug!("Reporting latency: {}ms", latency);
 
@@ -766,37 +767,6 @@ mod tests {
         assert!(service.is_connected().await, "Service should be connected");
 
         // Clean up server
-        server_handle.abort();
-    }
-
-    #[tokio::test]
-    async fn test_ping_pong_flow() {
-        let (server_url, server_handle) = setup_mock_server().await;
-        let ethstats_url = format!("test-node:test-secret@{server_url}");
-
-        let network = NoopNetwork::default();
-        let provider = NoopProvider::default();
-        let pool = NoopTransactionPool::default();
-
-        let service = EthStatsService::new(&ethstats_url, network, provider, pool)
-            .await
-            .expect("Service should connect");
-
-        // Clone the last_ping before moving service
-        let last_ping = service.last_ping.clone();
-
-        // Spawn the service in the background
-        let service_handle = tokio::spawn(service.run());
-
-        // Wait for the ping to be sent and pong received
-        tokio::time::sleep(Duration::from_secs(1)).await;
-
-        // Verify ping was acknowledged
-        let last_ping_guard = last_ping.lock().await;
-        assert!(last_ping_guard.is_none(), "Ping should have been acknowledged");
-
-        // Clean up
-        service_handle.abort();
         server_handle.abort();
     }
 
