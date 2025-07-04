@@ -65,6 +65,11 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.minimal-protocol-fee", default_value_t = MIN_PROTOCOL_BASE_FEE)]
     pub minimal_protocol_basefee: u64,
 
+    /// Minimum priority fee required for transaction acceptance into the pool.
+    /// Transactions with priority fee below this value will be rejected.
+    #[arg(long = "txpool.minimum-priority-fee")]
+    pub minimum_priority_fee: Option<u128>,
+
     /// The default enforced gas limit for transactions entering the pool
     #[arg(long = "txpool.gas-limit", default_value_t = ETHEREUM_BLOCK_GAS_LIMIT_30M)]
     pub enforced_gas_limit: u64,
@@ -144,6 +149,7 @@ impl Default for TxPoolArgs {
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
+            minimum_priority_fee: None,
             enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             max_tx_gas_limit: None,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
@@ -195,6 +201,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
                 replace_blob_tx_price_bump: self.blob_transaction_price_bump,
             },
             minimal_protocol_basefee: self.minimal_protocol_basefee,
+            minimum_priority_fee: self.minimum_priority_fee,
             gas_limit: self.enforced_gas_limit,
             pending_tx_listener_buffer_size: self.pending_tx_listener_buffer_size,
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
