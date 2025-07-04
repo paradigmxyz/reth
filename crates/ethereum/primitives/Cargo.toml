@@ -48,20 +48,20 @@ test-utils = [
     "reth-primitives-traits/test-utils",
 ]
 std = [
-	"alloy-consensus/std",
-	"alloy-primitives/std",
-	"alloy-rlp/std",
-	"reth-primitives-traits/std",
-	"serde?/std",
-	"alloy-eips/std",
-	"derive_more/std",
-	"serde_with?/std",
-	"secp256k1/std",
-	"reth-zstd-compressors/std"
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "reth-primitives-traits/std",
+    "serde?/std",
+    "alloy-eips/std",
+    "derive_more/std",
+    "serde_with?/std",
+    "secp256k1/std",
+    "reth-zstd-compressors/std",
 ]
 reth-codec = [
     "std",
-    "dep:reth-codecs"
+    "dep:reth-codecs",
 ]
 arbitrary = [
     "dep:arbitrary",
