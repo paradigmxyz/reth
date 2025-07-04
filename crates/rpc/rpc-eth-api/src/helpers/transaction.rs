@@ -414,7 +414,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 <<Self as RpcNodeCore>::Pool as TransactionPool>::Transaction::try_from_consensus(
                     transaction,
                 )
-                .map_err(|_| EthApiError::TransactionConversionError)?;
+                .map_err(|err| {
+                    tracing::error!("Failed to convert transaction to pool format: {:?}", err);
+                    EthApiError::TransactionConversionError
+                })?;
 
             // submit the transaction to the pool with a `Local` origin
             let hash = self
@@ -437,7 +440,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             self.find_signer(from)?
                 .sign_transaction(txn, from)
                 .await
-                .map_err(Self::Error::from_eth_err)
+                .map_err(|err| {
+                    tracing::error!("Failed to sign transaction for account {}: {:?}", from, err);
+                    Self::Error::from_eth_err(err)
+                })
         }
     }
 
@@ -452,7 +458,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .find_signer(&account)?
                 .sign(account, &message)
                 .await
-                .map_err(Self::Error::from_eth_err)?
+                .map_err(|err| {
+                    tracing::error!("Failed to sign message for account {}: {:?}", account, err);
+                    Self::Error::from_eth_err(err)
+                })?
                 .as_bytes()
                 .into())
         }
@@ -479,7 +488,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Ok(self
             .find_signer(&account)?
             .sign_typed_data(account, data)
-            .map_err(Self::Error::from_eth_err)?
+            .map_err(|err| {
+                tracing::error!("Failed to sign typed data for account {}: {:?}", account, err);
+                Self::Error::from_eth_err(err)
+            })?
             .as_bytes()
             .into())
     }
@@ -495,7 +507,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             .iter()
             .find(|signer| signer.is_signer_for(account))
             .map(|signer| dyn_clone::clone_box(&**signer))
-            .ok_or_else(|| SignError::NoAccount.into_eth_err())
+            .ok_or_else(|| {
+                tracing::warn!("No signer found for account: {}", account);
+                SignError::NoAccount.into_eth_err()
+            })
     }
 }
 
@@ -523,7 +538,10 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                     match this
                         .provider()
                         .transaction_by_hash_with_meta(hash)
-                        .map_err(Self::Error::from_eth_err)?
+                        .map_err(|err| {
+                            tracing::error!("Failed to query transaction {} from database: {:?}", hash, err);
+                            Self::Error::from_eth_err(err)
+                        })?
                     {
                         None => Ok(None),
                         Some((tx, meta)) => {
@@ -532,7 +550,10 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                             // check for pre EIP-2 because this transaction could be pre-EIP-2.
                             let transaction = tx
                                 .try_into_recovered_unchecked()
-                                .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+                                .map_err(|err| {
+                                    tracing::error!("Failed to recover transaction {} signature: {:?}", hash, err);
+                                    EthApiError::InvalidTransactionSignature
+                                })?;
 
                             let tx = TransactionSource::Block {
                                 transaction,
@@ -552,6 +573,7 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 if let Some(tx) =
                     self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
                 {
+                    tracing::debug!("Found transaction {} in mempool", hash);
                     resp = Some(TransactionSource::Pool(tx.into()));
                 }
             }
@@ -606,13 +628,19 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
             // Note: this is always either hash or pending
             let block_hash = match at {
                 BlockId::Hash(hash) => hash.block_hash,
-                _ => return Ok(None),
+                _ => {
+                    tracing::debug!("Transaction {} is pending, cannot fetch block", hash);
+                    return Ok(None);
+                }
             };
             let block = self
                 .cache()
                 .get_recovered_block(block_hash)
                 .await
-                .map_err(Self::Error::from_eth_err)?;
+                .map_err(|err| {
+                    tracing::error!("Failed to get block {}: {:?}", block_hash, err);
+                    Self::Error::from_eth_err(err)
+                })?;
             Ok(block.map(|block| (transaction, block)))
         }
     }
