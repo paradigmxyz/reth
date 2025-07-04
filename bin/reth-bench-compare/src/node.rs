@@ -264,7 +264,21 @@ impl NodeManager {
     /// Stop the reth node gracefully
     pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
         let pid = child.id().expect("Child process ID should be available");
-        info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
+        
+        // Check if the process has already exited
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                info!("Reth node (PID: {}) has already exited with status: {:?}", pid, status);
+                return Ok(());
+            }
+            Ok(None) => {
+                // Process is still running, proceed to stop it
+                info!("Stopping reth node gracefully with SIGINT (PID: {})...", pid);
+            }
+            Err(e) => {
+                return Err(eyre!("Failed to check process status: {}", e));
+            }
+        }
 
         #[cfg(unix)]
         {
@@ -272,8 +286,17 @@ impl NodeManager {
             // Mimic Ctrl-C: negative value == process group id
             let pgid = -(pid as i32);
             let nix_pgid = Pid::from_raw(pgid);
-            kill(nix_pgid, Signal::SIGINT)
-                .wrap_err_with(|| format!("Failed to send SIGINT to process group {pid}"))?;
+            
+            // Ignore ESRCH error (process doesn't exist) as it may have exited between our check and now
+            match kill(nix_pgid, Signal::SIGINT) {
+                Ok(()) => {},
+                Err(nix::errno::Errno::ESRCH) => {
+                    info!("Process group {} has already exited", pid);
+                }
+                Err(e) => {
+                    return Err(eyre!("Failed to send SIGINT to process group {}: {}", pid, e));
+                }
+            }
         }
 
         #[cfg(not(unix))]
@@ -287,12 +310,25 @@ impl NodeManager {
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                return Err(eyre!("Failed to kill process {}: {}", pid, stderr));
+                // Check if the error is because the process doesn't exist
+                if stderr.contains("not found") || stderr.contains("not exist") {
+                    info!("Process {} has already exited", pid);
+                } else {
+                    return Err(eyre!("Failed to kill process {}: {}", pid, stderr));
+                }
             }
         }
 
         // Wait for the process to exit
-        child.wait().await.wrap_err("Failed to wait for reth process to exit")?;
+        match child.wait().await {
+            Ok(status) => {
+                info!("Reth node (PID: {}) exited with status: {:?}", pid, status);
+            }
+            Err(e) => {
+                // If we get an error here, it might be because the process already exited
+                debug!("Error waiting for process exit (may have already exited): {}", e);
+            }
+        }
 
         Ok(())
     }
