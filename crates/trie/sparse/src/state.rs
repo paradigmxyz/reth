@@ -23,11 +23,14 @@ use tracing::trace;
 
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
-pub struct SparseStateTrie {
+pub struct SparseStateTrie<
+    A = RevealedSparseTrie, // Account trie implementation
+    S = RevealedSparseTrie, // Storage trie implementation
+> {
     /// Sparse account trie.
-    state: SparseTrie,
+    state: SparseTrie<A>,
     /// Sparse storage tries.
-    storages: B256Map<SparseTrie>,
+    storages: B256Map<SparseTrie<S>>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// Collection of revealed storage trie paths, per account.
@@ -41,7 +44,11 @@ pub struct SparseStateTrie {
     metrics: crate::metrics::SparseStateTrieMetrics,
 }
 
-impl Default for SparseStateTrie {
+impl<A, S> Default for SparseStateTrie<A, S>
+where
+    A: Default,
+    S: Default,
+{
     fn default() -> Self {
         Self {
             state: Default::default(),
@@ -64,7 +71,11 @@ impl SparseStateTrie {
     }
 }
 
-impl SparseStateTrie {
+impl<A, S> SparseStateTrie<A, S>
+where
+    A: SparseTrieInterface,
+    S: SparseTrieInterface,
+{
     /// Create new [`SparseStateTrie`]
     pub fn new() -> Self {
         Self::default()
@@ -77,13 +88,13 @@ impl SparseStateTrie {
     }
 
     /// Set the accounts trie to the given `SparseTrie`.
-    pub fn with_accounts_trie(mut self, trie: SparseTrie) -> Self {
+    pub fn with_accounts_trie(mut self, trie: SparseTrie<A>) -> Self {
         self.state = trie;
         self
     }
 
     /// Takes the `SparseTrie` from within the state root and clears it if it is not blinded.
-    pub fn take_cleared_accounts_trie(&mut self) -> SparseTrie {
+    pub fn take_cleared_accounts_trie(&mut self) -> SparseTrie<A> {
         core::mem::take(&mut self.state).clear()
     }
 
@@ -138,27 +149,27 @@ impl SparseStateTrie {
     }
 
     /// Returns reference to state trie if it was revealed.
-    pub const fn state_trie_ref(&self) -> Option<&RevealedSparseTrie> {
+    pub const fn state_trie_ref(&self) -> Option<&A> {
         self.state.as_revealed_ref()
     }
 
     /// Returns reference to storage trie if it was revealed.
-    pub fn storage_trie_ref(&self, address: &B256) -> Option<&RevealedSparseTrie> {
+    pub fn storage_trie_ref(&self, address: &B256) -> Option<&S> {
         self.storages.get(address).and_then(|e| e.as_revealed_ref())
     }
 
     /// Returns mutable reference to storage sparse trie if it was revealed.
-    pub fn storage_trie_mut(&mut self, address: &B256) -> Option<&mut RevealedSparseTrie> {
+    pub fn storage_trie_mut(&mut self, address: &B256) -> Option<&mut S> {
         self.storages.get_mut(address).and_then(|e| e.as_revealed_mut())
     }
 
     /// Takes the storage trie for the provided address.
-    pub fn take_storage_trie(&mut self, address: &B256) -> Option<SparseTrie> {
+    pub fn take_storage_trie(&mut self, address: &B256) -> Option<SparseTrie<S>> {
         self.storages.remove(address)
     }
 
     /// Inserts storage trie for the provided address.
-    pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie) {
+    pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie<S>) {
         self.storages.insert(address, storage_trie);
     }
 
@@ -598,13 +609,13 @@ impl SparseStateTrie {
         self.storages.get_mut(&account).and_then(|trie| trie.root())
     }
 
-    /// Returns mutable reference to the revealed sparse trie.
+    /// Returns mutable reference to the revealed account sparse trie.
     ///
     /// If the trie is not revealed yet, its root will be revealed using the blinded node provider.
     fn revealed_trie_mut(
         &mut self,
         provider_factory: impl BlindedProviderFactory,
-    ) -> SparseStateTrieResult<&mut RevealedSparseTrie> {
+    ) -> SparseStateTrieResult<&mut A> {
         match self.state {
             SparseTrie::Blind(_) => {
                 let (root_node, hash_mask, tree_mask) = provider_factory
@@ -919,7 +930,7 @@ mod tests {
 
     #[test]
     fn validate_root_node_first_node_not_root() {
-        let sparse = SparseStateTrie::default();
+        let sparse = SparseStateTrie::<RevealedSparseTrie>::default();
         let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
         assert_matches!(
             sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
@@ -929,7 +940,7 @@ mod tests {
 
     #[test]
     fn validate_root_node_invalid_proof_with_empty_root() {
-        let sparse = SparseStateTrie::default();
+        let sparse = SparseStateTrie::<RevealedSparseTrie>::default();
         let proof = [
             (Nibbles::default(), Bytes::from([EMPTY_STRING_CODE])),
             (Nibbles::from_nibbles([0x1]), Bytes::new()),
@@ -948,7 +959,7 @@ mod tests {
         let proofs = hash_builder.take_proof_nodes();
         assert_eq!(proofs.len(), 1);
 
-        let mut sparse = SparseStateTrie::default();
+        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default();
         assert_eq!(sparse.state, SparseTrie::Blind(None));
 
         sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
@@ -963,7 +974,7 @@ mod tests {
         let proofs = hash_builder.take_proof_nodes();
         assert_eq!(proofs.len(), 1);
 
-        let mut sparse = SparseStateTrie::default();
+        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default();
         assert!(sparse.storages.is_empty());
 
         sparse
@@ -978,7 +989,7 @@ mod tests {
     #[test]
     fn reveal_account_path_twice() {
         let provider_factory = DefaultBlindedProviderFactory;
-        let mut sparse = SparseStateTrie::default();
+        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
@@ -1050,7 +1061,7 @@ mod tests {
     #[test]
     fn reveal_storage_path_twice() {
         let provider_factory = DefaultBlindedProviderFactory;
-        let mut sparse = SparseStateTrie::default();
+        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
@@ -1182,7 +1193,7 @@ mod tests {
         let proof_nodes = hash_builder.take_proof_nodes();
 
         let provider_factory = DefaultBlindedProviderFactory;
-        let mut sparse = SparseStateTrie::default().with_updates(true);
+        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default().with_updates(true);
         sparse
             .reveal_decoded_multiproof(
                 MultiProof {
