@@ -57,7 +57,7 @@ cd prometheus-*
 # Install Grafana
 sudo apt-get install -y apt-transport-https software-properties-common
 wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
-echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+echo "deb https://packages.grafana.com stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
 sudo apt-get update
 sudo apt-get install grafana
 ```
@@ -141,4 +141,4 @@ This will all be very useful to you, whether you're simply running a home node a
 [installation]: ../installation/installation
 [release-profile]: https://doc.rust-lang.org/cargo/reference/profiles.html#release
 [docs]: https://github.com/paradigmxyz/reth/tree/main/docs
-[metrics]: https://github.com/paradigmxyz/reth/blob/main/docs/design/metrics#current-metrics
+[metrics]: https://reth.rs/run/observability.html

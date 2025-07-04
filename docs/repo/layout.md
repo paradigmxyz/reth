@@ -29,7 +29,7 @@ The supporting crates are split into two categories: [primitives](#primitives) a
 
 ### Documentation
 
-Contributor documentation is in [`docs`](../../docs) and end-user documentation is in [`book`](../../book).
+Contributor documentation is in [`docs`](../../docs).
 
 ### Binaries
 

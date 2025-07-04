@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{proofs::calculate_receipt_root, BlockHeader, TxReceipt};
-use alloy_eips::eip7685::Requests;
-use alloy_primitives::{Bloom, B256};
+use alloy_eips::{eip7685::Requests, Encodable2718};
+use alloy_primitives::{Bloom, Bytes, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{
@@ -41,6 +41,10 @@ where
         if let Err(error) =
             verify_receipts(block.header().receipts_root(), block.header().logs_bloom(), receipts)
         {
+            let receipts = receipts
+                .iter()
+                .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
+                .collect::<Vec<_>>();
             tracing::debug!(%error, ?receipts, "receipts verification failed");
             return Err(error)
         }

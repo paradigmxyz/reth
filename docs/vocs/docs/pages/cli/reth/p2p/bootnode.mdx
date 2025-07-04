@@ -1,21 +1,37 @@
-# reth p2p
+# reth p2p bootnode
 
-P2P Debugging utilities
+Bootnode command
 
 ```bash
-$ reth p2p --help
+$ reth p2p bootnode --help
 ```
 ```txt
-Usage: reth p2p [OPTIONS] <COMMAND>
-
-Commands:
-  header    Download block header
-  body      Download block body
-  rlpx      RLPx commands
-  bootnode  Bootnode command
-  help      Print this message or the help of the given subcommand(s)
+Usage: reth p2p bootnode [OPTIONS]
 
 Options:
+      --addr <ADDR>
+          Listen address for the bootnode (default: ":30301")
+
+          [default: :30301]
+
+      --gen-key <GEN_KEY>
+          Generate a new node key and save it to the specified file
+
+          [default: ]
+
+      --node-key <NODE_KEY>
+          Private key filename for the node
+
+          [default: ]
+
+      --nat <NAT>
+          NAT resolution method (any|none|upnp|publicip|extip:\<IP\>)
+
+          [default: any]
+
+      --v5
+          Run a v5 topic discovery bootnode
+
   -h, --help
           Print help (see a summary with '-h')
 
