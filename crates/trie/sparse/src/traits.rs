@@ -11,7 +11,7 @@ use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{Nibbles, TrieNode};
 
-use crate::blinded::BlindedProvider;
+use crate::provider::TrieNodeProvider;
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
@@ -99,7 +99,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if the update failed.
-    fn update_leaf<P: BlindedProvider>(
+    fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
@@ -119,7 +119,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if the removal failed.
-    fn remove_leaf<P: BlindedProvider>(
+    fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
         provider: P,
@@ -265,7 +265,7 @@ pub struct SparseTrieUpdates {
 pub enum LeafLookupError {
     /// The path leads to a blinded node, cannot determine if leaf exists.
     /// This means the witness is not complete.
-    BlindedNode {
+    TrieNode {
         /// Path to the blinded node.
         path: Nibbles,
         /// Hash of the blinded node.

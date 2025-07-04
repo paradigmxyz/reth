@@ -21,7 +21,7 @@ use reth_execution_errors::{
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
+    provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseStateTrie,
 };
 use std::sync::{mpsc, Arc};
@@ -250,11 +250,11 @@ impl<F> WitnessBlindedProviderFactory<F> {
     }
 }
 
-impl<F> BlindedProviderFactory for WitnessBlindedProviderFactory<F>
+impl<F> TrieNodeProviderFactory for WitnessBlindedProviderFactory<F>
 where
-    F: BlindedProviderFactory,
-    F::AccountNodeProvider: BlindedProvider,
-    F::StorageNodeProvider: BlindedProvider,
+    F: TrieNodeProviderFactory,
+    F::AccountNodeProvider: TrieNodeProvider,
+    F::StorageNodeProvider: TrieNodeProvider,
 {
     type AccountNodeProvider = WitnessBlindedProvider<F::AccountNodeProvider>;
     type StorageNodeProvider = WitnessBlindedProvider<F::StorageNodeProvider>;
@@ -284,9 +284,9 @@ impl<P> WitnessBlindedProvider<P> {
     }
 }
 
-impl<P: BlindedProvider> BlindedProvider for WitnessBlindedProvider<P> {
-    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let maybe_node = self.provider.blinded_node(path)?;
+impl<P: TrieNodeProvider> TrieNodeProvider for WitnessBlindedProvider<P> {
+    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+        let maybe_node = self.provider.trie_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx
                 .send(node.node.clone())

@@ -14,7 +14,7 @@ pub use trie::*;
 mod traits;
 pub use traits::*;
 
-pub mod blinded;
+pub mod provider;
 
 #[cfg(feature = "metrics")]
 mod metrics;

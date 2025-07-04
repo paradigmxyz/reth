@@ -13,7 +13,7 @@ use reth_trie::{
     HashedStorage,
 };
 use reth_trie_common::{HashBuilder, Nibbles};
-use reth_trie_sparse::{blinded::DefaultBlindedProvider, SerialSparseTrie, SparseTrie};
+use reth_trie_sparse::{provider::DefaultTrieNodeProvider, RevealedSparseTrie, SparseTrie};
 
 fn calculate_root_from_leaves(c: &mut Criterion) {
     let mut group = c.benchmark_group("calculate root from leaves");
@@ -40,7 +40,7 @@ fn calculate_root_from_leaves(c: &mut Criterion) {
         });
 
         // sparse trie
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         group.bench_function(BenchmarkId::new("sparse trie", size), |b| {
             b.iter_with_setup(SparseTrie::<SerialSparseTrie>::revealed_empty, |mut sparse| {
                 for (key, value) in &state {
@@ -179,7 +179,7 @@ fn calculate_root_from_leaves_repeated(c: &mut Criterion) {
                 });
 
                 // sparse trie
-                let provider = DefaultBlindedProvider;
+                let provider = DefaultTrieNodeProvider;
                 let benchmark_id = BenchmarkId::new(
                     "sparse trie",
                     format!(
