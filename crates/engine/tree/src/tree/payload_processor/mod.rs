@@ -29,6 +29,7 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::SparseTrie;
+use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::{
     collections::VecDeque,
     sync::{
@@ -44,6 +45,9 @@ pub mod executor;
 pub mod multiproof;
 pub mod prewarm;
 pub mod sparse_trie;
+
+/// Declares the concrete type used for the implementation of the account trie.
+pub type AccountTrieImpl = ParallelSparseTrie;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -70,7 +74,9 @@ where
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// A cleared sparse trie, kept around to be re-used for the state root computation so that
     /// allocations can be minimized.
-    sparse_trie: Option<SparseTrie>,
+    ///
+    /// Dynamic dispatch is used
+    sparse_trie: Option<SparseTrie<AccountTrieImpl>>,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -251,7 +257,7 @@ where
     }
 
     /// Sets the sparse trie to be kept around for the state root computation.
-    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrie) {
+    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrie<AccountTrieImpl>) {
         self.sparse_trie = Some(sparse_trie);
     }
 
@@ -327,7 +333,9 @@ pub struct PayloadHandle {
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
     /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    state_root: Option<
+        mpsc::Receiver<Result<StateRootComputeOutcome<AccountTrieImpl>, ParallelStateRootError>>,
+    >,
 }
 
 impl PayloadHandle {
@@ -336,7 +344,9 @@ impl PayloadHandle {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub fn state_root(
+        &mut self,
+    ) -> Result<StateRootComputeOutcome<AccountTrieImpl>, ParallelStateRootError> {
         self.state_root
             .take()
             .expect("state_root is None")
