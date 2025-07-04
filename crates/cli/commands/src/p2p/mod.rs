@@ -27,36 +27,12 @@ pub struct Command<C: ChainSpecParser> {
     command: Subcommands<C>,
 }
 
-/// `reth p2p` subcommands
-#[derive(Subcommand, Debug)]
-pub enum Subcommands<C: ChainSpecParser> {
-    /// Download block header
-    Header {
-        #[command(flatten)]
-        args: DownloadArgs<C>,
-        /// The header number or hash
-        #[arg(value_parser = hash_or_num_value_parser)]
-        id: BlockHashOrNumber,
-    },
-    /// Download block body
-    Body {
-        #[command(flatten)]
-        args: DownloadArgs<C>,
-        /// The block number or hash
-        #[arg(value_parser = hash_or_num_value_parser)]
-        id: BlockHashOrNumber,
-    },
-    // RLPx utilities
-    Rlpx(rlpx::Command),
-}
-
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `p2p` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         match self.command {
             Subcommands::Header { args, id } => {
-                let handle =
-                    args.setup::<N>().await?;
+                let handle = args.setup::<N>().await?;
                 let fetch_client = handle.fetch_client().await?;
                 let backoff = args.backoff();
 
@@ -68,8 +44,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
 
             Subcommands::Body { args, id } => {
-                let handle =
-                    args.setup::<N>().await?;
+                let handle = args.setup::<N>().await?;
                 let fetch_client = handle.fetch_client().await?;
                 let backoff = args.backoff();
 
@@ -124,6 +99,29 @@ impl<C: ChainSpecParser> Command<C> {
     }
 }
 
+/// `reth p2p` subcommands
+#[derive(Subcommand, Debug)]
+pub enum Subcommands<C: ChainSpecParser> {
+    /// Download block header
+    Header {
+        #[command(flatten)]
+        args: DownloadArgs<C>,
+        /// The header number or hash
+        #[arg(value_parser = hash_or_num_value_parser)]
+        id: BlockHashOrNumber,
+    },
+    /// Download block body
+    Body {
+        #[command(flatten)]
+        args: DownloadArgs<C>,
+        /// The block number or hash
+        #[arg(value_parser = hash_or_num_value_parser)]
+        id: BlockHashOrNumber,
+    },
+    // RLPx utilities
+    Rlpx(rlpx::Command),
+}
+
 #[derive(Debug, Clone, Parser)]
 pub struct DownloadArgs<C: ChainSpecParser> {
     /// The number of retries per request
@@ -157,11 +155,7 @@ pub struct DownloadArgs<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser> DownloadArgs<C> {
-    pub async fn setup<N>(
-        &self,
-    ) -> eyre::Result<
-        reth_network::NetworkHandle<N::NetworkPrimitives>,
-    >
+    pub async fn setup<N>(&self) -> eyre::Result<reth_network::NetworkHandle<N::NetworkPrimitives>>
     where
         C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
