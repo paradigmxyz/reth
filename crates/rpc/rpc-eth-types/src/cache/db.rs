@@ -114,6 +114,29 @@ impl reth_storage_api::AccountReader for StateProviderTraitObjWrapper<'_> {
     ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Account>> {
         self.0.basic_account(address)
     }
+
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: alloy_primitives::StorageKey,
+    ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
+        self.0.storage(account, storage_key)
+    }
+
+    fn account_code(
+        &self,
+        addr: &Address,
+    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
+        self.0.account_code(addr)
+    }
+
+    fn account_balance(&self, addr: &Address) -> reth_errors::ProviderResult<Option<U256>> {
+        self.0.account_balance(addr)
+    }
+
+    fn account_nonce(&self, addr: &Address) -> reth_errors::ProviderResult<Option<u64>> {
+        self.0.account_nonce(addr)
+    }
 }
 
 impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
@@ -143,31 +166,6 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
 impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
     fn hashed_post_state(&self, bundle_state: &BundleState) -> reth_trie::HashedPostState {
         self.0.hashed_post_state(bundle_state)
-    }
-}
-
-impl StateProvider for StateProviderTraitObjWrapper<'_> {
-    fn storage(
-        &self,
-        account: Address,
-        storage_key: alloy_primitives::StorageKey,
-    ) -> reth_errors::ProviderResult<Option<alloy_primitives::StorageValue>> {
-        self.0.storage(account, storage_key)
-    }
-
-    fn account_code(
-        &self,
-        addr: &Address,
-    ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
-        self.0.account_code(addr)
-    }
-
-    fn account_balance(&self, addr: &Address) -> reth_errors::ProviderResult<Option<U256>> {
-        self.0.account_balance(addr)
-    }
-
-    fn account_nonce(&self, addr: &Address) -> reth_errors::ProviderResult<Option<u64>> {
-        self.0.account_nonce(addr)
     }
 }
 

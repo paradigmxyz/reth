@@ -55,7 +55,7 @@ impl<T: StateProvider> EvmStateProvider for T {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        <T as StateProvider>::storage(self, account, storage_key)
+        <T as AccountReader>::storage(self, account, storage_key)
     }
 }
 
