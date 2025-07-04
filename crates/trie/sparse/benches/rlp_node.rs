@@ -7,7 +7,7 @@ use proptest::{prelude::*, test_runner::TestRunner};
 use rand::{seq::IteratorRandom, Rng};
 use reth_testing_utils::generators;
 use reth_trie::Nibbles;
-use reth_trie_sparse::{blinded::DefaultBlindedProvider, SerialSparseTrie, SparseTrieInterface};
+use reth_trie_sparse::{provider::DefaultTrieNodeProvider, RevealedSparseTrie, SparseTrieInterface};
 
 fn update_rlp_node_level(c: &mut Criterion) {
     let mut rng = generators::rng();
@@ -22,7 +22,7 @@ fn update_rlp_node_level(c: &mut Criterion) {
             .current();
 
         // Create a sparse trie with `size` leaves
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         for (key, value) in &state {
             sparse
