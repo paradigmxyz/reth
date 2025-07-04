@@ -41,7 +41,7 @@ The tool compares:
 
 ## Prerequisites
 
-- Clean git working directory
+- No uncommitted changes to tracked files (untracked files are allowed)
 - Rust toolchain and make
 - Valid git references (branches, tags, or commits)
 - JWT secret for engine API (auto-generated if needed)
