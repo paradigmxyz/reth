@@ -92,7 +92,6 @@ impl Command {
             .await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
-
             info!(%new_payload_result);
 
             // current duration since the start of the benchmark minus the time
