@@ -1,10 +1,7 @@
-use crate::validation::ValidationApiError::InvalidBlobsBundle;
 use alloy_consensus::{
     BlobTransactionValidationError, BlockHeader, EnvKzgSettings, Transaction, TxReceipt,
 };
-use alloy_eips::{
-    eip4844::kzg_to_versioned_hash, eip7594::CELLS_PER_EXT_BLOB, eip7685::RequestsOrHash,
-};
+use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
@@ -374,12 +371,6 @@ where
         &self,
         blobs_bundle: BlobsBundleV2,
     ) -> Result<Vec<B256>, ValidationApiError> {
-        if blobs_bundle.proofs.len() != blobs_bundle.blobs.len() * CELLS_PER_EXT_BLOB ||
-            blobs_bundle.commitments.len() != blobs_bundle.blobs.len()
-        {
-            return Err(ValidationApiError::InvalidBlobsBundle);
-        }
-
         let versioned_hashes = blobs_bundle
             .commitments
             .iter()
@@ -388,7 +379,7 @@ where
 
         blobs_bundle
             .try_into_sidecar()
-            .map_err(|_| InvalidBlobsBundle)?
+            .map_err(|_| ValidationApiError::InvalidBlobsBundle)?
             .validate(&versioned_hashes, EnvKzgSettings::default().get())?;
 
         Ok(versioned_hashes)
