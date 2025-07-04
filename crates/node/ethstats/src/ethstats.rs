@@ -181,6 +181,7 @@ where
         let id = &self.credentials.node_id;
         let secret = &self.credentials.secret;
         let protocol = format!("eth/{}", network_status.protocol_version);
+        let port = self.network.local_addr().port() as u64;
 
         let auth = AuthMsg {
             id: id.clone(),
@@ -188,7 +189,7 @@ where
             info: NodeInfo {
                 name: id.clone(),
                 node: network_status.client_version.clone(),
-                port: 30303,
+                port,
                 network: self.network.chain_id().to_string(),
                 protocol,
                 api: "No".to_string(),
@@ -281,14 +282,14 @@ where
     /// Calculates the round-trip time from the last ping and sends it to
     /// the server. This is called when a pong response is received.
     async fn report_latency(&self) -> Result<(), EthStatsError> {
+        let conn = self.conn.read().await;
+        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+
         let mut active = self.last_ping.lock().await;
         if let Some(start) = active.take() {
             let latency = start.elapsed().as_millis() as u64 / 2;
 
-            tracing::debug!("Pong received, latency: {}ms", latency);
-
-            let conn = self.conn.read().await;
-            let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+            tracing::debug!("Reporting latency: {}ms", latency);
 
             let latency_msg = LatencyMsg { id: self.credentials.node_id.clone(), latency };
 
@@ -308,13 +309,13 @@ where
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
         let pending = self.pool.pool_size().pending as u64;
 
+        tracing::debug!("Reporting pending txs: {}", pending);
+
         let pending_msg =
             PendingMsg { id: self.credentials.node_id.clone(), stats: PendingStats { pending } };
 
         let message = pending_msg.generate_pending_message();
         conn.write_json(&message).await?;
-
-        tracing::debug!("Pending handled, pending txs: {}", pending);
 
         Ok(())
     }
@@ -349,10 +350,10 @@ where
                     block: self.block_to_stats(&block)?,
                 };
 
+                tracing::debug!("Reporting block: {}", block_number);
+
                 let message = block_msg.generate_block_message();
                 conn.write_json(&message).await?;
-
-                tracing::debug!("Report block handled, block_number: {}", block_number);
             }
             Ok(None) => {
                 // Block not found, stop fetching
@@ -398,7 +399,7 @@ where
             diff: header.difficulty().to_string(),
             total_diff: "0".into(),
             txs,
-            tx_hash: header.transactions_root(),
+            tx_root: header.transactions_root(),
             root: header.state_root(),
             uncles: UncleStats(vec![]),
         })
@@ -465,7 +466,6 @@ where
 
         let message = history_msg.generate_history_message();
         conn.write_json(&message).await?;
-        tracing::debug!("History request handled");
 
         Ok(())
     }

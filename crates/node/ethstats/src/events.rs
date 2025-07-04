@@ -20,6 +20,7 @@ pub struct NodeInfo {
     pub port: u64,
 
     /// The network ID the node is connected to (e.g. "1" for mainnet)
+    #[serde(rename = "net")]
     pub network: String,
 
     /// Comma-separated list of supported protocols and their versions
@@ -32,12 +33,14 @@ pub struct NodeInfo {
     pub os: String,
 
     /// Operating system version/architecture
+    #[serde(rename = "os_v")]
     pub os_ver: String,
 
     /// Client software version
     pub client: String,
 
     /// Whether the node can provide historical block data
+    #[serde(rename = "canUpdateHistory")]
     pub history: bool,
 }
 
@@ -119,7 +122,7 @@ pub struct BlockStats {
 
     /// Root hash of all transactions (Merkle root).
     #[serde(rename = "transactionsRoot")]
-    pub tx_hash: B256,
+    pub tx_root: B256,
 
     /// State root after applying this block.
     #[serde(rename = "stateRoot")]
@@ -202,15 +205,12 @@ impl PendingMsg {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeStats {
     /// Whether the node is active
-    #[serde(rename = "active")]
     pub active: bool,
 
     /// Whether the node is currently syncing
-    #[serde(rename = "syncing")]
     pub syncing: bool,
 
     /// Number of connected peers
-    #[serde(rename = "peers")]
     pub peers: u64,
 
     /// Current gas price in wei
@@ -218,7 +218,6 @@ pub struct NodeStats {
     pub gas_price: u64,
 
     /// Node uptime percentage
-    #[serde(rename = "uptime")]
     pub uptime: u64,
 }
 
