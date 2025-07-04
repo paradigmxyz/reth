@@ -503,11 +503,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         account: &Address,
     ) -> Result<
         Box<
-            (dyn EthSigner<
-                ProviderTx<Self::Provider>,
-                Self::NetworkTypes,
-                RpcTxReq<Self::NetworkTypes>,
-            > + 'static),
+            dyn EthSigner<
+                    ProviderTx<Self::Provider>,
+                    Self::NetworkTypes,
+                    RpcTxReq<Self::NetworkTypes>,
+                > + 'static,
         >,
         Self::Error,
     > {
