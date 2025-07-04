@@ -26,6 +26,7 @@ use reth_rpc_eth_api::{
         SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
+    RpcTxReq,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{
@@ -184,6 +185,7 @@ where
     NetworkT: op_alloy_network::Network,
 {
     type Transaction = ProviderTx<Self::Provider>;
+    type Rpc = NetworkT;
 
     #[inline]
     fn starting_block(&self) -> U256 {
@@ -191,7 +193,11 @@ where
     }
 
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(
+        &self,
+    ) -> &parking_lot::RwLock<
+        Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>, NetworkT, RpcTxReq<NetworkT>>>>,
+    > {
         self.inner.eth_api.signers()
     }
 }
