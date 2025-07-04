@@ -282,12 +282,11 @@ where
     /// Calculates the round-trip time from the last ping and sends it to
     /// the server. This is called when a pong response is received.
     async fn report_latency(&self) -> Result<(), EthStatsError> {
-        let conn = self.conn.read().await;
-        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
-
         let mut active = self.last_ping.lock().await;
         if let Some(start) = active.take() {
             let latency = start.elapsed().as_millis() as u64 / 2;
+            let conn = self.conn.read().await;
+            let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
             tracing::debug!("Reporting latency: {}ms", latency);
 
