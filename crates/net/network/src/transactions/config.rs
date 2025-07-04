@@ -248,6 +248,62 @@ where
     }
 }
 
+/// Sharded mempool announcement filtering policy
+#[derive(Debug, Clone)]
+pub struct ShardedMempoolAnnouncementFilter<T> {
+    pub inner: T,
+    pub shard_bits: u8,
+    pub node_id: Option<B256>,
+}
+
+impl<T: AnnouncementFilteringPolicy> AnnouncementFilteringPolicy for ShardedMempoolAnnouncementFilter<T> {
+    fn decide_on_announcement(&self, ty: u8, hash: &B256, size: usize) -> AnnouncementAcceptance {
+        // Only apply sharding to blob transactions (type 3)
+        if ty != 3 {
+            return self.inner.decide_on_announcement(ty, hash, size);
+        }
+        
+        // Ta logique de sharding reste identique
+        let Some(our_node_id) = self.node_id.as_ref() else {
+            return AnnouncementAcceptance::Accept;
+        };
+
+        let mask = (1u8 << self.shard_bits) - 1;
+        let tx_shard = hash.as_slice()[31] & mask;
+        let our_shard = our_node_id.as_slice()[31] & mask;
+
+        if tx_shard == our_shard {
+            AnnouncementAcceptance::Accept
+        } else {
+            AnnouncementAcceptance::Ignore
+        }
+    }
+}
+
+impl<T> ShardedMempoolAnnouncementFilter<T> {
+    pub fn new(inner: T, shard_bits: u8, node_id: Option<B256>) -> Self {
+        Self { inner, shard_bits, node_id }
+    }
+    
+    pub fn new_with_node_id(inner: T, node_id: B256) -> Self {
+        Self {
+            inner,
+            shard_bits: 4,
+            node_id: Some(node_id),
+        }
+    }
+}
+
+impl<T: Default> Default for ShardedMempoolAnnouncementFilter<T> {
+    fn default() -> Self {
+        Self {
+            inner: T::default(),
+            shard_bits: 4,
+            node_id: None,
+        }
+    }
+}
+
 /// Type alias for `TypedRelaxedFilter`. This filter accepts known Ethereum transaction types and
 /// ignores unknown ones without penalizing the peer.
 pub type RelaxedEthAnnouncementFilter = TypedRelaxedFilter<TxType>;
