@@ -61,7 +61,7 @@ impl GitManager {
         Ok(branch)
     }
 
-    /// Check if the git working directory is clean
+    /// Check if the git working directory has uncommitted changes to tracked files
     pub fn validate_clean_state(&self) -> Result<()> {
         let output = Command::new("git")
             .args(["status", "--porcelain"])
@@ -76,15 +76,44 @@ impl GitManager {
         let status_output =
             String::from_utf8(output.stdout).wrap_err("Git status output is not valid UTF-8")?;
 
-        if !status_output.trim().is_empty() {
-            warn!("Git working directory has uncommitted changes:");
-            warn!("{}", status_output);
+        // Check for uncommitted changes to tracked files
+        // Status codes: M = modified, A = added, D = deleted, R = renamed, C = copied, U = updated
+        // ?? = untracked files (we want to ignore these)
+        let has_uncommitted_changes = status_output
+            .lines()
+            .any(|line| {
+                if line.len() >= 2 {
+                    let status = &line[0..2];
+                    // Ignore untracked files (??) and ignored files (!!)
+                    !matches!(status, "??" | "!!")
+                } else {
+                    false
+                }
+            });
+
+        if has_uncommitted_changes {
+            warn!("Git working directory has uncommitted changes to tracked files:");
+            for line in status_output.lines() {
+                if line.len() >= 2 && !matches!(&line[0..2], "??" | "!!") {
+                    warn!("  {}", line);
+                }
+            }
             return Err(eyre!(
-                "Git working directory is not clean. Please commit or stash changes before running benchmark comparison."
+                "Git working directory has uncommitted changes to tracked files. Please commit or stash changes before running benchmark comparison."
             ));
         }
 
-        info!("Git working directory is clean");
+        // Check if there are untracked files and log them as info
+        let untracked_files: Vec<&str> = status_output
+            .lines()
+            .filter(|line| line.starts_with("??"))
+            .collect();
+
+        if !untracked_files.is_empty() {
+            info!("Git working directory has {} untracked files (this is OK)", untracked_files.len());
+        }
+
+        info!("Git working directory is clean (no uncommitted changes to tracked files)");
         Ok(())
     }
 
