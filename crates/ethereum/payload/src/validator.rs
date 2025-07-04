@@ -2,6 +2,7 @@
 
 use alloy_consensus::Block;
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
+use alloy_rlp::Error as RlpError;
 use reth_chainspec::EthereumHardforks;
 use reth_payload_validator::{cancun, prague, shanghai};
 use reth_primitives_traits::{Block as _, RecoveredBlock, SignedTransaction};
@@ -80,8 +81,9 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
         // First parse the block
         let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();
 
-        // Get Senders
-        let senders = sealed_block.senders().unwrap();
+        // Get the recovered block using the sealed block
+        let recovered = RecoveredBlock::try_recover_sealed_unchecked(sealed_block.clone())
+        .map_err(|_err| PayloadError::Decode(RlpError::Custom("error recovering block".into())))?;
 
         // Ensure the hash included in the payload matches the block hash
         if expected_hash != sealed_block.hash() {
@@ -108,6 +110,6 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
             self.is_prague_active_at_timestamp(sealed_block.timestamp),
         )?;
 
-        Ok(RecoveredBlock::new_sealed(sealed_block, senders))
+        Ok(recovered)
     }
 }

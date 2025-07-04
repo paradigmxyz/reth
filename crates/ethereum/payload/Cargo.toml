@@ -36,6 +36,7 @@ alloy-rpc-types-engine.workspace = true
 alloy-eips.workspace = true
 alloy-consensus.workspace = true
 alloy-primitives.workspace = true
+alloy-rlp = { workspace = true, features = ["derive"] }
 
 # misc
 tracing.workspace = true
