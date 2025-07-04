@@ -46,7 +46,7 @@ pub mod prewarm;
 pub mod sparse_trie;
 
 /// Entrypoint for executing the payload.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PayloadProcessor<N, Evm>
 where
     N: NodePrimitives,

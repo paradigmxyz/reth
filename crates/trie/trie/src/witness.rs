@@ -7,6 +7,7 @@ use crate::{
 use alloy_rlp::EMPTY_STRING_CODE;
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_trie_common::HashedPostState;
+use reth_trie_sparse::SparseTrieInterface;
 
 use alloy_primitives::{
     keccak256,
@@ -21,7 +22,7 @@ use reth_execution_errors::{
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
-    SparseStateTrie,
+    RevealedSparseTrie, SparseStateTrie,
 };
 use std::sync::{mpsc, Arc};
 
@@ -153,7 +154,7 @@ where
             ),
             tx,
         );
-        let mut sparse_trie = SparseStateTrie::new();
+        let mut sparse_trie = SparseStateTrie::<RevealedSparseTrie>::new();
         sparse_trie.reveal_multiproof(multiproof)?;
 
         // Attempt to update state trie to gather additional information for the witness.

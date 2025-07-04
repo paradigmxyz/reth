@@ -5,7 +5,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use proptest::{prelude::*, strategy::ValueTree};
 use rand::seq::IteratorRandom;
 use reth_trie_common::Nibbles;
-use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
+use reth_trie_sparse::{blinded::DefaultBlindedProvider, RevealedSparseTrie, SparseTrie};
 
 const LEAF_COUNTS: [usize; 2] = [1_000, 5_000];
 
@@ -17,14 +17,15 @@ fn update_leaf(c: &mut Criterion) {
             let leaves = generate_leaves(leaf_count);
             // Start with an empty trie
             let provider = DefaultBlindedProvider;
-            let mut trie = SparseTrie::revealed_empty();
-            // Pre-populate with data
-            for (path, value) in leaves.iter().cloned() {
-                trie.update_leaf(path, value, &provider).unwrap();
-            }
 
             b.iter_batched(
                 || {
+                    let mut trie = SparseTrie::<RevealedSparseTrie>::revealed_empty();
+                    // Pre-populate with data
+                    for (path, value) in leaves.iter().cloned() {
+                        trie.update_leaf(path, value, &provider).unwrap();
+                    }
+
                     let new_leaves = leaves
                         .iter()
                         // Update 10% of existing leaves with new values
@@ -38,7 +39,7 @@ fn update_leaf(c: &mut Criterion) {
                         })
                         .collect::<Vec<_>>();
 
-                    (trie.clone(), new_leaves)
+                    (trie, new_leaves)
                 },
                 |(mut trie, new_leaves)| {
                     for (path, new_value) in new_leaves {
@@ -60,21 +61,22 @@ fn remove_leaf(c: &mut Criterion) {
             let leaves = generate_leaves(leaf_count);
             // Start with an empty trie
             let provider = DefaultBlindedProvider;
-            let mut trie = SparseTrie::revealed_empty();
-            // Pre-populate with data
-            for (path, value) in leaves.iter().cloned() {
-                trie.update_leaf(path, value, &provider).unwrap();
-            }
 
             b.iter_batched(
                 || {
+                    let mut trie = SparseTrie::<RevealedSparseTrie>::revealed_empty();
+                    // Pre-populate with data
+                    for (path, value) in leaves.iter().cloned() {
+                        trie.update_leaf(path, value, &provider).unwrap();
+                    }
+
                     let delete_leaves = leaves
                         .iter()
                         .map(|(path, _)| path)
                         // Remove 10% leaves
                         .choose_multiple(&mut rand::rng(), leaf_count / 10);
 
-                    (trie.clone(), delete_leaves)
+                    (trie, delete_leaves)
                 },
                 |(mut trie, delete_leaves)| {
                     for path in delete_leaves {
