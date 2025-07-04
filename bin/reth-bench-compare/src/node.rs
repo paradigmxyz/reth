@@ -150,12 +150,6 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
-        // Set process group for better signal handling
-        #[cfg(unix)]
-        {
-            cmd.process_group(0);
-        }
-
         Ok(cmd)
     }
 
@@ -163,7 +157,7 @@ impl NodeManager {
     fn create_direct_command(&self, reth_args: &[String]) -> Command {
         let binary_path = &reth_args[0];
 
-        let mut cmd = if self.use_sudo {
+        if self.use_sudo {
             info!("Starting reth node with sudo...");
             let mut cmd = Command::new("sudo");
             cmd.args(reth_args);
@@ -173,15 +167,7 @@ impl NodeManager {
             let mut cmd = Command::new(binary_path);
             cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
             cmd
-        };
-
-        // Set process group for better signal handling
-        #[cfg(unix)]
-        {
-            cmd.process_group(0);
         }
-
-        cmd
     }
 
     /// Start a reth node using the specified binary path and return the process handle
@@ -201,6 +187,13 @@ impl NodeManager {
         } else {
             self.create_direct_command(&reth_args)
         };
+        
+        // Set process group for better signal handling
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
+        }
+        
         debug!("Executing reth command: {cmd:?}");
 
         let mut child = cmd
