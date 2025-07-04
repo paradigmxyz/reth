@@ -47,8 +47,7 @@ where
         &self,
         payload: ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
-        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+        Ok(self.inner.ensure_well_formed_payload(payload)?)
     }
 }
 

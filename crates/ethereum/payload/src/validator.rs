@@ -4,7 +4,7 @@ use alloy_consensus::Block;
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use reth_chainspec::EthereumHardforks;
 use reth_payload_validator::{cancun, prague, shanghai};
-use reth_primitives_traits::{Block as _, SealedBlock, SignedTransaction};
+use reth_primitives_traits::{Block as _, RecoveredBlock, SignedTransaction};
 use std::sync::Arc;
 
 /// Execution payload validator.
@@ -72,13 +72,16 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
     pub fn ensure_well_formed_payload<T: SignedTransaction>(
         &self,
         payload: ExecutionData,
-    ) -> Result<SealedBlock<Block<T>>, PayloadError> {
+    ) -> Result<RecoveredBlock<Block<T>>, PayloadError> {
         let ExecutionData { payload, sidecar } = payload;
 
         let expected_hash = payload.block_hash();
 
         // First parse the block
         let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();
+
+        // Get Senders
+        let senders = sealed_block.senders().unwrap();
 
         // Ensure the hash included in the payload matches the block hash
         if expected_hash != sealed_block.hash() {
@@ -105,6 +108,6 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
             self.is_prague_active_at_timestamp(sealed_block.timestamp),
         )?;
 
-        Ok(sealed_block)
+        Ok(RecoveredBlock::new_sealed(sealed_block, senders))
     }
 }
