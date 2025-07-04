@@ -8331,7 +8331,6 @@ dependencies = [
  "arbitrary",
  "bincode 1.3.3",
  "derive_more",
- "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",

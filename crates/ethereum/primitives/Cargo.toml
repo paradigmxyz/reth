@@ -15,7 +15,6 @@ workspace = true
 # reth
 reth-codecs = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
-reth-zstd-compressors = { workspace = true, optional = true }
 
 # ethereum
 alloy-eips = { workspace = true, features = ["k256"] }
@@ -25,7 +24,6 @@ alloy-rlp.workspace = true
 
 # misc
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
-modular-bitfield = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
@@ -54,7 +52,6 @@ std = [
     "alloy-primitives/std",
     "alloy-rlp/std",
     "reth-primitives-traits/std",
-    "reth-zstd-compressors?/std",
     "serde?/std",
     "alloy-eips/std",
     "derive_more/std",
@@ -63,9 +60,7 @@ std = [
 ]
 reth-codec = [
     "std",
-    "dep:reth-codecs",
-    "dep:modular-bitfield",
-    "dep:reth-zstd-compressors",
+    "dep:reth-codecs"
 ]
 arbitrary = [
     "dep:arbitrary",
