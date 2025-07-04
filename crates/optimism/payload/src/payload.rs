@@ -134,9 +134,9 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
     }
 
     fn il(&self) -> Option<&Vec<Bytes>> {
-       self.payload_attributes.il()
+        self.payload_attributes.il()
     }
-    
+
     fn suggested_fee_recipient(&self) -> Address {
         self.payload_attributes.suggested_fee_recipient
     }

@@ -305,7 +305,10 @@ pub const fn validate_il_presence<T: EthereumHardforks>(
     has_il: bool,
 ) -> Result<(), EngineObjectValidationError> {
     match version {
-        EngineApiMessageVersion::V1 | EngineApiMessageVersion::V2 | EngineApiMessageVersion::V3 | EngineApiMessageVersion::V4=> {
+        EngineApiMessageVersion::V1 |
+        EngineApiMessageVersion::V2 |
+        EngineApiMessageVersion::V3 |
+        EngineApiMessageVersion::V4 => {
             if has_il {
                 return Err(message_validation_kind
                     .to_error(VersionSpecificValidationError::IlNotSupportedBeforeV5))

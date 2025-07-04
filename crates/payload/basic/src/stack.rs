@@ -120,7 +120,7 @@ where
             Self::Right(r) => r.withdrawals(),
         }
     }
-    fn il(&self) -> Option<&Vec<Bytes>> { 
+    fn il(&self) -> Option<&Vec<Bytes>> {
         match self {
             Self::Left(l) => l.il(),
             Self::Right(r) => r.il(),

@@ -87,7 +87,7 @@ pub trait EngineApi<Engine: EngineTypes> {
         execution_requests: RequestsOrHash,
         il: Vec<Bytes>,
     ) -> RpcResult<PayloadStatus>;
-    
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.
@@ -255,6 +255,10 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>>;
+
+    /// Fetch the inclusion list (IL).
+    #[method(name = "getInclusionListV1")]
+    async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/docs/reference/json-rpc-api>

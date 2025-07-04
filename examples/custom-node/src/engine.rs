@@ -86,8 +86,8 @@ impl PayloadAttributes for CustomPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
         self.inner.parent_beacon_block_root()
     }
-    
-    fn il(&self) -> Option<&Vec<Bytes>>{
+
+    fn il(&self) -> Option<&Vec<Bytes>> {
         self.inner.il()
     }
 }
@@ -134,10 +134,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         self.inner.parent_beacon_block_root()
     }
 
-    fn il(&self) -> Option<&Vec<Bytes>>{
+    fn il(&self) -> Option<&Vec<Bytes>> {
         self.inner.il()
     }
-    
+
     fn suggested_fee_recipient(&self) -> revm_primitives::Address {
         self.inner.suggested_fee_recipient()
     }

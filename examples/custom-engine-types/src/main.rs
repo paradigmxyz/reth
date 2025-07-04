@@ -98,9 +98,9 @@ impl PayloadAttributes for CustomPayloadAttributes {
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.inner.parent_beacon_block_root()
     }
-    
+
     fn il(&self) -> Option<&Vec<Bytes>> {
-       self.inner.il()
+        self.inner.il()
     }
 }
 
@@ -137,9 +137,9 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
     }
 
     fn il(&self) -> Option<&Vec<Bytes>> {
-       self.0.il()
+        self.0.il()
     }
-    
+
     fn suggested_fee_recipient(&self) -> Address {
         self.0.suggested_fee_recipient
     }

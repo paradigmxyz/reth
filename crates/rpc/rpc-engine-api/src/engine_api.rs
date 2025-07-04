@@ -8,11 +8,12 @@ use alloy_eips::{
     eip7685::RequestsOrHash,
 };
 use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
+use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields, AmsterdamPayloadFields
+    AmsterdamPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
+    ExecutionPayloadBodiesV1, ExecutionPayloadBodyV1, ExecutionPayloadInputV2,
+    ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -271,7 +272,7 @@ where
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
-    
+
     /// TODO: Update Link
     /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
     pub async fn new_payload_v5(
@@ -294,7 +295,7 @@ where
             .await
             .inspect(|_| self.inner.on_new_payload_response())?)
     }
-    
+
     /// Metrics version of `new_payload_v5`
     pub async fn new_payload_v5_metered(
         &self,
@@ -973,7 +974,7 @@ where
 
         Ok(self.new_payload_v5_metered(payload).await?)
     }
-    
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -1163,6 +1164,44 @@ where
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>> {
         trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
         Ok(self.get_blobs_v2_metered(versioned_hashes)?)
+    }
+
+    async fn get_inclusion_list_v1(&self, _parent_hash: B256) -> RpcResult<Vec<Bytes>> {
+        // TODO
+        //
+        // configure maximum elsewhere (e.g. global config)
+        const MAX_BYTES_PER_IL: usize = 8192;
+
+        // NOTE
+        //
+        // we may not be able to constrain the transactions that we can fetch from the transaction
+        // pool by parent hash (for now)
+        let mut txs = self.inner.tx_pool.pending_transactions();
+        let mut il = Vec::with_capacity(16);
+        let mut il_size = 0;
+
+        // sort the transactions from earliest timestamp to latest timestamp
+        txs.sort_by_key(|tx| tx.timestamp);
+
+        for tx in txs {
+            let tx_len = tx.encoded_length();
+
+            // if the transaction would cause the IL to exceed its maximum allowable size, then skip
+            // to the next transaction.
+            if il_size + tx_len > MAX_BYTES_PER_IL {
+                continue;
+            }
+
+            // encode the transaction and append it to the IL
+            let mut buf = vec![0u8; tx_len];
+            let tx = tx.to_consensus();
+            tx.encode(&mut buf);
+            il.push(buf.into());
+
+            il_size += tx_len;
+        }
+
+        Ok(il)
     }
 }
 

@@ -325,7 +325,7 @@ mod test {
                 withdrawals: Some(vec![]),
                 parent_beacon_block_root: Some(B256::ZERO),
                 // TODO: add a dummy IL
-                il: Some(vec![])
+                il: Some(vec![]),
             },
         }
     }
