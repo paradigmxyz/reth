@@ -13,7 +13,7 @@ use reth_config::Config;
 use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
 use reth_node_core::{
-    args::{DatabaseArgs, DatadirArgs, NetworkArgs},
+    args::{DatadirArgs, NetworkArgs},
     utils::get_single_header,
 };
 
@@ -32,7 +32,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         match self.command {
             Subcommands::Header { args, id } => {
-                let handle = args.setup::<N>().await?;
+                let handle = args.launch_network::<N>().await?;
                 let fetch_client = handle.fetch_client().await?;
                 let backoff = args.backoff();
 
@@ -44,7 +44,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
 
             Subcommands::Body { args, id } => {
-                let handle = args.setup::<N>().await?;
+                let handle = args.launch_network::<N>().await?;
                 let fetch_client = handle.fetch_client().await?;
                 let backoff = args.backoff();
 
@@ -140,9 +140,6 @@ pub struct DownloadArgs<C: ChainSpecParser> {
     #[command(flatten)]
     datadir: DatadirArgs,
 
-    #[command(flatten)]
-    db: DatabaseArgs,
-
     /// The path to the configuration file to use.
     #[arg(long, value_name = "FILE", verbatim_doc_comment)]
     config: Option<PathBuf>,
@@ -161,7 +158,10 @@ pub struct DownloadArgs<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser> DownloadArgs<C> {
-    pub async fn setup<N>(&self) -> eyre::Result<reth_network::NetworkHandle<N::NetworkPrimitives>>
+    /// Creates and spawns the network and returns the handle.
+    pub async fn launch_network<N>(
+        &self,
+    ) -> eyre::Result<reth_network::NetworkHandle<N::NetworkPrimitives>>
     where
         C::ChainSpec: EthChainSpec + Hardforks + EthereumHardforks + Send + Sync + 'static,
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
@@ -208,5 +208,23 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
 
     pub fn backoff(&self) -> ConstantBuilder {
         ConstantBuilder::default().with_max_times(self.retries.max(1))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reth_ethereum_cli::chainspec::EthereumChainSpecParser;
+
+    #[test]
+    fn parse_header_cmd() {
+        let _args: Command<EthereumChainSpecParser> =
+            Command::parse_from(["reth", "header", "--chain", "mainnet", "1000"]);
+    }
+
+    #[test]
+    fn parse_body_cmd() {
+        let _args: Command<EthereumChainSpecParser> =
+            Command::parse_from(["reth", "body", "--chain", "mainnet", "1000"]);
     }
 }
