@@ -36,7 +36,7 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::{FullNodePrimitives, NodePrimitives};
-use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{RecoveredBlock, SealedHeader, SignedTransaction};
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
@@ -1760,7 +1760,7 @@ impl<N: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>>
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         // Required data not present in static_files
         Err(ProviderError::UnsupportedProvider)
     }
