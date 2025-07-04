@@ -150,7 +150,7 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
-        // Set process group for better signal handling when profiling
+        // Set process group for better signal handling
         #[cfg(unix)]
         {
             cmd.process_group(0);
@@ -163,19 +163,25 @@ impl NodeManager {
     fn create_direct_command(&self, reth_args: &[String]) -> Command {
         let binary_path = &reth_args[0];
 
-        if self.use_sudo {
+        let mut cmd = if self.use_sudo {
             info!("Starting reth node with sudo...");
             let mut cmd = Command::new("sudo");
             cmd.args(reth_args);
-
             cmd
         } else {
             info!("Starting reth node...");
             let mut cmd = Command::new(binary_path);
             cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
-
             cmd
+        };
+
+        // Set process group for better signal handling
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
         }
+
+        cmd
     }
 
     /// Start a reth node using the specified binary path and return the process handle
