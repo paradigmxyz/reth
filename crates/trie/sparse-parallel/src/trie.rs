@@ -76,7 +76,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
     }
 
     fn with_updates(mut self, retain_updates: bool) -> Self {
-        self.updates = retain_updates.then(|| Default::default());
+        self.updates = retain_updates.then(Default::default);
         self
     }
 
@@ -539,7 +539,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
             subtries
                 .into_par_iter()
                 .map(|ChangedSubtrie { index, mut subtrie, mut prefix_set }| {
-                    let mut update_actions = self.updates_enabled().then(|| Vec::new());
+                    let mut update_actions = self.updates_enabled().then(Vec::new);
                     subtrie.update_hashes(&mut prefix_set, &mut update_actions);
                     (index, subtrie, update_actions)
                 })
@@ -917,7 +917,7 @@ impl ParallelSparseTrie {
             is_in_prefix_set: None,
         });
 
-        let mut update_actions = self.updates_enabled().then(|| Vec::new());
+        let mut update_actions = self.updates_enabled().then(Vec::new);
         while let Some(stack_item) = self.upper_subtrie.inner.buffers.path_stack.pop() {
             let path = stack_item.path;
             let node = if path.len() < UPPER_TRIE_MAX_DEPTH {
