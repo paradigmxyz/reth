@@ -72,7 +72,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
     fn simulate_v1(
         &self,
-        payload: SimulatePayload,
+        payload: SimulatePayload<RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>>,
         block: Option<BlockId>,
     ) -> impl Future<Output = SimulatedBlocksResult<Self::NetworkTypes, Self::Error>> + Send {
         async move {
@@ -144,9 +144,10 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     let chain_id = evm_env.cfg_env.chain_id;
 
                     let default_gas_limit = {
-                        let total_specified_gas = calls.iter().filter_map(|tx| tx.gas).sum::<u64>();
+                        let total_specified_gas =
+                            calls.iter().filter_map(|tx| tx.gas_limit()).sum::<u64>();
                         let txs_without_gas_limit =
-                            calls.iter().filter(|tx| tx.gas.is_none()).count();
+                            calls.iter().filter(|tx| tx.gas_limit().is_none()).count();
 
                         if total_specified_gas > block_gas_limit {
                             return Err(EthApiError::Other(Box::new(
