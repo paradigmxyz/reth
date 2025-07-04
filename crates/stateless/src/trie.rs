@@ -11,7 +11,7 @@ use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
     blinded::{DefaultBlindedProvider, DefaultBlindedProviderFactory},
     errors::SparseStateTrieResult,
-    SparseStateTrie, SparseTrie,
+    SparseStateTrie, SparseTrie, SparseTrieInterface,
 };
 
 /// Trait for stateless trie implementations that can be used for stateless validation.

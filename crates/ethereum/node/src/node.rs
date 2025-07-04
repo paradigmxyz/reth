@@ -35,7 +35,7 @@ use reth_node_builder::{
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
 use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
-use reth_rpc_builder::config::RethRpcServerConfig;
+use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -188,13 +188,16 @@ where
     }
 }
 
-impl<N, EthB, EV, EB> EthereumAddOns<N, EthB, EV, EB>
+impl<N, EthB, EV, EB, RpcMiddleware> EthereumAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
 {
     /// Replace the engine API builder.
-    pub fn with_engine_api<T>(self, engine_api_builder: T) -> EthereumAddOns<N, EthB, EV, T>
+    pub fn with_engine_api<T>(
+        self,
+        engine_api_builder: T,
+    ) -> EthereumAddOns<N, EthB, EV, T, RpcMiddleware>
     where
         T: Send,
     {
@@ -206,7 +209,7 @@ where
     pub fn with_engine_validator<T>(
         self,
         engine_validator_builder: T,
-    ) -> EthereumAddOns<N, EthB, T, EB>
+    ) -> EthereumAddOns<N, EthB, T, EB, RpcMiddleware>
     where
         T: Send,
     {
@@ -224,7 +227,8 @@ where
     }
 }
 
-impl<N, EthB, EV, EB> NodeAddOns<N> for EthereumAddOns<N, EthB, EV, EB>
+impl<N, EthB, EV, EB, RpcMiddleware> NodeAddOns<N>
+    for EthereumAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -239,6 +243,7 @@ where
     EB: EngineApiBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
+    RpcMiddleware: RethRpcMiddleware,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -422,8 +427,20 @@ where
             .with_local_transactions_config(pool_config.local_transactions_config.clone())
             .set_tx_fee_cap(ctx.config().rpc.rpc_tx_fee_cap)
             .with_max_tx_gas_limit(ctx.config().txpool.max_tx_gas_limit)
+            .with_minimum_priority_fee(ctx.config().txpool.minimum_priority_fee)
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
+
+        if validator.validator().eip4844() {
+            // initializing the KZG settings can be expensive, this should be done upfront so that
+            // it doesn't impact the first block or the first gossiped blob transaction, so we
+            // initialize this in the background
+            let kzg_settings = validator.validator().kzg_settings().clone();
+            ctx.task_executor().spawn_blocking(async move {
+                let _ = kzg_settings.get();
+                debug!(target: "reth::cli", "Initialized KZG settings");
+            });
+        }
 
         let transaction_pool = TxPoolBuilder::new(ctx)
             .with_validator(validator)

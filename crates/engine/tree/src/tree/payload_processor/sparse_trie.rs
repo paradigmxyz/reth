@@ -19,10 +19,6 @@ use std::{
 };
 use tracing::{debug, trace, trace_span};
 
-/// The level below which the sparse trie hashes are calculated in
-/// [`update_sparse_trie`].
-const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
-
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF>
 where
@@ -261,16 +257,14 @@ where
     let elapsed_before = started_at.elapsed();
     trace!(
         target: "engine::root::sparse",
-        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
-        "Calculating intermediate nodes below trie level"
+        "Calculating subtries"
     );
-    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+    trie.calculate_subtries();
 
     let elapsed = started_at.elapsed();
     let below_level_elapsed = elapsed - elapsed_before;
     trace!(
         target: "engine::root::sparse",
-        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
         ?below_level_elapsed,
         "Intermediate nodes calculated"
     );

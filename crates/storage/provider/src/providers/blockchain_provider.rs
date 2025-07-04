@@ -305,7 +305,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -1205,7 +1205,10 @@ mod tests {
             Some(RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()))
         );
 
-        assert_eq!(provider.pending_block_and_receipts()?, Some((block, vec![])));
+        assert_eq!(
+            provider.pending_block_and_receipts()?,
+            Some((RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()), vec![]))
+        );
 
         Ok(())
     }

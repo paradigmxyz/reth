@@ -23,8 +23,7 @@ use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{
-    Account, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-    SignerRecoverable,
+    Account, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader, SignerRecoverable,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -675,7 +674,7 @@ impl<ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Receipt>)>> {
         Ok(None)
     }
 

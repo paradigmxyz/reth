@@ -34,9 +34,7 @@ use reth_db_api::{
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
-use reth_primitives::{
-    Account, Bytecode, RecoveredBlock, SealedBlock, SealedHeader, TransactionMeta,
-};
+use reth_primitives::{Account, Bytecode, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
     CanonChainTracker, CanonStateNotification, CanonStateNotifications, CanonStateSubscriptions,
@@ -381,7 +379,7 @@ where
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         Err(ProviderError::UnsupportedProvider)
     }
 
@@ -1252,7 +1250,7 @@ where
 
     fn pending_block_and_receipts(
         &self,
-    ) -> Result<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>, ProviderError> {
+    ) -> Result<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
 
