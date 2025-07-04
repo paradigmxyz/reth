@@ -430,6 +430,17 @@ where
             .with_additional_tasks(ctx.config().txpool.additional_validation_tasks)
             .build_with_tasks(ctx.task_executor().clone(), blob_store.clone());
 
+        if validator.validator().eip4844() {
+            // initializing the KZG settings can be expensive, this should be done upfront so that
+            // it doesn't impact the first block or the first gossiped blob transaction, so we
+            // initialize this in the background
+            let kzg_settings = validator.validator().kzg_settings().clone();
+            ctx.task_executor().spawn_blocking(async move {
+                let _ = kzg_settings.get();
+                debug!(target: "reth::cli", "Initialized KZG settings");
+            });
+        }
+
         let transaction_pool = TxPoolBuilder::new(ctx)
             .with_validator(validator)
             .build_and_spawn_maintenance_task(blob_store, pool_config)?;
