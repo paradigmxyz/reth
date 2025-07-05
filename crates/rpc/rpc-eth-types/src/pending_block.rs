@@ -2,7 +2,7 @@
 //!
 //! Types used in block building.
 
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 use alloy_consensus::BlockHeader;
 use alloy_eips::{BlockId, BlockNumberOrTag};
@@ -25,7 +25,7 @@ pub struct PendingBlockEnv<B: Block, R, Spec> {
 #[derive(Clone, Debug)]
 pub enum PendingBlockEnvOrigin<B: Block = reth_ethereum_primitives::Block, R = Receipt> {
     /// The pending block as received from the CL.
-    ActualPending(RecoveredBlock<B>, Vec<R>),
+    ActualPending(Arc<RecoveredBlock<B>>, Arc<Vec<R>>),
     /// The _modified_ header of the latest block.
     ///
     /// This derives the pending state based on the latest header by modifying:
@@ -42,7 +42,7 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
     }
 
     /// Consumes the type and returns the actual pending block.
-    pub fn into_actual_pending(self) -> Option<RecoveredBlock<B>> {
+    pub fn into_actual_pending(self) -> Option<Arc<RecoveredBlock<B>>> {
         match self {
             Self::ActualPending(block, _) => Some(block),
             _ => None,
@@ -79,7 +79,7 @@ pub struct PendingBlock<B: Block, R> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The locally built pending block.
-    pub block: RecoveredBlock<B>,
+    pub block: Arc<RecoveredBlock<B>>,
     /// The receipts for the pending block
-    pub receipts: Vec<R>,
+    pub receipts: Arc<Vec<R>>,
 }
