@@ -1664,6 +1664,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "block-access-list"
+version = "1.5.0"
+
+[[package]]
 name = "block-buffer"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
