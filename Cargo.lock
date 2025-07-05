@@ -8351,7 +8351,6 @@ dependencies = [
  "arbitrary",
  "bincode 1.3.3",
  "derive_more",
- "modular-bitfield",
  "proptest",
  "proptest-arbitrary-interop",
  "rand 0.8.5",
@@ -8362,7 +8361,6 @@ dependencies = [
  "secp256k1 0.30.0",
  "serde",
  "serde_with",
- "test-fuzz",
 ]
 
 [[package]]
