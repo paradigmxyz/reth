@@ -9,7 +9,7 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory},
+    provider::{TrieNodeProvider, TrieNodeProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     SparseStateTrie, SparseTrie,
 };
@@ -22,9 +22,9 @@ use tracing::{debug, trace, trace_span};
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF>
 where
-    BPF: BlindedProviderFactory + Send + Sync,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
 {
     /// Executor used to spawn subtasks.
     #[expect(unused)] // TODO use this for spawning trie tasks
@@ -42,9 +42,9 @@ where
 
 impl<BPF> SparseTrieTask<BPF>
 where
-    BPF: BlindedProviderFactory + Send + Sync + Clone,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync + Clone,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
 {
     /// Creates a new sparse trie task.
     pub(super) fn new(
@@ -175,9 +175,9 @@ pub(crate) fn update_sparse_trie<BPF>(
     blinded_provider_factory: &BPF,
 ) -> SparseStateTrieResult<Duration>
 where
-    BPF: BlindedProviderFactory + Send + Sync,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
 {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();

@@ -11,7 +11,7 @@ use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::SparseTrieResult;
 use reth_trie_common::{Nibbles, TrieNode};
 
-use crate::blinded::BlindedProvider;
+use crate::provider::TrieNodeProvider;
 
 /// Trait defining common operations for revealed sparse trie implementations.
 ///
@@ -115,7 +115,7 @@ pub trait SparseTrieInterface: Default + Debug {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if the update failed.
-    fn update_leaf<P: BlindedProvider>(
+    fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
@@ -135,7 +135,7 @@ pub trait SparseTrieInterface: Default + Debug {
     /// # Returns
     ///
     /// `Ok(())` if successful, or an error if the removal failed.
-    fn remove_leaf<P: BlindedProvider>(
+    fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
         provider: P,

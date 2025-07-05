@@ -3,8 +3,8 @@ use crate::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use alloy_primitives::{map::HashSet, B256};
 use reth_execution_errors::{SparseTrieError, SparseTrieErrorKind};
 use reth_trie_common::{prefix_set::TriePrefixSetsMut, MultiProofTargets, Nibbles};
-use reth_trie_sparse::blinded::{
-    pad_path_to_key, BlindedProvider, BlindedProviderFactory, RevealedNode,
+use reth_trie_sparse::provider::{
+    pad_path_to_key, TrieNodeProvider, TrieNodeProviderFactory, RevealedNode,
 };
 use std::{sync::Arc, time::Instant};
 use tracing::{enabled, trace, Level};
@@ -31,7 +31,7 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
     }
 }
 
-impl<T, H> BlindedProviderFactory for ProofBlindedProviderFactory<T, H>
+impl<T, H> TrieNodeProviderFactory for ProofBlindedProviderFactory<T, H>
 where
     T: TrieCursorFactory + Clone + Send + Sync,
     H: HashedCursorFactory + Clone + Send + Sync,
@@ -79,7 +79,7 @@ impl<T, H> ProofBlindedAccountProvider<T, H> {
     }
 }
 
-impl<T, H> BlindedProvider for ProofBlindedAccountProvider<T, H>
+impl<T, H> TrieNodeProvider for ProofBlindedAccountProvider<T, H>
 where
     T: TrieCursorFactory + Clone + Send + Sync,
     H: HashedCursorFactory + Clone + Send + Sync,
@@ -136,7 +136,7 @@ impl<T, H> ProofBlindedStorageProvider<T, H> {
     }
 }
 
-impl<T, H> BlindedProvider for ProofBlindedStorageProvider<T, H>
+impl<T, H> TrieNodeProvider for ProofBlindedStorageProvider<T, H>
 where
     T: TrieCursorFactory + Clone + Send + Sync,
     H: HashedCursorFactory + Clone + Send + Sync,
