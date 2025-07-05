@@ -21,6 +21,7 @@ exclude_crates=(
   reth-dns-discovery
   reth-downloaders
   reth-e2e-test-utils
+  reth-engine-local
   reth-engine-service
   reth-engine-tree
   reth-engine-util
@@ -44,6 +45,8 @@ exclude_crates=(
   reth-optimism-payload-builder
   reth-optimism-rpc
   reth-optimism-storage
+  reth-ress-protocol
+  reth-ress-provider
   reth-rpc
   reth-rpc-api
   reth-rpc-api-testing-util
@@ -53,29 +56,27 @@ exclude_crates=(
   reth-rpc-eth-types
   reth-rpc-layer
   reth-stages
-  reth-engine-local
-  reth-ress-protocol
-  reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
   reth-alloy-provider
+  reth-bench-compare
+  reth-era-downloader # tokio
+  reth-era-utils # tokio
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
+  reth-optimism-txpool # reth-transaction-pool
   reth-payload-builder # reth-metrics
+  reth-payload-util # reth-transaction-pool
   reth-provider # tokio
   reth-prune # tokio
   reth-stages-api # reth-provider, reth-prune
   reth-static-file # tokio
+  reth-testing-utils
+  reth-tracing-otlp
   reth-transaction-pool # c-kzg
-  reth-payload-util # reth-transaction-pool
   reth-trie-parallel # tokio
   reth-trie-sparse-parallel # rayon
-  reth-testing-utils
-  reth-optimism-txpool # reth-transaction-pool
-  reth-era-downloader # tokio
-  reth-era-utils # tokio
-  reth-tracing-otlp
 )
 
 # Array to hold the results

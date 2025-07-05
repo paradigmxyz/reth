@@ -127,15 +127,15 @@ Example test structure:
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_component_behavior() {
         // Arrange
         let component = Component::new();
-        
+
         // Act
         let result = component.operation();
-        
+
         // Assert
         assert_eq!(result, expected);
     }
@@ -310,5 +310,5 @@ cargo build --release --features "jemalloc asm-keccak"
 cargo check --workspace --all-features
 
 # Check documentation
-cargo docs --document-private-items 
+cargo docs --document-private-items
 ```
