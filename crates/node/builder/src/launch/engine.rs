@@ -367,6 +367,8 @@ where
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
 
+        ctx.spawn_ethstats().await?;
+
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(
                 async { rx.await? },
