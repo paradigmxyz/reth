@@ -180,7 +180,12 @@ where
             .map_err(|e| EthStatsError::AuthError(e.to_string()))?;
         let id = &self.credentials.node_id;
         let secret = &self.credentials.secret;
-        let protocol = format!("eth/{}", network_status.protocol_version);
+        let protocol = network_status
+            .capabilities
+            .iter()
+            .map(|cap| format!("{}/{}", cap.name, cap.version))
+            .collect::<Vec<_>>()
+            .join(", ");
         let port = self.network.local_addr().port() as u64;
 
         let auth = AuthMsg {
