@@ -19,9 +19,13 @@ pub mod bench;
 pub mod bench_mode;
 pub mod valid_payload;
 
+use alloy_provider::network::AnyRpcBlock;
+use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
 use bench::BenchmarkCommand;
 use clap::Parser;
-use reth_cli_runner::CliRunner;
+use eyre::Ok;
+use reth_cli_runner::{CliContext, CliRunner};
+use std::sync::Arc;
 
 fn main() {
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
@@ -31,10 +35,25 @@ fn main() {
 
     // Run until either exit or sigint or sigterm
     let runner = CliRunner::try_default_runtime().unwrap();
+
+    let convert: Arc<dyn Fn(AnyRpcBlock) -> eyre::Result<ExecutionData> + Send + Sync> =
+        Arc::new(|block: AnyRpcBlock| -> eyre::Result<ExecutionData> {
+            let block = block
+                .into_inner()
+                .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+                .try_map_transactions(|tx| {
+                    tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
+                })?
+                .into_consensus();
+
+            let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+            Ok(ExecutionData { payload, sidecar })
+        });
+
     runner
-        .run_command_until_exit(|ctx| {
+        .run_command_until_exit(|ctx: CliContext| {
             let command = BenchmarkCommand::parse();
-            command.execute(ctx)
+            command.execute::<reth_ethereum_engine_primitives::EthEngineTypes>(ctx, convert)
         })
         .unwrap();
 }
