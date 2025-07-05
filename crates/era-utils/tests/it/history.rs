@@ -1,6 +1,7 @@
 use crate::{ClientWithFakeIndex, ITHACA_ERA_INDEX_URL};
 use reqwest::{Client, Url};
 use reth_db_common::init::init_genesis;
+use reth_era::execution_types::MAX_BLOCKS_PER_ERA1;
 use reth_era_downloader::{EraClient, EraStream, EraStreamConfig};
 use reth_era_utils::{export, import, ExportConfig};
 use reth_etl::Collector;
@@ -129,10 +130,30 @@ async fn test_roundtrip_export_after_import() {
             blocks_numbers_per_file
         );
 
-        // Verify exact ERA1 naming convention: `mainnet-{start_block}-{block_count}.era1`
+        // Verify format: mainnet-{era_number:05}-{era_count:05}-{8hexchars}.era1
+        let era_number = file_start_block / MAX_BLOCKS_PER_ERA1 as u64;
+
+        // Era count is always 1 for this test, as we are only exporting one era
+        let expected_prefix = format!("mainnet-{:05}-{:05}-", era_number, 1);
+
         let file_name = file_path.file_name().unwrap().to_str().unwrap();
-        let expected_filename =
-            format!("mainnet-{file_start_block}-{blocks_numbers_per_file}.era1");
-        assert_eq!(file_name, expected_filename, "File {} should have correct name", i + 1);
+        assert!(
+            file_name.starts_with(&expected_prefix),
+            "File {} should start with '{expected_prefix}', got '{file_name}'",
+            i + 1
+        );
+
+        // Verify the hash part is 8 characters
+        let hash_start = expected_prefix.len();
+        let hash_end = file_name.len() - 5; // remove ".era1"
+        let hash_part = &file_name[hash_start..hash_end];
+        assert_eq!(
+            hash_part.len(),
+            8,
+            "File {} hash should be 8 characters, got {} in '{}'",
+            i + 1,
+            hash_part.len(),
+            file_name
+        );
     }
 }

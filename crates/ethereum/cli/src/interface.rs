@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::ChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    config_cmd, db, download, dump_genesis, import, import_era, init_cmd, init_state,
+    config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
     p2p, prune, recover, stage,
@@ -166,6 +166,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
             Commands::ImportEra(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
             }
+            Commands::ExportEra(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => {
                 runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
@@ -218,6 +221,9 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// This syncs ERA encoded blocks from a directory.
     #[command(name = "import-era")]
     ImportEra(import_era::ImportEraCommand<C>),
+    /// Exports block to era1 files in a specified directory.
+    #[command(name = "export-era")]
+    ExportEra(export_era::ExportEraCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
@@ -258,6 +264,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             Self::Init(cmd) => cmd.chain_spec(),
             Self::InitState(cmd) => cmd.chain_spec(),
             Self::Import(cmd) => cmd.chain_spec(),
+            Self::ExportEra(cmd) => cmd.chain_spec(),
             Self::ImportEra(cmd) => cmd.chain_spec(),
             Self::DumpGenesis(cmd) => cmd.chain_spec(),
             Self::Db(cmd) => cmd.chain_spec(),
