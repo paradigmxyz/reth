@@ -4,8 +4,9 @@
 use alloy_primitives::{Address, B256};
 use reth_chainspec::EthereumHardforks;
 use reth_ethereum_engine_primitives::EthPayloadAttributes;
+use reth_node_api::{AddOnsContext, FullNodeComponents};
 use reth_payload_primitives::PayloadAttributesBuilder;
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// The attributes builder for local Ethereum payload.
 #[derive(Debug)]
@@ -65,18 +66,61 @@ where
     }
 }
 
-/// A temporary workaround to support local payload engine launcher for arbitrary payload
-/// attributes.
-// TODO(mattsse): This should be reworked so that LocalPayloadAttributesBuilder can be implemented
-// for any
-pub trait UnsupportedLocalAttributes: Send + Sync + 'static {}
+/// Provides local payload attributes builder functionality
+pub trait LocalPayloadAttributesAddOn<N: FullNodeComponents> {
+    /// The payload attributes type this builder produces
+    type PayloadAttributes;
 
-impl<T, ChainSpec> PayloadAttributesBuilder<T> for LocalPayloadAttributesBuilder<ChainSpec>
-where
-    ChainSpec: Send + Sync + 'static,
-    T: UnsupportedLocalAttributes,
+    /// Creates a local payload attributes builder
+    fn local_payload_attributes_builder(
+        &self,
+        ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<impl PayloadAttributesBuilder<Self::PayloadAttributes>>;
+}
+
+impl PayloadAttributesBuilder<()> for LocalPayloadAttributesBuilder<()> {
+    fn build(&self, _: u64) {
+        unreachable!("Unit type builder should never be used")
+    }
+}
+
+/// A default implementation for nodes that don't provide local payload building.
+///
+/// It returns an error when asked to build payload attributes,
+/// indicating that the feature is not available.
+///
+/// Useful as a fallback or when local building capabilities are not needed.
+#[derive(Debug)]
+pub struct UnsupportedLocalPayloadAttributesAddOn;
+
+impl<N: FullNodeComponents> LocalPayloadAttributesAddOn<N>
+    for UnsupportedLocalPayloadAttributesAddOn
 {
-    fn build(&self, _: u64) -> T {
-        panic!("Unsupported payload attributes")
+    type PayloadAttributes = ();
+
+    fn local_payload_attributes_builder(
+        &self,
+        _ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<impl PayloadAttributesBuilder<Self::PayloadAttributes>> {
+        Err(eyre::eyre!("Not supported"))
+            .map(|_: ()| LocalPayloadAttributesBuilder::new(Arc::new(())))
+    }
+}
+
+/// A builder implementation that indicates payload building is not configured.
+///
+/// Helpful for use cases where local payload building is not supported or not implemented.
+#[derive(Debug, Clone)]
+pub struct UnsupportedPayloadAttributesBuilder<T> {
+    _phantom: PhantomData<T>,
+}
+
+impl<T: Send + Sync + 'static> PayloadAttributesBuilder<T>
+    for UnsupportedPayloadAttributesBuilder<T>
+{
+    fn build(&self, _timestamp: u64) -> T {
+        unreachable!(
+            "UnsupportedPayloadAttributesBuilder should never be used to build payload attributes"
+        )
     }
 }

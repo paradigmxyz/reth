@@ -9,9 +9,10 @@ use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_engine_local::{LocalPayloadAttributesAddOn, UnsupportedPayloadAttributesBuilder};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, ReceiptTy,
+    NodeAddOns, NodeTypes, PayloadAttrTy, PayloadAttributesBuilder, PayloadTypes, ReceiptTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -618,6 +619,25 @@ where
 {
     fn default() -> Self {
         Self::new(EthB::default(), EV::default(), EB::default(), Default::default())
+    }
+}
+
+impl<N, EthB, EV, EB> LocalPayloadAttributesAddOn<N> for RpcAddOns<N, EthB, EV, EB>
+where
+    N: FullNodeComponents,
+    EthB: EthApiBuilder<N>,
+    EV: EngineValidatorBuilder<N>,
+    EB: EngineApiBuilder<N>,
+{
+    type PayloadAttributes = PayloadAttrTy<N::Types>;
+
+    fn local_payload_attributes_builder(
+        &self,
+        _ctx: &AddOnsContext<'_, N>,
+    ) -> eyre::Result<impl PayloadAttributesBuilder<Self::PayloadAttributes>> {
+        Err::<UnsupportedPayloadAttributesBuilder<Self::PayloadAttributes>, _>(eyre::eyre!(
+            "Local payload attributes not supported"
+        ))
     }
 }
 
