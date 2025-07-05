@@ -135,7 +135,7 @@ pub trait EthBlocks: LoadBlock {
 
                 // If no pending block from provider, build the pending block locally.
                 if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((Arc::new(block), Arc::new(receipts))));
+                    return Ok(Some((block, receipts)));
                 }
             }
 
@@ -245,7 +245,7 @@ pub trait LoadBlock:
 
                 // If no pending block from provider, try to get local pending block
                 return match self.local_pending_block().await? {
-                    Some((block, _)) => Ok(Some(Arc::new(block))),
+                    Some((block, _)) => Ok(Some(block)),
                     None => Ok(None),
                 };
             }
