@@ -181,14 +181,17 @@ pub trait LoadPendingBlock:
                 }
             };
 
+            let sealed_block = Arc::new(sealed_block);
+            let receipts = Arc::new(receipts);
+
             let now = Instant::now();
             *lock = Some(PendingBlock::new(
                 now + Duration::from_secs(1),
-                Arc::new(sealed_block.clone()),
-                Arc::new(receipts.clone()),
+                sealed_block.clone(),
+                receipts.clone()
             ));
 
-            Ok(Some((Arc::new(sealed_block), Arc::new(receipts))))
+            Ok(Some((sealed_block, receipts)))
         }
     }
 
