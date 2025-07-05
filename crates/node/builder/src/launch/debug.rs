@@ -145,6 +145,7 @@ where
                         "etherscan api key not found for rpc consensus client for chain: {chain}"
                     )
                 })?,
+                chain.id(),
                 N::Types::rpc_to_primitive_block,
             );
             let rpc_consensus_client = DebugConsensusClient::new(
