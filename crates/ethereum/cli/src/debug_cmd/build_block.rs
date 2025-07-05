@@ -244,7 +244,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 if state_root != block_with_senders.state_root() {
                     eyre::bail!(
                         "state root mismatch. expected: {}. got: {}",
-                        block_with_senders.state_root,
+                        block_with_senders.state_root(),
                         state_root
                     );
                 }
