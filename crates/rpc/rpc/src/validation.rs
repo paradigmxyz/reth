@@ -185,7 +185,7 @@ where
         let output = executor.execute_with_state_closure(&block, |state| {
             if !self.disallow.is_empty() {
                 // Check whether the submission interacted with any blacklisted account by scanning
-                // the `State`'s cache that records everything read form database during execution.
+                // the `State`'s cache that records everything read from database during execution.
                 for account in state.cache.accounts.keys() {
                     if self.disallow.contains(account) {
                         accessed_blacklisted = Some(*account);
