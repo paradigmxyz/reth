@@ -188,7 +188,7 @@ pub trait LoadPendingBlock:
             *lock = Some(PendingBlock::new(
                 now + Duration::from_secs(1),
                 sealed_block.clone(),
-                receipts.clone()
+                receipts.clone(),
             ));
 
             Ok(Some((sealed_block, receipts)))
