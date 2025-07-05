@@ -52,7 +52,7 @@ use reth_ethereum::{
         EthEvmConfig, EthereumEthApiBuilder,
     },
     pool::{PoolTransaction, TransactionPool},
-    primitives::{RecoveredBlock, SealedBlock},
+    primitives::{Recovered, RecoveredBlock, SealedBlock},
     provider::{EthStorage, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
@@ -136,7 +136,7 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         self.0.parent_beacon_block_root
     }
 
-    fn il(&self) -> Option<&Vec<Bytes>> {
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
         self.0.il()
     }
 

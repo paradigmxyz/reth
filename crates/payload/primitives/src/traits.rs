@@ -7,7 +7,8 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::{NodePrimitives, Recovered, SealedBlock};
 
 /// Represents a built payload type that contains a built `SealedBlock` and can be converted into
 /// engine API execution payloads.
@@ -75,7 +76,7 @@ pub trait PayloadBuilderAttributes: Send + Sync + fmt::Debug {
     fn withdrawals(&self) -> &Withdrawals;
 
     /// Returns the inclusion list (IL) for the running payload job.
-    fn il(&self) -> Option<&Vec<Bytes>>;
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>>;
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.

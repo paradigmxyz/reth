@@ -15,12 +15,14 @@ use reth_ethereum::{
     primitives::{RecoveredBlock, SealedBlock},
     storage::StateProviderFactory,
     trie::{KeccakKeyHasher, KeyHasher},
+    TransactionSigned,
 };
 use reth_node_builder::rpc::EngineValidatorBuilder;
 use reth_op::{
     node::{
         engine::OpEngineValidator, OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes,
     },
+    primitives::Recovered,
     OpTransactionSigned,
 };
 use revm_primitives::{Bytes, U256};
@@ -134,7 +136,7 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         self.inner.parent_beacon_block_root()
     }
 
-    fn il(&self) -> Option<&Vec<Bytes>> {
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
         self.inner.il()
     }
 

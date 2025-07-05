@@ -17,9 +17,12 @@ use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives_traits::{NodePrimitives, SealedBlock, SignedTransaction, WithEncoded};
+use reth_primitives_traits::{
+    NodePrimitives, Recovered, SealedBlock, SignedTransaction, WithEncoded,
+};
 
 /// Re-export for use in downstream arguments.
 pub use op_alloy_rpc_types_engine::OpPayloadAttributes;
@@ -105,7 +108,8 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
             prev_randao: attributes.payload_attributes.prev_randao,
             withdrawals: attributes.payload_attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
-            il: attributes.payload_attributes.il,
+            // TODO: impl IL into OP - Pelle
+            il: None,
         };
 
         Ok(Self {
@@ -133,7 +137,7 @@ impl<T: Decodable2718 + Send + Sync + Debug> PayloadBuilderAttributes
         self.payload_attributes.parent_beacon_block_root
     }
 
-    fn il(&self) -> Option<&Vec<Bytes>> {
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
         self.payload_attributes.il()
     }
 

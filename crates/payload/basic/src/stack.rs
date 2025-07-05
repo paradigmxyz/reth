@@ -4,10 +4,11 @@ use crate::{
 };
 
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, U256};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::BuiltPayload;
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, Recovered, SealedBlock};
 
 use alloy_eips::eip7685::Requests;
 use std::{error::Error, fmt};
@@ -120,7 +121,7 @@ where
             Self::Right(r) => r.withdrawals(),
         }
     }
-    fn il(&self) -> Option<&Vec<Bytes>> {
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
         match self {
             Self::Left(l) => l.il(),
             Self::Right(r) => r.il(),

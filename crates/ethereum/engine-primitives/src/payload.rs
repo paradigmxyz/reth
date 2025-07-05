@@ -7,17 +7,17 @@ use alloy_eips::{
     eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
     eip7685::Requests,
 };
-use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rlp::Encodable;
+use alloy_primitives::{Address, B256, U256};
+use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_engine::{
     BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
     ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadFieldV2,
     ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
-use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_ethereum_primitives::{Block, EthPrimitives, TransactionSigned};
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives_traits::SealedBlock;
+use reth_primitives_traits::{Recovered, SealedBlock};
 
 use crate::BuiltPayloadConversionError;
 
@@ -330,7 +330,7 @@ pub struct EthPayloadBuilderAttributes {
     /// Root of the parent beacon block
     pub parent_beacon_block_root: Option<B256>,
     /// Inclusion list for the generated payload.
-    pub il: Option<Vec<Bytes>>,
+    pub il: Option<Vec<Option<Recovered<TransactionSigned>>>>,
 }
 
 // === impl EthPayloadBuilderAttributes ===
@@ -347,6 +347,11 @@ impl EthPayloadBuilderAttributes {
     pub fn new(parent: B256, attributes: PayloadAttributes) -> Self {
         let id = payload_id(&parent, &attributes);
 
+        // if the IL is present, then attempt to decode each transaction in the IL.
+        let il = attributes.il.map(|il| {
+            il.into_iter().map(|tx| Recovered::decode(&mut tx.0.as_ref()).ok()).collect()
+        });
+
         Self {
             id,
             parent,
@@ -355,7 +360,7 @@ impl EthPayloadBuilderAttributes {
             prev_randao: attributes.prev_randao,
             withdrawals: attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.parent_beacon_block_root,
-            il: attributes.il,
+            il,
         }
     }
 }
@@ -403,7 +408,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
         &self.withdrawals
     }
 
-    fn il(&self) -> Option<&Vec<Bytes>> {
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
         self.il.as_ref()
     }
 }
