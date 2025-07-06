@@ -1,5 +1,5 @@
 [package]
-name = "block-access-list"
+name = "reth-block-access-list"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
