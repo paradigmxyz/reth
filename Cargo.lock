@@ -1666,6 +1666,27 @@ dependencies = [
 [[package]]
 name = "block-access-list"
 version = "1.5.0"
+dependencies = [
+ "alloy-consensus",
+ "alloy-eips",
+ "alloy-evm",
+ "alloy-primitives",
+ "auto_impl",
+ "derive_more",
+ "futures-util",
+ "metrics",
+ "metrics-util",
+ "reth-ethereum-forks",
+ "reth-ethereum-primitives",
+ "reth-execution-errors",
+ "reth-execution-types",
+ "reth-metrics",
+ "reth-primitives-traits",
+ "reth-storage-api",
+ "reth-storage-errors",
+ "reth-trie-common",
+ "revm",
+]
 
 [[package]]
 name = "block-buffer"
