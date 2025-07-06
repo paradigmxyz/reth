@@ -10,13 +10,13 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::Transaction;
-use alloy_primitives::U256;
+use alloy_primitives::{Address, U256};
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_errors::{BlockExecutionError, BlockValidationError};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
@@ -114,6 +114,10 @@ where
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
         let args = BuildArguments::new(Default::default(), config, Default::default(), None);
 
+        // NOTE
+        //
+        // the payload may not be empty if there is an IL to apply to the payload. the call to
+        // `apply_inclusion_list` is in the definition of `default_ethereum_payload`.
         default_ethereum_payload(
             self.evm_config.clone(),
             self.client.clone(),
@@ -317,6 +321,96 @@ where
         if let Some(sidecar) = blob_tx_sidecar {
             blob_sidecars.push_sidecar_variant(sidecar.as_ref().clone());
         }
+    }
+
+    // apply IL
+    //
+    // NOTE
+    //
+    // we apply after all other transactions so that we can ensure that the payload is IL-compliant.
+    // if we attempted to apply the IL at the beginning, and then applied some other transactions,
+    // then we would need to go back through the IL and retry any transactions that could not be
+    // included at the start but may now be valid due to state changes caused by non-IL
+    // transactions.
+    let empty_il = vec![];
+    let il = attributes.il.as_ref().unwrap_or(&empty_il);
+
+    // the IL bitfield tracks whether we need to consider the IL transaction at the corresponding
+    // index any longer.
+    //
+    // if the tx could not be decoded, then we mark it false.
+    // if the tx cannot execute for some reason that cannot change, then we mark it false.
+    // if the tx executes successfully and is added to the block, then we mark it false.
+    //
+    // if a transaction from the IL is executed successfully, then we need to go back over each of
+    // the remaining IL transactions that might now be valid.
+    let mut il_bitfield: Vec<_> = il.iter().map(|tx| tx.is_some()).collect();
+
+    let mut i = 0;
+    let n = il.len();
+
+    while i < n {
+        if !il_bitfield[i] {
+            i += 1;
+            continue;
+        }
+
+        // if the IL tx were not able to be decoded, then the corresponding index in the bitfield
+        // should be `false` in the check above.
+        let tx = il[i].as_ref().expect("IL tx exists b/c it was decoded");
+
+        // transaction is a blob transaction which is not supported
+        //
+        // NOTE
+        //
+        // we should catch this earlier, so that such a transaction does not occupy memory.
+        if tx.is_eip4844() {
+            il_bitfield[i] = false;
+            i += 1;
+            continue;
+        }
+
+        // transaction gas limit too high
+        if cumulative_gas_used + tx.gas_limit() > block_gas_limit {
+            il_bitfield[i] = false;
+            i += 1;
+            continue;
+        }
+
+        match builder.execute_transaction(tx.clone()) {
+            Ok(gas_used) => {
+                // update fees and gas used
+                let miner_fee = tx
+                    .effective_tip_per_gas(base_fee)
+                    .expect("fee is always valid; execution succeeded");
+                total_fees += U256::from(miner_fee) * U256::from(gas_used);
+                cumulative_gas_used += gas_used;
+            }
+            Err(BlockExecutionError::Validation(BlockValidationError::InvalidTx {
+                error, ..
+            })) => {
+                // a transaction whose nonce is too high may become valid.
+                // a transaction whose sender lacks funds may become valid.
+                if !error.is_nonce_too_high() && !error.is_lack_of_funds_for_max_fee() {
+                    il_bitfield[i] = false;
+                }
+
+                i += 1;
+                continue;
+            }
+            Err(err) => return Err(PayloadBuilderError::evm(err)),
+        }
+
+        // executed_txs.push(tx.clone().into_tx());
+
+        // NOTE
+        //
+        // if we are here, then the transaction executed successfully.
+        //
+        // instead of setting the index to zero, we could keep track of a flag that indicates
+        // whether or not we should perform another pass of the IL.
+        il_bitfield[i] = false;
+        i = 0;
     }
 
     // check if we have a better block

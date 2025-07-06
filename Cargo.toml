@@ -467,7 +467,7 @@ revm-inspectors = "0.24.0"
 alloy-chains = { version = "0.2.0", default-features = false }
 alloy-dyn-abi = "1.2.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.11", default-features = false }
+alloy-evm = { version = "0.11", default-features = false, path = "../evm/crates/evm"}
 alloy-primitives = { version = "1.2.0", default-features = false, features = [
     "map-foldhash",
 ] }
@@ -515,7 +515,7 @@ alloy-transport-ipc = { version = "1.0.12", default-features = false, path = "..
 alloy-transport-ws = { version = "1.0.12", default-features = false, path = "../alloy/crates/transport-ws" }
 
 # op
-alloy-op-evm = { version = "0.11", default-features = false }
+alloy-op-evm = { version = "0.11", default-features = false, path = "../evm/crates/op-evm"}
 alloy-op-hardforks = "0.2.2"
 op-alloy-rpc-types = { version = "0.18.6", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.18.6", default-features = false }
