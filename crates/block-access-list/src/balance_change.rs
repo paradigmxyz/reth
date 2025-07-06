@@ -19,11 +19,13 @@ impl BalanceChange {
     }
 
     /// Returns the transaction index.
+    #[inline]
     pub const fn tx_index(&self) -> TxIndex {
         self.tx_index
     }
 
     /// Returns the post-transaction balance.
+    #[inline]
     pub const fn post_balance(&self) -> u128 {
         self.post_balance
     }
