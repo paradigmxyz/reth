@@ -20,8 +20,7 @@ eyre.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tracing.workspace = true
 
-# HTTP client for RPC calls
-reqwest = { workspace = true, features = ["json"] }
+# Serialization (still needed for JSON handling)
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 
@@ -49,3 +48,4 @@ reth-chainspec.workspace = true
 
 # Alloy for RPC communication
 alloy-provider = { workspace = true, features = ["reqwest", "reqwest-rustls-tls"] }
+alloy-rpc-types-eth = { workspace = true }

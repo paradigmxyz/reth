@@ -1,14 +1,14 @@
 //! Node management for starting, stopping, and controlling reth instances.
 
 use crate::{cli::Args, git::sanitize_git_ref};
+use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_types_eth::SyncStatus;
 use eyre::{eyre, OptionExt, Result, WrapErr};
 #[cfg(unix)]
 use nix::sys::signal::{kill, Signal};
 #[cfg(unix)]
 use nix::unistd::Pid;
-use reqwest::Client;
 use reth_chainspec::Chain;
-use serde_json::{json, Value};
 use std::{fs, path::PathBuf, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader as AsyncBufReader},
@@ -23,7 +23,6 @@ pub struct NodeManager {
     metrics_port: u16,
     chain: Chain,
     use_sudo: bool,
-    http_client: Client,
     binary_path: Option<std::path::PathBuf>,
     enable_profiling: bool,
     output_dir: PathBuf,
@@ -37,10 +36,6 @@ impl NodeManager {
             metrics_port: args.metrics_port,
             chain: args.chain,
             use_sudo: args.sudo,
-            http_client: Client::builder()
-                .timeout(Duration::from_secs(30))
-                .build()
-                .expect("Failed to create HTTP client"),
             binary_path: None,
             enable_profiling: args.profile,
             output_dir: args.output_dir_path(),
@@ -244,28 +239,38 @@ impl NodeManager {
         let check_interval = Duration::from_secs(2);
         let rpc_url = "http://localhost:8545";
 
+        // Create Alloy provider
+        let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
+        let provider = ProviderBuilder::new().connect_http(url);
+
         let result = timeout(max_wait, async {
             loop {
-                // First check if RPC is up by trying to get the tip
-                match self.get_tip_from_rpc(rpc_url).await {
-                    Ok(tip) => {
-                        // RPC is up, now check if node is syncing
-                        match self.is_syncing(rpc_url).await {
-                            Ok(is_syncing) => {
-                                if !is_syncing {
+                // First check if RPC is up and node is not syncing
+                match provider.syncing().await {
+                    Ok(sync_result) => {
+                        // SyncStatus::None means not syncing, anything else means syncing
+                        let is_syncing = match sync_result {
+                            SyncStatus::None => false,
+                            _ => true,
+                        };
+                        
+                        if is_syncing {
+                            debug!("Node is still syncing, waiting...");
+                        } else {
+                            // Node is not syncing, now get the tip
+                            match provider.get_block_number().await {
+                                Ok(tip) => {
                                     info!("Node is ready and not syncing at block: {}", tip);
                                     return Ok(tip);
-                                } else {
-                                    debug!("Node is still syncing, waiting...");
                                 }
-                            }
-                            Err(e) => {
-                                debug!("Failed to check sync status: {}", e);
+                                Err(e) => {
+                                    debug!("Failed to get block number: {}", e);
+                                }
                             }
                         }
                     }
                     Err(e) => {
-                        debug!("Node RPC not ready yet: {}", e);
+                        debug!("Node RPC not ready yet or failed to check sync status: {}", e);
                     }
                 }
 
@@ -434,67 +439,4 @@ impl NodeManager {
         Ok(())
     }
 
-    /// Check if the node is still syncing
-    async fn is_syncing(&self, rpc_url: &str) -> Result<bool> {
-        let request_body = json!({
-            "jsonrpc": "2.0",
-            "method": "eth_syncing",
-            "params": [],
-            "id": 1
-        });
-
-        let response = self
-            .http_client
-            .post(rpc_url)
-            .json(&request_body)
-            .send()
-            .await
-            .wrap_err("Failed to send eth_syncing request")?;
-
-        if !response.status().is_success() {
-            return Err(eyre!("eth_syncing request failed with status: {}", response.status()));
-        }
-
-        let json: Value = response.json().await.wrap_err("Failed to parse eth_syncing response")?;
-
-        let result = json.get("result").ok_or_else(|| eyre!("No result field in eth_syncing response"))?;
-
-        // eth_syncing returns false when not syncing, or an object with sync status when syncing
-        Ok(!result.is_boolean() || result.as_bool().unwrap_or(true))
-    }
-
-    /// Get chain tip from RPC endpoint
-    async fn get_tip_from_rpc(&self, rpc_url: &str) -> Result<u64> {
-        let request_body = json!({
-            "jsonrpc": "2.0",
-            "method": "eth_blockNumber",
-            "params": [],
-            "id": 1
-        });
-
-        let response = self
-            .http_client
-            .post(rpc_url)
-            .json(&request_body)
-            .send()
-            .await
-            .wrap_err("Failed to send RPC request")?;
-
-        if !response.status().is_success() {
-            return Err(eyre!("RPC request failed with status: {}", response.status()));
-        }
-
-        let json: Value = response.json().await.wrap_err("Failed to parse RPC response")?;
-
-        let result = json.get("result").ok_or_else(|| eyre!("No result field in RPC response"))?;
-
-        let hex_str = result.as_str().ok_or_else(|| eyre!("Result is not a string"))?;
-
-        // Remove "0x" prefix and parse as hex
-        let hex_str = hex_str.strip_prefix("0x").unwrap_or(hex_str);
-        let block_number =
-            u64::from_str_radix(hex_str, 16).wrap_err("Failed to parse block number from hex")?;
-
-        Ok(block_number)
-    }
 }
