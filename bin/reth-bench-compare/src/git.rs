@@ -79,17 +79,15 @@ impl GitManager {
         // Check for uncommitted changes to tracked files
         // Status codes: M = modified, A = added, D = deleted, R = renamed, C = copied, U = updated
         // ?? = untracked files (we want to ignore these)
-        let has_uncommitted_changes = status_output
-            .lines()
-            .any(|line| {
-                if line.len() >= 2 {
-                    let status = &line[0..2];
-                    // Ignore untracked files (??) and ignored files (!!)
-                    !matches!(status, "??" | "!!")
-                } else {
-                    false
-                }
-            });
+        let has_uncommitted_changes = status_output.lines().any(|line| {
+            if line.len() >= 2 {
+                let status = &line[0..2];
+                // Ignore untracked files (??) and ignored files (!!)
+                !matches!(status, "??" | "!!")
+            } else {
+                false
+            }
+        });
 
         if has_uncommitted_changes {
             warn!("Git working directory has uncommitted changes to tracked files:");
@@ -104,13 +102,14 @@ impl GitManager {
         }
 
         // Check if there are untracked files and log them as info
-        let untracked_files: Vec<&str> = status_output
-            .lines()
-            .filter(|line| line.starts_with("??"))
-            .collect();
+        let untracked_files: Vec<&str> =
+            status_output.lines().filter(|line| line.starts_with("??")).collect();
 
         if !untracked_files.is_empty() {
-            info!("Git working directory has {} untracked files (this is OK)", untracked_files.len());
+            info!(
+                "Git working directory has {} untracked files (this is OK)",
+                untracked_files.len()
+            );
         }
 
         info!("Git working directory is clean (no uncommitted changes to tracked files)");
@@ -220,7 +219,12 @@ impl GitManager {
         if is_branch {
             // Check if the branch tracks a remote
             let tracking_output = Command::new("git")
-                .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", &format!("{}@{{upstream}}", git_ref)])
+                .args([
+                    "rev-parse",
+                    "--abbrev-ref",
+                    "--symbolic-full-name",
+                    &format!("{}@{{upstream}}", git_ref),
+                ])
                 .current_dir(&self.repo_root)
                 .output();
 
@@ -235,11 +239,16 @@ impl GitManager {
                             .args(["pull", "--ff-only"])
                             .current_dir(&self.repo_root)
                             .output()
-                            .wrap_err_with(|| format!("Failed to pull latest changes for branch '{}'", git_ref))?;
+                            .wrap_err_with(|| {
+                                format!("Failed to pull latest changes for branch '{}'", git_ref)
+                            })?;
 
                         if !pull_output.status.success() {
                             let stderr = String::from_utf8_lossy(&pull_output.stderr);
-                            warn!("Failed to pull latest changes for branch '{}': {}", git_ref, stderr);
+                            warn!(
+                                "Failed to pull latest changes for branch '{}': {}",
+                                git_ref, stderr
+                            );
                             // Continue anyway, we'll use whatever version we have
                         } else {
                             info!("Successfully pulled latest changes for branch: {}", git_ref);

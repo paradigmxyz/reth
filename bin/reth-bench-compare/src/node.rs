@@ -182,13 +182,13 @@ impl NodeManager {
         } else {
             self.create_direct_command(&reth_args)
         };
-        
+
         // Set process group for better signal handling
         #[cfg(unix)]
         {
             cmd.process_group(0);
         }
-        
+
         debug!("Executing reth command: {cmd:?}");
 
         let mut child = cmd
@@ -249,11 +249,8 @@ impl NodeManager {
                 match provider.syncing().await {
                     Ok(sync_result) => {
                         // SyncStatus::None means not syncing, anything else means syncing
-                        let is_syncing = match sync_result {
-                            SyncStatus::None => false,
-                            _ => true,
-                        };
-                        
+                        let is_syncing = !matches!(sync_result, SyncStatus::None);
+
                         if is_syncing {
                             debug!("Node is still syncing, waiting...");
                         } else {
@@ -286,7 +283,7 @@ impl NodeManager {
     /// Stop the reth node gracefully
     pub async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
         let pid = child.id().expect("Child process ID should be available");
-        
+
         // Check if the process has already exited
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -308,10 +305,11 @@ impl NodeManager {
             // Mimic Ctrl-C: negative value == process group id
             let pgid = -(pid as i32);
             let nix_pgid = Pid::from_raw(pgid);
-            
-            // Ignore ESRCH error (process doesn't exist) as it may have exited between our check and now
+
+            // Ignore ESRCH error (process doesn't exist) as it may have exited between our check
+            // and now
             match kill(nix_pgid, Signal::SIGINT) {
-                Ok(()) => {},
+                Ok(()) => {}
                 Err(nix::errno::Errno::ESRCH) => {
                     info!("Process group {} has already exited", pid);
                 }
@@ -438,5 +436,4 @@ impl NodeManager {
         info!("Unwound to block: {}", block_number);
         Ok(())
     }
-
 }

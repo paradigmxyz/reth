@@ -7318,13 +7318,13 @@ name = "reth-bench-compare"
 version = "1.5.0"
 dependencies = [
  "alloy-provider",
+ "alloy-rpc-types-eth",
  "chrono",
  "clap",
  "csv",
  "ctrlc",
  "eyre",
  "nix 0.29.0",
- "reqwest",
  "reth-chainspec",
  "reth-cli-runner",
  "reth-cli-util",

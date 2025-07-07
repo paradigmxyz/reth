@@ -418,13 +418,9 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
 
     // Conditionally pipe output based on log level
     if tracing::enabled!(tracing::Level::DEBUG) {
-        baseline_cmd
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+        baseline_cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     } else {
-        baseline_cmd
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
+        baseline_cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     }
 
     // Debug log the command
@@ -467,13 +463,9 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
 
     // Conditionally pipe output based on log level
     if tracing::enabled!(tracing::Level::DEBUG) {
-        feature_cmd
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+        feature_cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     } else {
-        feature_cmd
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
+        feature_cmd.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     }
 
     // Debug log the command
