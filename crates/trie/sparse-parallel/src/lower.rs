@@ -48,13 +48,13 @@ impl LowerSparseSubtrie {
     /// is shorter than this one, than this one becomes the new root path of the subtrie.
     pub(crate) fn reveal(&mut self, path: &Nibbles) {
         match self {
-            Self::Blind(None) => {
-                *self = Self::Revealed(Box::new(SparseSubtrie::new(*path)));
-            }
-            entry @ Self::Blind(Some(_)) => {
-                let Self::Blind(Some(mut subtrie)) = core::mem::take(entry) else { unreachable!() };
-                subtrie.path = *path;
-                *entry = Self::Revealed(subtrie);
+            Self::Blind(allocated) => {
+                *self = if let Some(mut subtrie) = allocated.take() {
+                    subtrie.path = *path;
+                    Self::Revealed(subtrie)
+                } else {
+                    Self::Revealed(Box::new(SparseSubtrie::new(*path)))
+                }
             }
             Self::Revealed(subtrie) => {
                 if path.len() < subtrie.path.len() {
@@ -68,7 +68,10 @@ impl LowerSparseSubtrie {
     /// [`SparseSubtrie`] if possible.
     pub(crate) fn clear(&mut self) {
         *self = match core::mem::take(self) {
-            Self::Blind(allocated) => Self::Blind(allocated),
+            Self::Blind(allocated) => {
+                debug_assert!(allocated.as_ref().is_some_and(|subtrie| subtrie.is_empty()));
+                Self::Blind(allocated)
+            }
             Self::Revealed(mut subtrie) => {
                 subtrie.clear();
                 Self::Blind(Some(subtrie))

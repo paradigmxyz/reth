@@ -1049,6 +1049,11 @@ impl SparseSubtrie {
         Self { path, ..Default::default() }
     }
 
+    /// Returns true if this subtrie has any nodes, false otherwise.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
     /// Returns true if the current path and its child are both found in the same level.
     fn is_child_same_level(current_path: &Nibbles, child_path: &Nibbles) -> bool {
         let current_level = core::mem::discriminant(&SparseSubtrieType::from_path(current_path));
