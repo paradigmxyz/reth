@@ -44,7 +44,7 @@ Ideally, we can achieve such fast runtime operation that we can avoid storing ce
 
 **Control over tradeoffs**
 
-Almost any given design choice or optimization to the client comes with its own tradeoffs. As such, our long-term goal is not to make opinionated decisions on behalf of everyone, as some users will be negatively impacted and turned away from what could be a great client.
+Almost any given design choice or optimization for the client comes with its own tradeoffs. As such, our long-term goal is not to make opinionated decisions on behalf of everyone, as some users will be negatively impacted and turned away from what could be a great client.
 
 **Profiles**
 
