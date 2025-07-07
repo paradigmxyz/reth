@@ -214,7 +214,7 @@ pub trait SparseTrieInterface: Default + Debug {
     /// Removes all nodes and values from the trie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.
     ///
-    /// This should not be used when intending to re-use the trie for a fresh account/storage root;
+    /// This should not be used when intending to reuse the trie for a fresh account/storage root;
     /// use `clear` for that.
     ///
     /// Note: All previously tracked changes to the trie are also removed.

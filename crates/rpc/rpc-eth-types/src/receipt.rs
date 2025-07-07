@@ -1,12 +1,14 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
 use super::EthResult;
-use alloy_consensus::{transaction::TransactionMeta, ReceiptEnvelope, TxReceipt};
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TransactionMeta},
+    ReceiptEnvelope, Transaction, TxReceipt,
+};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
 use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
-use reth_primitives_traits::SignedTransaction;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<R, T, E>(
@@ -19,7 +21,7 @@ pub fn build_receipt<R, T, E>(
 ) -> EthResult<TransactionReceipt<E>>
 where
     R: TxReceipt<Log = alloy_primitives::Log>,
-    T: SignedTransaction,
+    T: Transaction + SignerRecoverable,
 {
     // Note: we assume this transaction is valid, because it's mined (or part of pending block)
     // and we don't need to check for pre EIP-2
