@@ -69,7 +69,7 @@ impl LowerSparseSubtrie {
     pub(crate) fn clear(&mut self) {
         *self = match core::mem::take(self) {
             Self::Blind(allocated) => {
-                debug_assert!(allocated.as_ref().is_some_and(|subtrie| subtrie.is_empty()));
+                debug_assert!(allocated.as_ref().is_none_or(|subtrie| subtrie.is_empty()));
                 Self::Blind(allocated)
             }
             Self::Revealed(mut subtrie) => {
