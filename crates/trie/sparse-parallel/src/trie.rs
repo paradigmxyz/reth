@@ -1609,9 +1609,12 @@ impl SparseSubtrieInner {
             SparseNode::Leaf { key, hash } => {
                 let mut path = path;
                 path.extend(key);
-                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
-                    // If the node hash is already computed, and the node path is not in
-                    // the prefix set, return the pre-computed hash
+                let value = self.values.get(&path);
+                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path) || value.is_none())
+                {
+                    // If the node hash is already computed, and either the node path is not in
+                    // the prefix set or we don't have the value for it, return the pre-computed
+                    // hash
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 } else {
                     // Encode the leaf node and update its hash
