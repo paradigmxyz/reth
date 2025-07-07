@@ -3,8 +3,8 @@ use reth_trie_common::Nibbles;
 
 /// Tracks the state of the lower subtries.
 ///
-/// When a [`ParallelSparseTrie`] is initialized/cleared then its `LowerSparseSubtrie`s are all
-/// blinded, meaning they have no nodes. A blinded `LowerSparseSubtrie` may hold onto a cleared
+/// When a [`crate::ParallelSparseTrie`] is initialized/cleared then its `LowerSparseSubtrie`s are
+/// all blinded, meaning they have no nodes. A blinded `LowerSparseSubtrie` may hold onto a cleared
 /// [`SparseSubtrie`] in order to re-use allocations.
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum LowerSparseSubtrie {
