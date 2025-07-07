@@ -853,6 +853,9 @@ impl<T: TransactionOrdering> TxPool<T> {
                 }
             }
         }
+
+        self.update_size_metrics();
+
         outcome
     }
 
@@ -1573,6 +1576,8 @@ impl<T: PoolTransaction> AllTransactions<T> {
     }
 
     /// Removes a transaction from the set using its id.
+    ///
+    /// This is intended for processing updates after state changes.
     pub(crate) fn remove_transaction_by_id(
         &mut self,
         tx_id: &TransactionId,
@@ -1582,7 +1587,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
-        self.update_size_metrics();
         Some((tx, internal.subpool))
     }
 
