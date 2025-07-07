@@ -45,7 +45,7 @@ impl LowerSparseSubtrie {
     ///
     /// The given path is the path of a node which will be set into the [`SparseSubtrie`]'s `nodes`
     /// map immediately upon being revealed. If the subtrie is blinded, or if its current root path
-    /// is shorter than this one, than this one becomes the new root path of the subtrie.
+    /// is longer than this one, than this one becomes the new root path of the subtrie.
     pub(crate) fn reveal(&mut self, path: &Nibbles) {
         match self {
             Self::Blind(allocated) => {
