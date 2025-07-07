@@ -1,6 +1,7 @@
 //! Traits for sparse trie implementations.
 
 use core::fmt::Debug;
+use std::borrow::Cow;
 
 use alloc::vec::Vec;
 use alloy_primitives::{
@@ -200,6 +201,11 @@ pub trait SparseTrieInterface: Default + Debug {
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError>;
+
+    /// Returns a reference to the current sparse trie updates.
+    ///
+    /// If no updates have been made/recorded, returns an empty update set.
+    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates>;
 
     /// Consumes and returns the currently accumulated trie updates.
     ///

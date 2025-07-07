@@ -902,6 +902,10 @@ impl SparseTrieInterface for RevealedSparseTrie {
         self.values.get(full_path)
     }
 
+    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
+        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+    }
+
     fn take_updates(&mut self) -> SparseTrieUpdates {
         self.updates.take().unwrap_or_default()
     }
@@ -1056,13 +1060,6 @@ impl SparseTrieInterface for RevealedSparseTrie {
 }
 
 impl RevealedSparseTrie {
-    /// Returns a reference to the current sparse trie updates.
-    ///
-    /// If no updates have been made/recorded, returns an empty update set.
-    pub fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
-        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
-    }
-
     /// Returns an immutable reference to all nodes in the sparse trie.
     pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
         &self.nodes
