@@ -1,9 +1,8 @@
 //! Traits for sparse trie implementations.
 
 use core::fmt::Debug;
-use std::borrow::Cow;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,

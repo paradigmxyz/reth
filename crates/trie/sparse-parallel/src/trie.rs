@@ -1,3 +1,4 @@
+use alloc::borrow::Cow;
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
@@ -15,7 +16,7 @@ use reth_trie_sparse::{
     TrieMasks,
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, sync::mpsc};
+use std::sync::mpsc;
 use tracing::{instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
