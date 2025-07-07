@@ -48,7 +48,10 @@ pub struct ParallelSparseTrie {
 impl Default for ParallelSparseTrie {
     fn default() -> Self {
         Self {
-            upper_subtrie: Box::default(),
+            upper_subtrie: Box::new(SparseSubtrie {
+                nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
+                ..Default::default()
+            }),
             lower_subtries: [const { None }; NUM_LOWER_SUBTRIES],
             prefix_set: PrefixSetMut::default(),
             updates: None,
@@ -58,9 +61,7 @@ impl Default for ParallelSparseTrie {
 
 impl SparseTrieInterface for ParallelSparseTrie {
     fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self> {
-        let mut trie = Self::default().with_updates(retain_updates);
-        trie.reveal_node(Nibbles::default(), root, masks)?;
-        Ok(trie)
+        Self::default().with_root(root, masks, retain_updates)
     }
 
     fn with_root(
@@ -69,6 +70,12 @@ impl SparseTrieInterface for ParallelSparseTrie {
         masks: TrieMasks,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
+        // A fresh/cleared `ParallelSparseTrie` has a `SparseNode::Empty` at its root in the upper
+        // subtrie. Delete that so we can reveal the new root node.
+        let path = Nibbles::default();
+        let _removed_root = self.upper_subtrie.nodes.remove(&path).expect("root node should exist");
+        debug_assert_eq!(_removed_root, SparseNode::Empty);
+
         self = self.with_updates(retain_updates);
 
         self.reveal_node(Nibbles::default(), root, masks)?;
@@ -2600,13 +2607,11 @@ mod tests {
 
     #[test]
     fn test_reveal_node_extension_all_upper() {
-        let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::new();
         let child_hash = B256::repeat_byte(0xab);
         let node = create_extension_node([0x1], child_hash);
         let masks = TrieMasks::none();
-
-        trie.reveal_node(path, node, masks).unwrap();
+        let trie = ParallelSparseTrie::from_root(node, masks, true).unwrap();
 
         assert_matches!(
             trie.upper_subtrie.nodes.get(&path),
@@ -2621,13 +2626,11 @@ mod tests {
 
     #[test]
     fn test_reveal_node_extension_cross_level() {
-        let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::new();
         let child_hash = B256::repeat_byte(0xcd);
         let node = create_extension_node([0x1, 0x2, 0x3], child_hash);
         let masks = TrieMasks::none();
-
-        trie.reveal_node(path, node, masks).unwrap();
+        let trie = ParallelSparseTrie::from_root(node, masks, true).unwrap();
 
         // Extension node should be in upper trie
         assert_matches!(
@@ -2675,7 +2678,6 @@ mod tests {
 
     #[test]
     fn test_reveal_node_branch_all_upper() {
-        let mut trie = ParallelSparseTrie::default();
         let path = Nibbles::new();
         let child_hashes = [
             RlpNode::word_rlp(&B256::repeat_byte(0x11)),
@@ -2683,8 +2685,7 @@ mod tests {
         ];
         let node = create_branch_node_with_children(&[0x0, 0x5], child_hashes.clone());
         let masks = TrieMasks::none();
-
-        trie.reveal_node(path, node, masks).unwrap();
+        let trie = ParallelSparseTrie::from_root(node, masks, true).unwrap();
 
         // Branch node should be in upper trie
         assert_matches!(
@@ -3448,8 +3449,6 @@ mod tests {
 
     #[test]
     fn test_parallel_sparse_trie_root() {
-        let mut trie = ParallelSparseTrie::default().with_updates(true);
-
         // Step 1: Create the trie structure
         // Extension node at 0x with key 0x2 (goes to upper subtrie)
         let extension_path = Nibbles::new();
@@ -3491,7 +3490,7 @@ mod tests {
         );
 
         // Step 2: Reveal nodes in the trie
-        trie.reveal_node(extension_path, extension, TrieMasks::none()).unwrap();
+        let mut trie = ParallelSparseTrie::from_root(extension, TrieMasks::none(), true).unwrap();
         trie.reveal_node(branch_path, branch, TrieMasks::none()).unwrap();
         trie.reveal_node(leaf_1_path, leaf_1, TrieMasks::none()).unwrap();
         trie.reveal_node(leaf_2_path, leaf_2, TrieMasks::none()).unwrap();
