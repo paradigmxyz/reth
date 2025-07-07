@@ -34,8 +34,19 @@ reth-engine-local.workspace = true
 reth-tasks.workspace = true
 reth-node-ethereum.workspace = true
 reth-ethereum-primitives.workspace = true
+reth-cli-commands.workspace = true
+reth-config.workspace = true
+reth-consensus.workspace = true
+reth-evm.workspace = true
+reth-static-file.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-primitives.workspace = true
+reth-prune-types.workspace = true
+reth-db-common.workspace = true
+reth-primitives-traits.workspace = true
 
 revm.workspace = true
+tempfile.workspace = true
 
 # rpc
 jsonrpsee.workspace = true
@@ -44,6 +55,7 @@ url.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-rlp.workspace = true
 
 futures-util.workspace = true
 eyre.workspace = true
