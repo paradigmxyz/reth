@@ -33,6 +33,9 @@ pub mod wallet;
 /// Helper for payload operations
 mod payload;
 
+/// Helper for setting up nodes with pre-imported chain data
+pub mod setup_import;
+
 /// Helper for network operations
 mod network;
 
