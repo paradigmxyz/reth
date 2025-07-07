@@ -197,6 +197,74 @@ impl GitManager {
 
     /// Switch to the specified git reference (branch, tag, or commit)
     pub fn switch_ref(&self, git_ref: &str) -> Result<()> {
+        // First, check if this is a branch that tracks a remote
+        let is_branch = Command::new("git")
+            .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", git_ref)])
+            .current_dir(&self.repo_root)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+
+        if is_branch {
+            // Check if the branch tracks a remote
+            let tracking_output = Command::new("git")
+                .args(["rev-parse", "--abbrev-ref", "--symbolic-full-name", &format!("{}@{{upstream}}", git_ref)])
+                .current_dir(&self.repo_root)
+                .output();
+
+            if let Ok(output) = tracking_output {
+                if output.status.success() {
+                    let upstream = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !upstream.is_empty() && upstream != format!("{}@{{upstream}}", git_ref) {
+                        // Branch tracks a remote, pull latest changes
+                        info!("Pulling latest changes for branch: {}", git_ref);
+                        
+                        // First checkout the branch
+                        let checkout_output = Command::new("git")
+                            .args(["checkout", git_ref])
+                            .current_dir(&self.repo_root)
+                            .output()
+                            .wrap_err_with(|| format!("Failed to checkout branch '{}'", git_ref))?;
+
+                        if !checkout_output.status.success() {
+                            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
+                            return Err(eyre!("Failed to checkout branch '{}': {}", git_ref, stderr));
+                        }
+
+                        // Then pull latest changes
+                        let pull_output = Command::new("git")
+                            .args(["pull", "--ff-only"])
+                            .current_dir(&self.repo_root)
+                            .output()
+                            .wrap_err_with(|| format!("Failed to pull latest changes for branch '{}'", git_ref))?;
+
+                        if !pull_output.status.success() {
+                            let stderr = String::from_utf8_lossy(&pull_output.stderr);
+                            warn!("Failed to pull latest changes for branch '{}': {}", git_ref, stderr);
+                            // Continue anyway, we'll use whatever version we have
+                        } else {
+                            info!("Successfully pulled latest changes for branch: {}", git_ref);
+                        }
+                        
+                        // Verify the checkout succeeded
+                        let current_commit_output = Command::new("git")
+                            .args(["rev-parse", "HEAD"])
+                            .current_dir(&self.repo_root)
+                            .output()
+                            .wrap_err("Failed to get current commit")?;
+
+                        if !current_commit_output.status.success() {
+                            return Err(eyre!("Failed to verify git checkout"));
+                        }
+
+                        info!("Switched to reference: {} (with latest changes)", git_ref);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        // Not a tracking branch, just checkout normally (tag, commit, or non-tracking branch)
         let output = Command::new("git")
             .args(["checkout", git_ref])
             .current_dir(&self.repo_root)
