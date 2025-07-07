@@ -7,7 +7,6 @@ use crate::{
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
-use alloy_rpc_types_eth::{Block as RpcBlock, Header, Receipt, Transaction, TransactionRequest};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
 use reth_engine_local::LocalPayloadAttributesBuilder;
@@ -15,7 +14,6 @@ use reth_ethereum_primitives::Block;
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
 use reth_node_core::primitives::RecoveredBlock;
 use reth_payload_builder::EthPayloadBuilderAttributes;
-use reth_rpc_api::clients::EthApiClient;
 use revm::state::EvmState;
 use std::{marker::PhantomData, path::Path, sync::Arc};
 use tokio::{
@@ -156,7 +154,8 @@ where
                 .rpc_client()
                 .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
             let auth = node.auth_server_handle();
-            node_clients.push(crate::testsuite::NodeClient::new(rpc, auth));
+            let url = node.rpc_url();
+            node_clients.push(crate::testsuite::NodeClient::new(rpc, auth, url));
         }
 
         // Store the import result to keep nodes alive
@@ -205,8 +204,9 @@ where
                         .rpc_client()
                         .ok_or_else(|| eyre!("Failed to create HTTP RPC client for node"))?;
                     let auth = node.auth_server_handle();
+                    let url = node.rpc_url();
 
-                    node_clients.push(crate::testsuite::NodeClient::new(rpc, auth));
+                    node_clients.push(crate::testsuite::NodeClient::new(rpc, auth, url));
                 }
 
                 // spawn a separate task just to handle the shutdown
@@ -356,32 +356,22 @@ where
         for (idx, client) in node_clients.iter().enumerate() {
             let mut retry_count = 0;
             const MAX_RETRIES: usize = 10;
-            let mut last_error = None;
 
             while retry_count < MAX_RETRIES {
-                match EthApiClient::<TransactionRequest, Transaction, RpcBlock, Receipt, Header>::block_by_number(
-                    &client.rpc,
-                    BlockNumberOrTag::Latest,
-                    false,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        debug!("Node {idx} RPC endpoint is ready");
-                        break;
-                    }
-                    Err(e) => {
-                        last_error = Some(e);
-                        retry_count += 1;
-                        debug!(
-                            "Node {idx} RPC endpoint not ready, retry {retry_count}/{MAX_RETRIES}"
-                        );
-                        sleep(Duration::from_millis(500)).await;
-                    }
+                if client.is_ready().await {
+                    debug!("Node {idx} RPC endpoint is ready");
+                    break;
                 }
+
+                retry_count += 1;
+                debug!("Node {idx} RPC endpoint not ready, retry {retry_count}/{MAX_RETRIES}");
+                sleep(Duration::from_millis(500)).await;
             }
+
             if retry_count == MAX_RETRIES {
-                return Err(eyre!("Failed to connect to node {idx} RPC endpoint after {MAX_RETRIES} retries: {:?}", last_error));
+                return Err(eyre!(
+                    "Failed to connect to node {idx} RPC endpoint after {MAX_RETRIES} retries"
+                ));
             }
         }
         Ok(())
@@ -393,17 +383,10 @@ where
         client: &crate::testsuite::NodeClient,
         block: BlockNumberOrTag,
     ) -> Result<crate::testsuite::BlockInfo> {
-        let block = EthApiClient::<
-            TransactionRequest,
-            Transaction,
-            RpcBlock,
-            Receipt,
-            Header,
-        >::block_by_number(
-            &client.rpc, block, false
-        )
-        .await?
-        .ok_or_else(|| eyre!("Block {:?} not found", block))?;
+        let block = client
+            .get_block_by_number(block)
+            .await?
+            .ok_or_else(|| eyre!("Block {:?} not found", block))?;
 
         Ok(crate::testsuite::BlockInfo {
             hash: block.header.hash,

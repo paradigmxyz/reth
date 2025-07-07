@@ -68,5 +68,7 @@ alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-network.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-transport-http.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
