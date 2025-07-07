@@ -414,9 +414,18 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
     let mut baseline_cmd = Command::new(&samply_path);
     baseline_cmd
         .args(["load", "--port", &baseline_port.to_string(), &baseline_profile.to_string_lossy()])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
+
+    // Conditionally pipe output based on log level
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        baseline_cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+    } else {
+        baseline_cmd
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+    }
 
     // Debug log the command
     debug!("Executing samply load command: {:?}", baseline_cmd);
@@ -424,20 +433,79 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
     let mut baseline_child =
         baseline_cmd.spawn().wrap_err("Failed to start samply server for baseline")?;
 
+    // Stream baseline samply output if debug logging is enabled
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        if let Some(stdout) = baseline_child.stdout.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    debug!("[SAMPLY-BASELINE] {}", line);
+                }
+            });
+        }
+
+        if let Some(stderr) = baseline_child.stderr.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    debug!("[SAMPLY-BASELINE] {}", line);
+                }
+            });
+        }
+    }
+
     // Start feature server
     info!("Starting samply server for feature '{}' on port {}", args.feature_ref, feature_port);
     let mut feature_cmd = Command::new(&samply_path);
     feature_cmd
         .args(["load", "--port", &feature_port.to_string(), &feature_profile.to_string_lossy()])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         .kill_on_drop(true);
+
+    // Conditionally pipe output based on log level
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        feature_cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+    } else {
+        feature_cmd
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+    }
 
     // Debug log the command
     debug!("Executing samply load command: {:?}", feature_cmd);
 
     let mut feature_child =
         feature_cmd.spawn().wrap_err("Failed to start samply server for feature")?;
+
+    // Stream feature samply output if debug logging is enabled
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        if let Some(stdout) = feature_child.stdout.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(stdout);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    debug!("[SAMPLY-FEATURE] {}", line);
+                }
+            });
+        }
+
+        if let Some(stderr) = feature_child.stderr.take() {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncBufReadExt, BufReader};
+                let reader = BufReader::new(stderr);
+                let mut lines = reader.lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    debug!("[SAMPLY-FEATURE] {}", line);
+                }
+            });
+        }
+    }
 
     // Give servers time to start
     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
