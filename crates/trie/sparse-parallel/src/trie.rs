@@ -2170,10 +2170,14 @@ mod tests {
             (Nibbles::from_nibbles(path), encode_account_value(value_nonce))
         }
 
-        /// Insert multiple leaves into the trie
-        fn insert_leaves(&self, trie: &mut ParallelSparseTrie, leaves: &[(Nibbles, Vec<u8>)]) {
+        /// Update multiple leaves in the trie
+        fn update_leaves(
+            &self,
+            trie: &mut ParallelSparseTrie,
+            leaves: impl IntoIterator<Item = (Nibbles, Vec<u8>)>,
+        ) {
             for (path, value) in leaves {
-                trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
+                trie.update_leaf(path, value, DefaultBlindedProvider).unwrap();
             }
         }
 
@@ -2191,6 +2195,22 @@ mod tests {
         /// Create an assertion builder for the upper subtrie
         fn assert_upper_subtrie<'a>(&self, trie: &'a ParallelSparseTrie) -> SubtrieAssertion<'a> {
             SubtrieAssertion::new(&trie.upper_subtrie)
+        }
+
+        /// Assert the root, trie updates, and nodes against the hash builder output.
+        fn assert_with_hash_builder(
+            &self,
+            trie: &mut ParallelSparseTrie,
+            hash_builder_root: B256,
+            hash_builder_updates: TrieUpdates,
+            hash_builder_proof_nodes: ProofNodes,
+        ) {
+            assert_eq!(trie.root(), hash_builder_root);
+            pretty_assertions::assert_eq!(
+                BTreeMap::from_iter(trie.updates_ref().updated_nodes.clone()),
+                BTreeMap::from_iter(hash_builder_updates.account_nodes)
+            );
+            assert_eq_parallel_sparse_trie_proof_nodes(trie, hash_builder_proof_nodes);
         }
     }
 
@@ -3614,6 +3634,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_empty_update_one() {
+        let ctx = ParallelSparseTrieTestContext;
+
         let key = Nibbles::unpack(B256::with_last_byte(42));
         let value = || Account::default();
         let value_encoded = || {
@@ -3631,17 +3653,19 @@ mod tests {
             );
 
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
-        sparse.update_leaf(key, value_encoded(), DefaultBlindedProvider).unwrap();
-        let sparse_root = sparse.root();
-        let sparse_updates = sparse.take_updates();
-
-        assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
-        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+        ctx.update_leaves(&mut sparse, [(key, value_encoded())]);
+        ctx.assert_with_hash_builder(
+            &mut sparse,
+            hash_builder_root,
+            hash_builder_updates,
+            hash_builder_proof_nodes,
+        );
     }
 
     #[test]
     fn sparse_trie_empty_update_multiple_lower_nibbles() {
+        let ctx = ParallelSparseTrieTestContext;
+
         let paths = (0..=16).map(|b| Nibbles::unpack(B256::with_last_byte(b))).collect::<Vec<_>>();
         let value = || Account::default();
         let value_encoded = || {
@@ -3658,17 +3682,18 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
-        for path in &paths {
-            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
-        }
-        let sparse_root = sparse.root();
-        let sparse_updates = sparse.take_updates();
+        ctx.update_leaves(
+            &mut sparse,
+            paths.into_iter().zip(std::iter::repeat_with(value_encoded)),
+        );
 
-        assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
-        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+        ctx.assert_with_hash_builder(
+            &mut sparse,
+            hash_builder_root,
+            hash_builder_updates,
+            hash_builder_proof_nodes,
+        );
     }
 
     #[test]
@@ -3704,6 +3729,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_empty_update_multiple() {
+        let ctx = ParallelSparseTrieTestContext;
+
         let paths = (0..=255)
             .map(|b| {
                 Nibbles::unpack(if b % 2 == 0 {
@@ -3728,24 +3755,23 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
-        for path in &paths {
-            sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
-        }
-        let sparse_root = sparse.root();
-        let sparse_updates = sparse.take_updates();
-
-        assert_eq!(sparse_root, hash_builder_root);
-        pretty_assertions::assert_eq!(
-            BTreeMap::from_iter(sparse_updates.updated_nodes),
-            BTreeMap::from_iter(hash_builder_updates.account_nodes)
+        ctx.update_leaves(
+            &mut sparse,
+            paths.iter().copied().zip(std::iter::repeat_with(value_encoded)),
         );
-        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+        ctx.assert_with_hash_builder(
+            &mut sparse,
+            hash_builder_root,
+            hash_builder_updates,
+            hash_builder_proof_nodes,
+        );
     }
 
     #[test]
     fn sparse_trie_empty_update_repeated() {
+        let ctx = ParallelSparseTrieTestContext;
+
         let paths = (0..=255).map(|b| Nibbles::unpack(B256::repeat_byte(b))).collect::<Vec<_>>();
         let old_value = Account { nonce: 1, ..Default::default() };
         let old_value_encoded = {
@@ -3768,62 +3794,57 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
-        for path in &paths {
-            sparse.update_leaf(*path, old_value_encoded.clone(), &provider).unwrap();
-        }
-        let sparse_root = sparse.root();
-        let sparse_updates = sparse.updates_ref();
-
-        assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
-        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+        ctx.update_leaves(
+            &mut sparse,
+            paths.iter().copied().zip(std::iter::repeat(old_value_encoded)),
+        );
+        ctx.assert_with_hash_builder(
+            &mut sparse,
+            hash_builder_root,
+            hash_builder_updates,
+            hash_builder_proof_nodes,
+        );
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
             run_hash_builder(
-                paths.iter().copied().zip(std::iter::repeat_with(|| new_value)),
+                paths.iter().copied().zip(std::iter::repeat(new_value)),
                 NoopAccountTrieCursor::default(),
                 Default::default(),
                 paths.clone(),
             );
 
-        for path in &paths {
-            sparse.update_leaf(*path, new_value_encoded.clone(), &provider).unwrap();
-        }
-        let sparse_root = sparse.root();
-        let sparse_updates = sparse.take_updates();
-
-        assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
-        assert_eq_parallel_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
+        ctx.update_leaves(
+            &mut sparse,
+            paths.iter().copied().zip(std::iter::repeat(new_value_encoded)),
+        );
+        ctx.assert_with_hash_builder(
+            &mut sparse,
+            hash_builder_root,
+            hash_builder_updates,
+            hash_builder_proof_nodes,
+        );
     }
 
     #[test]
     fn sparse_trie_remove_leaf() {
+        let ctx = ParallelSparseTrieTestContext;
         let provider = DefaultBlindedProvider;
         let mut sparse = ParallelSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
 
-        sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone(), &provider)
-            .unwrap();
-        sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone(), &provider)
-            .unwrap();
-        sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone(), &provider)
-            .unwrap();
-        sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone(), &provider)
-            .unwrap();
-        sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone(), &provider)
-            .unwrap();
-        sparse
-            .update_leaf(Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value, &provider)
-            .unwrap();
+        ctx.update_leaves(
+            &mut sparse,
+            [
+                (Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x1]), value.clone()),
+                (Nibbles::from_nibbles([0x5, 0x0, 0x2, 0x3, 0x3]), value.clone()),
+                (Nibbles::from_nibbles([0x5, 0x2, 0x0, 0x1, 0x3]), value.clone()),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x1, 0x0, 0x2]), value.clone()),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x0, 0x2]), value.clone()),
+                (Nibbles::from_nibbles([0x5, 0x3, 0x3, 0x2, 0x0]), value),
+            ],
+        );
 
         // Extension (Key = 5)
         // └── Branch (Mask = 1011)
@@ -4737,7 +4758,7 @@ mod tests {
         ]);
 
         // Insert all leaves
-        ctx.insert_leaves(&mut trie, &leaves);
+        ctx.update_leaves(&mut trie, leaves.clone());
 
         // Verify the upper subtrie has an extension node at the root with key 0x12
         ctx.assert_upper_subtrie(&trie)
@@ -4796,7 +4817,7 @@ mod tests {
         let leaves = ctx.create_test_leaves(&[&[0x1, 0x2, 0x3, 0x4], &[0x1, 0x2, 0x3, 0x5]]);
 
         // Insert all leaves
-        ctx.insert_leaves(&mut trie, &leaves);
+        ctx.update_leaves(&mut trie, leaves.clone());
 
         // Verify the upper subtrie has an extension node at the root with key 0x123
         ctx.assert_upper_subtrie(&trie)
@@ -4827,7 +4848,7 @@ mod tests {
         let leaves = ctx.create_test_leaves(&[&[0x1, 0x2, 0x3, 0x4], &[0x1, 0x2, 0x4, 0x5]]);
 
         // Insert all leaves
-        ctx.insert_leaves(&mut trie, &leaves);
+        ctx.update_leaves(&mut trie, leaves.clone());
 
         // Verify the upper subtrie has an extension node at the root with key 0x12
         ctx.assert_upper_subtrie(&trie)
@@ -4864,10 +4885,15 @@ mod tests {
         let (leaf3_path, value3) = ctx.create_test_leaf([0x2], 3);
         let (leaf4_path, value4) = ctx.create_test_leaf([0x3], 4);
 
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf4_path, value4.clone(), DefaultBlindedProvider).unwrap();
+        ctx.update_leaves(
+            &mut trie,
+            [
+                (leaf1_path, value1.clone()),
+                (leaf2_path, value2.clone()),
+                (leaf3_path, value3.clone()),
+                (leaf4_path, value4.clone()),
+            ],
+        );
 
         // Verify upper trie has a branch at root with 4 children
         ctx.assert_upper_subtrie(&trie)
@@ -4904,8 +4930,7 @@ mod tests {
         let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x0], 1);
         let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x1, 0x1, 0x1, 0x1, 0x1, 0x1], 2);
 
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        ctx.update_leaves(&mut trie, [(leaf1_path, value1.clone()), (leaf2_path, value2.clone())]);
 
         // Verify upper trie has extension with the full common prefix
         ctx.assert_upper_subtrie(&trie).has_extension(
@@ -4957,9 +4982,7 @@ mod tests {
         }
 
         // Insert all leaves
-        for (path, value) in &leaves {
-            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
-        }
+        ctx.update_leaves(&mut trie, leaves.iter().cloned());
 
         // Verify upper trie structure
         ctx.assert_upper_subtrie(&trie)
@@ -5009,9 +5032,7 @@ mod tests {
         ];
 
         // Insert all leaves
-        for (path, value) in &leaves {
-            trie.update_leaf(*path, value.clone(), DefaultBlindedProvider).unwrap();
-        }
+        ctx.update_leaves(&mut trie, leaves.iter().cloned());
 
         // Verify upper trie has extension then branch
         ctx.assert_upper_subtrie(&trie)
@@ -5059,17 +5080,16 @@ mod tests {
         // First two leaves share prefix 0xFF0
         let (leaf1_path, value1) = ctx.create_test_leaf([0xF, 0xF, 0x0, 0x1], 1);
         let (leaf2_path, value2) = ctx.create_test_leaf([0xF, 0xF, 0x0, 0x2], 2);
+        let (leaf3_path, value3) = ctx.create_test_leaf([0xF, 0x0, 0x0, 0x3], 3);
 
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        ctx.update_leaves(&mut trie, [(leaf1_path, value1.clone()), (leaf2_path, value2.clone())]);
 
         // Verify initial extension structure
         ctx.assert_upper_subtrie(&trie)
             .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0xF, 0xF, 0x0]));
 
         // Add leaf that splits the extension
-        let (leaf3_path, value3) = ctx.create_test_leaf([0xF, 0x0, 0x0, 0x3], 3);
-        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+        ctx.update_leaves(&mut trie, [(leaf3_path, value3.clone())]);
 
         // Verify transformed structure
         ctx.assert_upper_subtrie(&trie)
