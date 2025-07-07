@@ -197,7 +197,19 @@ impl GitManager {
 
     /// Switch to the specified git reference (branch, tag, or commit)
     pub fn switch_ref(&self, git_ref: &str) -> Result<()> {
-        // First, check if this is a branch that tracks a remote
+        // First checkout the reference
+        let output = Command::new("git")
+            .args(["checkout", git_ref])
+            .current_dir(&self.repo_root)
+            .output()
+            .wrap_err_with(|| format!("Failed to switch to reference '{git_ref}'"))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(eyre!("Failed to switch to reference '{}': {}", git_ref, stderr));
+        }
+
+        // Check if this is a branch that tracks a remote and pull latest changes
         let is_branch = Command::new("git")
             .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", git_ref)])
             .current_dir(&self.repo_root)
@@ -218,20 +230,7 @@ impl GitManager {
                     if !upstream.is_empty() && upstream != format!("{}@{{upstream}}", git_ref) {
                         // Branch tracks a remote, pull latest changes
                         info!("Pulling latest changes for branch: {}", git_ref);
-                        
-                        // First checkout the branch
-                        let checkout_output = Command::new("git")
-                            .args(["checkout", git_ref])
-                            .current_dir(&self.repo_root)
-                            .output()
-                            .wrap_err_with(|| format!("Failed to checkout branch '{}'", git_ref))?;
 
-                        if !checkout_output.status.success() {
-                            let stderr = String::from_utf8_lossy(&checkout_output.stderr);
-                            return Err(eyre!("Failed to checkout branch '{}': {}", git_ref, stderr));
-                        }
-
-                        // Then pull latest changes
                         let pull_output = Command::new("git")
                             .args(["pull", "--ff-only"])
                             .current_dir(&self.repo_root)
@@ -245,39 +244,12 @@ impl GitManager {
                         } else {
                             info!("Successfully pulled latest changes for branch: {}", git_ref);
                         }
-                        
-                        // Verify the checkout succeeded
-                        let current_commit_output = Command::new("git")
-                            .args(["rev-parse", "HEAD"])
-                            .current_dir(&self.repo_root)
-                            .output()
-                            .wrap_err("Failed to get current commit")?;
-
-                        if !current_commit_output.status.success() {
-                            return Err(eyre!("Failed to verify git checkout"));
-                        }
-
-                        info!("Switched to reference: {} (with latest changes)", git_ref);
-                        return Ok(());
                     }
                 }
             }
         }
 
-        // Not a tracking branch, just checkout normally (tag, commit, or non-tracking branch)
-        let output = Command::new("git")
-            .args(["checkout", git_ref])
-            .current_dir(&self.repo_root)
-            .output()
-            .wrap_err_with(|| format!("Failed to switch to reference '{git_ref}'"))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(eyre!("Failed to switch to reference '{}': {}", git_ref, stderr));
-        }
-
-        // For tags, we might be in detached HEAD state, which is fine for benchmarking
-        // Just verify the checkout succeeded by checking the current commit
+        // Verify the checkout succeeded by checking the current commit
         let current_commit_output = Command::new("git")
             .args(["rev-parse", "HEAD"])
             .current_dir(&self.repo_root)
