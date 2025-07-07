@@ -2,7 +2,7 @@
 
 use eyre::{eyre, Result, WrapErr};
 use std::process::Command;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Manages git operations for branch switching
 #[derive(Debug, Clone)]
@@ -119,6 +119,7 @@ impl GitManager {
 
     /// Fetch all refs from remote to ensure we have latest branches and tags
     pub fn fetch_all(&self) -> Result<()> {
+        // First, fetch all refs from all remotes
         let output = Command::new("git")
             .args(["fetch", "--all", "--tags", "--quiet", "--force"])
             .current_dir(&self.repo_root)
@@ -133,6 +134,59 @@ impl GitManager {
             }
         } else {
             info!("Fetched latest refs");
+        }
+
+        // Get current branch to restore later
+        let current_branch = self.get_current_branch().ok();
+        
+        // Get list of local branches that track remote branches
+        let output = Command::new("git")
+            .args(["branch", "-r"])
+            .current_dir(&self.repo_root)
+            .output()
+            .wrap_err("Failed to list remote branches")?;
+
+        if output.status.success() {
+            let remote_branches = String::from_utf8_lossy(&output.stdout);
+            
+            // Update local branches that track remotes
+            for line in remote_branches.lines() {
+                let branch = line.trim();
+                // Skip HEAD pointer
+                if branch.contains("HEAD") {
+                    continue;
+                }
+                
+                // Extract branch name from origin/branch-name format
+                if let Some(branch_name) = branch.strip_prefix("origin/") {
+                    // Check if we have a local branch tracking this remote
+                    let local_exists = Command::new("git")
+                        .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", branch_name)])
+                        .current_dir(&self.repo_root)
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false);
+                    
+                    if local_exists {
+                        // Try to fast-forward the local branch
+                        let output = Command::new("git")
+                            .args(["fetch", "origin", &format!("{}:{}", branch_name, branch_name)])
+                            .current_dir(&self.repo_root)
+                            .output();
+                        
+                        if let Ok(output) = output {
+                            if output.status.success() {
+                                debug!("Updated local branch: {}", branch_name);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Restore original branch if we had one
+        if let Some(branch) = current_branch {
+            let _ = self.switch_branch(&branch);
         }
 
         Ok(())
