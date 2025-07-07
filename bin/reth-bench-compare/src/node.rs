@@ -236,26 +236,44 @@ impl NodeManager {
         Ok(child)
     }
 
-    /// Wait for the node to be ready and return its current tip (doesn't wait for sync)
+    /// Wait for the node to be ready and return its current tip
     pub async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
-        info!("Waiting for node to be ready...");
+        info!("Waiting for node to be ready and synced...");
 
-        let max_wait = Duration::from_secs(60); // 1 minute should be enough for RPC to come up
+        let max_wait = Duration::from_secs(120); // 2 minutes to allow for sync
         let check_interval = Duration::from_secs(2);
+        let rpc_url = "http://localhost:8545";
 
         let result = timeout(max_wait, async {
             loop {
-                // Try to get tip from local RPC first
-                if let Ok(tip) = self.get_tip_from_rpc("http://localhost:8545").await {
-                    return Ok(tip);
+                // First check if RPC is up by trying to get the tip
+                match self.get_tip_from_rpc(rpc_url).await {
+                    Ok(tip) => {
+                        // RPC is up, now check if node is syncing
+                        match self.is_syncing(rpc_url).await {
+                            Ok(is_syncing) => {
+                                if !is_syncing {
+                                    info!("Node is ready and not syncing at block: {}", tip);
+                                    return Ok(tip);
+                                } else {
+                                    debug!("Node is still syncing, waiting...");
+                                }
+                            }
+                            Err(e) => {
+                                debug!("Failed to check sync status: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        debug!("Node RPC not ready yet: {}", e);
+                    }
                 }
 
-                debug!("Node RPC not ready yet, waiting...");
                 sleep(check_interval).await;
             }
         })
         .await
-        .wrap_err("Timed out waiting for node RPC to be ready")?;
+        .wrap_err("Timed out waiting for node to be ready and synced")?;
 
         result
     }
@@ -414,6 +432,35 @@ impl NodeManager {
 
         info!("Unwound to block: {}", block_number);
         Ok(())
+    }
+
+    /// Check if the node is still syncing
+    async fn is_syncing(&self, rpc_url: &str) -> Result<bool> {
+        let request_body = json!({
+            "jsonrpc": "2.0",
+            "method": "eth_syncing",
+            "params": [],
+            "id": 1
+        });
+
+        let response = self
+            .http_client
+            .post(rpc_url)
+            .json(&request_body)
+            .send()
+            .await
+            .wrap_err("Failed to send eth_syncing request")?;
+
+        if !response.status().is_success() {
+            return Err(eyre!("eth_syncing request failed with status: {}", response.status()));
+        }
+
+        let json: Value = response.json().await.wrap_err("Failed to parse eth_syncing response")?;
+
+        let result = json.get("result").ok_or_else(|| eyre!("No result field in eth_syncing response"))?;
+
+        // eth_syncing returns false when not syncing, or an object with sync status when syncing
+        Ok(!result.is_boolean() || result.as_bool().unwrap_or(true))
     }
 
     /// Get chain tip from RPC endpoint
