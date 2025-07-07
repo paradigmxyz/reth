@@ -511,7 +511,7 @@ impl<R> Default for Geometry<R> {
 /// Read transactions prevent reuse of pages freed by newer write transactions, thus the database
 /// can grow quickly. This callback will be called when there is not enough space in the database
 /// (i.e. before increasing the database size or before `MDBX_MAP_FULL` error) and thus can be
-/// used to resolve issues with a "long-lived" read transacttions.
+/// used to resolve issues with a "long-lived" read transactions.
 ///
 /// Depending on the arguments and needs, your implementation may wait,
 /// terminate a process or thread that is performing a long read, or perform
@@ -778,7 +778,7 @@ impl EnvironmentBuilder {
     /// Sets the maximum number of threads or reader slots for the environment.
     ///
     /// This defines the number of slots in the lock table that is used to track readers in the
-    /// the environment. The default is 126. Starting a read-only transaction normally ties a lock
+    /// environment. The default is 126. Starting a read-only transaction normally ties a lock
     /// table slot to the [Transaction] object until it or the [Environment] object is destroyed.
     pub const fn set_max_readers(&mut self, max_readers: u64) -> &mut Self {
         self.max_readers = Some(max_readers);

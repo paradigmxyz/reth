@@ -106,6 +106,11 @@ impl<V> TransactionValidationTaskExecutor<V> {
             to_validation_task: self.to_validation_task,
         }
     }
+
+    /// Returns the validator.
+    pub const fn validator(&self) -> &V {
+        &self.validator
+    }
 }
 
 impl<Client, Tx> TransactionValidationTaskExecutor<EthTransactionValidator<Client, Tx>> {

@@ -41,41 +41,41 @@ const SPARSE_TRIE_SUBTRIE_HASHES_LEVEL: usize = 2;
 /// 2. Update tracking - changes to the trie structure can be tracked and selectively persisted
 /// 3. Incremental operations - nodes can be revealed as needed without loading the entire trie.
 ///    This is what gives rise to the notion of a "sparse" trie.
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub enum SparseTrie {
+#[derive(PartialEq, Eq, Debug)]
+pub enum SparseTrie<T = RevealedSparseTrie> {
     /// The trie is blind -- no nodes have been revealed
     ///
     /// This is the default state. In this state, the trie cannot be directly queried or modified
     /// until nodes are revealed.
     ///
     /// In this state the `SparseTrie` can optionally carry with it a cleared `RevealedSparseTrie`.
-    /// This allows for re-using the trie's allocations between payload executions.
-    Blind(Option<Box<RevealedSparseTrie>>),
+    /// This allows for reusing the trie's allocations between payload executions.
+    Blind(Option<Box<T>>),
     /// Some nodes in the Trie have been revealed.
     ///
     /// In this state, the trie can be queried and modified for the parts
     /// that have been revealed. Other parts remain blind and require revealing
     /// before they can be accessed.
-    Revealed(Box<RevealedSparseTrie>),
+    Revealed(Box<T>),
 }
 
-impl Default for SparseTrie {
+impl<T: Default> Default for SparseTrie<T> {
     fn default() -> Self {
         Self::Blind(None)
     }
 }
 
-impl SparseTrie {
+impl<T: SparseTrieInterface> SparseTrie<T> {
     /// Creates a new blind sparse trie.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
+    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, RevealedSparseTrie, SparseTrie};
     ///
-    /// let trie = SparseTrie::blind();
+    /// let trie = SparseTrie::<RevealedSparseTrie>::blind();
     /// assert!(trie.is_blind());
-    /// let trie = SparseTrie::default();
+    /// let trie = SparseTrie::<RevealedSparseTrie>::default();
     /// assert!(trie.is_blind());
     /// ```
     pub const fn blind() -> Self {
@@ -87,9 +87,9 @@ impl SparseTrie {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SparseTrie};
+    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, RevealedSparseTrie, SparseTrie};
     ///
-    /// let trie = SparseTrie::revealed_empty();
+    /// let trie = SparseTrie::<RevealedSparseTrie>::revealed_empty();
     /// assert!(!trie.is_blind());
     /// ```
     pub fn revealed_empty() -> Self {
@@ -106,13 +106,13 @@ impl SparseTrie {
     ///
     /// # Returns
     ///
-    /// A mutable reference to the underlying [`RevealedSparseTrie`].
+    /// A mutable reference to the underlying [`SparseTrieInterface`].
     pub fn reveal_root(
         &mut self,
         root: TrieNode,
         masks: TrieMasks,
         retain_updates: bool,
-    ) -> SparseTrieResult<&mut RevealedSparseTrie> {
+    ) -> SparseTrieResult<&mut T> {
         // if `Blind`, we initialize the revealed trie with the given root node, using a
         // pre-allocated trie if available.
         if self.is_blind() {
@@ -137,7 +137,7 @@ impl SparseTrie {
     /// Returns an immutable reference to the underlying revealed sparse trie.
     ///
     /// Returns `None` if the trie is blinded.
-    pub const fn as_revealed_ref(&self) -> Option<&RevealedSparseTrie> {
+    pub const fn as_revealed_ref(&self) -> Option<&T> {
         if let Self::Revealed(revealed) = self {
             Some(revealed)
         } else {
@@ -148,7 +148,7 @@ impl SparseTrie {
     /// Returns a mutable reference to the underlying revealed sparse trie.
     ///
     /// Returns `None` if the trie is blinded.
-    pub fn as_revealed_mut(&mut self) -> Option<&mut RevealedSparseTrie> {
+    pub fn as_revealed_mut(&mut self) -> Option<&mut T> {
         if let Self::Revealed(revealed) = self {
             Some(revealed)
         } else {
@@ -198,8 +198,8 @@ impl SparseTrie {
     }
 
     /// Returns a [`SparseTrie::Blind`] based on this one. If this instance was revealed, or was
-    /// itself a `Blind` with a pre-allocated [`RevealedSparseTrie`], this will return
-    /// a `Blind` carrying a cleared pre-allocated [`RevealedSparseTrie`].
+    /// itself a `Blind` with a pre-allocated [`SparseTrieInterface`], this will return
+    /// a `Blind` carrying a cleared pre-allocated [`SparseTrieInterface`].
     pub fn clear(self) -> Self {
         match self {
             Self::Blind(_) => self,
@@ -209,9 +209,7 @@ impl SparseTrie {
             }
         }
     }
-}
 
-impl SparseTrie {
     /// Updates (or inserts) a leaf at the given key path with the specified RLP-encoded value.
     ///
     /// # Errors
@@ -2384,8 +2382,8 @@ mod tests {
 
     #[test]
     fn sparse_trie_is_blind() {
-        assert!(SparseTrie::blind().is_blind());
-        assert!(!SparseTrie::revealed_empty().is_blind());
+        assert!(SparseTrie::<RevealedSparseTrie>::blind().is_blind());
+        assert!(!SparseTrie::<RevealedSparseTrie>::revealed_empty().is_blind());
     }
 
     #[test]

@@ -832,11 +832,11 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will move/discard the given transaction according to the `PoolUpdate`
     fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome<T::Transaction> {
         let mut outcome = UpdateOutcome::default();
-        for PoolUpdate { id, hash, current, destination } in updates {
+        for PoolUpdate { id, current, destination } in updates {
             match destination {
                 Destination::Discard => {
                     // remove the transaction from the pool and subpool
-                    if let Some(tx) = self.prune_transaction_by_hash(&hash) {
+                    if let Some(tx) = self.prune_transaction_by_id(&id) {
                         outcome.discarded.push(tx);
                     }
                     self.metrics.removed_transactions.increment(1);
@@ -956,6 +956,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx_hash: &B256,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
+        self.remove_from_subpool(pool, tx.id())
+    }
+    /// This removes the transaction from the pool and advances any descendant state inside the
+    /// subpool.
+    ///
+    /// This is intended to be used when we call [`Self::process_updates`].
+    fn prune_transaction_by_id(
+        &mut self,
+        tx_id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let (tx, pool) = self.all_transactions.remove_transaction_by_id(tx_id)?;
         self.remove_from_subpool(pool, tx.id())
     }
 
@@ -1363,7 +1374,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
                 if id.nonce < info.state_nonce {
                     updates.push(PoolUpdate {
                         id: *tx.transaction.id(),
-                        hash: *tx.transaction.hash(),
                         current: tx.subpool,
                         destination: Destination::Discard,
                     });
@@ -1473,7 +1483,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if current_pool != tx.subpool {
             updates.push(PoolUpdate {
                 id: *tx.transaction.id(),
-                hash: *tx.transaction.hash(),
                 current: current_pool,
                 destination: tx.subpool.into(),
             })
@@ -1563,6 +1572,20 @@ impl<T: PoolTransaction> AllTransactions<T> {
         Some((tx, internal.subpool))
     }
 
+    /// Removes a transaction from the set using its id.
+    pub(crate) fn remove_transaction_by_id(
+        &mut self,
+        tx_id: &TransactionId,
+    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
+        let internal = self.txs.remove(tx_id)?;
+        let tx = self.by_hash.remove(internal.transaction.hash())?;
+        self.remove_auths(&internal);
+        // decrement the counter for the sender.
+        self.tx_decr(tx.sender_id());
+        self.update_size_metrics();
+        Some((tx, internal.subpool))
+    }
+
     /// If a tx is removed (_not_ mined), all descendants are set to parked due to the nonce gap
     pub(crate) fn park_descendant_transactions(
         &mut self,
@@ -1582,7 +1605,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             if current_pool != tx.subpool {
                 updates.push(PoolUpdate {
                     id: *id,
-                    hash: *tx.transaction.hash(),
                     current: current_pool,
                     destination: tx.subpool.into(),
                 })
@@ -1942,7 +1964,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     if current_pool != tx.subpool {
                         updates.push(PoolUpdate {
                             id: *id,
-                            hash: *tx.transaction.hash(),
                             current: current_pool,
                             destination: tx.subpool.into(),
                         })

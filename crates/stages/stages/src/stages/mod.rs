@@ -213,7 +213,7 @@ mod tests {
 
             if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
-                assert!(acc_indexing_stage.execute(&provider, input).is_err());
+                assert!(storage_indexing_stage.execute(&provider, input).is_err());
             } else {
                 storage_indexing_stage.execute(&provider, input).unwrap();
 
