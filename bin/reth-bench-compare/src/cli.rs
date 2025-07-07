@@ -166,24 +166,27 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
         info!("Running in sudo mode - reth commands will use elevated privileges");
     }
 
-    // Initialize managers
+    // Initialize Git manager
     let git_manager = GitManager::new()?;
+    // Fetch all branches, tags, and commits
+    git_manager.fetch_all()?;
+
+    // Initialize compilation manager
     let output_dir = args.output_dir_path();
     let compilation_manager = CompilationManager::new(
         git_manager.repo_root().to_string(),
         output_dir.clone(),
         git_manager.clone(),
     )?;
+    // Initialize node manager
     let mut node_manager = NodeManager::new(&args);
+
     let benchmark_runner = BenchmarkRunner::new(&args);
     let mut comparison_generator = ComparisonGenerator::new(&args);
 
     // Store original git state for restoration
     let original_branch = git_manager.get_current_branch()?;
     info!("Current branch: {}", original_branch);
-
-    // Fetch all branches, tags, and commits
-    git_manager.fetch_all()?;
 
     // Validate git state
     if !args.skip_git_validation {
