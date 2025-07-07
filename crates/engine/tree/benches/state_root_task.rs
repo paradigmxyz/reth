@@ -25,6 +25,7 @@ use reth_provider::{
     AccountReader, ChainSpecProvider, HashingWriter, ProviderFactory,
 };
 use reth_trie::TrieInput;
+use reth_trie_sparse::RevealedSparseTrie;
 use revm_primitives::{HashMap, U256};
 use revm_state::{Account as RevmAccount, AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
 use std::{hint::black_box, sync::Arc};
@@ -220,12 +221,13 @@ fn bench_state_root(c: &mut Criterion) {
                         let state_updates = create_bench_state_updates(params);
                         setup_provider(&factory, &state_updates).expect("failed to setup provider");
 
-                        let payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
-                            WorkloadExecutor::default(),
-                            EthEvmConfig::new(factory.chain_spec()),
-                            &TreeConfig::default(),
-                            PrecompileCacheMap::default(),
-                        );
+                        let payload_processor =
+                            PayloadProcessor::<EthPrimitives, _, RevealedSparseTrie>::new(
+                                WorkloadExecutor::default(),
+                                EthEvmConfig::new(factory.chain_spec()),
+                                &TreeConfig::default(),
+                                PrecompileCacheMap::default(),
+                            );
                         let provider = BlockchainProvider::new(factory).unwrap();
 
                         (genesis_hash, payload_processor, provider, state_updates)

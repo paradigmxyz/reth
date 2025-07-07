@@ -47,6 +47,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use reth_trie_sparse::RevealedSparseTrie;
 use state::TreeState;
 use std::{
     borrow::Cow,
@@ -272,7 +273,7 @@ where
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
     /// The type responsible for processing new payloads
-    payload_processor: PayloadProcessor<N, C>,
+    payload_processor: PayloadProcessor<N, C, RevealedSparseTrie>,
     /// The EVM configuration.
     evm_config: C,
     /// Precompile cache map.

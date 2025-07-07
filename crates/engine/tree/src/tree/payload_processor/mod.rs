@@ -28,7 +28,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::SparseTrie;
+use reth_trie_sparse::{RevealedSparseTrie, SparseTrie, SparseTrieInterface};
 use std::{
     collections::VecDeque,
     sync::{
@@ -47,7 +47,7 @@ pub mod sparse_trie;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
-pub struct PayloadProcessor<N, Evm>
+pub struct PayloadProcessor<N, Evm, Trie>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
@@ -70,14 +70,15 @@ where
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// A cleared sparse trie, kept around to be reused for the state root computation so that
     /// allocations can be minimized.
-    sparse_trie: Option<SparseTrie>,
+    sparse_trie: Option<SparseTrie<Trie>>,
     _marker: std::marker::PhantomData<N>,
 }
 
-impl<N, Evm> PayloadProcessor<N, Evm>
+impl<N, Evm, Trie> PayloadProcessor<N, Evm, Trie>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
+    Trie: SparseTrieInterface + Send + Sync + 'static,
 {
     /// Creates a new payload processor.
     pub fn new(
@@ -101,10 +102,11 @@ where
     }
 }
 
-impl<N, Evm> PayloadProcessor<N, Evm>
+impl<N, Evm, Trie> PayloadProcessor<N, Evm, Trie>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N> + 'static,
+    Trie: SparseTrieInterface + Send + Sync + 'static,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
@@ -146,7 +148,7 @@ where
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle
+    ) -> PayloadHandle<Trie>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -199,7 +201,8 @@ where
         // take the sparse trie if it was set
         let sparse_trie = self.sparse_trie.take();
 
-        let mut sparse_trie_task = SparseTrieTask::new_with_stored_trie(
+        // use the trie generic for account tree, and the RevealedSparseTrie for the storage tries.
+        let mut sparse_trie_task = SparseTrieTask::<_, _, RevealedSparseTrie>::new_with_stored_trie(
             self.executor.clone(),
             sparse_trie_rx,
             proof_task.handle(),
@@ -237,7 +240,7 @@ where
         header: SealedHeaderFor<N>,
         transactions: VecDeque<Recovered<N::SignedTx>>,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle
+    ) -> PayloadHandle<Trie>
     where
         P: BlockReader
             + StateProviderFactory
@@ -251,7 +254,7 @@ where
     }
 
     /// Sets the sparse trie to be kept around for the state root computation.
-    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrie) {
+    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrie<Trie>) {
         self.sparse_trie = Some(sparse_trie);
     }
 
@@ -321,22 +324,22 @@ where
 
 /// Handle to all the spawned tasks.
 #[derive(Debug)]
-pub struct PayloadHandle {
+pub struct PayloadHandle<T = RevealedSparseTrie> {
     /// Channel for evm state updates
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
     /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome<T>, ParallelStateRootError>>>,
 }
 
-impl PayloadHandle {
+impl<T> PayloadHandle<T> {
     /// Awaits the state root
     ///
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    pub fn state_root(&mut self) -> Result<StateRootComputeOutcome<T>, ParallelStateRootError> {
         self.state_root
             .take()
             .expect("state_root is None")
@@ -478,6 +481,7 @@ mod tests {
     };
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
+    use reth_trie_sparse::RevealedSparseTrie;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
@@ -582,7 +586,7 @@ mod tests {
             }
         }
 
-        let mut payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+        let mut payload_processor = PayloadProcessor::<EthPrimitives, _, RevealedSparseTrie>::new(
             WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
