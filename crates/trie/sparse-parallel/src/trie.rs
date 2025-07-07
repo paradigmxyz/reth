@@ -1006,13 +1006,10 @@ impl ParallelSparseTrie {
                 }
                 .freeze();
 
-                // If the root node of the subtrie is either a branch or an extension node, we need
-                // to add its full path to the unchanged prefix set, so that when we don't skip it
-                // when calculating hashes for the upper subtrie using lower subtrie root nodes.
-                //
-                // For more information, see how we handle extension and branch nodes in `rlp_node`.
+                // We need the full path of root node of the lower subtrie to the unchanged prefix
+                // set, so that we don't skip it when calculating hashes for the upper subtrie.
                 match subtrie.nodes.get(&subtrie.path) {
-                    Some(SparseNode::Extension { key, .. }) => {
+                    Some(SparseNode::Extension { key, .. } | SparseNode::Leaf { key, .. }) => {
                         unchanged_prefix_set.insert(subtrie.path.join(key));
                     }
                     Some(SparseNode::Branch { .. }) => {
@@ -2882,6 +2879,7 @@ mod tests {
 
         let unchanged_prefix_set = PrefixSetMut::from([
             Nibbles::from_nibbles([0x0]),
+            leaf_2_full_path,
             Nibbles::from_nibbles([0x2, 0x0, 0x0]),
         ]);
         // Create a prefix set with the keys that match only the second subtrie
