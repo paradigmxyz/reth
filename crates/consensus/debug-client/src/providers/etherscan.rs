@@ -3,7 +3,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_json_rpc::{Response, ResponsePayload};
 use reqwest::Client;
-use reth_tracing::tracing::warn;
+use reth_tracing::tracing::{debug, warn};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::interval};
@@ -59,21 +59,26 @@ where
             tag => tag.to_string(),
         };
 
-        let resp: Response<RpcBlock> = self
-            .http_client
-            .get(&self.base_url)
-            .query(&[
-                ("module", "proxy"),
-                ("action", "eth_getBlockByNumber"),
-                ("tag", &tag),
-                ("boolean", "true"),
-                ("apikey", &self.api_key),
-                ("chainid", &self.chain_id.to_string()),
-            ])
-            .send()
-            .await?
-            .json()
-            .await?;
+        let mut req = self.http_client.get(&self.base_url).query(&[
+            ("module", "proxy"),
+            ("action", "eth_getBlockByNumber"),
+            ("tag", &tag),
+            ("boolean", "true"),
+            ("apikey", &self.api_key),
+        ]);
+
+        if !self.base_url.contains("chainid=") {
+            // only append chainid of not part of the base
+            req = req.query(&[("chainid", &self.chain_id.to_string())]);
+        }
+
+        let resp = req.send().await?.text().await?;
+
+        debug!(target: "etherscan", %resp, "fetched block from etherscan");
+
+        let resp: Response<RpcBlock> = serde_json::from_str(&resp).inspect_err(|err| {
+            warn!(target: "etherscan", "Failed to parse block response from etherscan: {}", err);
+        })?;
 
         let payload = resp.payload;
         match payload {
