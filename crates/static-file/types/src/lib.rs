@@ -101,24 +101,22 @@ impl StaticFileTargets {
     }
 
     /// Returns `true` if all targets are either [`None`] or has beginning of the range equal to the
-    /// highest static file.
-    pub fn is_contiguous_to_highest_static_files(&self, static_files: HighestStaticFiles) -> bool {
-        [
-            (self.headers.as_ref(), static_files.headers),
-            (self.receipts.as_ref(), static_files.receipts),
-            (self.transactions.as_ref(), static_files.transactions),
-            (self.block_meta.as_ref(), static_files.block_meta),
-        ]
-        .iter()
-        .all(|(target_block_range, highest_static_file_block)| {
-            target_block_range.is_none_or(|target_block_range| {
-                *target_block_range.start()
-                    == highest_static_file_block
-                        .map_or(0, |highest_static_file_block| highest_static_file_block + 1)
-                    })
-            })
+/// highest static file.
+pub fn is_contiguous_to_highest_static_files(&self, static_files: HighestStaticFiles) -> bool {
+    [
+        (self.headers.as_ref(), static_files.headers),
+        (self.receipts.as_ref(), static_files.receipts),
+        (self.transactions.as_ref(), static_files.transactions),
+        (self.block_meta.as_ref(), static_files.block_meta),
+    ]
+    .iter()
+    .all(|(target_block_range, highest_static_file_block)| {
+        target_block_range.is_none_or(|target_block_range| {
+            *target_block_range.start()
+                == highest_static_file_block
+                    .map_or(0, |highest_static_file_block| highest_static_file_block + 1)
         })
-    }
+    })
 }
 
 /// Each static file has a fixed number of blocks. This gives out the range where the requested
