@@ -10,6 +10,7 @@ exclude = [".github/"]
 [workspace]
 members = [
     "bin/reth-bench/",
+    "bin/reth-execution-tester/",
     "bin/reth/",
     "crates/alloy-provider/",
     "crates/chain-state/",
@@ -325,6 +326,7 @@ reth = { path = "bin/reth" }
 reth-alloy-provider = { path = "crates/alloy-provider" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }
+reth-execution-tester = { path = "bin/reth-execution-tester" }
 reth-chain-state = { path = "crates/chain-state" }
 reth-chainspec = { path = "crates/chainspec", default-features = false }
 reth-cli = { path = "crates/cli/cli" }
