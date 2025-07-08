@@ -7786,6 +7786,7 @@ version = "1.5.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
+ "alloy-genesis",
  "alloy-network",
  "alloy-primitives",
  "alloy-provider",
@@ -9994,6 +9995,26 @@ dependencies = [
  "reth-storage-api",
  "revm-context",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "reth-rpc-e2e-tests"
+version = "1.5.1"
+dependencies = [
+ "alloy-genesis",
+ "alloy-rpc-types-engine",
+ "eyre",
+ "futures-util",
+ "jsonrpsee",
+ "reth-chainspec",
+ "reth-e2e-test-utils",
+ "reth-node-api",
+ "reth-node-ethereum",
+ "reth-rpc-api",
+ "reth-tracing",
+ "serde_json",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
