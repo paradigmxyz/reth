@@ -248,20 +248,25 @@ impl NodeManager {
                 // First check if RPC is up and node is not syncing
                 match provider.syncing().await {
                     Ok(sync_result) => {
-                        // SyncStatus::None means not syncing, anything else means syncing
-                        let is_syncing = !matches!(sync_result, SyncStatus::None);
-
-                        if is_syncing {
-                            debug!("Node is still syncing ({sync_result:?}), waiting...");
-                        } else {
-                            // Node is not syncing, now get the tip
-                            match provider.get_block_number().await {
-                                Ok(tip) => {
-                                    info!("Node is ready and not syncing at block: {}", tip);
-                                    return Ok(tip);
-                                }
-                                Err(e) => {
-                                    debug!("Failed to get block number: {}", e);
+                        match sync_result {
+                            SyncStatus::Info(sync_info)
+                                if sync_info.current_block != sync_info.highest_block ||
+                                    sync_info.stages.as_ref().is_none_or(|stages| {
+                                        stages.windows(2).all(|w| w[0].block == w[1].block)
+                                    }) =>
+                            {
+                                debug!("Node is still syncing {sync_info:?}, waiting...");
+                            }
+                            _ => {
+                                // Node is not syncing, now get the tip
+                                match provider.get_block_number().await {
+                                    Ok(tip) => {
+                                        info!("Node is ready and not syncing at block: {}", tip);
+                                        return Ok(tip);
+                                    }
+                                    Err(e) => {
+                                        debug!("Failed to get block number: {}", e);
+                                    }
                                 }
                             }
                         }
