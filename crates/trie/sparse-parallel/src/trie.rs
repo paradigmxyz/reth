@@ -5499,4 +5499,132 @@ mod tests {
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2);
     }
+
+    #[test]
+    fn sparse_trie_fuzz_regression_test() {
+        use std::str::FromStr;
+
+        let test_data: Vec<BTreeMap<Nibbles, Account>> = vec![
+            BTreeMap::from_iter([(
+                Nibbles::from_nibbles_unchecked([0xd, 0x4, 0x7, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]),
+                Account {
+                    nonce: 5325726083542617053,
+                    balance: U256::from_str("101018114941614113849971053660389881402364231281015544450733225425640092698491").unwrap(),
+                    bytecode_hash: Some(B256::from_str("0xba59825fe769758d8468ee072bb6bfc12ae9c31a12dc79bbc1bb3c7f4db5890e").unwrap()),
+                }),
+            ]),
+            BTreeMap::from_iter([(
+                Nibbles::from_nibbles_unchecked([0xd, 0xd, 0xc, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]),
+                Account {
+                    nonce: 8232513358197611128,
+                    balance: U256::from_str("115248226886075036919767426034015054826632460320294652361420333269135477051051").unwrap(),
+                    bytecode_hash: Some(B256::from_str("0xeb76fd5b5f770f5ba3304540bc190e96f348d46c091ade4d15c4ac7f885c20d2").unwrap()),
+                }),
+            ]),
+            BTreeMap::from_iter([(
+                Nibbles::from_nibbles_unchecked([0xd, 0xd, 0x5, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]),
+                Account {
+                    nonce: 13168687424840546378,
+                    balance: U256::from_str("45401729761379445466961728301155070318243454500235837009111371492389893074896").unwrap(),
+                    bytecode_hash: Some(B256::from_str("0x58e83f1b1000974b80148ab0f9a4e4007227f113f2bd9163510953ea98d088dc").unwrap()),
+                }),
+            ]),
+            BTreeMap::from_iter([(
+                Nibbles::from_nibbles_unchecked([0xd, 0xd, 0x5, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0]),
+                Account {
+                    nonce: 12581550875575626477,
+                    balance: U256::from_str("101721156119720837296053977909961378800848695057357169780882530336322481556791").unwrap(),
+                    bytecode_hash: Some(B256::from_str("0x418c6f252285135e995b1b17ff4194defbb8fb685a98a39917f91fe1427b7ad6").unwrap()),
+                }),
+            ]),
+        ];
+
+        // Call the exact same test function logic that the fuzz test calls
+        {
+            let mut state = BTreeMap::default();
+            let default_provider = DefaultBlindedProvider;
+            let provider_factory = create_test_provider_factory();
+            let mut sparse = ParallelSparseTrie::default().with_updates(true);
+
+            for update in test_data {
+                // Insert state updates into the sparse trie and calculate the root
+                for (key, account) in update.clone() {
+                    let account = account.into_trie_account(EMPTY_ROOT_HASH);
+                    let mut account_rlp = Vec::new();
+                    account.encode(&mut account_rlp);
+                    sparse.update_leaf(key, account_rlp, &default_provider).unwrap();
+                }
+                // We need to clone the sparse trie, so that all updated branch nodes are
+                // preserved, and not only those that were changed after the last call to
+                // `root()`.
+                let mut updated_sparse = sparse.clone();
+                let sparse_root = updated_sparse.root();
+                let sparse_updates = updated_sparse.take_updates();
+
+                // Insert state updates into the hash builder and calculate the root
+                state.extend(update);
+                let provider = provider_factory.provider().unwrap();
+                let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
+                let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
+                    run_hash_builder(
+                        state.clone(),
+                        trie_cursor.account_trie_cursor().unwrap(),
+                        Default::default(),
+                        state.keys().copied().collect::<Vec<_>>(),
+                    );
+
+                // Write trie updates to the database
+                let provider_rw = provider_factory.provider_rw().unwrap();
+                provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                provider_rw.commit().unwrap();
+
+                // Assert that the sparse trie root matches the hash builder root
+                assert_eq!(sparse_root, hash_builder_root);
+                // Assert that the sparse trie updates match the hash builder updates
+                pretty_assertions::assert_eq!(
+                    BTreeMap::from_iter(sparse_updates.updated_nodes),
+                    BTreeMap::from_iter(hash_builder_updates.account_nodes)
+                );
+                // Assert that the sparse trie nodes match the hash builder proof nodes
+                assert_eq_parallel_sparse_trie_proof_nodes(
+                    &updated_sparse,
+                    hash_builder_proof_nodes,
+                );
+
+                // We need to clone the sparse trie, so that all updated branch nodes are
+                // preserved, and not only those that were changed after the last call to
+                // `root()`.
+                let mut updated_sparse = sparse.clone();
+                let sparse_root = updated_sparse.root();
+                let sparse_updates = updated_sparse.take_updates();
+
+                let provider = provider_factory.provider().unwrap();
+                let trie_cursor = DatabaseTrieCursorFactory::new(provider.tx_ref());
+                let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
+                    run_hash_builder(
+                        state.clone(),
+                        trie_cursor.account_trie_cursor().unwrap(),
+                        B256Set::default(),
+                        state.keys().copied().collect::<Vec<_>>(),
+                    );
+
+                // Write trie updates to the database
+                let provider_rw = provider_factory.provider_rw().unwrap();
+                provider_rw.write_trie_updates(&hash_builder_updates).unwrap();
+                provider_rw.commit().unwrap();
+
+                // Assert that the sparse trie root matches the hash builder root
+                assert_eq!(sparse_root, hash_builder_root);
+                // Assert that the sparse trie updates match the hash builder updates
+                pretty_assertions::assert_eq!(
+                    BTreeMap::from_iter(sparse_updates.updated_nodes),
+                    BTreeMap::from_iter(hash_builder_updates.account_nodes)
+                );
+                assert_eq_parallel_sparse_trie_proof_nodes(
+                    &updated_sparse,
+                    hash_builder_proof_nodes,
+                );
+            }
+        }
+    }
 }
