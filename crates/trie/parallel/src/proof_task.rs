@@ -19,7 +19,7 @@ use reth_provider::{
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
-    proof::{ProofBlindedProviderFactory, StorageProof},
+    proof::{ProofTrieNodeProviderFactory, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdatesSorted,
     DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
@@ -302,7 +302,7 @@ where
 
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
+        let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
             trie_cursor_factory,
             hashed_cursor_factory,
             self.task_ctx.prefix_sets.clone(),
@@ -347,7 +347,7 @@ where
 
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
+        let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
             trie_cursor_factory,
             hashed_cursor_factory,
             self.task_ctx.prefix_sets.clone(),
