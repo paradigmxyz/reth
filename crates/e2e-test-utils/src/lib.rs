@@ -42,6 +42,9 @@ mod network;
 /// Helper for rpc operations
 mod rpc;
 
+/// Utilities for creating and writing RLP test data
+pub mod test_rlp_utils;
+
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
     num_nodes: usize,

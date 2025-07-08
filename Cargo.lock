@@ -7787,6 +7787,7 @@ dependencies = [
  "alloy-eips",
  "alloy-network",
  "alloy-primitives",
+ "alloy-provider",
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
