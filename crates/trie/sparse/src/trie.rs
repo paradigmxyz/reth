@@ -65,7 +65,7 @@ impl<T: Default> Default for SparseTrie<T> {
     }
 }
 
-impl<T: SparseTrieInterface> SparseTrie<T> {
+impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     /// Creates a new blind sparse trie.
     ///
     /// # Examples
