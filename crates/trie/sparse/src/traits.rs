@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
@@ -200,6 +200,11 @@ pub trait SparseTrieInterface: Default + Debug + Send + Sync {
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError>;
+
+    /// Returns a reference to the current sparse trie updates.
+    ///
+    /// If no updates have been made/recorded, returns an empty update set.
+    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates>;
 
     /// Consumes and returns the currently accumulated trie updates.
     ///
