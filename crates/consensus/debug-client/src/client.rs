@@ -1,8 +1,8 @@
 use alloy_consensus::Sealable;
 use alloy_primitives::B256;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, EngineApiMessageVersion, ExecutionPayload,
-    NodePrimitives, PayloadTypes,
+    BuiltPayload, ConsensusEngineHandle as BeaconConsensusEngineHandle, EngineApiMessageVersion,
+    ExecutionPayload, NodePrimitives, PayloadTypes,
 };
 use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;

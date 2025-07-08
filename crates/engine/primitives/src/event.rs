@@ -14,9 +14,11 @@ use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
+type BeaconConsensusEngineEvent<N> = ConsensusEngineEvent<N>;
+
 /// Events emitted by the consensus engine.
 #[derive(Clone, Debug)]
-pub enum BeaconConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
+pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     /// The fork choice state was updated, and the current fork choice status
     ForkchoiceUpdated(ForkchoiceState, ForkchoiceStatus),
     /// A block was added to the fork chain.

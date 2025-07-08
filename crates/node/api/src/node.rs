@@ -5,7 +5,10 @@ use alloy_rpc_types_engine::JwtSecret;
 use reth_basic_payload_builder::PayloadBuilder;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
+use reth_engine_primitives::{
+    ConsensusEngineEvent as BeaconConsensusEngineEvent,
+    ConsensusEngineHandle as BeaconConsensusEngineHandle,
+};
 use reth_evm::ConfigureEvm;
 use reth_network_api::FullNetwork;
 use reth_node_core::node_config::NodeConfig;

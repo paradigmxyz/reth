@@ -11,8 +11,8 @@ use alloy_rpc_types_engine::{
 use async_trait::async_trait;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc, RpcModule};
 use reth_ethereum::node::api::{
-    AddOnsContext, BeaconConsensusEngineHandle, EngineApiMessageVersion, FullNodeComponents,
-    NodeTypes,
+    AddOnsContext, ConsensusEngineHandle as BeaconConsensusEngineHandle, EngineApiMessageVersion,
+    FullNodeComponents, NodeTypes,
 };
 use reth_node_builder::rpc::EngineApiBuilder;
 use reth_op::node::OpStorage;

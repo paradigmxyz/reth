@@ -8,7 +8,9 @@ use crate::{
 use alloy_primitives::B256;
 use futures::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage};
+use reth_engine_primitives::{
+    BeaconEngineMessage, ConsensusEngineEvent as BeaconConsensusEngineEvent,
+};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};

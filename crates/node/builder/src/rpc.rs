@@ -3,7 +3,10 @@
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity};
 
-use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
+use crate::{
+    ConsensusEngineEvent as BeaconConsensusEngineEvent,
+    ConsensusEngineHandle as BeaconConsensusEngineHandle,
+};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
