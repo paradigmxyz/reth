@@ -157,6 +157,15 @@ async fn validate_rpc_chain_id(rpc_url: &str, expected_chain: &Chain) -> Result<
 
 /// Main comparison workflow execution
 pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
+    // Create a new process group for this process and all its children
+    #[cfg(unix)]
+    {
+        use nix::unistd::{getpid, setpgid};
+        if let Err(e) = setpgid(getpid(), getpid()) {
+            warn!("Failed to create process group: {e}");
+        }
+    }
+
     info!(
         "Starting benchmark comparison between '{}' and '{}'",
         args.baseline_ref, args.feature_ref
@@ -202,6 +211,22 @@ pub async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
     let original_branch_cleanup = original_branch.clone();
     ctrlc::set_handler(move || {
         eprintln!("Received interrupt signal, cleaning up...");
+
+        // Send SIGTERM to entire process group to ensure all children exit
+        #[cfg(unix)]
+        {
+            use nix::{
+                sys::signal::{kill, Signal},
+                unistd::Pid,
+            };
+
+            // Send SIGTERM to our process group (negative PID = process group)
+            let current_pid = std::process::id() as i32;
+            let pgid = Pid::from_raw(-current_pid);
+            if let Err(e) = kill(pgid, Signal::SIGTERM) {
+                eprintln!("Failed to send SIGTERM to process group: {e}");
+            }
+        }
 
         // Give a moment for any ongoing git operations to complete
         std::thread::sleep(std::time::Duration::from_millis(200));
@@ -353,6 +378,12 @@ async fn generate_comparison_charts(
         &chart_output.to_string_lossy(),
     ]);
 
+    // Set process group for consistent signal handling
+    #[cfg(unix)]
+    {
+        cmd.process_group(0);
+    }
+
     let output = cmd.output().await.map_err(|e| {
         eyre!("Failed to execute Python script with uv: {}. Make sure uv is installed.", e)
     })?;
@@ -416,6 +447,12 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
         .args(["load", "--port", &baseline_port.to_string(), &baseline_profile.to_string_lossy()])
         .kill_on_drop(true);
 
+    // Set process group for consistent signal handling
+    #[cfg(unix)]
+    {
+        baseline_cmd.process_group(0);
+    }
+
     // Conditionally pipe output based on log level
     if tracing::enabled!(tracing::Level::DEBUG) {
         baseline_cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
@@ -460,6 +497,12 @@ async fn start_samply_servers(args: &Args) -> Result<()> {
     feature_cmd
         .args(["load", "--port", &feature_port.to_string(), &feature_profile.to_string_lossy()])
         .kill_on_drop(true);
+
+    // Set process group for consistent signal handling
+    #[cfg(unix)]
+    {
+        feature_cmd.process_group(0);
+    }
 
     // Conditionally pipe output based on log level
     if tracing::enabled!(tracing::Level::DEBUG) {

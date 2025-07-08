@@ -70,6 +70,12 @@ impl BenchmarkRunner {
             .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
+        // Set process group for consistent signal handling
+        #[cfg(unix)]
+        {
+            cmd.process_group(0);
+        }
+
         // Debug log the command
         debug!("Executing reth-bench command: {:?}", cmd);
 
