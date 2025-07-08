@@ -252,7 +252,7 @@ impl NodeManager {
                         let is_syncing = !matches!(sync_result, SyncStatus::None);
 
                         if is_syncing {
-                            debug!("Node is still syncing, waiting...");
+                            debug!("Node is still syncing ({sync_result:?}), waiting...");
                         } else {
                             // Node is not syncing, now get the tip
                             match provider.get_block_number().await {
