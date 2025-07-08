@@ -7793,7 +7793,6 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-signer",
  "alloy-signer-local",
- "alloy-transport-http",
  "derive_more",
  "eyre",
  "futures-util",
