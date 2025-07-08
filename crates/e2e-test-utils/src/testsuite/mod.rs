@@ -14,25 +14,58 @@ use std::{collections::HashMap, marker::PhantomData};
 pub mod actions;
 pub mod setup;
 use crate::testsuite::setup::Setup;
+use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use reth_rpc_builder::auth::AuthServerHandle;
+use std::sync::Arc;
+use url::Url;
 
 #[cfg(test)]
 mod examples;
 
 /// Client handles for both regular RPC and Engine API endpoints
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NodeClient {
     /// Regular JSON-RPC client
     pub rpc: HttpClient,
     /// Engine API client
     pub engine: AuthServerHandle,
+    /// Alloy provider for interacting with the node
+    provider: Arc<dyn Provider + Send + Sync>,
 }
 
 impl NodeClient {
-    /// Instantiates a new [`NodeClient`] with the given handles
-    pub const fn new(rpc: HttpClient, engine: AuthServerHandle) -> Self {
-        Self { rpc, engine }
+    /// Instantiates a new [`NodeClient`] with the given handles and RPC URL
+    pub fn new(rpc: HttpClient, engine: AuthServerHandle, url: Url) -> Self {
+        let provider =
+            Arc::new(ProviderBuilder::new().connect_http(url)) as Arc<dyn Provider + Send + Sync>;
+        Self { rpc, engine, provider }
+    }
+
+    /// Get a block by number using the alloy provider
+    pub async fn get_block_by_number(
+        &self,
+        number: alloy_eips::BlockNumberOrTag,
+    ) -> Result<Option<alloy_rpc_types_eth::Block>> {
+        self.provider
+            .get_block_by_number(number)
+            .await
+            .map_err(|e| eyre::eyre!("Failed to get block by number: {}", e))
+    }
+
+    /// Check if the node is ready by attempting to get the latest block
+    pub async fn is_ready(&self) -> bool {
+        self.get_block_by_number(alloy_eips::BlockNumberOrTag::Latest).await.is_ok()
+    }
+}
+
+impl std::fmt::Debug for NodeClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NodeClient")
+            .field("rpc", &self.rpc)
+            .field("engine", &self.engine)
+            .field("provider", &"<Provider>")
+            .finish()
     }
 }
 

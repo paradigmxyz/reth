@@ -18,7 +18,7 @@ use crate::blinded::BlindedProvider;
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
 /// while providing a unified interface for the core trie operations needed by the
 /// [`crate::SparseTrie`] enum.
-pub trait SparseTrieInterface: Default + Debug {
+pub trait SparseTrieInterface: Default + Debug + Send + Sync {
     /// Creates a new revealed sparse trie from the given root node.
     ///
     /// This function initializes the internal structures and then reveals the root.
