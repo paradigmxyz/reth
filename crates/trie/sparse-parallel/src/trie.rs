@@ -517,6 +517,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // that can access both upper and lower subtrie nodes
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let root_rlp = self.update_upper_subtrie_hashes(&mut prefix_set);
+        println!("DEBUG root_rlp:{root_rlp:?}");
 
         // Return the root hash
         root_rlp.as_hash().unwrap_or(EMPTY_ROOT_HASH)
@@ -562,6 +563,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // top-level `SparseTrieUpdates`.
         for (index, subtrie, update_actions) in rx {
             self.apply_subtrie_update_actions(update_actions);
+            println!(
+                "DEBUG index:{index:?} root:{:?}",
+                subtrie.nodes.get(&subtrie.path).unwrap().hash()
+            );
             self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
         }
     }
@@ -920,8 +925,15 @@ impl ParallelSparseTrie {
             is_in_prefix_set: None,
         });
 
+        println!("update_upper_subtrie_hashes prefix_set:{prefix_set:?}");
+
         let mut update_actions = self.updates_enabled().then(Vec::new);
         while let Some(stack_item) = self.upper_subtrie.inner.buffers.path_stack.pop() {
+            println!("DEBUG ====== top of update_upper_subtrie_hashes loop =====");
+            println!(
+                "stack_item:{stack_item:?} path_stack:{:?}",
+                self.upper_subtrie.inner.buffers.path_stack,
+            );
             let path = stack_item.path;
             let node = if path.len() < UPPER_TRIE_MAX_DEPTH {
                 self.upper_subtrie.nodes.get_mut(&path).expect("upper subtrie node must exist")
@@ -1269,6 +1281,7 @@ impl SparseSubtrie {
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
         debug_assert!(path.starts_with(&self.path));
+        println!("DEBUG reveal_node({path:?}, {node:?}, {masks:?}");
 
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
@@ -1581,6 +1594,10 @@ impl SparseSubtrieInner {
             ?node,
             "Calculating node RLP"
         );
+        println!(
+            "DEBUG rlp_node({stack_item:?}, {node:?}) with stack {:?} and prefix_set:{prefix_set:?}",
+            self.buffers.rlp_node_stack
+        );
 
         // Check if the path is in the prefix set.
         // First, check the cached value. If it's `None`, then check the prefix set, and update
@@ -1598,11 +1615,17 @@ impl SparseSubtrieInner {
             SparseNode::Leaf { key, hash } => {
                 let mut path = path;
                 path.extend(key);
+                println!(
+                    "Leaf with path:{path:?} is in prefix_set:{:?}",
+                    prefix_set_contains(&path)
+                );
                 if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
+                    println!("DEBUG IN THE HASH BLOCK hash:{hash:?}");
                     // If the node hash is already computed, and the node path is not in
                     // the prefix set, return the pre-computed hash
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 } else {
+                    println!("getting value from {:?}", self.values);
                     // Encode the leaf node and update its hash
                     let value = self.values.get(&path).unwrap();
                     self.buffers.rlp_buf.clear();

@@ -28,7 +28,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::SparseTrie;
+use reth_trie_sparse::{RevealedSparseTrie, SparseTrie};
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::{
     collections::VecDeque,

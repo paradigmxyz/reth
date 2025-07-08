@@ -1234,7 +1234,8 @@ impl RevealedSparseTrie {
                 path,
                 is_in_prefix_set: Some(true),
             });
-            self.rlp_node(&mut prefix_set, &mut buffers, &mut temp_rlp_buf);
+            let node = self.rlp_node(&mut prefix_set, &mut buffers, &mut temp_rlp_buf);
+            println!("DEBUG path:{path:?} rlp_node:{node:?}");
         }
         self.rlp_buf = temp_rlp_buf;
     }
