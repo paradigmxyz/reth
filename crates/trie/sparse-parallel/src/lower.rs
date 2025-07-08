@@ -49,6 +49,7 @@ impl LowerSparseSubtrie {
     pub(crate) fn reveal(&mut self, path: &Nibbles) {
         match self {
             Self::Blind(allocated) => {
+                debug_assert!(allocated.as_ref().is_none_or(|subtrie| subtrie.is_empty()));
                 *self = if let Some(mut subtrie) = allocated.take() {
                     subtrie.path = *path;
                     Self::Revealed(subtrie)
@@ -85,7 +86,7 @@ impl LowerSparseSubtrie {
     /// If the subtrie is revealed, and the predicate function returns `true` when called with it,
     /// then this method will take ownership of the subtrie and transition this `LowerSparseSubtrie`
     /// to the blinded state. Otherwise, returns `None`.
-    pub(crate) fn take_if<P>(&mut self, predicate: P) -> Option<Box<SparseSubtrie>>
+    pub(crate) fn take_revealed_if<P>(&mut self, predicate: P) -> Option<Box<SparseSubtrie>>
     where
         P: FnOnce(&SparseSubtrie) -> bool,
     {

@@ -972,7 +972,9 @@ impl ParallelSparseTrie {
         let mut unchanged_prefix_set = PrefixSetMut::default();
 
         for (index, subtrie) in self.lower_subtries.iter_mut().enumerate() {
-            if let Some(subtrie) = subtrie.take_if(|subtrie| prefix_set.contains(&subtrie.path)) {
+            if let Some(subtrie) =
+                subtrie.take_revealed_if(|subtrie| prefix_set.contains(&subtrie.path))
+            {
                 let prefix_set = if prefix_set.all() {
                     unchanged_prefix_set = PrefixSetMut::all();
                     PrefixSetMut::all()
