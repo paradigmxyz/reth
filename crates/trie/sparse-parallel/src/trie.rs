@@ -260,6 +260,12 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         // If we reached the max depth of the upper trie, we may have had more nodes to insert.
         if let Some(next_path) = next.filter(|n| !SparseSubtrieType::path_len_is_upper(n.len())) {
+            // The value was inserted into the upper subtrie's `values` at the top of this method.
+            // At this point we know the value is not in the upper subtrie, and the call to
+            // `update_leaf` below will insert it into the lower subtrie. So remove it from the
+            // upper subtrie.
+            self.upper_subtrie.inner.values.remove(&full_path);
+
             // Use subtrie_for_path to ensure the subtrie has the correct path.
             //
             // The next_path here represents where we need to continue traversal, which may
@@ -567,10 +573,6 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // top-level `SparseTrieUpdates`.
         for (index, subtrie, update_actions) in rx {
             self.apply_subtrie_update_actions(update_actions);
-            println!(
-                "DEBUG index:{index:?} root:{:?}",
-                subtrie.nodes.get(&subtrie.path).unwrap().hash()
-            );
             self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
         }
     }
@@ -988,7 +990,9 @@ impl ParallelSparseTrie {
         let mut unchanged_prefix_set = PrefixSetMut::default();
 
         for (index, subtrie) in self.lower_subtries.iter_mut().enumerate() {
-            if let Some(subtrie) = subtrie.take_if(|subtrie| prefix_set.contains(&subtrie.path)) {
+            if let Some(subtrie) =
+                subtrie.take_revealed_if(|subtrie| prefix_set.contains(&subtrie.path))
+            {
                 let prefix_set = if prefix_set.all() {
                     unchanged_prefix_set = PrefixSetMut::all();
                     PrefixSetMut::all()
@@ -2064,6 +2068,7 @@ mod tests {
     };
     use crate::trie::ChangedSubtrie;
     use alloy_primitives::{
+        b256, hex,
         map::{foldhash::fast::RandomState, B256Set, DefaultHashBuilder, HashMap},
         B256,
     };
@@ -3716,8 +3721,8 @@ mod tests {
         //
         // Final trie structure:
         // Upper trie:
-        //   0x: Branch { state_mask: 0x10 }
-        //   └── 0x1: Extension { key: 0x }
+        //   0x: Extension { key: 0x1 }
+        //   └── 0x1: Branch { state_mask: 0x1100 }
         //       └── Subtrie (0x12): pointer to lower subtrie
         //       └── Subtrie (0x13): pointer to lower subtrie
         //
@@ -3737,14 +3742,18 @@ mod tests {
 
         // Verify upper trie has a leaf at the root with key 1345
         ctx.assert_upper_subtrie(&trie)
-            .has_leaf(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x3, 0x4, 0x5]));
+            .has_leaf(&Nibbles::default(), &Nibbles::from_nibbles([0x1, 0x3, 0x4, 0x5]))
+            .has_value(&leaf1_path, &value1);
 
         // Add leaf 0x1234 - this should go first in the upper subtrie
         let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 2);
         trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
 
         // Upper trie should now have a branch at 0x1
-        ctx.assert_upper_subtrie(&trie).has_branch(&Nibbles::from_nibbles([0x1]), &[0x2, 0x3]);
+        ctx.assert_upper_subtrie(&trie)
+            .has_branch(&Nibbles::from_nibbles([0x1]), &[0x2, 0x3])
+            .has_no_value(&leaf1_path)
+            .has_no_value(&leaf2_path);
 
         // Add leaf 0x1245 - this should cause a branch and create the 0x12 subtrie
         let (leaf3_path, value3) = ctx.create_test_leaf([0x1, 0x2, 0x4, 0x5], 3);
@@ -3771,6 +3780,15 @@ mod tests {
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
             .has_value(&leaf2_path, &value2)
             .has_value(&leaf3_path, &value3);
+
+        // Upper trie has no values
+        ctx.assert_upper_subtrie(&trie)
+            .has_extension(&Nibbles::default(), &Nibbles::from_nibbles([0x1]))
+            .has_branch(&Nibbles::from_nibbles([0x1]), &[0x2, 0x3])
+            .has_no_value(&leaf1_path)
+            .has_no_value(&leaf2_path)
+            .has_no_value(&leaf3_path)
+            .has_no_value(&leaf4_path);
     }
 
     #[test]
@@ -4573,5 +4591,129 @@ mod tests {
             .has_branch(&Nibbles::from_nibbles(&path1_nibbles[..63]), &[0x0, 0x1])
             .has_value(&leaf1_path, &value1)
             .has_value(&leaf2_path, &value2);
+    }
+
+    #[test]
+    fn test_hoodie_block_1_data() {
+        // Reveal node at path Nibbles(0x) - root branch node
+        let root_branch_stack = vec![
+            hex!("a0550b6aba4dd4582a2434d2cbdad8d3007d09f622d7a6e6eaa7a49385823c2fa2"),
+            hex!("a04788a4975a9e1efd29b834fd80fdfe8a57cc1b1c5ace6d30ce5a36a15e0092b3"),
+            hex!("a093aeccf87da304e6f7d09edc5d7bd3a552808866d2149dd0940507a8f9bfa910"),
+            hex!("a08b5b423ba68d0dec2eca1f408076f9170678505eb4a5db2abbbd83bb37666949"),
+            hex!("a08592f62216af4218098a78acad7cf472a727fb55e6c27d3cfdf2774d4518eb83"),
+            hex!("a0ef02aeee845cb64c11f85edc1a3094227c26445952554b8a9248915d80c746c3"),
+            hex!("a0df2529ee3a1ce4df5a758cf17e6a86d0fb5ea22ab7071cf60af6412e9b0a428a"),
+            hex!("a0acaa1092db69cd5a63676685827b3484c4b80dc1d3361f6073bbb9240101e144"),
+            hex!("a09c3f2bb2a729d71f246a833353ade65667716bb330e0127a3299a42d11200f93"),
+            hex!("a0ce978470f4c0b1f8069570563a14d2b79d709add2db4bf22dd9b6aed3271c566"),
+            hex!("a095f783cd1d464a60e3c8adcadc28c6eb9fec7306664df39553be41dccc909606"),
+            hex!("a0a9083f5fb914b255e1feb5d951a4dfddacf3c8003ef1d1ec6a13bb6ba5b2ac62"),
+            hex!("a0fec113d537d8577cd361e0cabf5e95ef58f1cc34318292fdecce9fae57c3e094"),
+            hex!("a08b7465f5fe8b3e3c0d087cb7521310d4065ef2a0ee43bf73f68dee8a5742b3dd"),
+            hex!("a0c589aa1ae3d5fd87d8640957f7d5184a4ac06f393b453a8e8ed7e8fba0d385c8"),
+            hex!("a0b516d6f3352f87beab4ed6e7322f191fc7a147686500ef4de7dd290ad784ef51"),
+        ];
+
+        let root_branch_rlp_stack: Vec<RlpNode> = root_branch_stack
+            .iter()
+            .map(|hex_str| RlpNode::from_raw_rlp(&hex_str[..]).unwrap())
+            .collect();
+
+        let root_branch_node = BranchNode::new(
+            root_branch_rlp_stack,
+            TrieMask::new(0b1111111111111111), // state_mask: all 16 children present
+        );
+
+        let root_branch_masks = TrieMasks {
+            hash_mask: Some(TrieMask::new(0b1111111111111111)),
+            tree_mask: Some(TrieMask::new(0b1111111111111111)),
+        };
+
+        let mut trie = ParallelSparseTrie::from_root(
+            TrieNode::Branch(root_branch_node),
+            root_branch_masks,
+            true,
+        )
+        .unwrap();
+
+        // Reveal node at path Nibbles(0x3) - branch node
+        let branch_0x3_stack = vec![
+            hex!("a09da7d9755fe0c558b3c3de9fdcdf9f28ae641f38c9787b05b73ab22ae53af3e2"),
+            hex!("a0d9990bf0b810d1145ecb2b011fd68c63cc85564e6724166fd4a9520180706e5f"),
+            hex!("a0f60eb4b12132a40df05d9bbdb88bbde0185a3f097f3c76bf4200c23eda26cf86"),
+            hex!("a0ca976997ddaf06f18992f6207e4f6a05979d07acead96568058789017cc6d06b"),
+            hex!("a04d78166b48044fdc28ed22d2fd39c8df6f8aaa04cb71d3a17286856f6893ff83"),
+            hex!("a021d4f90c34d3f1706e78463b6482bca77a3aa1cd059a3f326c42a1cfd30b9b60"),
+            hex!("a0fc3b71c33e2e6b77c5e494c1db7fdbb447473f003daf378c7a63ba9bf3f0049d"),
+            hex!("a0e33ed2be194a3d93d343e85642447c93a9d0cfc47a016c2c23d14c083be32a7c"),
+            hex!("a07b8e7a21c1178d28074f157b50fca85ee25c12568ff8e9706dcbcdacb77bf854"),
+            hex!("a0973274526811393ea0bf4811ca9077531db00d06b86237a2ecd683f55ba4bcb0"),
+            hex!("a03a93d726d7487874e51b52d8d534c63aa2a689df18e3b307c0d6cb0a388b00f3"),
+            hex!("a06aa67101d011d1c22fe739ef83b04b5214a3e2f8e1a2625d8bfdb116b447e86f"),
+            hex!("a02dd545b33c62d33a183e127a08a4767fba891d9f3b94fc20a2ca02600d6d1fff"),
+            hex!("a0fe6db87d00f06d53bff8169fa497571ff5af1addfb715b649b4d79dd3e394b04"),
+            hex!("a0d9240a9d2d5851d05a97ff3305334dfdb0101e1e321fc279d2bb3cad6afa8fc8"),
+            hex!("a01b69c6ab5173de8a8ec53a6ebba965713a4cc7feb86cb3e230def37c230ca2b2"),
+        ];
+
+        let branch_0x3_rlp_stack: Vec<RlpNode> = branch_0x3_stack
+            .iter()
+            .map(|hex_str| RlpNode::from_raw_rlp(&hex_str[..]).unwrap())
+            .collect();
+
+        let branch_0x3_node = BranchNode::new(
+            branch_0x3_rlp_stack,
+            TrieMask::new(0b1111111111111111), // state_mask: all 16 children present
+        );
+
+        let branch_0x3_masks = TrieMasks {
+            hash_mask: Some(TrieMask::new(0b0100010000010101)),
+            tree_mask: Some(TrieMask::new(0b0100000000000000)),
+        };
+
+        trie.reveal_node(
+            Nibbles::from_nibbles([0x3]),
+            TrieNode::Branch(branch_0x3_node),
+            branch_0x3_masks,
+        )
+        .unwrap();
+
+        // Reveal node at path Nibbles(0x37) - leaf node
+        let leaf_path = Nibbles::from_nibbles([0x3, 0x7]);
+        let leaf_key = Nibbles::unpack(
+            &hex!("d65eaa92c6bc4c13a5ec45527f0c18ea8932588728769ec7aecfe6d9f32e42")[..],
+        );
+        let leaf_value = hex!("f8440180a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0f57acd40259872606d76197ef052f3d35588dadf919ee1f0e3cb9b62d3f4b02c").to_vec();
+
+        let leaf_node = LeafNode::new(leaf_key, leaf_value);
+        let leaf_masks = TrieMasks::none();
+
+        trie.reveal_node(leaf_path, TrieNode::Leaf(leaf_node), leaf_masks).unwrap();
+
+        // Update leaf with its new value
+        let mut leaf_full_path = leaf_path;
+        leaf_full_path.extend(&leaf_key);
+
+        let leaf_new_value = vec![
+            248, 68, 1, 128, 160, 224, 163, 152, 169, 122, 160, 155, 102, 53, 41, 0, 47, 28, 205,
+            190, 199, 5, 215, 108, 202, 22, 138, 70, 196, 178, 193, 208, 18, 96, 95, 63, 238, 160,
+            245, 122, 205, 64, 37, 152, 114, 96, 109, 118, 25, 126, 240, 82, 243, 211, 85, 136,
+            218, 223, 145, 158, 225, 240, 227, 203, 155, 98, 211, 244, 176, 44,
+        ];
+
+        trie.update_leaf(leaf_full_path, leaf_new_value.clone(), DefaultBlindedProvider).unwrap();
+
+        // Sanity checks before calculating the root
+        assert_eq!(
+            Some(&leaf_new_value),
+            trie.lower_subtrie_for_path(&leaf_path).unwrap().inner.values.get(&leaf_full_path)
+        );
+        assert!(trie.upper_subtrie.inner.values.is_empty());
+
+        // Assert the root hash matches the expected value
+        let expected_root =
+            b256!("29b07de8376e9ce7b3a69e9b102199869514d3f42590b5abc6f7d48ec9b8665c");
+        assert_eq!(trie.root(), expected_root);
     }
 }
