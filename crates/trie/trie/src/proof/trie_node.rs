@@ -11,7 +11,7 @@ use tracing::{enabled, trace, Level};
 
 /// Factory for instantiating providers capable of retrieving blinded trie nodes via proofs.
 #[derive(Debug, Clone)]
-pub struct ProofBlindedProviderFactory<T, H> {
+pub struct ProofTrieNodeProviderFactory<T, H> {
     /// The cursor factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -20,7 +20,7 @@ pub struct ProofBlindedProviderFactory<T, H> {
     prefix_sets: Arc<TriePrefixSetsMut>,
 }
 
-impl<T, H> ProofBlindedProviderFactory<T, H> {
+impl<T, H> ProofTrieNodeProviderFactory<T, H> {
     /// Create new proof-based blinded provider factory.
     pub const fn new(
         trie_cursor_factory: T,
@@ -31,7 +31,7 @@ impl<T, H> ProofBlindedProviderFactory<T, H> {
     }
 }
 
-impl<T, H> TrieNodeProviderFactory for ProofBlindedProviderFactory<T, H>
+impl<T, H> TrieNodeProviderFactory for ProofTrieNodeProviderFactory<T, H>
 where
     T: TrieCursorFactory + Clone + Send + Sync,
     H: HashedCursorFactory + Clone + Send + Sync,

@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
-    proof::{Proof, ProofBlindedProviderFactory},
+    proof::{Proof, ProofTrieNodeProviderFactory},
     trie_cursor::TrieCursorFactory,
 };
 use alloy_rlp::EMPTY_STRING_CODE;
@@ -146,8 +146,8 @@ where
         }
 
         let (tx, rx) = mpsc::channel();
-        let blinded_provider_factory = WitnessBlindedProviderFactory::new(
-            ProofBlindedProviderFactory::new(
+        let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
+            ProofTrieNodeProviderFactory::new(
                 self.trie_cursor_factory,
                 self.hashed_cursor_factory,
                 Arc::new(self.prefix_sets),
@@ -237,20 +237,20 @@ where
 }
 
 #[derive(Debug, Clone)]
-struct WitnessBlindedProviderFactory<F> {
+struct WitnessTrieNodeProviderFactory<F> {
     /// Blinded node provider factory.
     provider_factory: F,
     /// Sender for forwarding fetched blinded node.
     tx: mpsc::Sender<Bytes>,
 }
 
-impl<F> WitnessBlindedProviderFactory<F> {
+impl<F> WitnessTrieNodeProviderFactory<F> {
     const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
         Self { provider_factory, tx }
     }
 }
 
-impl<F> TrieNodeProviderFactory for WitnessBlindedProviderFactory<F>
+impl<F> TrieNodeProviderFactory for WitnessTrieNodeProviderFactory<F>
 where
     F: TrieNodeProviderFactory,
     F::AccountNodeProvider: TrieNodeProvider,
