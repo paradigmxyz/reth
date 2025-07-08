@@ -71,6 +71,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         masks: TrieMasks,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
+        println!("DEBUG with_root({root:?}, {masks:?}, {retain_updates:?}");
         // A fresh/cleared `ParallelSparseTrie` has a `SparseNode::Empty` at its root in the upper
         // subtrie. Delete that so we can reveal the new root node.
         let path = Nibbles::default();
@@ -94,6 +95,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
+        println!("DEBUG reveal_node({path:?}, {node:?}, {masks:?}");
         if let Some(subtrie) = self.lower_subtrie_for_path_mut(&path) {
             return subtrie.reveal_node(path, &node, masks);
         }
@@ -144,6 +146,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         value: Vec<u8>,
         provider: P,
     ) -> SparseTrieResult<()> {
+        println!("DEBUG update_leaf({full_path:?}, {value:?}, P)");
         self.prefix_set.insert(full_path);
         let existing = self.upper_subtrie.inner.values.insert(full_path, value.clone());
         if existing.is_some() {
@@ -281,6 +284,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         full_path: &Nibbles,
         provider: P,
     ) -> SparseTrieResult<()> {
+        println!("DEBUG remove_leaf({full_path:?}, P)");
         // When removing a leaf node it's possibly necessary to modify its parent node, and possibly
         // the parent's parent node. It is not ever necessary to descend further than that; once an
         // extension node is hit it must terminate in a branch or the root, which won't need further
