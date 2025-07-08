@@ -7,6 +7,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::BlockBody;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
     types::RpcTypes,
@@ -76,7 +77,11 @@ where
 
                     Ok(OpReceiptBuilder::new(
                         &self.inner.eth_api.provider().chain_spec(),
-                        tx,
+                        &tx.try_clone_into_recovered().map_err(|_| {
+                            OpEthApiError::Eth(
+                                reth_rpc_eth_types::EthApiError::InvalidTransactionSignature,
+                            )
+                        })?,
                         meta,
                         receipt,
                         &receipts,

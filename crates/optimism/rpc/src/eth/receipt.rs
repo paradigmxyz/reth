@@ -1,5 +1,6 @@
 //! Loads and formats OP receipt RPC response.
 
+use crate::{OpEthApi, OpEthApiError};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
@@ -10,11 +11,10 @@ use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
+use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 use reth_storage_api::{ReceiptProvider, TransactionsProvider};
-
-use crate::{OpEthApi, OpEthApiError};
 
 impl<N> LoadReceipt for OpEthApi<N>
 where
@@ -45,7 +45,9 @@ where
 
         Ok(OpReceiptBuilder::new(
             &self.inner.eth_api.provider().chain_spec(),
-            &tx,
+            &tx.try_clone_into_recovered().map_err(|_| {
+                OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::InvalidTransactionSignature)
+            })?,
             meta,
             &receipt,
             &receipts,
@@ -223,7 +225,7 @@ impl OpReceiptBuilder {
     /// Returns a new builder.
     pub fn new(
         chain_spec: &impl OpHardforks,
-        transaction: &OpTransactionSigned,
+        transaction: &Recovered<OpTransactionSigned>,
         meta: TransactionMeta,
         receipt: &OpReceipt,
         all_receipts: &[OpReceipt],
