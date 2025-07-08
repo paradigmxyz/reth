@@ -1,35 +1,41 @@
 //! Example tests using the test suite framework.
 
-use crate::testsuite::{
-    actions::{
-        Action, AssertChainTip, AssertMineBlock, CaptureBlock, CaptureBlockOnNode,
-        CompareNodeChainTips, CreateFork, MakeCanonical, ProduceBlocks, ReorgTo, SelectActiveNode,
-        UpdateBlockInfo,
-    },
-    setup::{NetworkSetup, Setup},
-    TestBuilder,
-};
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::PayloadAttributes;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
+use reth_e2e_test_utils::{
+    test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp},
+    testsuite::{
+        actions::{
+            Action, AssertChainTip, AssertMineBlock, CaptureBlock, CaptureBlockOnNode,
+            CompareNodeChainTips, CreateFork, MakeCanonical, ProduceBlocks, ReorgTo,
+            SelectActiveNode, UpdateBlockInfo,
+        },
+        setup::{NetworkSetup, Setup},
+        Environment, TestBuilder,
+    },
+};
 use reth_node_api::TreeConfig;
 use reth_node_ethereum::{EthEngineTypes, EthereumNode};
 use std::sync::Arc;
+use tempfile::TempDir;
 use tracing::debug;
 
 #[tokio::test]
 async fn test_apply_with_import() -> Result<()> {
-    use crate::test_rlp_utils::{generate_test_blocks, write_blocks_to_rlp};
-    use tempfile::TempDir;
-
     reth_tracing::init_test_tracing();
 
     // Create test chain spec
     let chain_spec = Arc::new(
         ChainSpecBuilder::default()
             .chain(MAINNET.chain)
-            .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+            .genesis(
+                serde_json::from_str(include_str!(
+                    "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                ))
+                .unwrap(),
+            )
             .london_activated()
             .shanghai_activated()
             .cancun_activated()
@@ -49,7 +55,7 @@ async fn test_apply_with_import() -> Result<()> {
         Setup::default().with_chain_spec(chain_spec).with_network(NetworkSetup::single_node());
 
     // Create environment and apply setup with import
-    let mut env = crate::testsuite::Environment::<EthEngineTypes>::default();
+    let mut env = Environment::<EthEngineTypes>::default();
     setup.apply_with_import::<EthereumNode>(&mut env, &rlp_path).await?;
 
     // Now run test actions on the environment with imported chain
@@ -126,7 +132,12 @@ async fn test_testsuite_assert_mine_block() -> Result<()> {
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .genesis(
+                    serde_json::from_str(include_str!(
+                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                    ))
+                    .unwrap(),
+                )
                 .paris_activated()
                 .build(),
         ))
@@ -163,7 +174,12 @@ async fn test_testsuite_produce_blocks() -> Result<()> {
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .genesis(
+                    serde_json::from_str(include_str!(
+                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                    ))
+                    .unwrap(),
+                )
                 .cancun_activated()
                 .build(),
         ))
@@ -187,7 +203,12 @@ async fn test_testsuite_create_fork() -> Result<()> {
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .genesis(
+                    serde_json::from_str(include_str!(
+                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                    ))
+                    .unwrap(),
+                )
                 .cancun_activated()
                 .build(),
         ))
@@ -212,7 +233,12 @@ async fn test_testsuite_reorg_with_tagging() -> Result<()> {
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .genesis(
+                    serde_json::from_str(include_str!(
+                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                    ))
+                    .unwrap(),
+                )
                 .cancun_activated()
                 .build(),
         ))
@@ -239,7 +265,12 @@ async fn test_testsuite_deep_reorg() -> Result<()> {
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .genesis(
+                    serde_json::from_str(include_str!(
+                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                    ))
+                    .unwrap(),
+                )
                 .cancun_activated()
                 .build(),
         ))
@@ -284,7 +315,12 @@ async fn test_testsuite_multinode_block_production() -> Result<()> {
         .with_chain_spec(Arc::new(
             ChainSpecBuilder::default()
                 .chain(MAINNET.chain)
-                .genesis(serde_json::from_str(include_str!("assets/genesis.json")).unwrap())
+                .genesis(
+                    serde_json::from_str(include_str!(
+                        "../../../../crates/e2e-test-utils/src/testsuite/assets/genesis.json"
+                    ))
+                    .unwrap(),
+                )
                 .cancun_activated()
                 .build(),
         ))

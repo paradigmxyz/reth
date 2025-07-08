@@ -1,6 +1,6 @@
 //! E2E test implementations using the e2e test framework for engine tree functionality.
 
-use crate::tree::TreeConfig;
+use reth_engine_tree::tree::TreeConfig;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
