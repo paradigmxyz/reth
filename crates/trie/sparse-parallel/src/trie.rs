@@ -1014,6 +1014,18 @@ impl ParallelSparseTrie {
                 }
                 .freeze();
 
+                // We need the full path of root node of the lower subtrie to the unchanged prefix
+                // set, so that we don't skip it when calculating hashes for the upper subtrie.
+                match subtrie.nodes.get(&subtrie.path) {
+                    Some(SparseNode::Extension { key, .. } | SparseNode::Leaf { key, .. }) => {
+                        unchanged_prefix_set.insert(subtrie.path.join(key));
+                    }
+                    Some(SparseNode::Branch { .. }) => {
+                        unchanged_prefix_set.insert(subtrie.path);
+                    }
+                    _ => {}
+                }
+
                 changed_subtries.push(ChangedSubtrie { index, subtrie, prefix_set });
             }
         }
@@ -1619,10 +1631,13 @@ impl SparseSubtrieInner {
                     "Leaf with path:{path:?} is in prefix_set:{:?}",
                     prefix_set_contains(&path)
                 );
-                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path)) {
+                let value = self.values.get(&path);
+                if let Some(hash) = hash.filter(|_| !prefix_set_contains(&path) || value.is_none())
+                {
                     println!("DEBUG IN THE HASH BLOCK hash:{hash:?}");
-                    // If the node hash is already computed, and the node path is not in
-                    // the prefix set, return the pre-computed hash
+                    // If the node hash is already computed, and either the node path is not in
+                    // the prefix set or the leaf doesn't belong to the current trie (its value is
+                    // absent), return the pre-computed hash
                     (RlpNode::word_rlp(&hash), SparseNodeType::Leaf)
                 } else {
                     println!("getting value from {:?}", self.values);
@@ -2892,6 +2907,7 @@ mod tests {
 
         let unchanged_prefix_set = PrefixSetMut::from([
             Nibbles::from_nibbles([0x0]),
+            leaf_2_full_path,
             Nibbles::from_nibbles([0x2, 0x0, 0x0]),
         ]);
         // Create a prefix set with the keys that match only the second subtrie
