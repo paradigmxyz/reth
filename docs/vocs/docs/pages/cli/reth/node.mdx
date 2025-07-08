@@ -489,10 +489,16 @@ TxPool:
 
           [default: 7]
 
+      --txpool.minimum-priority-fee <MINIMUM_PRIORITY_FEE>
+          Minimum priority fee required for transaction acceptance into the pool. Transactions with priority fee below this value will be rejected
+
       --txpool.gas-limit <ENFORCED_GAS_LIMIT>
           The default enforced gas limit for transactions entering the pool
 
           [default: 30000000]
+
+      --txpool.max-tx-gas <MAX_TX_GAS_LIMIT>
+          Maximum gas limit for individual transactions. Transactions exceeding this limit will be rejected by the transaction pool
 
       --blobpool.pricebump <BLOB_TRANSACTION_PRICE_BUMP>
           Price bump percentage to replace an already existing blob transaction

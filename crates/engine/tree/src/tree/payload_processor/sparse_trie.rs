@@ -11,17 +11,13 @@ use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie, SparseTrieState,
+    SparseStateTrie, SparseTrie,
 };
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
 use tracing::{debug, trace, trace_span};
-
-/// The level below which the sparse trie hashes are calculated in
-/// [`update_sparse_trie`].
-const SPARSE_TRIE_INCREMENTAL_LEVEL: usize = 2;
 
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF>
@@ -66,40 +62,39 @@ where
         }
     }
 
-    /// Creates a new sparse trie, populating the accounts trie with the given cleared
-    /// `SparseTrieState` if it exists.
+    /// Creates a new sparse trie, populating the accounts trie with the given `SparseTrie`, if it
+    /// exists.
     pub(super) fn new_with_stored_trie(
         executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         trie_metrics: MultiProofTaskMetrics,
-        sparse_trie_state: Option<SparseTrieState>,
+        sparse_trie: Option<SparseTrie>,
     ) -> Self {
-        if let Some(sparse_trie_state) = sparse_trie_state {
+        if let Some(sparse_trie) = sparse_trie {
             Self::with_accounts_trie(
                 executor,
                 updates,
                 blinded_provider_factory,
                 trie_metrics,
-                sparse_trie_state,
+                sparse_trie,
             )
         } else {
             Self::new(executor, updates, blinded_provider_factory, trie_metrics)
         }
     }
 
-    /// Creates a new sparse trie task, using the given cleared `SparseTrieState` for the accounts
+    /// Creates a new sparse trie task, using the given [`SparseTrie::Blind`] for the accounts
     /// trie.
     pub(super) fn with_accounts_trie(
         executor: WorkloadExecutor,
         updates: mpsc::Receiver<SparseTrieUpdate>,
         blinded_provider_factory: BPF,
         metrics: MultiProofTaskMetrics,
-        sparse_trie_state: SparseTrieState,
+        sparse_trie: SparseTrie,
     ) -> Self {
-        let mut trie = SparseStateTrie::new().with_updates(true);
-        trie.populate_from(sparse_trie_state);
-
+        debug_assert!(sparse_trie.is_blind());
+        let trie = SparseStateTrie::new().with_updates(true).with_accounts_trie(sparse_trie);
         Self { executor, updates, metrics, trie, blinded_provider_factory }
     }
 
@@ -154,8 +149,8 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        // take the account trie
-        let trie = self.trie.take_cleared_account_trie_state();
+        // take the account trie so that we can reuse its already allocated data structures.
+        let trie = self.trie.take_cleared_accounts_trie();
 
         Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
     }
@@ -170,7 +165,7 @@ pub struct StateRootComputeOutcome {
     /// The trie updates.
     pub trie_updates: TrieUpdates,
     /// The account state trie.
-    pub trie: SparseTrieState,
+    pub trie: SparseTrie,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
@@ -262,16 +257,14 @@ where
     let elapsed_before = started_at.elapsed();
     trace!(
         target: "engine::root::sparse",
-        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
-        "Calculating intermediate nodes below trie level"
+        "Calculating subtries"
     );
-    trie.calculate_below_level(SPARSE_TRIE_INCREMENTAL_LEVEL);
+    trie.calculate_subtries();
 
     let elapsed = started_at.elapsed();
     let below_level_elapsed = elapsed - elapsed_before;
     trace!(
         target: "engine::root::sparse",
-        level=SPARSE_TRIE_INCREMENTAL_LEVEL,
         ?below_level_elapsed,
         "Intermediate nodes calculated"
     );
