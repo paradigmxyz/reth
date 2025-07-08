@@ -218,6 +218,9 @@ pub enum InvalidPoolTransactionError {
     /// respect the size limits of the pool.
     #[error("transaction's gas limit {0} exceeds block's gas limit {1}")]
     ExceedsGasLimit(u64, u64),
+    /// Thrown when a transaction's gas limit exceeds the configured maximum per-transaction limit.
+    #[error("transaction's gas limit {0} exceeds maximum per-transaction gas limit {1}")]
+    MaxTxGasLimitExceeded(u64, u64),
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
@@ -247,6 +250,10 @@ pub enum InvalidPoolTransactionError {
         /// Balance of account.
         balance: U256,
     },
+    /// EIP-2681 error thrown if the nonce is higher or equal than `U64::max`
+    /// `<https://eips.ethereum.org/EIPS/eip-2681>`
+    #[error("nonce exceeds u64 limit")]
+    Eip2681,
     /// EIP-4844 related errors
     #[error(transparent)]
     Eip4844(#[from] Eip4844PoolTransactionError),
@@ -260,6 +267,12 @@ pub enum InvalidPoolTransactionError {
     /// invocation.
     #[error("intrinsic gas too low")]
     IntrinsicGasTooLow,
+    /// The transaction priority fee is below the minimum required priority fee.
+    #[error("transaction priority fee below minimum required priority fee {minimum_priority_fee}")]
+    PriorityFeeBelowMinimum {
+        /// Minimum required priority fee.
+        minimum_priority_fee: u128,
+    },
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -316,6 +329,10 @@ impl InvalidPoolTransactionError {
                 }
             }
             Self::ExceedsGasLimit(_, _) => true,
+            Self::MaxTxGasLimitExceeded(_, _) => {
+                // local setting
+                false
+            }
             Self::ExceedsFeeCap { max_tx_fee_wei: _, tx_fee_cap_wei: _ } => true,
             Self::ExceedsMaxInitCodeSize(_, _) => true,
             Self::OversizedData(_, _) => true,
@@ -326,6 +343,7 @@ impl InvalidPoolTransactionError {
             Self::IntrinsicGasTooLow => true,
             Self::Overdraft { .. } => false,
             Self::Other(err) => err.is_bad_transaction(),
+            Self::Eip2681 => true,
             Self::Eip4844(eip4844_err) => {
                 match eip4844_err {
                     Eip4844PoolTransactionError::MissingEip4844BlobSidecar => {
@@ -369,6 +387,7 @@ impl InvalidPoolTransactionError {
                 Eip7702PoolTransactionError::InflightTxLimitReached => false,
                 Eip7702PoolTransactionError::AuthorityReserved => false,
             },
+            Self::PriorityFeeBelowMinimum { .. } => false,
         }
     }
 

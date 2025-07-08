@@ -11,13 +11,16 @@ use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
 ///
 /// This struct implements the [`reth_revm::Database`] trait, allowing the EVM to execute
 /// transactions using:
-///  - Account and storage slot data provided by a [`StatelessTrie`].
+///  - Account and storage slot data provided by a [`StatelessTrie`] implementation.
 ///  - Bytecode and ancestor block hashes provided by in-memory maps.
 ///
 /// This is designed for stateless execution scenarios where direct access to a full node's
 /// database is not available or desired.
 #[derive(Debug)]
-pub(crate) struct WitnessDatabase<'a> {
+pub(crate) struct WitnessDatabase<'a, T>
+where
+    T: StatelessTrie,
+{
     /// Map of block numbers to block hashes.
     /// This is used to service the `BLOCKHASH` opcode.
     // TODO: use Vec instead -- ancestors should be contiguous
@@ -32,10 +35,13 @@ pub(crate) struct WitnessDatabase<'a> {
     /// TODO: Ideally we do not have this trie and instead a simple map.
     /// TODO: Then as a corollary we can avoid unnecessary hashing in `Database::storage`
     /// TODO: and `Database::basic` without needing to cache the hashed Addresses and Keys
-    trie: &'a StatelessTrie,
+    trie: &'a T,
 }
 
-impl<'a> WitnessDatabase<'a> {
+impl<'a, T> WitnessDatabase<'a, T>
+where
+    T: StatelessTrie,
+{
     /// Creates a new [`WitnessDatabase`] instance.
     ///
     /// # Assumptions
@@ -50,7 +56,7 @@ impl<'a> WitnessDatabase<'a> {
     ///    contiguous chain of blocks. The caller is responsible for verifying the contiguity and
     ///    the block limit.
     pub(crate) const fn new(
-        trie: &'a StatelessTrie,
+        trie: &'a T,
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: BTreeMap<u64, B256>,
     ) -> Self {
@@ -58,25 +64,26 @@ impl<'a> WitnessDatabase<'a> {
     }
 }
 
-impl Database for WitnessDatabase<'_> {
+impl<T> Database for WitnessDatabase<'_, T>
+where
+    T: StatelessTrie,
+{
     /// The database error type.
     type Error = ProviderError;
 
     /// Get basic account information by hashing the address and looking up the account RLP
-    /// in the underlying [`StatelessTrie`].
+    /// in the underlying [`StatelessTrie`] implementation.
     ///
     /// Returns `Ok(None)` if the account is not found in the trie.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        if let Some(account) = self.trie.account(address)? {
-            return Ok(Some(AccountInfo {
+        self.trie.account(address).map(|opt| {
+            opt.map(|account| AccountInfo {
                 balance: account.balance,
                 nonce: account.nonce,
                 code_hash: account.code_hash,
                 code: None,
-            }));
-        };
-
-        Ok(None)
+            })
+        })
     }
 
     /// Get storage value of an account at a specific slot.
@@ -90,11 +97,9 @@ impl Database for WitnessDatabase<'_> {
     ///
     /// Returns an error if the bytecode for the given hash is not found in the map.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        let bytecode = self.bytecode.get(&code_hash).ok_or_else(|| {
+        self.bytecode.get(&code_hash).cloned().ok_or_else(|| {
             ProviderError::TrieWitnessError(format!("bytecode for {code_hash} not found"))
-        })?;
-
-        Ok(bytecode.clone())
+        })
     }
 
     /// Get block hash by block number from the provided ancestor hashes map.

@@ -4,7 +4,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Encodable, RlpDecodable, RlpEncodable};
 use reth_codecs::Compact;
-use reth_ethereum::primitives::{BlockHeader, InMemorySize};
+use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, BlockHeader, InMemorySize};
 use revm_primitives::keccak256;
 use serde::{Deserialize, Serialize};
 
@@ -183,32 +183,4 @@ impl reth_db_api::table::Decompress for CustomHeader {
 
 impl BlockHeader for CustomHeader {}
 
-mod serde_bincode_compat {
-    use alloy_consensus::serde_bincode_compat::Header;
-    use reth_ethereum::primitives::serde_bincode_compat::SerdeBincodeCompat;
-    use serde::{Deserialize, Serialize};
-
-    #[derive(Serialize, Deserialize, Debug)]
-    pub struct CustomHeader<'a> {
-        inner: Header<'a>,
-        extension: u64,
-    }
-
-    impl From<CustomHeader<'_>> for super::CustomHeader {
-        fn from(value: CustomHeader) -> Self {
-            Self { inner: value.inner.into(), extension: value.extension }
-        }
-    }
-
-    impl SerdeBincodeCompat for super::CustomHeader {
-        type BincodeRepr<'a> = CustomHeader<'a>;
-
-        fn as_repr(&self) -> Self::BincodeRepr<'_> {
-            CustomHeader { inner: self.inner.as_repr(), extension: self.extension }
-        }
-
-        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
-            repr.into()
-        }
-    }
-}
+impl RlpBincode for CustomHeader {}

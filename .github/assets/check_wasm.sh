@@ -48,6 +48,7 @@ exclude_crates=(
   reth-rpc-api
   reth-rpc-api-testing-util
   reth-rpc-builder
+  reth-rpc-e2e-tests
   reth-rpc-engine-api
   reth-rpc-eth-api
   reth-rpc-eth-types
@@ -58,6 +59,7 @@ exclude_crates=(
   reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
+  reth-alloy-provider
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
@@ -69,6 +71,7 @@ exclude_crates=(
   reth-transaction-pool # c-kzg
   reth-payload-util # reth-transaction-pool
   reth-trie-parallel # tokio
+  reth-trie-sparse-parallel # rayon
   reth-testing-utils
   reth-optimism-txpool # reth-transaction-pool
   reth-era-downloader # tokio

@@ -41,7 +41,7 @@ use derive_more::{Constructor, Deref};
 use futures::{stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt};
 use pin_project::pin_project;
 use reth_eth_wire::{
-    DedupPayload, EthVersion, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
+    DedupPayload, GetPooledTransactions, HandleMempoolData, HandleVersionedMempoolData,
     PartiallyValidData, RequestTxHashes, ValidAnnouncementData,
 };
 use reth_eth_wire_types::{EthNetworkPrimitives, NetworkPrimitives};
@@ -840,19 +840,6 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         }
     }
 
-    /// Returns the approx number of transactions that a [`GetPooledTransactions`] request will
-    /// have capacity for w.r.t. the given version of the protocol.
-    pub const fn approx_capacity_get_pooled_transactions_req(
-        &self,
-        announcement_version: EthVersion,
-    ) -> usize {
-        if announcement_version.is_eth68() {
-            approx_capacity_get_pooled_transactions_req_eth68(&self.info)
-        } else {
-            approx_capacity_get_pooled_transactions_req_eth66()
-        }
-    }
-
     /// Processes a resolved [`GetPooledTransactions`] request. Queues the outcome as a
     /// [`FetchEvent`], which will then be streamed by
     /// [`TransactionsManager`](super::TransactionsManager).
@@ -895,15 +882,19 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
                 if unsolicited > 0 {
                     self.metrics.unsolicited_transactions.increment(unsolicited as u64);
                 }
-                if verification_outcome == VerificationOutcome::ReportPeer {
-                    // todo: report peer for sending hashes that weren't requested
+
+                let report_peer = if verification_outcome == VerificationOutcome::ReportPeer {
                     trace!(target: "net::tx",
                         peer_id=format!("{peer_id:#}"),
                         unverified_len,
                         verified_payload_len=verified_payload.len(),
                         "received `PooledTransactions` response from peer with entries that didn't verify against request, filtered out transactions"
                     );
-                }
+                    true
+                } else {
+                    false
+                };
+
                 // peer has only sent hashes that we didn't request
                 if verified_payload.is_empty() {
                     return FetchEvent::FetchError { peer_id, error: RequestError::BadResponse }
@@ -965,7 +956,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
                 let transactions = valid_payload.into_data().into_values().collect();
 
-                FetchEvent::TransactionsFetched { peer_id, transactions }
+                FetchEvent::TransactionsFetched { peer_id, transactions, report_peer }
             }
             Ok(Err(req_err)) => {
                 self.try_buffer_hashes_for_retry(requested_hashes, &peer_id);
@@ -1052,6 +1043,9 @@ pub enum FetchEvent<T = PooledTransaction> {
         peer_id: PeerId,
         /// The transactions that were fetched, if available.
         transactions: PooledTransactions<T>,
+        /// Whether the peer should be penalized for sending unsolicited transactions or for
+        /// misbehavior.
+        report_peer: bool,
     },
     /// Triggered when there is an error in fetching transactions.
     FetchError {
@@ -1298,6 +1292,7 @@ mod test {
     use alloy_primitives::{hex, B256};
     use alloy_rlp::Decodable;
     use derive_more::IntoIterator;
+    use reth_eth_wire_types::EthVersion;
     use reth_ethereum_primitives::TransactionSigned;
     use std::{collections::HashSet, str::FromStr};
 

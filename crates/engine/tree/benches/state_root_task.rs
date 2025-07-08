@@ -66,6 +66,7 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                     info: AccountInfo::default(),
                     storage: HashMap::default(),
                     status: AccountStatus::SelfDestructed,
+                    transaction_id: 0,
                 }
             } else {
                 RevmAccount {
@@ -82,11 +83,13 @@ fn create_bench_state_updates(params: &BenchParams) -> Vec<EvmState> {
                                 EvmStorageSlot::new_changed(
                                     U256::ZERO,
                                     U256::from(rng.random::<u64>()),
+                                    0,
                                 ),
                             )
                         })
                         .collect(),
                     status: AccountStatus::Touched,
+                    transaction_id: 0,
                 }
             };
 
@@ -227,7 +230,7 @@ fn bench_state_root(c: &mut Criterion) {
 
                         (genesis_hash, payload_processor, provider, state_updates)
                     },
-                    |(genesis_hash, payload_processor, provider, state_updates)| {
+                    |(genesis_hash, mut payload_processor, provider, state_updates)| {
                         black_box({
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
