@@ -19,7 +19,7 @@ use tracing::info;
 /// 1. Initializes a node with chain data from testdata (chain.rlp)
 /// 2. Applies the forkchoice state from headfcu.json
 /// 3. Runs all `eth_getLogs` test cases from the execution-apis test suite
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_eth_get_logs_compat() -> Result<()> {
     reth_tracing::init_test_tracing();
 
