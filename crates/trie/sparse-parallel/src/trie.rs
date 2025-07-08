@@ -62,10 +62,6 @@ impl Default for ParallelSparseTrie {
 }
 
 impl SparseTrieInterface for ParallelSparseTrie {
-    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self> {
-        Self::default().with_root(root, masks, retain_updates)
-    }
-
     fn with_root(
         mut self,
         root: TrieNode,
@@ -614,6 +610,28 @@ impl ParallelSparseTrie {
     /// Returns true if retaining updates is enabled for the overall trie.
     const fn updates_enabled(&self) -> bool {
         self.updates.is_some()
+    }
+
+    /// Creates a new revealed sparse trie from the given root node.
+    ///
+    /// This function initializes the internal structures and then reveals the root.
+    /// It is a convenient method to create a trie when you already have the root node available.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - The root node of the trie
+    /// * `masks` - Trie masks for root branch node
+    /// * `retain_updates` - Whether to track updates
+    ///
+    /// # Returns
+    ///
+    /// Self if successful, or an error if revealing fails.
+    pub fn from_root(
+        root: TrieNode,
+        masks: TrieMasks,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        Self::default().with_root(root, masks, retain_updates)
     }
 
     /// Returns a reference to the lower `SparseSubtrie` for the given path, or None if the

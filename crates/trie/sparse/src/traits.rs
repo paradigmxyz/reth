@@ -19,22 +19,6 @@ use crate::blinded::BlindedProvider;
 /// while providing a unified interface for the core trie operations needed by the
 /// [`crate::SparseTrie`] enum.
 pub trait SparseTrieInterface: Default + Debug + Send + Sync {
-    /// Creates a new revealed sparse trie from the given root node.
-    ///
-    /// This function initializes the internal structures and then reveals the root.
-    /// It is a convenient method to create a trie when you already have the root node available.
-    ///
-    /// # Arguments
-    ///
-    /// * `root` - The root node of the trie
-    /// * `masks` - Trie masks for root branch node
-    /// * `retain_updates` - Whether to track updates
-    ///
-    /// # Returns
-    ///
-    /// Self if successful, or an error if revealing fails.
-    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self>;
-
     /// Configures the trie to have the given root node revealed.
     ///
     /// # Arguments

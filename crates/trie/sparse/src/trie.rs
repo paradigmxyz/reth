@@ -377,10 +377,6 @@ impl Default for RevealedSparseTrie {
 }
 
 impl SparseTrieInterface for RevealedSparseTrie {
-    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self> {
-        Self::default().with_root(root, masks, retain_updates)
-    }
-
     fn with_root(
         mut self,
         root: TrieNode,
@@ -1060,6 +1056,35 @@ impl SparseTrieInterface for RevealedSparseTrie {
 }
 
 impl RevealedSparseTrie {
+    /// Creates a new revealed sparse trie from the given root node.
+    ///
+    /// This function initializes the internal structures and then reveals the root.
+    /// It is a convenient method to create a trie when you already have the root node available.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - The root node of the trie
+    /// * `masks` - Trie masks for root branch node
+    /// * `retain_updates` - Whether to track updates
+    ///
+    /// # Returns
+    ///
+    /// Self if successful, or an error if revealing fails.
+    pub fn from_root(
+        root: TrieNode,
+        masks: TrieMasks,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        Self::default().with_root(root, masks, retain_updates)
+    }
+
+    /// Returns a reference to the current sparse trie updates.
+    ///
+    /// If no updates have been made/recorded, returns an empty update set.
+    pub fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
+        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+    }
+
     /// Returns an immutable reference to all nodes in the sparse trie.
     pub const fn nodes_ref(&self) -> &HashMap<Nibbles, SparseNode> {
         &self.nodes
