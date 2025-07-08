@@ -347,7 +347,7 @@ impl<N: ProviderNodeTypes> BlockNumReader for ProviderFactory<N> {
 
     fn earliest_block_number(&self) -> ProviderResult<BlockNumber> {
         // earliest history height tracks the lowest block number that has __not__ been expired, in
-        // other words, the first/earlierst available block.
+        // other words, the first/earliest available block.
         Ok(self.static_file_provider.earliest_history_height())
     }
 
