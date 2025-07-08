@@ -1,3 +1,4 @@
+use crate::LowerSparseSubtrie;
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
@@ -37,7 +38,7 @@ pub struct ParallelSparseTrie {
     /// This contains the trie nodes for the upper part of the trie.
     upper_subtrie: Box<SparseSubtrie>,
     /// An array containing the subtries at the second level of the trie.
-    lower_subtries: [Option<Box<SparseSubtrie>>; NUM_LOWER_SUBTRIES],
+    lower_subtries: [LowerSparseSubtrie; NUM_LOWER_SUBTRIES],
     /// Set of prefixes (key paths) that have been marked as updated.
     /// This is used to track which parts of the trie need to be recalculated.
     prefix_set: PrefixSetMut,
@@ -52,7 +53,7 @@ impl Default for ParallelSparseTrie {
                 nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
                 ..Default::default()
             }),
-            lower_subtries: [const { None }; NUM_LOWER_SUBTRIES],
+            lower_subtries: [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES],
             prefix_set: PrefixSetMut::default(),
             updates: None,
         }
@@ -360,7 +361,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
                         if let SparseSubtrieType::Lower(idx) =
                             SparseSubtrieType::from_path(&curr_path)
                         {
-                            curr_subtrie = self.lower_subtries[idx].as_mut().unwrap();
+                            curr_subtrie = self.lower_subtries[idx]
+                                .as_revealed_mut()
+                                .expect("lower subtrie is revealed");
                             curr_subtrie_is_upper = false;
                         }
                     }
@@ -559,7 +562,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // top-level `SparseTrieUpdates`.
         for (index, subtrie, update_actions) in rx {
             self.apply_subtrie_update_actions(update_actions);
-            self.lower_subtries[index] = Some(subtrie);
+            self.lower_subtries[index] = LowerSparseSubtrie::Revealed(subtrie);
         }
     }
 
@@ -573,13 +576,14 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
     fn wipe(&mut self) {
         self.upper_subtrie.wipe();
-        self.lower_subtries = [const { None }; NUM_LOWER_SUBTRIES];
+        self.lower_subtries = [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES];
         self.prefix_set = PrefixSetMut::all();
     }
 
     fn clear(&mut self) {
         self.upper_subtrie.clear();
-        for subtrie in self.lower_subtries.iter_mut().flatten() {
+        self.upper_subtrie.nodes.insert(Nibbles::default(), SparseNode::Empty);
+        for subtrie in &mut self.lower_subtries {
             subtrie.clear();
         }
         self.prefix_set.clear();
@@ -602,35 +606,27 @@ impl ParallelSparseTrie {
     }
 
     /// Returns a reference to the lower `SparseSubtrie` for the given path, or None if the
-    /// path belongs to the upper trie or a lower subtrie for the path doesn't exist.
+    /// path belongs to the upper trie, or if the lower subtrie for the path doesn't exist or is
+    /// blinded.
     fn lower_subtrie_for_path(&self, path: &Nibbles) -> Option<&SparseSubtrie> {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
-            SparseSubtrieType::Lower(idx) => {
-                self.lower_subtries[idx].as_ref().map(|subtrie| subtrie.as_ref())
-            }
+            SparseSubtrieType::Lower(idx) => self.lower_subtries[idx].as_revealed_ref(),
         }
     }
 
     /// Returns a mutable reference to the lower `SparseSubtrie` for the given path, or None if the
     /// path belongs to the upper trie.
     ///
-    /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
-    /// does exist, but its path field is longer than the given path, then the field will be set
-    /// to the given path.
-    fn lower_subtrie_for_path_mut(&mut self, path: &Nibbles) -> Option<&mut Box<SparseSubtrie>> {
+    /// This method will create/reveal a new lower subtrie for the given path if one isn't already.
+    /// If one does exist, but its path field is longer than the given path, then the field will be
+    /// set to the given path.
+    fn lower_subtrie_for_path_mut(&mut self, path: &Nibbles) -> Option<&mut SparseSubtrie> {
         match SparseSubtrieType::from_path(path) {
             SparseSubtrieType::Upper => None,
             SparseSubtrieType::Lower(idx) => {
-                if let Some(subtrie) = self.lower_subtries[idx].as_mut() {
-                    if path.len() < subtrie.path.len() {
-                        subtrie.path = *path;
-                    }
-                } else {
-                    self.lower_subtries[idx] = Some(Box::new(SparseSubtrie::new(*path)));
-                }
-
-                self.lower_subtries[idx].as_mut()
+                self.lower_subtries[idx].reveal(path);
+                Some(self.lower_subtries[idx].as_revealed_mut().expect("just revealed"))
             }
         }
     }
@@ -652,10 +648,10 @@ impl ParallelSparseTrie {
     /// Returns a mutable reference to either the lower or upper `SparseSubtrie` for the given path,
     /// depending on the path's length.
     ///
-    /// This method will create a new lower subtrie if one doesn't exist for the given path. If one
-    /// does exist, but its path field is longer than the given path, then the field will be set
-    /// to the given path.
-    fn subtrie_for_path_mut(&mut self, path: &Nibbles) -> &mut Box<SparseSubtrie> {
+    /// This method will create/reveal a new lower subtrie for the given path if one isn't already.
+    /// If one does exist, but its path field is longer than the given path, then the field will be
+    /// set to the given path.
+    fn subtrie_for_path_mut(&mut self, path: &Nibbles) -> &mut SparseSubtrie {
         // We can't just call `lower_subtrie_for_path` and return `upper_subtrie` if it returns
         // None, because Rust complains about double mutable borrowing `self`.
         if SparseSubtrieType::path_len_is_upper(path.len()) {
@@ -777,10 +773,10 @@ impl ParallelSparseTrie {
 
         match node {
             Some(SparseNode::Leaf { .. }) => {
-                // If the leaf was the final node in its lower subtrie then we can remove the lower
-                // subtrie completely.
+                // If the leaf was the final node in its lower subtrie then we can blind the
+                // subtrie, effectively marking it as empty.
                 if subtrie.nodes.is_empty() {
-                    self.lower_subtries[idx] = None;
+                    self.lower_subtries[idx].clear();
                 }
             }
             Some(SparseNode::Extension { key, .. }) => {
@@ -932,7 +928,7 @@ impl ParallelSparseTrie {
             } else {
                 let index = path_subtrie_index_unchecked(&path);
                 let node = self.lower_subtries[index]
-                    .as_mut()
+                    .as_revealed_mut()
                     .expect("lower subtrie must exist")
                     .nodes
                     .get_mut(&path)
@@ -976,7 +972,9 @@ impl ParallelSparseTrie {
         let mut unchanged_prefix_set = PrefixSetMut::default();
 
         for (index, subtrie) in self.lower_subtries.iter_mut().enumerate() {
-            if let Some(subtrie) = subtrie.take_if(|subtrie| prefix_set.contains(&subtrie.path)) {
+            if let Some(subtrie) =
+                subtrie.take_revealed_if(|subtrie| prefix_set.contains(&subtrie.path))
+            {
                 let prefix_set = if prefix_set.all() {
                     unchanged_prefix_set = PrefixSetMut::all();
                     PrefixSetMut::all()
@@ -1040,7 +1038,7 @@ pub struct SparseSubtrie {
     /// [`ParallelSparseTrie`].
     ///
     /// There should be a node for this path in `nodes` map.
-    path: Nibbles,
+    pub(crate) path: Nibbles,
     /// The map from paths to sparse trie nodes within this subtrie.
     nodes: HashMap<Nibbles, SparseNode>,
     /// Subset of fields for mutable access while `nodes` field is also being mutably borrowed.
@@ -1061,8 +1059,13 @@ enum FindNextToLeafOutcome {
 
 impl SparseSubtrie {
     /// Creates a new empty subtrie with the specified root path.
-    fn new(path: Nibbles) -> Self {
+    pub(crate) fn new(path: Nibbles) -> Self {
         Self { path, ..Default::default() }
+    }
+
+    /// Returns true if this subtrie has any nodes, false otherwise.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
     }
 
     /// Returns true if the current path and its child are both found in the same level.
@@ -1528,7 +1531,7 @@ impl SparseSubtrie {
     }
 
     /// Clears the subtrie, keeping the data structures allocated.
-    fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.nodes.clear();
         self.inner.clear();
     }
@@ -2031,7 +2034,8 @@ enum SparseTrieUpdatesAction {
 #[cfg(test)]
 mod tests {
     use super::{
-        path_subtrie_index_unchecked, ParallelSparseTrie, SparseSubtrie, SparseSubtrieType,
+        path_subtrie_index_unchecked, LowerSparseSubtrie, ParallelSparseTrie, SparseSubtrie,
+        SparseSubtrieType,
     };
     use crate::trie::ChangedSubtrie;
     use alloy_primitives::{
@@ -2112,7 +2116,7 @@ mod tests {
         fn assert_subtrie_exists(&self, trie: &ParallelSparseTrie, path: &Nibbles) {
             let idx = path_subtrie_index_unchecked(path);
             assert!(
-                trie.lower_subtries[idx].is_some(),
+                trie.lower_subtries[idx].as_revealed_ref().is_some(),
                 "Expected lower subtrie at path {path:?} to exist",
             );
         }
@@ -2125,7 +2129,7 @@ mod tests {
         ) -> &'a SparseSubtrie {
             let idx = path_subtrie_index_unchecked(path);
             trie.lower_subtries[idx]
-                .as_ref()
+                .as_revealed_ref()
                 .unwrap_or_else(|| panic!("Lower subtrie at path {path:?} should exist"))
         }
 
@@ -2140,7 +2144,7 @@ mod tests {
             let expected_path = Nibbles::from_nibbles(expected_path);
             let idx = path_subtrie_index_unchecked(&subtrie_prefix);
 
-            let subtrie = trie.lower_subtries[idx].as_ref().unwrap_or_else(|| {
+            let subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap_or_else(|| {
                 panic!("Lower subtrie at prefix {subtrie_prefix:?} should exist")
             });
 
@@ -2404,7 +2408,7 @@ mod tests {
         let lower_sparse_nodes = sparse_trie
             .lower_subtries
             .iter()
-            .filter_map(Option::as_ref)
+            .filter_map(LowerSparseSubtrie::as_revealed_ref)
             .flat_map(|subtrie| subtrie.nodes.iter());
 
         let upper_sparse_nodes = sparse_trie.upper_subtrie.nodes.iter();
@@ -2511,9 +2515,9 @@ mod tests {
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
-        trie.lower_subtries[subtrie_1_index] = Some(subtrie_1.clone());
-        trie.lower_subtries[subtrie_2_index] = Some(subtrie_2.clone());
-        trie.lower_subtries[subtrie_3_index] = Some(subtrie_3);
+        trie.lower_subtries[subtrie_1_index] = LowerSparseSubtrie::Revealed(subtrie_1.clone());
+        trie.lower_subtries[subtrie_2_index] = LowerSparseSubtrie::Revealed(subtrie_2.clone());
+        trie.lower_subtries[subtrie_3_index] = LowerSparseSubtrie::Revealed(subtrie_3);
 
         let unchanged_prefix_set = PrefixSetMut::from([
             Nibbles::from_nibbles([0x0]),
@@ -2547,10 +2551,10 @@ mod tests {
             )]
         );
         assert_eq!(unchanged_prefix_set, unchanged_prefix_set);
-        assert!(trie.lower_subtries[subtrie_2_index].is_none());
+        assert!(trie.lower_subtries[subtrie_2_index].as_revealed_ref().is_none());
 
         // First subtrie should remain unchanged
-        assert_eq!(trie.lower_subtries[subtrie_1_index], Some(subtrie_1));
+        assert_eq!(trie.lower_subtries[subtrie_1_index], LowerSparseSubtrie::Revealed(subtrie_1));
     }
 
     #[test]
@@ -2565,9 +2569,9 @@ mod tests {
         let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
         // Add subtries at specific positions
-        trie.lower_subtries[subtrie_1_index] = Some(subtrie_1.clone());
-        trie.lower_subtries[subtrie_2_index] = Some(subtrie_2.clone());
-        trie.lower_subtries[subtrie_3_index] = Some(subtrie_3.clone());
+        trie.lower_subtries[subtrie_1_index] = LowerSparseSubtrie::Revealed(subtrie_1.clone());
+        trie.lower_subtries[subtrie_2_index] = LowerSparseSubtrie::Revealed(subtrie_2.clone());
+        trie.lower_subtries[subtrie_3_index] = LowerSparseSubtrie::Revealed(subtrie_3.clone());
 
         // Create a prefix set that matches any key
         let mut prefix_set = PrefixSetMut::all().freeze();
@@ -2589,7 +2593,7 @@ mod tests {
         );
         assert_eq!(unchanged_prefix_set, PrefixSetMut::all());
 
-        assert!(trie.lower_subtries.iter().all(Option::is_none));
+        assert!(trie.lower_subtries.iter().all(|subtrie| subtrie.as_revealed_ref().is_none()));
     }
 
     #[test]
@@ -2676,10 +2680,10 @@ mod tests {
 
             // Check that the lower subtrie was created
             let idx = path_subtrie_index_unchecked(&path);
-            assert!(trie.lower_subtries[idx].is_some());
+            assert!(trie.lower_subtries[idx].as_revealed_ref().is_some());
 
             // Check that the lower subtrie's path was correctly set
-            let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+            let lower_subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap();
             assert_eq!(lower_subtrie.path, path);
 
             assert_matches!(
@@ -2700,7 +2704,7 @@ mod tests {
 
             // Check that the lower subtrie's path hasn't changed
             let idx = path_subtrie_index_unchecked(&path);
-            let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+            let lower_subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap();
             assert_eq!(lower_subtrie.path, Nibbles::from_nibbles([0x1, 0x2]));
         }
     }
@@ -2742,9 +2746,9 @@ mod tests {
         // Child path (0x1, 0x2, 0x3) should be in lower trie
         let child_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let idx = path_subtrie_index_unchecked(&child_path);
-        assert!(trie.lower_subtries[idx].is_some());
+        assert!(trie.lower_subtries[idx].as_revealed_ref().is_some());
 
-        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        let lower_subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap();
         assert_eq!(lower_subtrie.path, child_path);
         assert_eq!(lower_subtrie.nodes.get(&child_path), Some(&SparseNode::Hash(child_hash)));
     }
@@ -2769,9 +2773,9 @@ mod tests {
         // Child path (0x1, 0x2) should be in lower trie
         let child_path = Nibbles::from_nibbles([0x1, 0x2]);
         let idx = path_subtrie_index_unchecked(&child_path);
-        assert!(trie.lower_subtries[idx].is_some());
+        assert!(trie.lower_subtries[idx].as_revealed_ref().is_some());
 
-        let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+        let lower_subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap();
         assert_eq!(lower_subtrie.path, child_path);
         assert_eq!(lower_subtrie.nodes.get(&child_path), Some(&SparseNode::Hash(child_hash)));
     }
@@ -2837,7 +2841,7 @@ mod tests {
 
         for (i, child_path) in child_paths.iter().enumerate() {
             let idx = path_subtrie_index_unchecked(child_path);
-            let lower_subtrie = trie.lower_subtries[idx].as_ref().unwrap();
+            let lower_subtrie = trie.lower_subtries[idx].as_revealed_ref().unwrap();
             assert_eq!(&lower_subtrie.path, child_path);
             assert_eq!(
                 lower_subtrie.nodes.get(child_path),
@@ -2876,9 +2880,9 @@ mod tests {
         subtrie_3.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
 
         // Add subtries at specific positions
-        trie.lower_subtries[subtrie_1_index] = Some(subtrie_1);
-        trie.lower_subtries[subtrie_2_index] = Some(subtrie_2);
-        trie.lower_subtries[subtrie_3_index] = Some(subtrie_3);
+        trie.lower_subtries[subtrie_1_index] = LowerSparseSubtrie::Revealed(subtrie_1);
+        trie.lower_subtries[subtrie_2_index] = LowerSparseSubtrie::Revealed(subtrie_2);
+        trie.lower_subtries[subtrie_3_index] = LowerSparseSubtrie::Revealed(subtrie_3);
 
         let unchanged_prefix_set = PrefixSetMut::from([
             Nibbles::from_nibbles([0x0]),
@@ -2900,9 +2904,9 @@ mod tests {
         // Check that the prefix set was updated
         assert_eq!(trie.prefix_set, unchanged_prefix_set);
         // Check that subtries were returned back to the array
-        assert!(trie.lower_subtries[subtrie_1_index].is_some());
-        assert!(trie.lower_subtries[subtrie_2_index].is_some());
-        assert!(trie.lower_subtries[subtrie_3_index].is_some());
+        assert!(trie.lower_subtries[subtrie_1_index].as_revealed_ref().is_some());
+        assert!(trie.lower_subtries[subtrie_2_index].as_revealed_ref().is_some());
+        assert!(trie.lower_subtries[subtrie_3_index].as_revealed_ref().is_some());
     }
 
     #[test]
@@ -3071,11 +3075,11 @@ mod tests {
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
-        let lower_subtrie_50 = trie.lower_subtries[0x50].as_ref().unwrap();
+        let lower_subtrie_50 = trie.lower_subtries[0x50].as_revealed_ref().unwrap();
 
         // Check that the `SparseSubtrie` the leaf was removed from was itself removed, as it is now
         // empty.
-        assert_matches!(trie.lower_subtries[0x53].as_ref(), None);
+        assert_matches!(trie.lower_subtries[0x53].as_revealed_ref(), None);
 
         // Check that the leaf node was removed, and that its parent/grandparent were modified
         // appropriately.
@@ -3194,8 +3198,8 @@ mod tests {
         // Check that both lower subtries were removed. 0x50 should have been removed because
         // removing its leaf made it empty. 0x51 should have been removed after its own leaf was
         // collapsed into the upper trie, leaving it also empty.
-        assert_matches!(trie.lower_subtries[0x50].as_ref(), None);
-        assert_matches!(trie.lower_subtries[0x51].as_ref(), None);
+        assert_matches!(trie.lower_subtries[0x50].as_revealed_ref(), None);
+        assert_matches!(trie.lower_subtries[0x51].as_revealed_ref(), None);
 
         // Check that the other leaf's value was moved to the upper trie
         let other_leaf_full_value = Nibbles::from_nibbles([0x5, 0x1, 0x3, 0x4]);
@@ -3254,8 +3258,8 @@ mod tests {
         // Check that both lower subtries were removed. 0x20 should have been removed because
         // removing its leaf made it empty. 0x21 should have been removed after its own leaf was
         // collapsed into the upper trie, leaving it also empty.
-        assert_matches!(trie.lower_subtries[0x20].as_ref(), None);
-        assert_matches!(trie.lower_subtries[0x21].as_ref(), None);
+        assert_matches!(trie.lower_subtries[0x20].as_revealed_ref(), None);
+        assert_matches!(trie.lower_subtries[0x21].as_revealed_ref(), None);
 
         // Check that the other leaf's value was moved to the upper trie
         let other_leaf_full_value = Nibbles::from_nibbles([0x2, 0x1, 0x5, 0x6]);
@@ -3340,7 +3344,7 @@ mod tests {
         // 1. The branch at 0x123 should become an extension to 0x12345
         // 2. That extension should merge with the root extension at 0x
         // 3. The lower subtrie's path should be updated to 0x12345
-        let lower_subtrie = trie.lower_subtries[0x12].as_ref().unwrap();
+        let lower_subtrie = trie.lower_subtries[0x12].as_revealed_ref().unwrap();
         assert_eq!(lower_subtrie.path, Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4, 0x5]));
 
         // Verify the root extension now points all the way to 0x12345
@@ -3517,7 +3521,7 @@ mod tests {
         trie.remove_leaf(&leaf_full_path, provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
-        let lower_subtrie_10 = trie.lower_subtries[0x01].as_ref().unwrap();
+        let lower_subtrie_10 = trie.lower_subtries[0x01].as_revealed_ref().unwrap();
 
         // Verify that hash fields are unset for all nodes along the path to the removed leaf
         assert_matches!(
@@ -3606,14 +3610,14 @@ mod tests {
         let leaf_2_subtrie_idx = path_subtrie_index_unchecked(&leaf_2_path);
 
         trie.lower_subtries[leaf_1_subtrie_idx]
-            .as_mut()
+            .as_revealed_mut()
             .unwrap()
             .nodes
             .get_mut(&leaf_1_path)
             .unwrap()
             .set_hash(None);
         trie.lower_subtries[leaf_2_subtrie_idx]
-            .as_mut()
+            .as_revealed_mut()
             .unwrap()
             .nodes
             .get_mut(&leaf_2_path)
@@ -3639,8 +3643,8 @@ mod tests {
         assert_eq!(root, hash_builder_root);
 
         // Verify hashes were computed
-        let leaf_1_subtrie = trie.lower_subtries[leaf_1_subtrie_idx].as_ref().unwrap();
-        let leaf_2_subtrie = trie.lower_subtries[leaf_2_subtrie_idx].as_ref().unwrap();
+        let leaf_1_subtrie = trie.lower_subtries[leaf_1_subtrie_idx].as_revealed_ref().unwrap();
+        let leaf_2_subtrie = trie.lower_subtries[leaf_2_subtrie_idx].as_revealed_ref().unwrap();
         assert!(trie.upper_subtrie.nodes.get(&extension_path).unwrap().hash().is_some());
         assert!(trie.upper_subtrie.nodes.get(&branch_path).unwrap().hash().is_some());
         assert!(leaf_1_subtrie.nodes.get(&leaf_1_path).unwrap().hash().is_some());
