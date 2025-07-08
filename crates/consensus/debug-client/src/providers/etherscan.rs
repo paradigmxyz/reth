@@ -68,7 +68,7 @@ where
         ]);
 
         if !self.base_url.contains("chainid=") {
-            // only append chainid of not part of the base
+            // only append chainid if not part of the base url already
             req = req.query(&[("chainid", &self.chain_id.to_string())]);
         }
 
