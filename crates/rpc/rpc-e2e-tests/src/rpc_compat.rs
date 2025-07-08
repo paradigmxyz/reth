@@ -91,49 +91,59 @@ impl RunRpcCompatTests {
     }
 
     /// Compare JSON values with special handling for numbers and errors
+    /// Uses iterative approach to avoid stack overflow with deeply nested structures
     fn compare_json_values(actual: &Value, expected: &Value, path: &str) -> Result<()> {
-        match (actual, expected) {
-            // Number comparison: handle different representations
-            (Value::Number(a), Value::Number(b)) => {
-                let a_f64 = a.as_f64().ok_or_else(|| eyre!("Invalid number"))?;
-                let b_f64 = b.as_f64().ok_or_else(|| eyre!("Invalid number"))?;
-                if (a_f64 - b_f64).abs() > f64::EPSILON {
-                    return Err(eyre!("Number mismatch at {}: {} != {}", path, a, b));
-                }
-            }
-            // Array comparison
-            (Value::Array(a), Value::Array(b)) => {
-                if a.len() != b.len() {
-                    return Err(eyre!(
-                        "Array length mismatch at {}: {} != {}",
-                        path,
-                        a.len(),
-                        b.len()
-                    ));
-                }
-                for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate() {
-                    Self::compare_json_values(av, bv, &format!("{path}[{i}]"))?;
-                }
-            }
-            // Object comparison
-            (Value::Object(a), Value::Object(b)) => {
-                // Check all keys in expected are present in actual
-                for (key, expected_val) in b {
-                    if let Some(actual_val) = a.get(key) {
-                        Self::compare_json_values(
-                            actual_val,
-                            expected_val,
-                            &format!("{path}.{key}"),
-                        )?;
-                    } else {
-                        return Err(eyre!("Missing key at {}.{}", path, key));
+        // Stack to hold work items: (actual, expected, path)
+        let mut work_stack = vec![(actual, expected, path.to_string())];
+
+        while let Some((actual, expected, current_path)) = work_stack.pop() {
+            match (actual, expected) {
+                // Number comparison: handle different representations
+                (Value::Number(a), Value::Number(b)) => {
+                    let a_f64 = a.as_f64().ok_or_else(|| eyre!("Invalid number"))?;
+                    let b_f64 = b.as_f64().ok_or_else(|| eyre!("Invalid number"))?;
+                    // Use a reasonable epsilon for floating point comparison
+                    const EPSILON: f64 = 1e-10;
+                    if (a_f64 - b_f64).abs() > EPSILON {
+                        return Err(eyre!("Number mismatch at {}: {} != {}", current_path, a, b));
                     }
                 }
-            }
-            // Direct value comparison
-            (a, b) => {
-                if a != b {
-                    return Err(eyre!("Value mismatch at {}: {:?} != {:?}", path, a, b));
+                // Array comparison
+                (Value::Array(a), Value::Array(b)) => {
+                    if a.len() != b.len() {
+                        return Err(eyre!(
+                            "Array length mismatch at {}: {} != {}",
+                            current_path,
+                            a.len(),
+                            b.len()
+                        ));
+                    }
+                    // Add array elements to work stack in reverse order
+                    // so they are processed in correct order
+                    for (i, (av, bv)) in a.iter().zip(b.iter()).enumerate().rev() {
+                        work_stack.push((av, bv, format!("{current_path}[{i}]")));
+                    }
+                }
+                // Object comparison
+                (Value::Object(a), Value::Object(b)) => {
+                    // Check all keys in expected are present in actual
+                    for (key, expected_val) in b {
+                        if let Some(actual_val) = a.get(key) {
+                            work_stack.push((
+                                actual_val,
+                                expected_val,
+                                format!("{current_path}.{key}"),
+                            ));
+                        } else {
+                            return Err(eyre!("Missing key at {}.{}", current_path, key));
+                        }
+                    }
+                }
+                // Direct value comparison
+                (a, b) => {
+                    if a != b {
+                        return Err(eyre!("Value mismatch at {}: {:?} != {:?}", current_path, a, b));
+                    }
                 }
             }
         }
@@ -425,5 +435,80 @@ where
             info!("Successfully initialized chain from execution-apis test data");
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_compare_json_values_deeply_nested() {
+        // Test that the iterative comparison handles deeply nested structures
+        // without stack overflow
+        let mut nested = json!({"value": 0});
+        let mut expected = json!({"value": 0});
+
+        // Create a deeply nested structure
+        for i in 1..1000 {
+            nested = json!({"level": i, "nested": nested});
+            expected = json!({"level": i, "nested": expected});
+        }
+
+        // Should not panic with stack overflow
+        RunRpcCompatTests::compare_json_values(&nested, &expected, "root").unwrap();
+    }
+
+    #[test]
+    fn test_compare_json_values_arrays() {
+        // Test array comparison
+        let actual = json!([1, 2, 3, 4, 5]);
+        let expected = json!([1, 2, 3, 4, 5]);
+
+        RunRpcCompatTests::compare_json_values(&actual, &expected, "root").unwrap();
+
+        // Test array length mismatch
+        let actual = json!([1, 2, 3]);
+        let expected = json!([1, 2, 3, 4, 5]);
+
+        let result = RunRpcCompatTests::compare_json_values(&actual, &expected, "root");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Array length mismatch"));
+    }
+
+    #[test]
+    fn test_compare_json_values_objects() {
+        // Test object comparison
+        let actual = json!({"a": 1, "b": 2, "c": 3});
+        let expected = json!({"a": 1, "b": 2, "c": 3});
+
+        RunRpcCompatTests::compare_json_values(&actual, &expected, "root").unwrap();
+
+        // Test missing key
+        let actual = json!({"a": 1, "b": 2});
+        let expected = json!({"a": 1, "b": 2, "c": 3});
+
+        let result = RunRpcCompatTests::compare_json_values(&actual, &expected, "root");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Missing key"));
+    }
+
+    #[test]
+    fn test_compare_json_values_numbers() {
+        // Test number comparison with floating point
+        let actual = json!({"value": 1.00000000001});
+        let expected = json!({"value": 1.0});
+
+        // Should be equal within epsilon (1e-10)
+        RunRpcCompatTests::compare_json_values(&actual, &expected, "root").unwrap();
+
+        // Test significant difference
+        let actual = json!({"value": 1.1});
+        let expected = json!({"value": 1.0});
+
+        let result = RunRpcCompatTests::compare_json_values(&actual, &expected, "root");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Number mismatch"));
     }
 }
