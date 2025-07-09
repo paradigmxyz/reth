@@ -177,6 +177,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     if let Some(result) = result {
                         if matches!(result, Err(_) | Ok(Err(_))) {
                             error!(?result);
+                            return Err(eyre::eyre!("Re-execution failed: {result:?}"));
                         }
                     } else {
                         break;
