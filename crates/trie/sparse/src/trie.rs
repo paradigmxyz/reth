@@ -49,7 +49,7 @@ pub enum SparseTrie<T = RevealedSparseTrie> {
     /// until nodes are revealed.
     ///
     /// In this state the `SparseTrie` can optionally carry with it a cleared `RevealedSparseTrie`.
-    /// This allows for reusing the trie's allocations between payload executions.
+    /// This allows for re-using the trie's allocations between payload executions.
     Blind(Option<Box<T>>),
     /// Some nodes in the Trie have been revealed.
     ///
