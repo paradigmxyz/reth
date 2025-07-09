@@ -50,7 +50,6 @@ eyre.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 
 [features]
-default = ["std"]
 std = [
     "scroll-alloy-consensus/std",
     "scroll-alloy-evm/std",
