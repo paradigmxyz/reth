@@ -14,9 +14,10 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected, SignedTransaction};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
-    TransactionVariant,
+    StaticFileProviderFactory, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_stages::stages::calculate_gas_used_from_headers;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -65,6 +66,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let max_block = self.to.unwrap_or(provider.best_block_number()?);
 
         let total_blocks = max_block - min_block;
+        let total_gas = calculate_gas_used_from_headers(
+            &provider_factory.static_file_provider(),
+            min_block..=max_block,
+        )?;
         let blocks_per_task = total_blocks / self.num_tasks;
 
         let db_at = {
@@ -188,7 +193,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     let gas_executed = total_executed_gas - last_logged_gas;
 
                     if blocks_executed > 0 {
-                        let progress = 100.0 * total_executed_blocks as f64 / total_blocks as f64;
+                        let progress = 100.0 * total_executed_gas as f64 / total_gas as f64;
                         info!(
                             throughput=?format_gas_throughput(gas_executed, last_logged_time.elapsed()),
                             progress=format!("{progress:.2}%"),
