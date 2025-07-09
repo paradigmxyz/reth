@@ -22,6 +22,7 @@ pub mod launcher;
 pub mod node;
 pub mod p2p;
 pub mod prune;
+pub mod re_execute;
 pub mod recover;
 pub mod stage;
 #[cfg(feature = "arbitrary")]
