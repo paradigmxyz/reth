@@ -71,7 +71,7 @@ impl ExportConfig {
 
         if self.network != "mainnet" && self.network != "sepolia" {
             return Err(eyre!(
-                "Network '{}' is not supported. Only 'mainnet' and 'sepolia' are allowed",
+                "Unsupported network '{}'. Pre-merge era1 exports only support 'mainnet' and 'sepolia' networks.",
                 self.network
             ));
         }
