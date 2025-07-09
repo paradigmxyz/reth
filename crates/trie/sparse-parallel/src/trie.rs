@@ -45,6 +45,10 @@ pub struct ParallelSparseTrie {
     prefix_set: PrefixSetMut,
     /// Optional tracking of trie updates for later use.
     updates: Option<SparseTrieUpdates>,
+    /// When a bit is set, the corresponding child subtree is stored in the database.
+    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// When a bit is set, the corresponding child is stored as a hash in the database.
+    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
 }
 
 impl Default for ParallelSparseTrie {
@@ -57,6 +61,8 @@ impl Default for ParallelSparseTrie {
             lower_subtries: [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES],
             prefix_set: PrefixSetMut::default(),
             updates: None,
+            branch_node_tree_masks: HashMap::default(),
+            branch_node_hash_masks: HashMap::default(),
         }
     }
 }
@@ -91,6 +97,14 @@ impl SparseTrieInterface for ParallelSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
+        // Store masks
+        if let Some(tree_mask) = masks.tree_mask {
+            self.branch_node_tree_masks.insert(path, tree_mask);
+        }
+        if let Some(hash_mask) = masks.hash_mask {
+            self.branch_node_hash_masks.insert(path, hash_mask);
+        }
+
         if let Some(subtrie) = self.lower_subtrie_for_path_mut(&path) {
             return subtrie.reveal_node(path, &node, masks);
         }
@@ -224,10 +238,13 @@ impl SparseTrieInterface for ParallelSparseTrie {
             let node =
                 self.upper_subtrie.nodes.remove(node_path).expect("node belongs to upper subtrie");
 
-            // If it's a leaf node, extract its value before getting mutable reference to subtrie
+            // If it's a leaf node, extract its value before getting mutable reference to subtrie.
+            // We also add the leaf the prefix set, so that whichever lower subtrie it belongs to
+            // will have its hash recalculated as part of `update_subtrie_hashes`.
             let leaf_value = if let SparseNode::Leaf { key, .. } = &node {
                 let mut leaf_full_path = *node_path;
                 leaf_full_path.extend(key);
+                self.prefix_set.insert(leaf_full_path);
                 Some((
                     leaf_full_path,
                     self.upper_subtrie
@@ -546,7 +563,12 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // Update subtrie hashes serially if nostd
         for ChangedSubtrie { index, mut subtrie, mut prefix_set } in subtries {
             let mut update_actions = self.updates_enabled().then(|| Vec::new());
-            subtrie.update_hashes(&mut prefix_set, &mut update_actions);
+            subtrie.update_hashes(
+                &mut prefix_set,
+                &mut update_actions,
+                &self.branch_node_tree_masks,
+                &self.branch_node_hash_masks,
+            );
             tx.send((index, subtrie, update_actions)).unwrap();
         }
 
@@ -554,11 +576,18 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // Update subtrie hashes in parallel
         {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
+            let branch_node_tree_masks = &self.branch_node_tree_masks;
+            let branch_node_hash_masks = &self.branch_node_hash_masks;
             subtries
                 .into_par_iter()
                 .map(|ChangedSubtrie { index, mut subtrie, mut prefix_set }| {
                     let mut update_actions = self.updates_enabled().then(Vec::new);
-                    subtrie.update_hashes(&mut prefix_set, &mut update_actions);
+                    subtrie.update_hashes(
+                        &mut prefix_set,
+                        &mut update_actions,
+                        branch_node_tree_masks,
+                        branch_node_hash_masks,
+                    );
                     (index, subtrie, update_actions)
                 })
                 .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
@@ -1048,7 +1077,14 @@ impl ParallelSparseTrie {
             };
 
             // Calculate the RLP node for the current node using upper subtrie
-            self.upper_subtrie.inner.rlp_node(prefix_set, &mut update_actions, stack_item, node);
+            self.upper_subtrie.inner.rlp_node(
+                prefix_set,
+                &mut update_actions,
+                stack_item,
+                node,
+                &self.branch_node_tree_masks,
+                &self.branch_node_hash_masks,
+            );
         }
 
         // If there were any branch node updates as a result of calculating the RLP node for the
@@ -1400,13 +1436,6 @@ impl SparseSubtrie {
             return Ok(())
         }
 
-        if let Some(tree_mask) = masks.tree_mask {
-            self.inner.branch_node_tree_masks.insert(path, tree_mask);
-        }
-        if let Some(hash_mask) = masks.hash_mask {
-            self.inner.branch_node_hash_masks.insert(path, hash_mask);
-        }
-
         match node {
             TrieNode::EmptyRoot => {
                 // For an empty root, ensure that we are at the root path, and at the upper subtrie.
@@ -1595,7 +1624,8 @@ impl SparseSubtrie {
     /// - `update_actions`: A buffer which `SparseTrieUpdatesAction`s will be written to in the
     ///   event that any changes to the top-level updates are required. If None then update
     ///   retention is disabled.
-    /// is disabled.
+    /// - `branch_node_tree_masks`: The tree masks for branch nodes
+    /// - `branch_node_hash_masks`: The hash masks for branch nodes
     ///
     /// # Returns
     ///
@@ -1609,6 +1639,8 @@ impl SparseSubtrie {
         &mut self,
         prefix_set: &mut PrefixSet,
         update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
+        branch_node_tree_masks: &HashMap<Nibbles, TrieMask>,
+        branch_node_hash_masks: &HashMap<Nibbles, TrieMask>,
     ) -> RlpNode {
         trace!(target: "trie::parallel_sparse", "Updating subtrie hashes");
 
@@ -1627,7 +1659,14 @@ impl SparseSubtrie {
                 .get_mut(&path)
                 .unwrap_or_else(|| panic!("node at path {path:?} does not exist"));
 
-            self.inner.rlp_node(prefix_set, update_actions, stack_item, node);
+            self.inner.rlp_node(
+                prefix_set,
+                update_actions,
+                stack_item,
+                node,
+                branch_node_tree_masks,
+                branch_node_hash_masks,
+            );
         }
 
         debug_assert_eq!(self.inner.buffers.rlp_node_stack.len(), 1);
@@ -1652,10 +1691,6 @@ impl SparseSubtrie {
 /// struct.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 struct SparseSubtrieInner {
-    /// When a branch is set, the corresponding child subtree is stored in the database.
-    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
-    /// When a bit is set, the corresponding child is stored as a hash in the database.
-    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
     /// Map from leaf key paths to their values.
     /// All values are stored here instead of directly in leaf nodes.
     values: HashMap<Nibbles, Vec<u8>>,
@@ -1681,6 +1716,8 @@ impl SparseSubtrieInner {
     ///   retention is disabled.
     /// - `stack_item`: The stack item to process
     /// - `node`: The sparse node to process (will be mutated to update hash)
+    /// - `branch_node_tree_masks`: The tree masks for branch nodes
+    /// - `branch_node_hash_masks`: The hash masks for branch nodes
     ///
     /// # Side Effects
     ///
@@ -1698,6 +1735,8 @@ impl SparseSubtrieInner {
         update_actions: &mut Option<Vec<SparseTrieUpdatesAction>>,
         mut stack_item: RlpNodePathStackItem,
         node: &mut SparseNode,
+        branch_node_tree_masks: &HashMap<Nibbles, TrieMask>,
+        branch_node_hash_masks: &HashMap<Nibbles, TrieMask>,
     ) {
         let path = stack_item.path;
         trace!(
@@ -1854,7 +1893,7 @@ impl SparseSubtrieInner {
                             } else {
                                 // A blinded node has the tree mask bit set
                                 child_node_type.is_hash() &&
-                                    self.branch_node_tree_masks
+                                    branch_node_tree_masks
                                         .get(&path)
                                         .is_some_and(|mask| mask.is_bit_set(last_child_nibble))
                             };
@@ -1868,7 +1907,7 @@ impl SparseSubtrieInner {
                             let hash = child.as_hash().filter(|_| {
                                 child_node_type.is_branch() ||
                                     (child_node_type.is_hash() &&
-                                        self.branch_node_hash_masks.get(&path).is_some_and(
+                                        branch_node_hash_masks.get(&path).is_some_and(
                                             |mask| mask.is_bit_set(last_child_nibble),
                                         ))
                             });
@@ -1937,23 +1976,15 @@ impl SparseSubtrieInner {
                         );
                         update_actions
                             .push(SparseTrieUpdatesAction::InsertUpdated(path, branch_node));
-                    } else if self
-                        .branch_node_tree_masks
-                        .get(&path)
-                        .is_some_and(|mask| !mask.is_empty()) ||
-                        self.branch_node_hash_masks
-                            .get(&path)
-                            .is_some_and(|mask| !mask.is_empty())
+                    } else if branch_node_tree_masks.get(&path).is_some_and(|mask| !mask.is_empty()) ||
+                        branch_node_hash_masks.get(&path).is_some_and(|mask| !mask.is_empty())
                     {
                         // If new tree and hash masks are empty, but previously they weren't, we
                         // need to remove the node update and add the node itself to the list of
                         // removed nodes.
                         update_actions.push(SparseTrieUpdatesAction::InsertRemoved(path));
-                    } else if self
-                        .branch_node_hash_masks
-                        .get(&path)
-                        .is_none_or(|mask| mask.is_empty()) &&
-                        self.branch_node_hash_masks.get(&path).is_none_or(|mask| mask.is_empty())
+                    } else if branch_node_tree_masks.get(&path).is_none_or(|mask| mask.is_empty()) &&
+                        branch_node_hash_masks.get(&path).is_none_or(|mask| mask.is_empty())
                     {
                         // If new tree and hash masks are empty, and they were previously empty
                         // as well, we need to remove the node update.
@@ -1984,8 +2015,6 @@ impl SparseSubtrieInner {
 
     /// Clears the subtrie, keeping the data structures allocated.
     fn clear(&mut self) {
-        self.branch_node_tree_masks.clear();
-        self.branch_node_hash_masks.clear();
         self.values.clear();
         self.buffers.clear();
     }
@@ -2180,7 +2209,8 @@ mod tests {
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
         blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
-        LeafLookup, LeafLookupError, SparseNode, SparseTrieInterface, TrieMasks,
+        LeafLookup, LeafLookupError, RevealedSparseTrie, SparseNode, SparseTrieInterface,
+        SparseTrieUpdates, TrieMasks,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -3098,6 +3128,8 @@ mod tests {
             &mut PrefixSetMut::from([leaf_1_full_path, leaf_2_full_path, leaf_3_full_path])
                 .freeze(),
             &mut None,
+            &HashMap::default(),
+            &HashMap::default(),
         );
 
         // Compare hashes between hash builder and subtrie
@@ -4441,6 +4473,137 @@ mod tests {
         )| {
             test(updates)
         });
+    }
+
+    #[test]
+    fn sparse_trie_fuzz_vs_serial() {
+        // Having only the first 3 nibbles set, we narrow down the range of keys
+        // to 4096 different hashes. It allows us to generate collisions more likely
+        // to test the sparse trie updates.
+        const KEY_NIBBLES_LEN: usize = 3;
+
+        fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
+            let default_provider = DefaultBlindedProvider;
+            let mut serial = RevealedSparseTrie::default().with_updates(true);
+            let mut parallel = ParallelSparseTrie::default().with_updates(true);
+
+            for (update, keys_to_delete) in updates {
+                // Perform leaf updates on both tries
+                for (key, account) in update.clone() {
+                    let account = account.into_trie_account(EMPTY_ROOT_HASH);
+                    let mut account_rlp = Vec::new();
+                    account.encode(&mut account_rlp);
+                    serial.update_leaf(key, account_rlp.clone(), &default_provider).unwrap();
+                    parallel.update_leaf(key, account_rlp, &default_provider).unwrap();
+                }
+
+                // Calculate roots and assert their equality
+                let serial_root = serial.root();
+                let parallel_root = parallel.root();
+                assert_eq!(parallel_root, serial_root);
+
+                // Assert that both tries produce the same updates
+                let serial_updates = serial.take_updates();
+                let parallel_updates = parallel.take_updates();
+                pretty_assertions::assert_eq!(
+                    BTreeMap::from_iter(parallel_updates.updated_nodes),
+                    BTreeMap::from_iter(serial_updates.updated_nodes),
+                );
+                pretty_assertions::assert_eq!(
+                    BTreeSet::from_iter(parallel_updates.removed_nodes),
+                    BTreeSet::from_iter(serial_updates.removed_nodes),
+                );
+
+                // Perform leaf removals on both tries
+                for key in &keys_to_delete {
+                    parallel.remove_leaf(key, &default_provider).unwrap();
+                    serial.remove_leaf(key, &default_provider).unwrap();
+                }
+
+                // Calculate roots and assert their equality
+                let serial_root = serial.root();
+                let parallel_root = parallel.root();
+                assert_eq!(parallel_root, serial_root);
+
+                // Assert that both tries produce the same updates
+                let serial_updates = serial.take_updates();
+                let parallel_updates = parallel.take_updates();
+                pretty_assertions::assert_eq!(
+                    BTreeMap::from_iter(parallel_updates.updated_nodes),
+                    BTreeMap::from_iter(serial_updates.updated_nodes),
+                );
+                pretty_assertions::assert_eq!(
+                    BTreeSet::from_iter(parallel_updates.removed_nodes),
+                    BTreeSet::from_iter(serial_updates.removed_nodes),
+                );
+            }
+        }
+
+        fn transform_updates(
+            updates: Vec<BTreeMap<Nibbles, Account>>,
+            mut rng: impl rand::Rng,
+        ) -> Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)> {
+            let mut keys = BTreeSet::new();
+            updates
+                .into_iter()
+                .map(|update| {
+                    keys.extend(update.keys().copied());
+
+                    let keys_to_delete_len = update.len() / 2;
+                    let keys_to_delete = (0..keys_to_delete_len)
+                        .map(|_| {
+                            let key =
+                                *rand::seq::IteratorRandom::choose(keys.iter(), &mut rng).unwrap();
+                            keys.take(&key).unwrap()
+                        })
+                        .collect();
+
+                    (update, keys_to_delete)
+                })
+                .collect::<Vec<_>>()
+        }
+
+        proptest!(ProptestConfig::with_cases(10), |(
+            updates in proptest::collection::vec(
+                proptest::collection::btree_map(
+                    any_with::<Nibbles>(SizeRange::new(KEY_NIBBLES_LEN..=KEY_NIBBLES_LEN)).prop_map(pad_nibbles_right),
+                    arb::<Account>(),
+                    1..50,
+                ),
+                1..50,
+            ).prop_perturb(transform_updates)
+        )| {
+            test(updates)
+        });
+    }
+
+    #[test]
+    fn sparse_trie_two_leaves_at_lower_roots() {
+        let provider = DefaultBlindedProvider;
+        let mut trie = ParallelSparseTrie::default().with_updates(true);
+        let key_50 = Nibbles::unpack(hex!(
+            "0x5000000000000000000000000000000000000000000000000000000000000000"
+        ));
+        let key_51 = Nibbles::unpack(hex!(
+            "0x5100000000000000000000000000000000000000000000000000000000000000"
+        ));
+
+        let account = Account::default().into_trie_account(EMPTY_ROOT_HASH);
+        let mut account_rlp = Vec::new();
+        account.encode(&mut account_rlp);
+
+        // Add a leaf and calculate the root.
+        trie.update_leaf(key_50, account_rlp.clone(), &provider).unwrap();
+        trie.root();
+
+        // Add a second leaf and assert that the root is the expected value.
+        trie.update_leaf(key_51, account_rlp.clone(), &provider).unwrap();
+
+        let expected_root =
+            hex!("0xdaf0ef9f91a2f179bb74501209effdb5301db1697bcab041eca2234b126e25de");
+        let root = trie.root();
+        assert_eq!(root, expected_root);
+        assert_eq!(SparseTrieUpdates::default(), trie.take_updates());
     }
 
     /// We have three leaves that share the same prefix: 0x00, 0x01 and 0x02. Hash builder trie has
