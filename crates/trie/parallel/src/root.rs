@@ -106,7 +106,7 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            rayon::spawn_fifo(move || {
+            tokio::task::spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider_ro = view.provider_ro()?;
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
