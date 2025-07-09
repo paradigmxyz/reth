@@ -14,6 +14,7 @@ use alloy_primitives::{BlockNumber, B256};
 use eyre::eyre;
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
+use reth_engine_local::MiningMode;
 use reth_ethereum_forks::{EthereumHardforks, Head};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives_traits::SealedHeader;
@@ -493,11 +494,11 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Returns the [`MiningMode`] intended for --dev mode.
-    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> reth_engine_local::MiningMode {
+    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
         if let Some(interval) = self.dev.block_time {
-            reth_engine_local::MiningMode::interval(interval)
+            MiningMode::interval(interval)
         } else {
-            reth_engine_local::MiningMode::instant(pool)
+            MiningMode::instant(pool)
         }
     }
 }
