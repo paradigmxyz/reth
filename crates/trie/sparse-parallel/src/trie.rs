@@ -45,7 +45,7 @@ pub struct ParallelSparseTrie {
     prefix_set: PrefixSetMut,
     /// Optional tracking of trie updates for later use.
     updates: Option<SparseTrieUpdates>,
-    /// When a branch is set, the corresponding child subtree is stored in the database.
+    /// When a bit is set, the corresponding child subtree is stored in the database.
     branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     /// When a bit is set, the corresponding child is stored as a hash in the database.
     branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
@@ -995,7 +995,6 @@ impl ParallelSparseTrie {
             };
 
             // Calculate the RLP node for the current node using upper subtrie
-            // Pass the masks from the ParallelSparseTrie level
             self.upper_subtrie.inner.rlp_node(
                 prefix_set,
                 &mut update_actions,
@@ -1540,7 +1539,8 @@ impl SparseSubtrie {
     /// - `update_actions`: A buffer which `SparseTrieUpdatesAction`s will be written to in the
     ///   event that any changes to the top-level updates are required. If None then update
     ///   retention is disabled.
-    /// is disabled.
+    /// - `branch_node_tree_masks`: The tree masks for branch nodes
+    /// - `branch_node_hash_masks`: The hash masks for branch nodes
     ///
     /// # Returns
     ///
@@ -1631,6 +1631,8 @@ impl SparseSubtrieInner {
     ///   retention is disabled.
     /// - `stack_item`: The stack item to process
     /// - `node`: The sparse node to process (will be mutated to update hash)
+    /// - `branch_node_tree_masks`: The tree masks for branch nodes
+    /// - `branch_node_hash_masks`: The hash masks for branch nodes
     ///
     /// # Side Effects
     ///
@@ -3037,14 +3039,12 @@ mod tests {
         );
 
         // Update hashes for the subtrie
-        let empty_tree_masks = HashMap::default();
-        let empty_hash_masks = HashMap::default();
         subtrie.update_hashes(
             &mut PrefixSetMut::from([leaf_1_full_path, leaf_2_full_path, leaf_3_full_path])
                 .freeze(),
             &mut None,
-            &empty_tree_masks,
-            &empty_hash_masks,
+            &HashMap::default(),
+            &HashMap::default(),
         );
 
         // Compare hashes between hash builder and subtrie
