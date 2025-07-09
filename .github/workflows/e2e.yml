@@ -41,14 +41,14 @@ jobs:
         name: Run e2e tests
         run: |
           cargo nextest run \
-            --locked --features "asm-keccak ${{ matrix.network }}" \
+            --locked --features "asm-keccak" \
             --workspace -E 'binary(e2e_testsuite)'
       - if: matrix.network == 'optimism'
         name: Run e2e tests
         run: |
           cargo nextest run \
-            --locked --features "asm-keccak optimism" \
-            --workspace -E 'binary(e2e_testsuite) and package(~reth-optimism)'
+            --locked --features "asm-keccak" \
+            -p reth-optimism-node --test e2e_testsuite
 
   e2e-success:
     name: e2e success
