@@ -44,7 +44,7 @@ where
     BPF: BlindedProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
     BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
-    A: SparseTrieInterface + Send + Sync,
+    A: SparseTrieInterface + Send + Sync + Default,
 {
     /// Creates a new sparse trie task.
     pub(super) fn new(
@@ -178,7 +178,7 @@ where
     BPF: BlindedProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
     BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
-    A: SparseTrieInterface + Send + Sync,
+    A: SparseTrieInterface + Send + Sync + Default,
 {
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
