@@ -160,7 +160,7 @@ impl ReadOnlyConfig {
     ///
     /// Caution: Keeping database transaction open indefinitely can cause the free list to grow if
     /// changes to the database are made.
-    pub fn disable_long_read_transaction_safety(mut self) -> Self {
+    pub const fn disable_long_read_transaction_safety(mut self) -> Self {
         self.db_args.max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
         self
     }
