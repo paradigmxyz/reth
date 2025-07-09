@@ -10275,7 +10275,6 @@ dependencies = [
  "reth-node-metrics",
  "reth-scroll-chainspec",
  "reth-scroll-evm",
- "reth-scroll-node",
  "reth-scroll-primitives",
  "reth-tracing",
  "scroll-alloy-consensus",

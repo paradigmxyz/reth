@@ -26,7 +26,6 @@ reth-tracing.workspace = true
 # scroll
 reth-scroll-chainspec.workspace = true
 reth-scroll-evm.workspace = true
-reth-scroll-node.workspace = true
 reth-scroll-primitives.workspace = true
 scroll-alloy-consensus = { workspace = true, optional = true }
 
