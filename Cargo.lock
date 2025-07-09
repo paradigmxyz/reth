@@ -8453,8 +8453,6 @@ name = "reth-execution-tester"
 version = "1.5.1"
 dependencies = [
  "alloy-consensus",
- "alloy-network",
- "alloy-provider",
  "eyre",
  "reth-chainspec",
  "reth-consensus",
@@ -8463,7 +8461,6 @@ dependencies = [
  "reth-evm",
  "reth-evm-ethereum",
  "reth-primitives-traits",
- "revm-database",
  "tokio",
  "tracing",
  "tracing-subscriber 0.3.19",
@@ -10766,14 +10763,11 @@ version = "7.0.1"
 source = "git+https://github.com/bluealloy/revm?rev=22a2d024#22a2d02453f8269ae9f7d7ebe74241890fee1dc2"
 dependencies = [
  "alloy-eips",
- "alloy-provider",
- "alloy-transport",
  "revm-bytecode",
  "revm-database-interface",
  "revm-primitives",
  "revm-state",
  "serde",
- "tokio",
 ]
 
 [[package]]
@@ -10786,7 +10780,6 @@ dependencies = [
  "revm-primitives",
  "revm-state",
  "serde",
- "tokio",
 ]
 
 [[package]]

@@ -22,10 +22,6 @@ reth-ethereum-consensus.workspace = true
 reth-primitives-traits.workspace = true
 
 alloy-consensus.workspace = true
-alloy-network.workspace = true
-alloy-provider = { workspace = true, features = ["reqwest-rustls-tls"] }
-
-revm-database = { workspace = true, features = ["alloydb"] }
 
 eyre.workspace = true
 tokio.workspace = true

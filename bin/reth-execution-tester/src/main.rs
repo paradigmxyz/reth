@@ -1,36 +1,27 @@
 use alloy_consensus::TxReceipt;
-use alloy_network::{Network, ReceiptResponse};
-use alloy_provider::{DynProvider, Provider, ProviderBuilder};
 use eyre::Context;
 use reth_chainspec::{mainnet::MAINNET_SPURIOUS_DRAGON_BLOCK, MAINNET};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_ethereum::{
     evm::revm::database::StateProviderDatabase,
-    node::{
-        api::{NodeTypes, NodeTypesWithDB},
-        EthereumNode,
-    },
+    node::EthereumNode,
     provider::{
         db::open_db_read_only,
         providers::{ProviderNodeTypes, StaticFileProvider},
         BlockNumReader, ProviderFactory,
     },
     storage::{BlockReader, ReceiptProvider, TransactionVariant},
-    tasks::TaskExecutor,
 };
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{
-    format_gas_throughput, AlloyBlockHeader, Block, BlockBody, BlockTy, GotExpected,
-    SignedTransaction,
+    format_gas_throughput, AlloyBlockHeader, BlockBody, GotExpected, SignedTransaction,
 };
-use revm_database::{AlloyDB, WrapDatabaseAsync, WrapDatabaseRef};
 use std::{
-    future::IntoFuture,
     path::PathBuf,
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
-use tokio::{runtime::Handle, task::JoinSet};
+use tokio::task::JoinSet;
 use tracing::{error, info};
 
 pub async fn run<E, N>(
@@ -51,8 +42,9 @@ where
     let min_block = min_block.unwrap_or(1);
     let max_block = max_block.unwrap_or(latest_block);
 
+    let total_blocks = max_block - min_block;
     let num_tasks = 10;
-    let blocks_per_task = (max_block - min_block) / num_tasks;
+    let blocks_per_task = total_blocks / num_tasks;
 
     let db_at = {
         let provider = provider_factory.clone();
@@ -63,22 +55,30 @@ where
 
     let (stats_tx, stats_rx) = mpsc::channel();
     tasks.spawn_blocking(move || {
+        let mut total_executed = 0;
         loop {
             let instant = Instant::now();
             std::thread::sleep(Duration::from_secs(10));
-            let mut total_gas = 0;
-            let mut total_blocks = 0;
+            let mut executed_gas = 0;
+            let mut executed_blocks = 0;
             while let Ok(gas_used) = stats_rx.try_recv() {
-                total_gas += gas_used;
-                total_blocks += 1;
+                executed_gas += gas_used;
+                executed_blocks += 1;
             }
-            info!(throughput=?format_gas_throughput(total_gas, instant.elapsed()), "Executed {total_blocks} blocks");
+            total_executed += executed_blocks;
+
+            let progress = 100.0 * total_executed as f64 / total_blocks as f64;
+            info!(
+                throughput=?format_gas_throughput(executed_gas, instant.elapsed()),
+                progress=format!("{progress:.2}%"),
+                "Executed {executed_blocks} blocks"
+            );
         }
     });
 
     for i in 0..num_tasks {
         let start_block = min_block + i * blocks_per_task;
-        let end_block = start_block + blocks_per_task;
+        let end_block = if i == num_tasks - 1 { max_block } else { start_block + blocks_per_task };
 
         // Spawn thread executing blocks
         {
