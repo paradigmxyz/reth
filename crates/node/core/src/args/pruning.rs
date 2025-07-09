@@ -48,19 +48,22 @@ pub struct PruningArgs {
 
     // Receipts
     /// Prunes all receipt data.
-    #[arg(long = "prune.receipts.full", conflicts_with_all = &["receipts_distance", "receipts_before"])]
+    #[arg(long = "prune.receipts.full", conflicts_with_all = &["receipts_pre_merge", "receipts_distance", "receipts_before"])]
     pub receipts_full: bool,
+    /// Prune receipts before the merge block.
+    #[arg(long = "prune.receipts.pre-merge", conflicts_with_all = &["receipts_full", "receipts_distance", "receipts_before"])]
+    pub receipts_pre_merge: bool,
     /// Prune receipts before the `head-N` block number. In other words, keep last N + 1 blocks.
-    #[arg(long = "prune.receipts.distance", value_name = "BLOCKS", conflicts_with_all = &["receipts_full", "receipts_before"])]
+    #[arg(long = "prune.receipts.distance", value_name = "BLOCKS", conflicts_with_all = &["receipts_full", "receipts_pre_merge", "receipts_before"])]
     pub receipts_distance: Option<u64>,
     /// Prune receipts before the specified block number. The specified block number is not pruned.
-    #[arg(long = "prune.receipts.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["receipts_full", "receipts_distance"])]
+    #[arg(long = "prune.receipts.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["receipts_full", "receipts_pre_merge", "receipts_distance"])]
     pub receipts_before: Option<BlockNumber>,
     // Receipts Log Filter
     /// Configure receipts log filter. Format:
     /// <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be
     /// 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
-    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", conflicts_with_all = &["receipts_full", "receipts_distance",  "receipts_before"], value_parser = parse_receipts_log_filter)]
+    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", conflicts_with_all = &["receipts_full", "receipts_pre_merge", "receipts_distance",  "receipts_before"], value_parser = parse_receipts_log_filter)]
     pub receipts_log_filter: Option<ReceiptsLogPruneConfig>,
 
     // Account History
@@ -138,7 +141,7 @@ impl PruningArgs {
         if let Some(mode) = self.transaction_lookup_prune_mode() {
             config.segments.transaction_lookup = Some(mode);
         }
-        if let Some(mode) = self.receipts_prune_mode() {
+        if let Some(mode) = self.receipts_prune_mode(chain_spec) {
             config.segments.receipts = Some(mode);
         }
         if let Some(mode) = self.account_history_prune_mode() {
@@ -202,15 +205,21 @@ impl PruningArgs {
         }
     }
 
-    const fn receipts_prune_mode(&self) -> Option<PruneMode> {
-        if self.receipts_full {
+    fn receipts_prune_mode<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneMode>
+    where
+        ChainSpec: EthereumHardforks,
+    {
+        if self.receipts_pre_merge {
+            chain_spec
+                .ethereum_fork_activation(EthereumHardfork::Paris)
+                .block_number()
+                .map(PruneMode::Before)
+        } else if self.receipts_full {
             Some(PruneMode::Full)
         } else if let Some(distance) = self.receipts_distance {
             Some(PruneMode::Distance(distance))
-        } else if let Some(block_number) = self.receipts_before {
-            Some(PruneMode::Before(block_number))
         } else {
-            None
+            self.receipts_before.map(PruneMode::Before)
         }
     }
 

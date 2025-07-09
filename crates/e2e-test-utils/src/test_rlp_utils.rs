@@ -176,10 +176,10 @@ pub fn write_blocks_to_rlp(blocks: &[SealedBlock], path: &Path) -> std::io::Resu
 /// Create FCU JSON for the tip of the chain
 pub fn create_fcu_json(tip: &SealedBlock) -> serde_json::Value {
     serde_json::json!({
-        "forkchoiceState": {
+        "params": [{
             "headBlockHash": format!("0x{:x}", tip.hash()),
             "safeBlockHash": format!("0x{:x}", tip.hash()),
             "finalizedBlockHash": format!("0x{:x}", tip.hash()),
-        }
+        }]
     })
 }

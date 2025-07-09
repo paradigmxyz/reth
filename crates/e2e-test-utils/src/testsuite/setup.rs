@@ -46,6 +46,8 @@ pub struct Setup<I> {
     /// Holds the import result to keep nodes alive when using imported chain
     /// This is stored as an option to avoid lifetime issues with `tokio::spawn`
     import_result_holder: Option<crate::setup_import::ChainImportResult>,
+    /// Path to RLP file to import during setup
+    pub import_rlp_path: Option<std::path::PathBuf>,
 }
 
 impl<I> Default for Setup<I> {
@@ -61,6 +63,7 @@ impl<I> Default for Setup<I> {
             is_dev: true,
             _phantom: Default::default(),
             import_result_holder: None,
+            import_rlp_path: None,
         }
     }
 }
@@ -174,6 +177,10 @@ where
             <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
         >,
     {
+        // If import_rlp_path is set, use apply_with_import instead
+        if let Some(rlp_path) = self.import_rlp_path.take() {
+            return self.apply_with_import::<N>(env, &rlp_path).await;
+        }
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
 

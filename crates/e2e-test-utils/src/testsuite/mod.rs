@@ -293,6 +293,17 @@ where
         self
     }
 
+    /// Set the test setup with chain import from RLP file
+    pub fn with_setup_and_import(
+        mut self,
+        mut setup: Setup<I>,
+        rlp_path: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        setup.import_rlp_path = Some(rlp_path.into());
+        self.setup = Some(setup);
+        self
+    }
+
     /// Add an action to the test
     pub fn with_action<A>(mut self, action: A) -> Self
     where

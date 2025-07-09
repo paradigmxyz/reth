@@ -209,7 +209,7 @@ mod tests {
         let request2 = codec
             .decode(&mut buf)
             .expect("There should be no error in first 2nd test")
-            .expect("There should be aa request in 2nd whitespace test");
+            .expect("There should be a request in 2nd whitespace test");
         // TODO: maybe actually trim it out
         assert_eq!(request2, "\n\n\n\n{ test: 2 }");
 

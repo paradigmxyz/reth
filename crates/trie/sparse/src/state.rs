@@ -73,8 +73,8 @@ impl SparseStateTrie {
 
 impl<A, S> SparseStateTrie<A, S>
 where
-    A: SparseTrieInterface,
-    S: SparseTrieInterface,
+    A: SparseTrieInterface + Default,
+    S: SparseTrieInterface + Default,
 {
     /// Create new [`SparseStateTrie`]
     pub fn new() -> Self {

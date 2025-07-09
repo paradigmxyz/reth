@@ -30,14 +30,17 @@ rayon = { workspace = true, optional = true }
 [dev-dependencies]
 # reth
 reth-primitives-traits.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
-reth-trie.workspace = true
+reth-trie-db.workspace = true
 reth-trie-sparse = { workspace = true, features = ["test-utils"] }
+reth-trie.workspace = true
 
 # misc
 arbitrary.workspace = true
 assert_matches.workspace = true
 itertools.workspace = true
+pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
 rand.workspace = true
