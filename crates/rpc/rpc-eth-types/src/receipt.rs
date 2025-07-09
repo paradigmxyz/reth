@@ -22,8 +22,6 @@ where
     R: TxReceipt<Log = alloy_primitives::Log>,
     T: Transaction + SignerRecoverable,
 {
-    // Note: we assume this transaction is valid, because it's mined (or part of pending block)
-    // and we don't need to check for pre EIP-2
     let from = transaction.signer();
 
     // get the previous transaction cumulative gas used
