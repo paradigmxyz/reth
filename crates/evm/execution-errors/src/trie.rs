@@ -151,7 +151,7 @@ pub enum SparseTrieErrorKind {
     /// Sparse trie is still blind. Thrown on attempt to update it.
     #[error("sparse trie is blind")]
     Blind,
-    /// Encountered trie node on update.
+    /// Encountered blinded node on update.
     #[error("attempted to update blind node at {path:?}: {hash}")]
     BlindedNode {
         /// Blind node path.
