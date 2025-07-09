@@ -8458,6 +8458,7 @@ dependencies = [
  "eyre",
  "reth-chainspec",
  "reth-consensus",
+ "reth-ethereum",
  "reth-ethereum-consensus",
  "reth-evm",
  "reth-evm-ethereum",

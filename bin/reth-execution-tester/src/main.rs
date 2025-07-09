@@ -4,6 +4,20 @@ use alloy_provider::{DynProvider, Provider, ProviderBuilder};
 use eyre::Context;
 use reth_chainspec::{mainnet::MAINNET_SPURIOUS_DRAGON_BLOCK, MAINNET};
 use reth_consensus::{ConsensusError, FullConsensus};
+use reth_ethereum::{
+    evm::revm::database::StateProviderDatabase,
+    node::{
+        api::{NodeTypes, NodeTypesWithDB},
+        EthereumNode,
+    },
+    provider::{
+        db::open_db_read_only,
+        providers::{ProviderNodeTypes, StaticFileProvider},
+        BlockNumReader, ProviderFactory,
+    },
+    storage::{BlockReader, ReceiptProvider},
+    tasks::TaskExecutor,
+};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{
     format_gas_throughput, AlloyBlockHeader, Block, BlockBody, BlockTy, GotExpected,
@@ -12,6 +26,7 @@ use reth_primitives_traits::{
 use revm_database::{AlloyDB, WrapDatabaseAsync, WrapDatabaseRef};
 use std::{
     future::IntoFuture,
+    path::PathBuf,
     sync::{mpsc, Arc},
     time::{Duration, Instant},
 };
@@ -21,16 +36,16 @@ use tracing::{error, info};
 pub async fn run<E, N>(
     evm_config: E,
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
-    provider: DynProvider<N>,
-    convert_block: impl Fn(N::BlockResponse) -> BlockTy<E::Primitives> + Send + Copy + 'static,
+    provider_factory: ProviderFactory<N>,
     min_block: Option<u64>,
     max_block: Option<u64>,
 ) -> eyre::Result<()>
 where
     E: ConfigureEvm + 'static,
-    N: Network,
+    N: ProviderNodeTypes<Primitives = E::Primitives>,
 {
-    let latest_block = provider.get_block_number().await?;
+    let mut tasks = JoinSet::new();
+    let latest_block = provider_factory.best_block_number().unwrap();
     info!(?latest_block, "Starting execution threads");
 
     let min_block = min_block.unwrap_or(1);
@@ -40,15 +55,10 @@ where
 
     let blocks_per_thread = (max_block - min_block) / num_threads;
 
-    let mut tasks = JoinSet::new();
-
     let db_at = {
-        let provider = provider.clone();
+        let provider = provider_factory.clone();
         move |block_number: u64| {
-            WrapDatabaseRef(
-                WrapDatabaseAsync::new(AlloyDB::new(provider.clone(), block_number.into()))
-                    .unwrap(),
-            )
+            StateProviderDatabase(provider.history_by_block_number(block_number).unwrap())
         }
     };
 
@@ -76,11 +86,14 @@ where
 
         // Spawn thread streaming blocks
         {
-            let provider = provider.clone();
-            tasks.spawn(async move {
+            let provider = provider_factory.clone();
+            tasks.spawn_blocking(move || {
                 for block_number in start_block..end_block {
-                    let block = provider.get_block(block_number.into()).full().await?.unwrap();
-                    let block = convert_block(block).seal_slow().try_recover()?;
+                    let block = provider
+                        .block_by_number(block_number.into())?
+                        .unwrap()
+                        .seal_slow()
+                        .try_recover()?;
                     let _ = blocks_tx.send(block);
                 }
 
@@ -90,7 +103,7 @@ where
 
         // Spawn thread executing blocks
         {
-            let provider = provider.clone();
+            let provider = provider_factory.clone();
             let evm_config = evm_config.clone();
             let consensus = consensus.clone();
             let db_at = db_at.clone();
@@ -104,17 +117,16 @@ where
                         .validate_block_post_execution(&block, &result)
                         .wrap_err_with(|| format!("Failed to validate block {}", block.number()))
                     {
-                        let correct_receipts = Handle::current()
-                            .block_on(provider.get_block_receipts(block.number().into()))?
-                            .unwrap();
+                        let correct_receipts = provider.receipts_by_block(block.number().into())?.unwrap();
 
                         for (i, (receipt, correct_receipt)) in
                             result.receipts.iter().zip(correct_receipts.iter()).enumerate()
                         {
+                            let expected_gas_used = correct_receipt.cumulative_gas_used() - if i == 0 { 0 } else { correct_receipts[i - 1].cumulative_gas_used() };
                             let got_gas_used = receipt.cumulative_gas_used() - if i == 0 { 0 } else { result.receipts[i - 1].cumulative_gas_used() };
-                            if got_gas_used != correct_receipt.gas_used() {
+                            if got_gas_used != expected_gas_used {
                                 let mismatch = GotExpected {
-                                    expected: correct_receipt.gas_used(),
+                                    expected: expected_gas_used,
                                     got: got_gas_used,
                                 };
                                 let tx_hash = block.body().transactions()[i].tx_hash();
@@ -154,14 +166,18 @@ async fn main() -> eyre::Result<()> {
         .init();
 
     let chain_spec = MAINNET.clone();
-    let provider = DynProvider::new(
-        ProviderBuilder::new().connect("https://reth-ethereum.ithaca.xyz/rpc").await?,
-    );
+    let datadir = PathBuf::from(std::env::var("RETH_DATADIR").unwrap());
+
+    let provider_factory = EthereumNode::provider_factory_builder()
+        .db(Arc::new(open_db_read_only(datadir.join("db"), Default::default()).unwrap()))
+        .chainspec(chain_spec.clone())
+        .static_file(StaticFileProvider::read_only(datadir.join("static_files"), false).unwrap())
+        .build_provider_factory();
+
     run(
         reth_evm_ethereum::EthEvmConfig::new(chain_spec.clone()),
         Arc::new(reth_ethereum_consensus::EthBeaconConsensus::new(chain_spec)),
-        provider,
-        |block| block.into_consensus().convert_transactions(),
+        provider_factory,
         Some(MAINNET_SPURIOUS_DRAGON_BLOCK),
         None,
     )
