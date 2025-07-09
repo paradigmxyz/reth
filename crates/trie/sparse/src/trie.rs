@@ -1618,7 +1618,7 @@ impl RevealedSparseTrie {
                             updates.updated_nodes.remove(&path);
                             updates.removed_nodes.insert(path);
                         } else if self
-                            .branch_node_hash_masks
+                            .branch_node_tree_masks
                             .get(&path)
                             .is_none_or(|mask| mask.is_empty()) &&
                             self.branch_node_hash_masks
