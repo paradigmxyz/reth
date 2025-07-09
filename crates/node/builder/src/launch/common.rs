@@ -97,6 +97,10 @@ use tokio::sync::{
 use futures::{future::Either, stream, Stream, StreamExt};
 use reth_node_events::{cl::ConsensusLayerHealthEvents, node::NodeEvent};
 
+// Global rayon thread pool initialization - only initialize once per process
+use std::sync::Once;
+static INIT_GLOBAL_POOL: Once = Once::new();
+
 /// Reusable setup for launching a node.
 ///
 /// This is the entry point for the node launch process. It implements a builder
@@ -219,18 +223,21 @@ impl LaunchContext {
             Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
         }
 
-        // Reserving the given number of CPU cores for the rest of OS.
-        // Users can reserve more cores by setting engine.reserved-cpu-cores
-        // Note: The global rayon thread pool will use at least one core.
-        let num_threads = available_parallelism()
-            .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
-        if let Err(err) = ThreadPoolBuilder::new()
-            .num_threads(num_threads)
-            .thread_name(|i| format!("reth-rayon-{i}"))
-            .build_global()
-        {
-            error!(%err, "Failed to build global thread pool")
-        }
+        // Only initialize the global rayon thread pool once per process
+        INIT_GLOBAL_POOL.call_once(|| {
+            // Reserving the given number of CPU cores for the rest of OS.
+            // Users can reserve more cores by setting engine.reserved-cpu-cores
+            // Note: The global rayon thread pool will use at least one core.
+            let num_threads = available_parallelism()
+                .map_or(0, |num| num.get().saturating_sub(reserved_cpu_cores).max(1));
+            if let Err(err) = ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .thread_name(|i| format!("reth-rayon-{i}"))
+                .build_global()
+            {
+                error!(%err, "Failed to build global thread pool")
+            }
+        });
     }
 }
 
