@@ -1,7 +1,7 @@
 //! Logic to export from database era1 block history
 //! and injecting them into era1 files with `Era1Writer`.
 
-use alloy_consensus::{BlockBody, BlockHeader, Header};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
 use reth_era::{
@@ -83,11 +83,9 @@ impl ExportConfig {
 /// Fetches block history data from the provider
 /// and prepares it for export to era1 files
 /// for a given number of blocks then writes them to disk.
-pub fn export<P, B>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
+pub fn export<P>(provider: &P, config: &ExportConfig) -> Result<Vec<PathBuf>>
 where
-    P: BlockReader<Block = B>,
-    B: Into<BlockBody<P::Transaction, Header>>,
-    P::Header: Into<Header>,
+    P: BlockReader,
 {
     config.validate()?;
     info!(
@@ -278,16 +276,14 @@ where
 }
 
 // Compresses block data and returns compressed components with metadata
-fn compress_block_data<P, B>(
+fn compress_block_data<P>(
     provider: &P,
     header: P::Header,
     expected_block_number: BlockNumber,
     total_difficulty: &mut U256,
 ) -> Result<(CompressedHeader, CompressedBody, CompressedReceipts)>
 where
-    P: BlockReader<Block = B>,
-    B: Into<BlockBody<P::Transaction, Header>>,
-    P::Header: Into<Header>,
+    P: BlockReader,
 {
     let actual_block_number = header.number();
 
@@ -305,8 +301,8 @@ where
 
     *total_difficulty += header.difficulty();
 
-    let compressed_header = CompressedHeader::from_header(&header.into())?;
-    let compressed_body = CompressedBody::from_body(&body.into())?;
+    let compressed_header = CompressedHeader::from_header(&header)?;
+    let compressed_body = CompressedBody::from_body(&body)?;
     let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
         .map_err(|e| eyre!("Failed to compress receipts: {}", e))?;
 

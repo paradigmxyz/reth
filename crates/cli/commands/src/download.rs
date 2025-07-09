@@ -17,7 +17,7 @@ use tokio::task;
 use tracing::info;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
-const MERKLE_BASE_URL: &str = "https://downloads.merkle.io";
+const MERKLE_BASE_URL: &str = "https://snapshots.merkle.io";
 const EXTENSION_TAR_FILE: &str = ".tar.lz4";
 
 #[derive(Debug, Parser)]
@@ -32,7 +32,7 @@ pub struct DownloadCommand<C: ChainSpecParser> {
         long_help = "Specify a snapshot URL or let the command propose a default one.\n\
         \n\
         Available snapshot sources:\n\
-        - https://downloads.merkle.io (default, mainnet archive)\n\
+        - https://snapshots.merkle.io (default, mainnet archive)\n\
         - https://publicnode.com/snapshots (full nodes & testnets)\n\
         \n\
         If no URL is provided, the latest mainnet archive snapshot\n\

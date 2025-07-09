@@ -1,6 +1,6 @@
 # Stages
 
-The `stages` lib plays a central role in syncing the node, maintaining state, updating the database and more. The stages involved in the Reth pipeline are the `HeaderStage`, `BodyStage`, `SenderRecoveryStage`, and `ExecutionStage` (note that this list is non-exhaustive, and more pipeline stages will be added in the near future). Each of these stages are queued up and stored within the Reth pipeline.
+The `stages` lib plays a central role in syncing the node, maintaining state, updating the database and more. The stages involved in the Reth pipeline are the `HeaderStage`, `BodyStage`, `SenderRecoveryStage`, and `ExecutionStage` (note that this list is non-exhaustive, and more pipeline stages will be added in the near future). Each of these stages is queued up and stored within the Reth pipeline.
 
 
 When the node is first started, a new `Pipeline` is initialized and all of the stages are added into `Pipeline.stages`. Then, the `Pipeline::run` function is called, which starts the pipeline, executing all of the stages continuously in an infinite loop. This process syncs the chain, keeping everything up to date with the chain tip. 
@@ -36,7 +36,7 @@ The transactions root is a value that is calculated based on the transactions in
 
 When the `BodyStage` is looking at the headers to determine which block to download, it will skip the blocks where the `header.ommers_hash` and the `header.transaction_root` are empty, denoting that the block is empty as well.
 
-Once the `BodyStage` determines which block bodies to fetch, a new `bodies_stream` is created which downloads all of the bodies from the `starting_block`, up until the `target_block` specified. Each time the `bodies_stream` yields a value, a `SealedBlock` is created using the block header, the ommers hash and the newly downloaded block body.
+Once the `BodyStage` determines which block bodies to fetch, a new `bodies_stream` is created which downloads all of the bodies from the `starting_block`, up until the `target_block` is specified. Each time the `bodies_stream` yields a value, a `SealedBlock` is created using the block header, the ommers hash and the newly downloaded block body.
 
 The new block is then pre-validated, checking that the ommers hash and transactions root in the block header are the same in the block body. Following a successful pre-validation, the `BodyStage` loops through each transaction in the `block.body`, adding the transaction to the database. This process is repeated for every downloaded block body, with the `BodyStage` returning `Ok(ExecOutput { stage_progress, done: true })` signaling it successfully completed. 
 
@@ -108,7 +108,7 @@ The `IndexAccountHistoryStage` builds indices for account history, tracking how 
 
 ## FinishStage
 
-The `FinishStage` is the final stage in the pipeline that performs cleanup and verification tasks. It ensures that all previous stages have completed successfully and that the node's state is consistent. This stage may also update various metrics and status indicators to reflect the completion of a sync cycle.
+The `FinishStage` is the final stage in the pipeline that performs cleanup and verification tasks. It ensures that all previous stages have been completed successfully and that the node's state is consistent. This stage may also update various metrics and status indicators to reflect the completion of a sync cycle.
 
 <br>
 

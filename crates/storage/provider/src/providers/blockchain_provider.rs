@@ -305,7 +305,7 @@ impl<N: ProviderNodeTypes> BlockReader for BlockchainProvider<N> {
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         Ok(self.canonical_in_memory_state.pending_block_and_receipts())
     }
 
@@ -1205,7 +1205,10 @@ mod tests {
             Some(RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()))
         );
 
-        assert_eq!(provider.pending_block_and_receipts()?, Some((block, vec![])));
+        assert_eq!(
+            provider.pending_block_and_receipts()?,
+            Some((RecoveredBlock::new_sealed(block.clone(), block.senders().unwrap()), vec![]))
+        );
 
         Ok(())
     }
@@ -2049,7 +2052,7 @@ mod tests {
 
                 // Test range that spans database and in-memory
                 {
-                    // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
+                    // This block will be persisted to disk and removed from memory AFTER the first database query. This ensures that we query the in-memory state before the database avoiding any race condition.
                     persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
 
                     assert_eq!(
@@ -2141,7 +2144,7 @@ mod tests {
                 // Test range that spans database and in-memory
                 {
 
-                    // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
+                    // This block will be persisted to disk and removed from memory AFTER the first database query. This ensures that we query the in-memory state before the database avoiding any race condition.
                     persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
 
                     assert_eq!(
@@ -2258,7 +2261,7 @@ mod tests {
 
             // Ensure that the first generated in-memory block exists
             {
-                // This block will be persisted to disk and removed from memory AFTER the firsk database query. This ensures that we query the in-memory state before the database avoiding any race condition.
+                // This block will be persisted to disk and removed from memory AFTER the first database query. This ensures that we query the in-memory state before the database avoiding any race condition.
                 persist_block_after_db_tx_creation(provider.clone(), in_memory_blocks[0].number);
 
                 call_method!($arg_count, provider, $method, $item_extractor, tx_num, tx_hash, &in_memory_blocks[0], &receipts);
