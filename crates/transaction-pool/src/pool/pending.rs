@@ -292,7 +292,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
         tx: Arc<ValidPoolTransaction<T::Transaction>>,
         base_fee: u64,
     ) {
-        assert!(
+        debug_assert!(
             !self.contains(tx.id()),
             "transaction already included {:?}",
             self.get(tx.id()).unwrap().transaction
