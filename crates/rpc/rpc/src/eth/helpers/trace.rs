@@ -2,6 +2,7 @@
 
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
+use reth_rpc_convert::RpcTypes;
 use reth_rpc_eth_api::{
     helpers::{LoadState, Trace},
     FromEvmError,
@@ -23,5 +24,6 @@ where
         Error: FromEvmError<Self::Evm>,
     >,
     Provider: BlockReader,
+    Network: RpcTypes,
 {
 }

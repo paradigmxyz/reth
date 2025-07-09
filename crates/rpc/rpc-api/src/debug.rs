@@ -129,7 +129,7 @@ pub trait DebugApi<TxReq: RpcObject> {
     #[method(name = "traceCallMany")]
     async fn debug_trace_call_many(
         &self,
-        bundles: Vec<Bundle>,
+        bundles: Vec<Bundle<TxReq>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>>;

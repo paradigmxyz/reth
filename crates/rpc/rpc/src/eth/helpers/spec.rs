@@ -2,6 +2,7 @@ use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_network_api::NetworkInfo;
+use reth_rpc_convert::RpcTypes;
 use reth_rpc_eth_api::{
     helpers::{spec::Signers, EthApiSpec},
     RpcNodeCore,
@@ -19,6 +20,7 @@ where
         Network: NetworkInfo,
     >,
     Provider: BlockReader,
+    Network: RpcTypes,
 {
     type Transaction = ProviderTx<Provider>;
     type Rpc = Ethereum;
