@@ -47,7 +47,7 @@ jobs:
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
             --workspace --exclude ef-tests \
-            -E "kind(test) and not (package(reth-rpc-e2e-tests) or (test(/e2e::/) and test(/^test_/)))"
+            -E "kind(test) and not binary(e2e_testsuite)"
       - if: matrix.network == 'optimism'
         name: Run tests
         run: |
