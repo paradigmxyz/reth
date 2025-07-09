@@ -20,7 +20,6 @@ use reth_rpc_builder::auth::AuthServerHandle;
 use std::sync::Arc;
 use url::Url;
 
-
 /// Client handles for both regular RPC and Engine API endpoints
 #[derive(Clone)]
 pub struct NodeClient {
