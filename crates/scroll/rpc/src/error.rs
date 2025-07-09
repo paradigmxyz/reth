@@ -2,6 +2,7 @@
 
 use alloy_rpc_types_eth::BlockError;
 use reth_evm::execute::ProviderError;
+use reth_rpc_convert::transaction::EthTxEnvError;
 use reth_rpc_eth_api::{AsEthApiError, TransactionConversionError};
 use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
 use revm::context::result::{EVMError, HaltReason};
@@ -27,6 +28,12 @@ impl From<ScrollEthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
         match err {
             ScrollEthApiError::Eth(err) => err.into(),
         }
+    }
+}
+
+impl From<EthTxEnvError> for ScrollEthApiError {
+    fn from(value: EthTxEnvError) -> Self {
+        Self::Eth(EthApiError::from(value))
     }
 }
 

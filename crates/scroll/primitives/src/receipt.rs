@@ -353,8 +353,6 @@ impl InMemorySize for ScrollReceipt {
     }
 }
 
-impl reth_primitives_traits::Receipt for ScrollReceipt {}
-
 #[cfg(feature = "serde-bincode-compat")]
 impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for ScrollReceipt {
     type BincodeRepr<'a> = Self;

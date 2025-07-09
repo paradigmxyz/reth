@@ -9,7 +9,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 
 /// Enum to control transaction hash inclusion.
 ///
-/// This serves as a hint to the provider to include or omit exclude hashes because hashes are
+/// This serves as a hint to the provider to include or omit hashes because hashes are
 /// stored separately and are not always needed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TransactionVariant {

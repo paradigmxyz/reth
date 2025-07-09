@@ -134,6 +134,7 @@ impl ScrollAddOnsBuilder {
                 ScrollEthApi::<N>::builder(),
                 Default::default(),
                 Default::default(),
+                Default::default(),
             ),
         }
     }

@@ -150,7 +150,7 @@ where
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
         // set state clear flag if the block is after the Spurious Dragon hardfork.
         let state_clear_flag =
-            self.spec.is_spurious_dragon_active_at_block(self.evm.block().number);
+            self.spec.is_spurious_dragon_active_at_block(self.evm.block().number.to());
         self.evm.db_mut().set_state_clear_flag(state_clear_flag);
 
         // load the l1 gas oracle contract in cache.
@@ -164,7 +164,7 @@ where
         if self
             .spec
             .scroll_fork_activation(ScrollHardfork::Curie)
-            .transitions_at_block(self.evm.block().number)
+            .transitions_at_block(self.evm.block().number.to())
         {
             if let Err(err) = apply_curie_hard_fork(self.evm.db_mut()) {
                 return Err(BlockExecutionError::msg(format!(
@@ -177,7 +177,7 @@ where
         if self
             .spec
             .scroll_fork_activation(ScrollHardfork::Feynman)
-            .active_at_timestamp(self.evm.block().timestamp)
+            .active_at_timestamp(self.evm.block().timestamp.to())
         {
             if let Err(err) = apply_feynman_hard_fork(self.evm.db_mut()) {
                 return Err(BlockExecutionError::msg(format!(
@@ -214,14 +214,14 @@ where
 
         let block = self.evm.block();
         // verify the transaction type is accepted by the current fork.
-        if tx.tx().is_eip2930() && !chain_spec.is_curie_active_at_block(block.number) {
+        if tx.tx().is_eip2930() && !chain_spec.is_curie_active_at_block(block.number.to()) {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip2930NotSupported),
             }
             .into())
         }
-        if tx.tx().is_eip1559() && !chain_spec.is_curie_active_at_block(block.number) {
+        if tx.tx().is_eip1559() && !chain_spec.is_curie_active_at_block(block.number.to()) {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip1559NotSupported),
@@ -235,7 +235,9 @@ where
             }
             .into())
         }
-        if tx.tx().is_eip7702() && !chain_spec.is_euclid_v2_active_at_timestamp(block.timestamp) {
+        if tx.tx().is_eip7702() &&
+            !chain_spec.is_euclid_v2_active_at_timestamp(block.timestamp.to())
+        {
             return Err(BlockValidationError::InvalidTx {
                 hash,
                 error: Box::new(InvalidTransaction::Eip7702NotSupported),
@@ -400,4 +402,16 @@ where
     {
         ScrollBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
     }
+}
+
+// TODO: remove this when we bump revm > v78
+/// A helper function that compares asserts that two bytecode instances are equal.
+#[cfg(test)]
+fn assert_bytecode_eq(expected: &revm::bytecode::Bytecode, actual: &revm::bytecode::Bytecode) {
+    assert_eq!(expected.legacy_jump_table().unwrap().len, actual.legacy_jump_table().unwrap().len);
+    assert_eq!(
+        expected.legacy_jump_table().unwrap().table,
+        actual.legacy_jump_table().unwrap().table
+    );
+    assert_eq!(expected.bytecode(), actual.bytecode());
 }

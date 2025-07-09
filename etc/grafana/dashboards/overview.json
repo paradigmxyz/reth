@@ -14,6 +14,13 @@
       "description": "",
       "type": "datasource",
       "pluginId": "__expr__"
+    },
+    {
+      "name": "VAR_INSTANCE_LABEL",
+      "type": "constant",
+      "label": "Instance Label",
+      "value": "job",
+      "description": ""
     }
   ],
   "__elements": {},
@@ -177,7 +184,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{job=\"$job\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{version}}",
           "range": false,
@@ -245,7 +252,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{job=\"$job\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{build_timestamp}}",
           "range": false,
@@ -313,7 +320,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{job=\"$job\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{git_sha}}",
           "range": false,
@@ -381,7 +388,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{job=\"$job\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{build_profile}}",
           "range": false,
@@ -449,7 +456,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{job=\"$job\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{target_triple}}",
           "range": false,
@@ -517,7 +524,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_info{job=\"$job\"}",
+          "expr": "reth_info{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{cargo_features}}",
           "range": false,
@@ -594,7 +601,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_network_connected_peers{job=\"$job\"}",
+          "expr": "reth_network_connected_peers{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "__auto",
           "range": false,
@@ -668,7 +675,7 @@
           },
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_sync_checkpoint{job=\"$job\"}",
+          "expr": "reth_sync_checkpoint{$instance_label=\"$instance\"}",
           "instant": true,
           "legendFormat": "{{stage}}",
           "range": false,
@@ -767,7 +774,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{job=\"$job\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"})",
           "legendFormat": "Database",
           "range": true,
           "refId": "A"
@@ -778,7 +785,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_freelist{job=\"$job\"} * reth_db_page_size{job=\"$job\"})",
+          "expr": "sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "Freelist",
@@ -791,7 +798,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_static_files_segment_size{job=\"$job\"})",
+          "expr": "sum(reth_static_files_segment_size{$instance_label=\"$instance\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "Static Files",
@@ -804,7 +811,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_table_size{job=\"$job\"}) + sum(reth_db_freelist{job=\"$job\"} * reth_db_page_size{job=\"$job\"}) + sum(reth_static_files_segment_size{job=\"$job\"})",
+          "expr": "sum(reth_db_table_size{$instance_label=\"$instance\"}) + sum(reth_db_freelist{$instance_label=\"$instance\"} * reth_db_page_size{$instance_label=\"$instance\"}) + sum(reth_static_files_segment_size{$instance_label=\"$instance\"})",
           "hide": false,
           "instant": false,
           "legendFormat": "Total",
@@ -903,7 +910,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_sync_entities_processed{job=\"$job\"} / reth_sync_entities_total{job=\"$job\"}",
+          "expr": "reth_sync_entities_processed{$instance_label=\"$instance\"} / reth_sync_entities_total{$instance_label=\"$instance\"}",
           "legendFormat": "{{stage}}",
           "range": true,
           "refId": "A"
@@ -1000,7 +1007,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_sync_checkpoint{job=\"$job\"}",
+          "expr": "reth_sync_checkpoint{$instance_label=\"$instance\"}",
           "legendFormat": "{{stage}}",
           "range": true,
           "refId": "A"
@@ -1121,7 +1128,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "engine_forkchoiceUpdatedV1 min",
@@ -1136,7 +1143,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1152,7 +1159,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1168,7 +1175,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1184,7 +1191,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v1{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v1{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1200,7 +1207,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1216,7 +1223,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1232,7 +1239,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1248,7 +1255,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1264,7 +1271,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v2{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v2{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1280,7 +1287,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1296,7 +1303,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1312,7 +1319,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1328,7 +1335,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1344,7 +1351,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_fork_choice_updated_v3{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_fork_choice_updated_v3{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1469,7 +1476,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "legendFormat": "engine_newPayloadV1 min",
@@ -1484,7 +1491,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1500,7 +1507,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1516,7 +1523,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1532,7 +1539,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v1{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_new_payload_v1{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1548,7 +1555,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1564,7 +1571,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1580,7 +1587,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1596,7 +1603,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1612,7 +1619,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v2{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_new_payload_v2{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1628,7 +1635,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1644,7 +1651,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1660,7 +1667,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1676,7 +1683,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1692,7 +1699,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v3{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_new_payload_v3{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1708,7 +1715,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1724,7 +1731,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1740,7 +1747,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1756,7 +1763,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1772,7 +1779,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_new_payload_v4{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_new_payload_v4{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1783,6 +1790,268 @@
         }
       ],
       "title": "Engine API newPayload Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The metric is the amount of gas processed in a block",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "sishort"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 29
+      },
+      "id": 1004,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.5.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "hide": false,
+          "legendFormat": "p90",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "hide": false,
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_total_gas{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "hide": false,
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Engine API newPayload Total Gas",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "The throughput of the Engine API newPayload method. The metric is the amount of gas processed in a block, divided by the time it took to process the newPayload request.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "unit": "si: gas/s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 29
+      },
+      "id": 1003,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.5.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.5\"}",
+          "legendFormat": "p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.9\"}",
+          "hide": false,
+          "legendFormat": "p90",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.95\"}",
+          "hide": false,
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_engine_rpc_new_payload_gas_per_second{$instance_label=\"$instance\", quantile=\"0.99\"}",
+          "hide": false,
+          "legendFormat": "p99",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Engine API newPayload Throughput",
       "type": "timeseries"
     },
     {
@@ -1847,7 +2116,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 29
+        "y": 37
       },
       "id": 56,
       "options": {
@@ -1871,7 +2140,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sync_execution_gas_per_second{job=\"$job\"}",
+          "expr": "reth_sync_execution_gas_per_second{$instance_label=\"$instance\"}",
           "legendFormat": "Gas/s",
           "range": true,
           "refId": "A"
@@ -1883,7 +2152,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg_over_time(reth_sync_execution_gas_per_second{job=\"$job\"}[1m])",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{$instance_label=\"$instance\"}[1m])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1899,7 +2168,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg_over_time(reth_sync_execution_gas_per_second{job=\"$job\"}[5m])",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{$instance_label=\"$instance\"}[5m])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1915,7 +2184,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg_over_time(reth_sync_execution_gas_per_second{job=\"$job\"}[10m])",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{$instance_label=\"$instance\"}[10m])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1931,7 +2200,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg_over_time(reth_sync_execution_gas_per_second{job=\"$job\"}[30m])",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{$instance_label=\"$instance\"}[30m])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1947,7 +2216,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg_over_time(reth_sync_execution_gas_per_second{job=\"$job\"}[1h])",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{$instance_label=\"$instance\"}[1h])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -1963,7 +2232,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "avg_over_time(reth_sync_execution_gas_per_second{job=\"$job\"}[24h])",
+          "expr": "avg_over_time(reth_sync_execution_gas_per_second{$instance_label=\"$instance\"}[24h])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2041,7 +2310,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 29
+        "y": 37
       },
       "id": 240,
       "options": {
@@ -2066,7 +2335,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_sync_block_validation_state_root_duration{job=\"$job\"}",
+          "expr": "reth_sync_block_validation_state_root_duration{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -2082,7 +2351,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_sync_execution_execution_duration{job=\"$job\"}",
+          "expr": "reth_sync_execution_execution_duration{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2102,7 +2371,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 37
+        "y": 45
       },
       "id": 87,
       "panels": [],
@@ -2175,7 +2444,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 38
+        "y": 46
       },
       "id": 84,
       "options": {
@@ -2199,7 +2468,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_consensus_engine_beacon_forkchoice_updated_messages{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_consensus_engine_beacon_forkchoice_updated_messages{$instance_label=\"$instance\"}[$__rate_interval])",
           "legendFormat": "forkchoiceUpdated",
           "range": true,
           "refId": "A"
@@ -2210,7 +2479,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_consensus_engine_beacon_new_payload_messages{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_consensus_engine_beacon_new_payload_messages{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "newPayload",
           "range": true,
@@ -2286,7 +2555,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 38
+        "y": 46
       },
       "id": 249,
       "options": {
@@ -2310,7 +2579,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_consensus_engine_beacon_failed_new_payload_response_deliveries{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_consensus_engine_beacon_failed_new_payload_response_deliveries{$instance_label=\"$instance\"}[$__rate_interval])",
           "legendFormat": "newPayload",
           "range": true,
           "refId": "A"
@@ -2321,7 +2590,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_consensus_engine_beacon_failed_forkchoice_updated_response_deliveries{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_consensus_engine_beacon_failed_forkchoice_updated_response_deliveries{$instance_label=\"$instance\"}[$__rate_interval])",
           "legendFormat": "forkchoiceUpdated",
           "range": true,
           "refId": "B"
@@ -2396,7 +2665,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 46
+        "y": 54
       },
       "id": 213,
       "options": {
@@ -2420,7 +2689,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_engine_rpc_new_payload_forkchoice_updated_time_diff{job=\"$job\"}",
+          "expr": "reth_engine_rpc_new_payload_forkchoice_updated_time_diff{$instance_label=\"$instance\"}",
           "legendFormat": "p{{quantile}}",
           "range": true,
           "refId": "A"
@@ -2495,7 +2764,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 46
+        "y": 54
       },
       "id": 212,
       "options": {
@@ -2520,7 +2789,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2536,7 +2805,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2552,7 +2821,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2568,7 +2837,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2584,7 +2853,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_hash_v1{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2600,7 +2869,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2616,7 +2885,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2632,7 +2901,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{job=\"$job\", quantile=\"0.9\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{$instance_label=\"$instance\", quantile=\"0.9\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2648,7 +2917,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2664,7 +2933,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_get_payload_bodies_by_range_v1{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2738,7 +3007,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 54
+        "y": 62
       },
       "id": 1000,
       "options": {
@@ -2762,7 +3031,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_engine_rpc_blobs_blob_count{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_engine_rpc_blobs_blob_count{$instance_label=\"$instance\"}[$__rate_interval])",
           "legendFormat": "Found",
           "range": true,
           "refId": "A"
@@ -2773,7 +3042,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_engine_rpc_blobs_blob_misses{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_engine_rpc_blobs_blob_misses{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Missed",
           "range": true,
@@ -2848,7 +3117,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 54
+        "y": 62
       },
       "id": 258,
       "options": {
@@ -2873,7 +3142,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_blobs_v1{job=\"$job\", quantile=\"0.5\"}",
+          "expr": "reth_engine_rpc_get_blobs_v1{$instance_label=\"$instance\", quantile=\"0.5\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2889,7 +3158,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_blobs_v1{job=\"$job\", quantile=\"0.95\"}",
+          "expr": "reth_engine_rpc_get_blobs_v1{$instance_label=\"$instance\", quantile=\"0.95\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2905,7 +3174,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_blobs_v1{job=\"$job\", quantile=\"0.99\"}",
+          "expr": "reth_engine_rpc_get_blobs_v1{$instance_label=\"$instance\", quantile=\"0.99\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2921,7 +3190,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_blobs_v1{job=\"$job\", quantile=\"0\"}",
+          "expr": "reth_engine_rpc_get_blobs_v1{$instance_label=\"$instance\", quantile=\"0\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -2937,7 +3206,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_engine_rpc_get_blobs_v1{job=\"$job\", quantile=\"1\"}",
+          "expr": "reth_engine_rpc_get_blobs_v1{$instance_label=\"$instance\", quantile=\"1\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3015,7 +3284,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 62
+        "y": 70
       },
       "id": 85,
       "options": {
@@ -3039,7 +3308,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_consensus_engine_beacon_pipeline_runs{job=\"$job\"}",
+          "expr": "reth_consensus_engine_beacon_pipeline_runs{$instance_label=\"$instance\"}",
           "legendFormat": "Pipeline runs",
           "range": true,
           "refId": "A"
@@ -3113,7 +3382,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 62
+        "y": 70
       },
       "id": 83,
       "options": {
@@ -3137,7 +3406,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_consensus_engine_beacon_active_block_downloads{job=\"$job\"}",
+          "expr": "reth_consensus_engine_beacon_active_block_downloads{$instance_label=\"$instance\"}",
           "legendFormat": "Active block downloads",
           "range": true,
           "refId": "A"
@@ -3152,7 +3421,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 78
       },
       "id": 46,
       "panels": [],
@@ -3225,7 +3494,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 71
+        "y": 79
       },
       "id": 1001,
       "options": {
@@ -3250,7 +3519,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_sync_block_validation_state_root_duration{job=\"$job\"}",
+          "expr": "reth_sync_block_validation_state_root_duration{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -3266,7 +3535,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_sync_execution_execution_duration{job=\"$job\"}",
+          "expr": "reth_sync_execution_execution_duration{$instance_label=\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3345,7 +3614,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 71
+        "y": 79
       },
       "id": 251,
       "options": {
@@ -3370,7 +3639,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "reth_sync_caching_account_cache_hits{job=\"$job\"} / (reth_sync_caching_account_cache_hits{job=\"$job\"} + reth_sync_caching_account_cache_misses{job=\"$job\"})",
+          "expr": "reth_sync_caching_account_cache_hits{$instance_label=\"$instance\"} / (reth_sync_caching_account_cache_hits{$instance_label=\"$instance\"} + reth_sync_caching_account_cache_misses{$instance_label=\"$instance\"})",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3387,7 +3656,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "reth_sync_caching_storage_cache_hits{job=\"$job\"} / (reth_sync_caching_storage_cache_hits{job=\"$job\"} + reth_sync_caching_storage_cache_misses{job=\"$job\"})",
+          "expr": "reth_sync_caching_storage_cache_hits{$instance_label=\"$instance\"} / (reth_sync_caching_storage_cache_hits{$instance_label=\"$instance\"} + reth_sync_caching_storage_cache_misses{$instance_label=\"$instance\"})",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3404,7 +3673,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "reth_sync_caching_code_cache_hits{job=\"$job\"} / (reth_sync_caching_code_cache_hits{job=\"$job\"} + reth_sync_caching_code_cache_misses{job=\"$job\"})",
+          "expr": "reth_sync_caching_code_cache_hits{$instance_label=\"$instance\"} / (reth_sync_caching_code_cache_hits{$instance_label=\"$instance\"} + reth_sync_caching_code_cache_misses{$instance_label=\"$instance\"})",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3484,7 +3753,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 79
+        "y": 87
       },
       "id": 252,
       "options": {
@@ -3509,7 +3778,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "reth_sync_block_validation_trie_input_duration{job=\"$job\", quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sync_block_validation_trie_input_duration{$instance_label=\"$instance\", quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -3524,12 +3793,116 @@
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 87
+      },
+      "id": 1005,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "hideZeros": false,
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "pluginVersion": "11.5.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_sync_caching_precompile_cache_hits{$instance_label=\"$instance\"} / (reth_sync_caching_precompile_cache_hits{$instance_label=\"$instance\"} + reth_sync_caching_precompile_cache_misses{$instance_label=\"$instance\"})",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Precompile cache hits",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        }
+      ],
+      "title": "Precompile cache hitrate",
+      "type": "timeseries"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 87
+        "y": 95
       },
       "id": 214,
       "panels": [],
@@ -3600,7 +3973,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 88
+        "y": 96
       },
       "id": 255,
       "options": {
@@ -3624,7 +3997,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_proofs_processed_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_proofs_processed_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -3699,7 +4072,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 88
+        "y": 96
       },
       "id": 254,
       "options": {
@@ -3723,7 +4096,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_proof_calculation_duration_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_proof_calculation_duration_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -3798,7 +4171,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 96
+        "y": 104
       },
       "id": 257,
       "options": {
@@ -3822,7 +4195,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_pending_multiproofs_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_pending_multiproofs_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -3897,7 +4270,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 96
+        "y": 104
       },
       "id": 256,
       "options": {
@@ -3921,7 +4294,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_inflight_multiproofs_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_inflight_multiproofs_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "{{quantile}} percentile",
           "range": true,
@@ -3996,7 +4369,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 104
+        "y": 112
       },
       "id": 260,
       "options": {
@@ -4020,7 +4393,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_skipped_storage_nodes{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_skipped_storage_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "Storage {{quantile}} percentile",
           "range": true,
@@ -4095,7 +4468,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 104
+        "y": 112
       },
       "id": 259,
       "options": {
@@ -4119,7 +4492,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_skipped_account_nodes{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_skipped_account_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "Account {{quantile}} percentile",
           "range": true,
@@ -4194,7 +4567,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 112
+        "y": 120
       },
       "id": 262,
       "options": {
@@ -4218,7 +4591,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_total_account_nodes{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_total_account_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Account {{quantile}} percentile",
@@ -4294,7 +4667,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 112
+        "y": 120
       },
       "id": 261,
       "options": {
@@ -4318,7 +4691,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_sparse_state_trie_multiproof_total_storage_nodes{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_sparse_state_trie_multiproof_total_storage_nodes{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "instant": false,
           "legendFormat": "Storage {{quantile}} percentile",
           "range": true,
@@ -4394,7 +4767,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 120
+        "y": 128
       },
       "id": 263,
       "options": {
@@ -4418,7 +4791,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_tree_root_multiproof_task_total_duration_histogram{job=\"$job\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
+          "expr": "reth_tree_root_multiproof_task_total_duration_histogram{$instance_label=\"$instance\",quantile=~\"(0|0.5|0.9|0.95|1)\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Task duration {{quantile}} percentile",
@@ -4435,7 +4808,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 128
+        "y": 136
       },
       "id": 38,
       "panels": [],
@@ -4506,7 +4879,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 129
+        "y": 137
       },
       "id": 40,
       "options": {
@@ -4531,7 +4904,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg(rate(reth_database_transaction_close_duration_seconds_sum{job=\"$job\", outcome=\"commit\"}[$__rate_interval]) / rate(reth_database_transaction_close_duration_seconds_count{job=\"$job\", outcome=\"commit\"}[$__rate_interval]) >= 0)",
+          "expr": "avg(rate(reth_database_transaction_close_duration_seconds_sum{$instance_label=\"$instance\", outcome=\"commit\"}[$__rate_interval]) / rate(reth_database_transaction_close_duration_seconds_count{$instance_label=\"$instance\", outcome=\"commit\"}[$__rate_interval]) >= 0)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Commit time",
@@ -4567,7 +4940,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 129
+        "y": 137
       },
       "id": 42,
       "maxDataPoints": 25,
@@ -4621,7 +4994,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg(max_over_time(reth_database_transaction_close_duration_seconds{job=\"$job\", outcome=\"commit\"}[$__rate_interval])) by (quantile)",
+          "expr": "avg(max_over_time(reth_database_transaction_close_duration_seconds{$instance_label=\"$instance\", outcome=\"commit\"}[$__rate_interval])) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
@@ -4695,7 +5068,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 137
+        "y": 145
       },
       "id": 117,
       "options": {
@@ -4720,7 +5093,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(rate(reth_database_transaction_open_duration_seconds_sum{job=\"$job\", outcome!=\"\"}[$__rate_interval]) / rate(reth_database_transaction_open_duration_seconds_count{job=\"$job\", outcome!=\"\"}[$__rate_interval])) by (outcome, mode)",
+          "expr": "sum(rate(reth_database_transaction_open_duration_seconds_sum{$instance_label=\"$instance\", outcome!=\"\"}[$__rate_interval]) / rate(reth_database_transaction_open_duration_seconds_count{$instance_label=\"$instance\", outcome!=\"\"}[$__rate_interval])) by (outcome, mode)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{mode}}, {{outcome}}",
@@ -4793,7 +5166,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 137
+        "y": 145
       },
       "id": 116,
       "options": {
@@ -4818,7 +5191,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "max(max_over_time(reth_database_transaction_open_duration_seconds{job=\"$job\", outcome!=\"\", quantile=\"1\"}[$__interval])) by (outcome, mode)",
+          "expr": "max(max_over_time(reth_database_transaction_open_duration_seconds{$instance_label=\"$instance\", outcome!=\"\", quantile=\"1\"}[$__interval])) by (outcome, mode)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{mode}}, {{outcome}}",
@@ -4922,7 +5295,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 145
+        "y": 153
       },
       "id": 119,
       "options": {
@@ -4948,7 +5321,7 @@
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(reth_database_transaction_opened_total{job=\"$job\", mode=\"read-write\"})",
+          "expr": "sum(reth_database_transaction_opened_total{$instance_label=\"$instance\", mode=\"read-write\"})",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -4965,7 +5338,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sum(reth_database_transaction_closed_total{job=\"$job\", mode=\"read-write\"})",
+          "expr": "sum(reth_database_transaction_closed_total{$instance_label=\"$instance\", mode=\"read-write\"})",
           "format": "time_series",
           "instant": false,
           "legendFormat": "Closed {{mode}}",
@@ -5079,7 +5452,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 145
+        "y": 153
       },
       "id": 250,
       "options": {
@@ -5105,7 +5478,7 @@
           "disableTextWrap": false,
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "reth_database_transaction_opened_total{job=\"$job\", mode=\"read-only\"}",
+          "expr": "reth_database_transaction_opened_total{$instance_label=\"$instance\", mode=\"read-only\"}",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -5123,7 +5496,7 @@
           "disableTextWrap": false,
           "editorMode": "builder",
           "exemplar": false,
-          "expr": "sum(reth_database_transaction_closed_total{job=\"$job\", mode=\"read-only\"})",
+          "expr": "sum(reth_database_transaction_closed_total{$instance_label=\"$instance\", mode=\"read-only\"})",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -5174,7 +5547,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 153
+        "y": 161
       },
       "id": 48,
       "options": {
@@ -5205,7 +5578,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_db_table_size{job=\"$job\"}",
+          "expr": "reth_db_table_size{$instance_label=\"$instance\"}",
           "interval": "",
           "legendFormat": "{{table}}",
           "range": true,
@@ -5281,7 +5654,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 153
+        "y": 161
       },
       "id": 118,
       "options": {
@@ -5306,7 +5679,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "max(max_over_time(reth_database_operation_large_value_duration_seconds{job=\"$job\", quantile=\"1\"}[$__interval]) > 0) by (table)",
+          "expr": "max(max_over_time(reth_database_operation_large_value_duration_seconds{$instance_label=\"$instance\", quantile=\"1\"}[$__interval]) > 0) by (table)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{table}}",
@@ -5344,7 +5717,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 161
+        "y": 169
       },
       "id": 50,
       "options": {
@@ -5374,7 +5747,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "sum by (type) ( reth_db_table_pages{job=\"$job\"} )",
+          "expr": "sum by (type) ( reth_db_table_pages{$instance_label=\"$instance\"} )",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -5450,7 +5823,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 161
+        "y": 169
       },
       "id": 52,
       "options": {
@@ -5474,7 +5847,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (job) ( reth_db_table_size{job=\"$job\"} )",
+          "expr": "sum by (job) ( reth_db_table_size{$instance_label=\"$instance\"} )",
           "legendFormat": "Size ({{job}})",
           "range": true,
           "refId": "A"
@@ -5549,7 +5922,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 169
+        "y": 177
       },
       "id": 113,
       "options": {
@@ -5573,7 +5946,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(reth_db_freelist{job=\"$job\"}) by (job)",
+          "expr": "sum(reth_db_freelist{$instance_label=\"$instance\"}) by (job)",
           "legendFormat": "Pages ({{job}})",
           "range": true,
           "refId": "A"
@@ -5709,7 +6082,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 169
+        "y": 177
       },
       "id": 58,
       "options": {
@@ -5731,7 +6104,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "sort_desc(reth_db_table_pages{job=\"$job\", type=\"overflow\"} != 0)",
+          "expr": "sort_desc(reth_db_table_pages{$instance_label=\"$instance\", type=\"overflow\"} != 0)",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",
@@ -5748,7 +6121,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 177
+        "y": 185
       },
       "id": 203,
       "panels": [],
@@ -5782,7 +6155,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 178
+        "y": 186
       },
       "id": 202,
       "options": {
@@ -5813,7 +6186,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_static_files_segment_size{job=\"$job\"}",
+          "expr": "reth_static_files_segment_size{$instance_label=\"$instance\"}",
           "interval": "",
           "legendFormat": "{{segment}}",
           "range": true,
@@ -5938,7 +6311,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 178
+        "y": 186
       },
       "id": 204,
       "options": {
@@ -5960,7 +6333,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_static_files_segment_entries{job=\"$job\"}",
+          "expr": "reth_static_files_segment_entries{$instance_label=\"$instance\"}",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",
@@ -6086,7 +6459,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 178
+        "y": 186
       },
       "id": 205,
       "options": {
@@ -6108,7 +6481,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "reth_static_files_segment_files{job=\"$job\"}",
+          "expr": "reth_static_files_segment_files{$instance_label=\"$instance\"}",
           "format": "table",
           "instant": true,
           "legendFormat": "__auto",
@@ -6185,7 +6558,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 186
+        "y": 194
       },
       "id": 206,
       "options": {
@@ -6209,7 +6582,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (job) ( reth_static_files_segment_size{job=\"$job\"} )",
+          "expr": "sum by (job) ( reth_static_files_segment_size{$instance_label=\"$instance\"} )",
           "legendFormat": "__auto",
           "range": true,
           "refId": "A"
@@ -6284,7 +6657,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 186
+        "y": 194
       },
       "id": 207,
       "options": {
@@ -6308,7 +6681,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "max(max_over_time(reth_static_files_jar_provider_write_duration_seconds{job=\"$job\", operation=\"commit-writer\", quantile=\"1\"}[$__interval]) > 0) by (segment)",
+          "expr": "max(max_over_time(reth_static_files_jar_provider_write_duration_seconds{$instance_label=\"$instance\", operation=\"commit-writer\", quantile=\"1\"}[$__interval]) > 0) by (segment)",
           "legendFormat": "{{segment}}",
           "range": true,
           "refId": "A"
@@ -6323,7 +6696,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 194
+        "y": 202
       },
       "id": 79,
       "panels": [],
@@ -6396,7 +6769,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 195
+        "y": 203
       },
       "id": 74,
       "options": {
@@ -6420,7 +6793,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_blockchain_tree_canonical_chain_height{job=\"$job\"}",
+          "expr": "reth_blockchain_tree_canonical_chain_height{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Canonical chain height",
           "range": true,
@@ -6495,7 +6868,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 195
+        "y": 203
       },
       "id": 80,
       "options": {
@@ -6519,7 +6892,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_blockchain_tree_block_buffer_blocks{job=\"$job\"}",
+          "expr": "reth_blockchain_tree_block_buffer_blocks{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks",
           "range": true,
@@ -6594,7 +6967,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 203
+        "y": 211
       },
       "id": 1002,
       "options": {
@@ -6618,7 +6991,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "increase(reth_blockchain_tree_reorgs{job=\"$job\"}[$__rate_interval])",
+          "expr": "increase(reth_blockchain_tree_reorgs{$instance_label=\"$instance\"}[$__rate_interval])",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -6693,7 +7066,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 203
+        "y": 211
       },
       "id": 190,
       "options": {
@@ -6717,7 +7090,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_blockchain_tree_latest_reorg_depth{job=\"$job\"}",
+          "expr": "reth_blockchain_tree_latest_reorg_depth{$instance_label=\"$instance\"}",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -6733,7 +7106,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 211
+        "y": 219
       },
       "id": 108,
       "panels": [],
@@ -6831,7 +7204,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 212
+        "y": 220
       },
       "id": 109,
       "options": {
@@ -6856,7 +7229,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "code",
-          "expr": "sum(reth_rpc_server_connections_connections_opened_total{job=\"$job\"} - reth_rpc_server_connections_connections_closed_total{job=\"$job\"}) by (transport)",
+          "expr": "sum(reth_rpc_server_connections_connections_opened_total{$instance_label=\"$instance\"} - reth_rpc_server_connections_connections_closed_total{$instance_label=\"$instance\"}) by (transport)",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -6894,7 +7267,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 212
+        "y": 220
       },
       "id": 111,
       "maxDataPoints": 25,
@@ -6948,7 +7321,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg(max_over_time(reth_rpc_server_connections_request_time_seconds{job=\"$job\"}[$__rate_interval]) > 0) by (quantile)",
+          "expr": "avg(max_over_time(reth_rpc_server_connections_request_time_seconds{$instance_label=\"$instance\"}[$__rate_interval]) > 0) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "__auto",
@@ -7024,7 +7397,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 220
+        "y": 228
       },
       "id": 120,
       "options": {
@@ -7048,7 +7421,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "max(max_over_time(reth_rpc_server_calls_time_seconds{job=\"$job\"}[$__rate_interval])) by (method) > 0",
+          "expr": "max(max_over_time(reth_rpc_server_calls_time_seconds{$instance_label=\"$instance\"}[$__rate_interval])) by (method) > 0",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -7083,7 +7456,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 220
+        "y": 228
       },
       "id": 112,
       "maxDataPoints": 25,
@@ -7137,7 +7510,7 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "avg(max_over_time(reth_rpc_server_calls_time_seconds{job=\"$job\"}[$__rate_interval]) > 0) by (quantile)",
+          "expr": "avg(max_over_time(reth_rpc_server_calls_time_seconds{$instance_label=\"$instance\"}[$__rate_interval]) > 0) by (quantile)",
           "format": "time_series",
           "instant": false,
           "legendFormat": "{{quantile}}",
@@ -7196,8 +7569,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7249,7 +7621,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 228
+        "y": 236
       },
       "id": 198,
       "options": {
@@ -7274,7 +7646,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_cached_count{job=\"$job\", cache=\"headers\"}",
+          "expr": "reth_rpc_eth_cache_cached_count{$instance_label=\"$instance\", cache=\"headers\"}",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
@@ -7290,7 +7662,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_queued_consumers_count{job=\"$job\", cache=\"receipts\"}",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{$instance_label=\"$instance\", cache=\"receipts\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -7307,7 +7679,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_queued_consumers_count{job=\"$job\", cache=\"headers\"}",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{$instance_label=\"$instance\", cache=\"headers\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -7324,7 +7696,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_queued_consumers_count{job=\"$job\", cache=\"blocks\"}",
+          "expr": "reth_rpc_eth_cache_queued_consumers_count{$instance_label=\"$instance\", cache=\"blocks\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -7341,7 +7713,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_memory_usage{job=\"$job\", cache=\"blocks\"}",
+          "expr": "reth_rpc_eth_cache_memory_usage{$instance_label=\"$instance\", cache=\"blocks\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -7358,7 +7730,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_cached_count{job=\"$job\", cache=\"receipts\"}",
+          "expr": "reth_rpc_eth_cache_cached_count{$instance_label=\"$instance\", cache=\"receipts\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -7375,7 +7747,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_memory_usage{job=\"$job\", cache=\"receipts\"}",
+          "expr": "reth_rpc_eth_cache_memory_usage{$instance_label=\"$instance\", cache=\"receipts\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -7392,7 +7764,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_rpc_eth_cache_cached_count{job=\"$job\", cache=\"blocks\"}",
+          "expr": "reth_rpc_eth_cache_cached_count{$instance_label=\"$instance\", cache=\"blocks\"}",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": true,
@@ -7454,8 +7826,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7471,7 +7842,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 228
+        "y": 236
       },
       "id": 246,
       "options": {
@@ -7511,7 +7882,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 236
+        "y": 244
       },
       "id": 24,
       "panels": [],
@@ -7567,8 +7938,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7608,7 +7978,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 237
+        "y": 245
       },
       "id": 26,
       "options": {
@@ -7632,7 +8002,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_total_downloaded{job=\"$job\"}",
+          "expr": "reth_downloaders_headers_total_downloaded{$instance_label=\"$instance\"}",
           "legendFormat": "Downloaded",
           "range": true,
           "refId": "A"
@@ -7643,7 +8013,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_total_flushed{job=\"$job\"}",
+          "expr": "reth_downloaders_headers_total_flushed{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Flushed",
           "range": true,
@@ -7655,7 +8025,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_total_downloaded{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_total_downloaded{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "instant": false,
           "legendFormat": "Downloaded/s",
@@ -7668,7 +8038,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_total_flushed{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_total_flushed{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Flushed/s",
           "range": true,
@@ -7727,8 +8097,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7744,7 +8113,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 237
+        "y": 245
       },
       "id": 33,
       "options": {
@@ -7768,7 +8137,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_timeout_errors{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_timeout_errors{$instance_label=\"$instance\"}[$__rate_interval])",
           "legendFormat": "Request timed out",
           "range": true,
           "refId": "A"
@@ -7779,7 +8148,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_unexpected_errors{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_unexpected_errors{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Unexpected error",
           "range": true,
@@ -7791,7 +8160,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_headers_validation_errors{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_headers_validation_errors{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Invalid response",
           "range": true,
@@ -7850,8 +8219,7 @@
             "mode": "absolute",
             "steps": [
               {
-                "color": "green",
-                "value": null
+                "color": "green"
               },
               {
                 "color": "red",
@@ -7866,7 +8234,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 245
+        "y": 253
       },
       "id": 36,
       "options": {
@@ -7890,7 +8258,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_headers_in_flight_requests{job=\"$job\"}",
+          "expr": "reth_downloaders_headers_in_flight_requests{$instance_label=\"$instance\"}",
           "legendFormat": "In flight requests",
           "range": true,
           "refId": "A"
@@ -7901,7 +8269,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_connected_peers{job=\"$job\"}",
+          "expr": "reth_network_connected_peers{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
@@ -7917,7 +8285,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 253
+        "y": 261
       },
       "id": 32,
       "panels": [],
@@ -8022,7 +8390,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 254
+        "y": 262
       },
       "id": 30,
       "options": {
@@ -8045,7 +8413,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_total_downloaded{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_total_downloaded{$instance_label=\"$instance\"}",
           "legendFormat": "Downloaded",
           "range": true,
           "refId": "A"
@@ -8056,7 +8424,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_total_flushed{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_total_flushed{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Flushed",
           "range": true,
@@ -8068,7 +8436,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_total_flushed{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_total_flushed{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Flushed/s",
           "range": true,
@@ -8080,7 +8448,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_total_downloaded{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_total_downloaded{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Downloaded/s",
           "range": true,
@@ -8092,7 +8460,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_responses{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_buffered_responses{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered responses",
           "range": true,
@@ -8104,7 +8472,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_blocks{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_buffered_blocks{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks",
           "range": true,
@@ -8116,7 +8484,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_queued_blocks{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_queued_blocks{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Queued blocks",
           "range": true,
@@ -8187,7 +8555,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 254
+        "y": 262
       },
       "id": 28,
       "options": {
@@ -8210,7 +8578,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_timeout_errors{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_timeout_errors{$instance_label=\"$instance\"}[$__rate_interval])",
           "legendFormat": "Request timed out",
           "range": true,
           "refId": "A"
@@ -8221,7 +8589,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_unexpected_errors{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_unexpected_errors{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Unexpected error",
           "range": true,
@@ -8233,7 +8601,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "rate(reth_downloaders_bodies_validation_errors{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_downloaders_bodies_validation_errors{$instance_label=\"$instance\"}[$__rate_interval])",
           "hide": false,
           "legendFormat": "Invalid response",
           "range": true,
@@ -8306,7 +8674,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 262
+        "y": 270
       },
       "id": 35,
       "options": {
@@ -8329,7 +8697,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_in_flight_requests{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_in_flight_requests{$instance_label=\"$instance\"}",
           "legendFormat": "In flight requests",
           "range": true,
           "refId": "A"
@@ -8340,7 +8708,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_network_connected_peers{job=\"$job\"}",
+          "expr": "reth_network_connected_peers{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Connected peers",
           "range": true,
@@ -8431,7 +8799,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 262
+        "y": 270
       },
       "id": 73,
       "options": {
@@ -8454,7 +8822,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_blocks_size_bytes{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_buffered_blocks_size_bytes{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks size ",
           "range": true,
@@ -8466,7 +8834,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_buffered_blocks{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_buffered_blocks{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Buffered blocks",
           "range": true,
@@ -8557,7 +8925,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 270
+        "y": 278
       },
       "id": 102,
       "options": {
@@ -8580,7 +8948,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_downloaders_bodies_response_response_size_bytes{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_response_response_size_bytes{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Response size",
           "range": true,
@@ -8592,7 +8960,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_response_response_length{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_response_response_length{$instance_label=\"$instance\"}",
           "hide": false,
           "legendFormat": "Individual response length (number of bodies in response)",
           "range": true,
@@ -8604,7 +8972,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_downloaders_bodies_response_response_size_bytes / reth_downloaders_bodies_response_response_length{job=\"$job\"}",
+          "expr": "reth_downloaders_bodies_response_response_size_bytes / reth_downloaders_bodies_response_response_length{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Mean body size in response",
@@ -8621,7 +8989,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 278
+        "y": 286
       },
       "id": 226,
       "panels": [],
@@ -8717,7 +9085,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 279
+        "y": 287
       },
       "id": 225,
       "options": {
@@ -8742,7 +9110,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_eth_headers_requests_received_total{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_network_eth_headers_requests_received_total{$instance_label=\"$instance\"}[$__rate_interval])",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -8844,7 +9212,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 279
+        "y": 287
       },
       "id": 227,
       "options": {
@@ -8869,7 +9237,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_eth_receipts_requests_received_total{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_network_eth_receipts_requests_received_total{$instance_label=\"$instance\"}[$__rate_interval])",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -8971,7 +9339,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 287
+        "y": 295
       },
       "id": 235,
       "options": {
@@ -8996,7 +9364,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_eth_bodies_requests_received_total{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_network_eth_bodies_requests_received_total{$instance_label=\"$instance\"}[$__rate_interval])",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -9098,7 +9466,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 287
+        "y": 295
       },
       "id": 234,
       "options": {
@@ -9123,7 +9491,7 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_eth_node_data_requests_received_total{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_network_eth_node_data_requests_received_total{$instance_label=\"$instance\"}[$__rate_interval])",
           "format": "time_series",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
@@ -9142,7 +9510,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 295
+        "y": 303
       },
       "id": 68,
       "panels": [],
@@ -9213,7 +9581,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 296
+        "y": 304
       },
       "id": 60,
       "options": {
@@ -9236,7 +9604,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_payloads_active_jobs{job=\"$job\"}",
+          "expr": "reth_payloads_active_jobs{$instance_label=\"$instance\"}",
           "legendFormat": "Active Jobs",
           "range": true,
           "refId": "A"
@@ -9308,7 +9676,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 296
+        "y": 304
       },
       "id": 62,
       "options": {
@@ -9331,7 +9699,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_payloads_initiated_jobs{job=\"$job\"}",
+          "expr": "reth_payloads_initiated_jobs{$instance_label=\"$instance\"}",
           "legendFormat": "Initiated Jobs",
           "range": true,
           "refId": "A"
@@ -9403,7 +9771,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 304
+        "y": 312
       },
       "id": 64,
       "options": {
@@ -9426,7 +9794,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_payloads_failed_jobs{job=\"$job\"}",
+          "expr": "reth_payloads_failed_jobs{$instance_label=\"$instance\"}",
           "legendFormat": "Failed Jobs",
           "range": true,
           "refId": "A"
@@ -9441,7 +9809,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 312
+        "y": 320
       },
       "id": 105,
       "panels": [],
@@ -9512,7 +9880,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 313
+        "y": 321
       },
       "id": 106,
       "options": {
@@ -9535,7 +9903,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_pruner_duration_seconds_sum{job=\"$job\"}[$__rate_interval]) / rate(reth_pruner_duration_seconds_count{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_pruner_duration_seconds_sum{$instance_label=\"$instance\"}[$__rate_interval]) / rate(reth_pruner_duration_seconds_count{$instance_label=\"$instance\"}[$__rate_interval])",
           "instant": false,
           "legendFormat": "__auto",
           "range": true,
@@ -9609,7 +9977,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 313
+        "y": 321
       },
       "id": 107,
       "options": {
@@ -9632,7 +10000,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "rate(reth_pruner_segments_duration_seconds_sum{job=\"$job\"}[$__rate_interval]) / rate(reth_pruner_segments_duration_seconds_count{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_pruner_segments_duration_seconds_sum{$instance_label=\"$instance\"}[$__rate_interval]) / rate(reth_pruner_segments_duration_seconds_count{$instance_label=\"$instance\"}[$__rate_interval])",
           "instant": false,
           "legendFormat": "{{segment}}",
           "range": true,
@@ -9705,7 +10073,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 321
+        "y": 329
       },
       "id": 217,
       "options": {
@@ -9728,7 +10096,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_pruner_segments_highest_pruned_block{job=\"$job\"}",
+          "expr": "reth_pruner_segments_highest_pruned_block{$instance_label=\"$instance\"}",
           "instant": false,
           "legendFormat": "{{segment}}",
           "range": true,
@@ -9744,7 +10112,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 329
+        "y": 337
       },
       "id": 97,
       "panels": [],
@@ -9827,7 +10195,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 330
+        "y": 338
       },
       "id": 98,
       "options": {
@@ -9850,7 +10218,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_active{job=\"$job\"}",
+          "expr": "reth_jemalloc_active{$instance_label=\"$instance\"}",
           "instant": false,
           "legendFormat": "Active",
           "range": true,
@@ -9862,7 +10230,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_allocated{job=\"$job\"}",
+          "expr": "reth_jemalloc_allocated{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Allocated",
@@ -9875,7 +10243,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_mapped{job=\"$job\"}",
+          "expr": "reth_jemalloc_mapped{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Mapped",
@@ -9888,7 +10256,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_metadata{job=\"$job\"}",
+          "expr": "reth_jemalloc_metadata{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Metadata",
@@ -9901,7 +10269,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_resident{job=\"$job\"}",
+          "expr": "reth_jemalloc_resident{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Resident",
@@ -9914,7 +10282,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_jemalloc_retained{job=\"$job\"}",
+          "expr": "reth_jemalloc_retained{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Retained",
@@ -9989,7 +10357,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 330
+        "y": 338
       },
       "id": 101,
       "options": {
@@ -10012,7 +10380,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_process_resident_memory_bytes{job=\"$job\"}",
+          "expr": "reth_process_resident_memory_bytes{$instance_label=\"$instance\"}",
           "instant": false,
           "legendFormat": "Resident",
           "range": true,
@@ -10086,7 +10454,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 338
+        "y": 346
       },
       "id": 99,
       "options": {
@@ -10109,7 +10477,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "avg(rate(reth_process_cpu_seconds_total{job=\"$job\"}[1m]))",
+          "expr": "avg(rate(reth_process_cpu_seconds_total{$instance_label=\"$instance\"}[1m]))",
           "instant": false,
           "legendFormat": "Process",
           "range": true,
@@ -10183,7 +10551,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 338
+        "y": 346
       },
       "id": 100,
       "options": {
@@ -10206,7 +10574,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "builder",
-          "expr": "reth_process_open_fds{job=\"$job\"}",
+          "expr": "reth_process_open_fds{$instance_label=\"$instance\"}",
           "instant": false,
           "legendFormat": "Open",
           "range": true,
@@ -10280,7 +10648,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 346
+        "y": 354
       },
       "id": 248,
       "options": {
@@ -10304,7 +10672,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "reth_executor_spawn_critical_tasks_total{job=\"$job\"}- reth_executor_spawn_finished_critical_tasks_total{job=\"$job\"}",
+          "expr": "reth_executor_spawn_critical_tasks_total{$instance_label=\"$instance\"}- reth_executor_spawn_finished_critical_tasks_total{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Tasks running",
@@ -10392,7 +10760,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 346
+        "y": 354
       },
       "id": 247,
       "options": {
@@ -10418,7 +10786,7 @@
           "disableTextWrap": false,
           "editorMode": "code",
           "exemplar": false,
-          "expr": "rate(reth_executor_spawn_regular_tasks_total{job=\"$job\"}[$__rate_interval])",
+          "expr": "rate(reth_executor_spawn_regular_tasks_total{$instance_label=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "hide": false,
           "includeNullMetadata": false,
@@ -10434,7 +10802,7 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "reth_executor_spawn_regular_tasks_total{job=\"$job\"} - reth_executor_spawn_finished_regular_tasks_total{job=\"$job\"}",
+          "expr": "reth_executor_spawn_regular_tasks_total{$instance_label=\"$instance\"} - reth_executor_spawn_finished_regular_tasks_total{$instance_label=\"$instance\"}",
           "hide": false,
           "instant": false,
           "legendFormat": "Tasks running",
@@ -10451,7 +10819,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 354
+        "y": 362
       },
       "id": 236,
       "panels": [
@@ -10541,7 +10909,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "builder",
-              "expr": "reth_exex_notifications_sent_total{job=\"$job\"}",
+              "expr": "reth_exex_notifications_sent_total{$instance_label=\"$instance\"}",
               "hide": false,
               "legendFormat": "Total Notifications Sent",
               "range": true,
@@ -10637,7 +11005,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "builder",
-              "expr": "reth_exex_events_sent_total{job=\"$job\"}",
+              "expr": "reth_exex_events_sent_total{$instance_label=\"$instance\"}",
               "hide": false,
               "legendFormat": "Total Events Sent",
               "range": true,
@@ -10733,7 +11101,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "builder",
-              "expr": "reth_exex_manager_current_capacity{job=\"$job\"}",
+              "expr": "reth_exex_manager_current_capacity{$instance_label=\"$instance\"}",
               "hide": false,
               "legendFormat": "Current size",
               "range": true,
@@ -10745,7 +11113,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "max_over_time(reth_exex_manager_max_capacity{job=\"$job\"}[1h])",
+              "expr": "max_over_time(reth_exex_manager_max_capacity{$instance_label=\"$instance\"}[1h])",
               "hide": false,
               "legendFormat": "Max size",
               "range": true,
@@ -10841,7 +11209,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "reth_exex_manager_buffer_size{job=\"$job\"}",
+              "expr": "reth_exex_manager_buffer_size{$instance_label=\"$instance\"}",
               "hide": false,
               "legendFormat": "Max size",
               "range": true,
@@ -10909,7 +11277,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "builder",
-              "expr": "reth_exex_manager_num_exexs{job=\"$job\"}",
+              "expr": "reth_exex_manager_num_exexs{$instance_label=\"$instance\"}",
               "hide": false,
               "legendFormat": "Number of ExExs",
               "range": true,
@@ -10929,7 +11297,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 355
+        "y": 363
       },
       "id": 241,
       "panels": [
@@ -11020,7 +11388,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "reth_exex_wal_lowest_committed_block_height{job=\"$job\"}",
+              "expr": "reth_exex_wal_lowest_committed_block_height{$instance_label=\"$instance\"}",
               "hide": false,
               "instant": false,
               "legendFormat": "Lowest Block",
@@ -11033,7 +11401,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "reth_exex_wal_highest_committed_block_height{job=\"$job\"}",
+              "expr": "reth_exex_wal_highest_committed_block_height{$instance_label=\"$instance\"}",
               "hide": false,
               "instant": false,
               "legendFormat": "Highest Block",
@@ -11131,7 +11499,7 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "expr": "reth_exex_wal_committed_blocks_count{job=\"$job\"}",
+              "expr": "reth_exex_wal_committed_blocks_count{$instance_label=\"$instance\"}",
               "hide": false,
               "instant": false,
               "legendFormat": "Committed Blocks",
@@ -11144,7 +11512,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "reth_exex_wal_notifications_count{job=\"$job\"}",
+              "expr": "reth_exex_wal_notifications_count{$instance_label=\"$instance\"}",
               "hide": false,
               "instant": false,
               "legendFormat": "Notifications",
@@ -11243,7 +11611,7 @@
                 "uid": "${DS_PROMETHEUS}"
               },
               "editorMode": "code",
-              "expr": "reth_exex_wal_size_bytes{job=\"$job\"}",
+              "expr": "reth_exex_wal_size_bytes{$instance_label=\"$instance\"}",
               "hide": false,
               "instant": false,
               "legendFormat": "__auto",
@@ -11270,18 +11638,19 @@
           "type": "prometheus",
           "uid": "${datasource}"
         },
-        "definition": "query_result(reth_info)",
+        "definition": "label_values(reth_info,$instance_label)",
         "includeAll": false,
-        "label": "Job",
-        "name": "job",
+        "label": "Instance",
+        "name": "instance",
         "options": [],
         "query": {
-          "qryType": 3,
-          "query": "query_result(reth_info)",
+          "qryType": 1,
+          "query": "label_values(reth_info,$instance_label)",
           "refId": "PrometheusVariableQueryEditor-VariableQuery"
         },
         "refresh": 1,
-        "regex": "/.*job=\\\"([^\\\"]*).*/",
+        "regex": "",
+        "sort": 1,
         "type": "query"
       },
       {
@@ -11294,6 +11663,26 @@
         "refresh": 1,
         "regex": "",
         "type": "datasource"
+      },
+      {
+        "hide": 2,
+        "label": "Instance Label",
+        "name": "instance_label",
+        "query": "${VAR_INSTANCE_LABEL}",
+        "skipUrlSync": true,
+        "type": "constant",
+        "current": {
+          "value": "${VAR_INSTANCE_LABEL}",
+          "text": "${VAR_INSTANCE_LABEL}",
+          "selected": false
+        },
+        "options": [
+          {
+            "value": "${VAR_INSTANCE_LABEL}",
+            "text": "${VAR_INSTANCE_LABEL}",
+            "selected": false
+          }
+        ]
       }
     ]
   },
@@ -11305,6 +11694,6 @@
   "timezone": "",
   "title": "Reth",
   "uid": "2k8BXz24x",
-  "version": 4,
+  "version": 10,
   "weekStart": ""
 }

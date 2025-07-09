@@ -90,7 +90,7 @@ pub(super) fn apply_feynman_hard_fork<DB: Database>(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{super::assert_bytecode_eq, *};
     use revm::{
         database::{
             states::{bundle_state::BundleRetention, plain_account::PlainStorage, StorageSlot},
@@ -158,8 +158,24 @@ mod tests {
         let expected_oracle_info =
             AccountInfo { code_hash, code: Some(bytecode.clone()), ..Default::default() };
 
-        assert_eq!(oracle.original_info.unwrap(), oracle_pre_fork);
-        assert_eq!(oracle.info.unwrap(), expected_oracle_info);
+        // TODO: revert back to performing equality check on `AccountInfo` once we bump revm > v78
+        let oracle_original_info = oracle.original_info.unwrap();
+        assert_bytecode_eq(
+            oracle_original_info.code.as_ref().unwrap(),
+            oracle_pre_fork.code.as_ref().unwrap(),
+        );
+        assert_eq!(oracle_original_info.balance, oracle_pre_fork.balance);
+        assert_eq!(oracle_original_info.nonce, oracle_pre_fork.nonce);
+        assert_eq!(oracle_original_info.code_hash, oracle_pre_fork.code_hash);
+
+        let oracle_post_info = oracle.info.unwrap();
+        assert_bytecode_eq(
+            oracle_post_info.code.as_ref().unwrap(),
+            expected_oracle_info.code.as_ref().unwrap(),
+        );
+        assert_eq!(oracle_post_info.balance, expected_oracle_info.balance);
+        assert_eq!(oracle_post_info.nonce, expected_oracle_info.nonce);
+        assert_eq!(oracle_post_info.code_hash, expected_oracle_info.code_hash);
 
         // check oracle storage changeset
         let mut storage = oracle.storage.into_iter().collect::<Vec<(U256, StorageSlot)>>();
@@ -175,7 +191,7 @@ mod tests {
         }
 
         // check deployed contract
-        assert_eq!(bundle.contracts.get(&code_hash).unwrap().clone(), bytecode);
+        assert_bytecode_eq(bundle.contracts.get(&code_hash).unwrap(), &bytecode);
 
         Ok(())
     }

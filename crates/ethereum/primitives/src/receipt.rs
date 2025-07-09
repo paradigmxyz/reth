@@ -283,8 +283,6 @@ impl InMemorySize for Receipt {
     }
 }
 
-impl reth_primitives_traits::Receipt for Receipt {}
-
 impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt
 where
     T: Into<Log>,
@@ -438,13 +436,13 @@ pub(super) mod serde_bincode_compat {
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
-                reseipt: Receipt,
+                receipt: Receipt,
             }
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
             let data = Data {
-                reseipt: Receipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+                receipt: Receipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
             };
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();

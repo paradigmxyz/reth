@@ -58,6 +58,10 @@ impl TransactionBuilder<Scroll> for ScrollTransactionRequest {
         self.as_mut().set_nonce(nonce);
     }
 
+    fn take_nonce(&mut self) -> Option<u64> {
+        self.as_mut().nonce.take()
+    }
+
     fn input(&self) -> Option<&Bytes> {
         self.as_ref().input()
     }

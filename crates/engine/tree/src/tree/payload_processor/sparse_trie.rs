@@ -11,7 +11,7 @@ use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    SparseStateTrie,
+    SparseStateTrie, SparseTrieState,
 };
 use std::{
     sync::mpsc,
@@ -63,6 +63,43 @@ where
         }
     }
 
+    /// Creates a new sparse trie, populating the accounts trie with the given cleared
+    /// `SparseTrieState` if it exists.
+    pub(super) fn new_with_stored_trie(
+        executor: WorkloadExecutor,
+        updates: mpsc::Receiver<SparseTrieUpdate>,
+        blinded_provider_factory: BPF,
+        trie_metrics: MultiProofTaskMetrics,
+        sparse_trie_state: Option<SparseTrieState>,
+    ) -> Self {
+        if let Some(sparse_trie_state) = sparse_trie_state {
+            Self::with_accounts_trie(
+                executor,
+                updates,
+                blinded_provider_factory,
+                trie_metrics,
+                sparse_trie_state,
+            )
+        } else {
+            Self::new(executor, updates, blinded_provider_factory, trie_metrics)
+        }
+    }
+
+    /// Creates a new sparse trie task, using the given cleared `SparseTrieState` for the accounts
+    /// trie.
+    pub(super) fn with_accounts_trie(
+        executor: WorkloadExecutor,
+        updates: mpsc::Receiver<SparseTrieUpdate>,
+        blinded_provider_factory: BPF,
+        metrics: MultiProofTaskMetrics,
+        sparse_trie_state: SparseTrieState,
+    ) -> Self {
+        let mut trie = SparseStateTrie::new(blinded_provider_factory).with_updates(true);
+        trie.populate_from(sparse_trie_state);
+
+        Self { executor, updates, metrics, trie }
+    }
+
     /// Runs the sparse trie task to completion.
     ///
     /// This waits for new incoming [`SparseTrieUpdate`].
@@ -109,7 +146,10 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        Ok(StateRootComputeOutcome { state_root, trie_updates })
+        // take the account trie
+        let trie = self.trie.take_cleared_account_trie_state();
+
+        Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
     }
 }
 
@@ -121,6 +161,8 @@ pub struct StateRootComputeOutcome {
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: TrieUpdates,
+    /// The account state trie.
+    pub trie: SparseTrieState,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.

@@ -62,13 +62,13 @@ fn transact_blockhashes_contract_call<Halt>(
     evm: &mut impl Evm<HaltReason = Halt>,
 ) -> Result<Option<ResultAndState<Halt>>, BlockExecutionError> {
     // if Feynman is not active at timestamp then no system transaction occurs.
-    if !spec.is_feynman_active_at_timestamp(evm.block().timestamp) {
+    if !spec.is_feynman_active_at_timestamp(evm.block().timestamp.to()) {
         return Ok(None);
     }
 
     // if the block number is zero (genesis block) then no system transaction may occur as per
     // EIP-2935
-    if evm.block().number == 0 {
+    if evm.block().number.to::<u64>() == 0u64 {
         return Ok(None);
     }
 
@@ -101,7 +101,6 @@ mod tests {
     use reth_scroll_evm::ScrollEvmConfig;
     use revm::{
         bytecode::Bytecode,
-        context::ContextTr,
         database::{EmptyDBTyped, State},
         state::AccountInfo,
         Database,
@@ -151,7 +150,7 @@ mod tests {
         system_caller.apply_blockhashes_contract_call(block.parent_hash, &mut evm).unwrap();
 
         // assert the storage slot remains unchanged.
-        let parent_hash = evm.db().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap();
+        let parent_hash = evm.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap();
         assert_eq!(parent_hash, U256::ZERO);
     }
 
@@ -197,7 +196,7 @@ mod tests {
         system_caller.apply_blockhashes_contract_call(block.parent_hash, &mut evm).unwrap();
 
         // assert the hash is written to storage.
-        let parent_hash = evm.db().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap();
+        let parent_hash = evm.db_mut().storage(HISTORY_STORAGE_ADDRESS, U256::ZERO).unwrap();
         assert_eq!(Into::<B256>::into(parent_hash), block.parent_hash);
     }
 }

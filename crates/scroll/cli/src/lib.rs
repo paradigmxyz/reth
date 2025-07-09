@@ -22,7 +22,6 @@ use reth_node_core::{
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_scroll_chainspec::ScrollChainSpec;
 use reth_scroll_evm::ScrollExecutorProvider;
-use reth_scroll_node::ScrollNetworkPrimitives;
 use reth_scroll_primitives::ScrollPrimitives;
 use reth_tracing::FileWorkerGuard;
 use std::{ffi::OsString, fmt, future::Future, sync::Arc};
@@ -128,16 +127,14 @@ where
                 runner.run_blocking_until_ctrl_c(command.execute::<Types>())
             }
             Commands::Import(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<Types, _, _>(components))
+                runner.run_blocking_until_ctrl_c(command.execute::<Types, _>(components))
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<Types>()),
-            Commands::Stage(command) => runner.run_command_until_exit(|ctx| {
-                command.execute::<Types, _, _, ScrollNetworkPrimitives>(ctx, components)
-            }),
-            Commands::P2P(command) => {
-                runner.run_until_ctrl_c(command.execute::<ScrollNetworkPrimitives>())
+            Commands::Stage(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<Types, _>(ctx, components))
             }
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<Types>()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Recover(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<Types>(ctx))

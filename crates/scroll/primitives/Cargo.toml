@@ -60,7 +60,6 @@ std = [
 reth-codec = [
     "dep:reth-codecs",
     "std",
-    "dep:arbitrary",
     "reth-primitives-traits/reth-codec",
     "scroll-alloy-consensus/reth-codec",
     "dep:bytes",
