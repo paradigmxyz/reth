@@ -1868,7 +1868,7 @@ impl SparseSubtrieInner {
                         // removed nodes.
                         update_actions.push(SparseTrieUpdatesAction::InsertRemoved(path));
                     } else if self
-                        .branch_node_hash_masks
+                        .branch_node_tree_masks
                         .get(&path)
                         .is_none_or(|mask| mask.is_empty()) &&
                         self.branch_node_hash_masks.get(&path).is_none_or(|mask| mask.is_empty())
