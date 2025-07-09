@@ -39,10 +39,8 @@ where
 
     let blob_gas_used = transaction.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
-    let blob_gas_price = blob_gas_used.and_then(|_| {
-        blob_params
-            .and_then(|params| meta.excess_blob_gas.map(|excess| params.calc_blob_fee(excess)))
-    });
+    let blob_gas_price =
+        blob_gas_used.and_then(|_| Some(blob_params?.calc_blob_fee(meta.excess_blob_gas?)));
 
     let logs_bloom = receipt.bloom();
 
