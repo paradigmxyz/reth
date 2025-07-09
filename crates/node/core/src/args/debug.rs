@@ -95,7 +95,7 @@ pub struct DebugArgs {
 
     /// The URL of the ethstats server to connect to.
     /// Example: `nodename:secret@host:port`
-    #[arg(long = "debug.ethstats", help_heading = "Debug")]
+    #[arg(long = "ethstats", help_heading = "Debug")]
     pub ethstats: Option<String>,
 }
 

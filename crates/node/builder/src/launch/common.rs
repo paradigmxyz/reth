@@ -1051,14 +1051,16 @@ where
 
     /// Spawns the `EthStats` service.
     pub async fn spawn_ethstats(&self) -> eyre::Result<()> {
-        if let Some(url) = self.node_config().debug.ethstats.as_ref() {
-            let network = self.components().network().clone();
-            let pool = self.components().pool().clone();
-            let provider = self.node_adapter().provider.clone();
+        let Some(url) = self.node_config().debug.ethstats.as_ref() else { return Ok(()) };
 
-            let ethstats = EthStatsService::new(url, network, provider, pool).await?;
-            tokio::spawn(async move { ethstats.run().await });
-        }
+        let network = self.components().network().clone();
+        let pool = self.components().pool().clone();
+        let provider = self.node_adapter().provider.clone();
+
+        info!(target: "reth::cli", "Starting EthStats service at {}", url);
+
+        let ethstats = EthStatsService::new(url, network, provider, pool).await?;
+        tokio::spawn(async move { ethstats.run().await });
 
         Ok(())
     }

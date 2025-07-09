@@ -8,12 +8,10 @@ use crate::{
 };
 use alloy_consensus::{BlockHeader, Sealable};
 use alloy_primitives::U256;
+use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_primitives_traits::{Block, BlockBody, InMemorySize};
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, CanonStateNotification, CanonStateSubscriptions,
-};
-use reth_storage_api::NodePrimitivesProvider;
+use reth_storage_api::{BlockReader, BlockReaderIdExt, NodePrimitivesProvider};
 use reth_transaction_pool::TransactionPool;
 
 use chrono::Local;
@@ -29,6 +27,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_tungstenite::connect_async;
+use tracing::{debug, error, info, warn};
 use url::Url;
 
 /// Number of historical blocks to include in a history update sent to the `EthStats` server
@@ -149,19 +148,30 @@ where
     /// Attempts to connect to the server using the credentials and handles
     /// connection timeouts and errors.
     async fn connect(&self) -> Result<(), EthStatsError> {
+        debug!(
+            target = "ethstats",
+            "Attempting to connect to EthStats server at {}", self.credentials.host
+        );
         let full_url = format!("ws://{}/api", self.credentials.host);
         let url = Url::parse(&full_url)
             .map_err(|e| EthStatsError::InvalidUrl(format!("Invalid URL: {full_url} - {e}")))?;
 
         match timeout(CONNECT_TIMEOUT, connect_async(url.to_string())).await {
             Ok(Ok((ws_stream, _))) => {
+                debug!(
+                    target = "ethstats",
+                    "Successfully connected to EthStats server at {}", self.credentials.host
+                );
                 let conn: ConnWrapper = ConnWrapper::new(ws_stream);
                 *self.conn.write().await = Some(conn.clone());
                 self.login().await?;
                 Ok(())
             }
             Ok(Err(e)) => Err(EthStatsError::InvalidUrl(e.to_string())),
-            Err(_) => Err(EthStatsError::Timeout),
+            Err(_) => {
+                error!(target = "ethstats", "Connection to EthStats server timed out");
+                Err(EthStatsError::Timeout)
+            }
         }
     }
 
@@ -170,6 +180,10 @@ where
     /// Sends authentication credentials and node information to the server
     /// and waits for a successful acknowledgment.
     async fn login(&self) -> Result<(), EthStatsError> {
+        debug!(
+            target = "ethstats",
+            "Attempting to login to EthStats server as node_id {}", self.credentials.node_id
+        );
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
@@ -213,11 +227,15 @@ where
 
         if let Some(ack) = response.get("emit") {
             if ack.get(0) == Some(&Value::String("ready".to_string())) {
-                tracing::info!("Login successful to ethstats server");
+                info!(
+                    target = "ethstats",
+                    "Login successful to EthStats server as node_id {}", self.credentials.node_id
+                );
                 return Ok(());
             }
         }
 
+        error!(target = "ethstats", "Login failed: Unauthorized or unexpected login response");
         Err(EthStatsError::AuthError("Unauthorized or unexpected login response".into()))
     }
 
@@ -270,7 +288,7 @@ where
             sleep(PING_TIMEOUT).await;
             let mut active = active_ping.lock().await;
             if active.is_some() {
-                tracing::warn!("Ping timeout");
+                warn!(target = "ethstats", "Ping timeout");
                 *active = None;
                 // Clear connection to trigger reconnect
                 if let Some(conn) = conn_ref.write().await.take() {
@@ -294,7 +312,7 @@ where
         if let Some(start) = active.take() {
             let latency = start.elapsed().as_millis() as u64 / 2;
 
-            tracing::debug!("Reporting latency: {}ms", latency);
+            debug!(target = "ethstats", "Reporting latency: {}ms", latency);
 
             let latency_msg = LatencyMsg { id: self.credentials.node_id.clone(), latency };
 
@@ -314,7 +332,7 @@ where
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
         let pending = self.pool.pool_size().pending as u64;
 
-        tracing::debug!("Reporting pending txs: {}", pending);
+        debug!("Reporting pending txs: {}", pending);
 
         let pending_msg =
             PendingMsg { id: self.credentials.node_id.clone(), stats: PendingStats { pending } };
@@ -355,18 +373,18 @@ where
                     block: self.block_to_stats(&block)?,
                 };
 
-                tracing::debug!("Reporting block: {}", block_number);
+                debug!(target = "ethstats", "Reporting block: {}", block_number);
 
                 let message = block_msg.generate_block_message();
                 conn.write_json(&message).await?;
             }
             Ok(None) => {
                 // Block not found, stop fetching
-                tracing::warn!("Block {} not found", block_number);
+                warn!(target = "ethstats", "Block {} not found", block_number);
                 return Err(EthStatsError::BlockNotFound(block_number));
             }
             Err(e) => {
-                tracing::error!("Error fetching block {}: {}", block_number, e);
+                error!(target = "ethstats", "Error fetching block {}: {}", block_number, e);
                 return Err(EthStatsError::DataFetchError(e.to_string()));
             }
         };
@@ -444,11 +462,11 @@ where
                 }
                 Ok(None) => {
                     // Block not found, stop fetching
-                    tracing::warn!("Block {} not found", block_number);
+                    warn!(target = "ethstats", "Block {} not found", block_number);
                     break;
                 }
                 Err(e) => {
-                    tracing::error!("Error fetching block {}: {}", block_number, e);
+                    error!(target = "ethstats", "Error fetching block {}: {}", block_number, e);
                     break;
                 }
             }
@@ -458,9 +476,10 @@ where
             blocks.iter().map(|block| self.block_to_stats(block)).collect::<Result<_, _>>()?;
 
         if history.is_empty() {
-            tracing::warn!("No history to send to stats server");
+            warn!(target = "ethstats", "No history to send to stats server");
         } else {
-            tracing::debug!(
+            debug!(
+                target = "ethstats",
                 "Sending historical blocks to ethstats, first: {}, last: {}",
                 history.first().unwrap().number,
                 history.last().unwrap().number
@@ -496,7 +515,7 @@ where
         let emit = match msg.get("emit") {
             Some(emit) => emit,
             None => {
-                tracing::warn!("Stats server sent non-broadcast, msg {}", msg);
+                warn!(target = "ethstats", "Stats server sent non-broadcast, msg {}", msg);
                 return Err(EthStatsError::InvalidRequest);
             }
         };
@@ -504,7 +523,7 @@ where
         let command = match emit.get(0) {
             Some(Value::String(command)) => command.as_str(),
             _ => {
-                tracing::warn!("Invalid stats server message type, msg {}", msg);
+                warn!(target = "ethstats", "Invalid stats server message type, msg {}", msg);
                 return Err(EthStatsError::InvalidRequest);
             }
         };
@@ -531,7 +550,10 @@ where
                     .iter()
                     .map(|val| {
                         val.as_u64().ok_or_else(|| {
-                            tracing::warn!("Invalid stats history block number, msg {}", msg);
+                            warn!(
+                                target = "ethstats",
+                                "Invalid stats history block number, msg {}", msg
+                            );
                             EthStatsError::InvalidRequest
                         })
                     })
@@ -539,7 +561,7 @@ where
 
                 self.report_history(Some(&block_numbers)).await?;
             }
-            other => tracing::warn!("Unhandled command: {}", other),
+            other => warn!(target = "ethstats", "Unhandled command: {}", other),
         }
 
         Ok(())
@@ -579,7 +601,7 @@ where
                                 }
                             }
                             Err(e) => {
-                                tracing::error!("Read error: {}", e);
+                                error!(target = "ethstats", "Read error: {}", e);
                                 break;
                             }
                         }
@@ -622,14 +644,14 @@ where
             tokio::select! {
                 // Handle shutdown signal
                 _ = shutdown_rx.recv() => {
-                    tracing::info!("Shutting down ethstats service");
+                    info!(target = "ethstats", "Shutting down ethstats service");
                     break;
                 }
 
                 // Handle messages from the read loop
                 Some(msg) = message_rx.recv() => {
                     if let Err(e) = self.handle_message(msg).await {
-                        tracing::error!("Error handling message: {}", e);
+                        error!(target = "ethstats", "Error handling message: {}", e);
                         self.disconnect().await;
                     }
                 }
@@ -637,12 +659,12 @@ where
                 // Handle new block
                 Some(head) = head_rx.recv() => {
                     if let Err(e) = self.report_block(Some(head)).await {
-                        tracing::error!("Failed to report block: {}", e);
+                        error!(target = "ethstats", "Failed to report block: {}", e);
                         self.disconnect().await;
                     }
 
                     if let Err(e) = self.report_pending().await {
-                        tracing::error!("Failed to report pending: {}", e);
+                        error!(target = "ethstats", "Failed to report pending: {}", e);
                         self.disconnect().await;
                     }
                 }
@@ -650,7 +672,7 @@ where
                 // Handle new pending tx
                 _= pending_tx_receiver.recv() => {
                     if let Err(e) = self.report_pending().await {
-                        tracing::error!("Failed to report pending: {}", e);
+                        error!(target = "ethstats", "Failed to report pending: {}", e);
                         self.disconnect().await;
                     }
                 }
@@ -658,7 +680,7 @@ where
                 // Handle stats reporting
                 _ = report_interval.tick() => {
                     if let Err(e) = self.report().await {
-                        tracing::error!("Failed to report: {}", e);
+                        error!(target = "ethstats", "Failed to report: {}", e);
                         self.disconnect().await;
                     }
                 }
@@ -666,8 +688,8 @@ where
                 // Handle reconnection
                 _ = reconnect_interval.tick(), if self.conn.read().await.is_none() => {
                     match self.connect().await {
-                        Ok(_) => tracing::info!("Reconnected successfully"),
-                        Err(e) => tracing::error!("Reconnect failed: {}", e),
+                        Ok(_) => info!(target = "ethstats", "Reconnected successfully"),
+                        Err(e) => error!(target = "ethstats", "Reconnect failed: {}", e),
                     }
                 }
             }
@@ -688,7 +710,7 @@ where
     async fn disconnect(&self) {
         if let Some(conn) = self.conn.write().await.take() {
             if let Err(e) = conn.close().await {
-                tracing::error!("Error closing connection: {}", e);
+                error!(target = "ethstats", "Error closing connection: {}", e);
             }
         }
     }
@@ -705,7 +727,7 @@ mod tests {
     use super::*;
     use futures_util::{SinkExt, StreamExt};
     use reth_network_api::noop::NoopNetwork;
-    use reth_provider::noop::NoopProvider;
+    use reth_storage_api::noop::NoopProvider;
     use reth_transaction_pool::noop::NoopTransactionPool;
     use serde_json::json;
     use tokio::net::TcpListener;
