@@ -29,6 +29,7 @@ where
         >,
     EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
     Provider: BlockReader,
+    Network: RpcTypes,
 {
 }
 
@@ -50,6 +51,7 @@ where
                        + From<ProviderError>,
         > + SpawnBlocking,
     Provider: BlockReader,
+    Network: RpcTypes,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -66,5 +68,6 @@ impl<Provider, Pool, Network, EvmConfig> EstimateCall for EthApi<Provider, Pool,
 where
     Self: Call,
     Provider: BlockReader,
+    Network: RpcTypes,
 {
 }

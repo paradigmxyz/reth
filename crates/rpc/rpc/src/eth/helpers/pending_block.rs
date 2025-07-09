@@ -48,6 +48,7 @@ where
             >,
         >,
     Provider: BlockReader,
+    Network: RpcTypes,
 {
     #[inline]
     fn pending_block(

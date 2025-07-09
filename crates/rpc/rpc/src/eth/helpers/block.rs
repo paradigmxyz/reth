@@ -28,6 +28,7 @@ where
             Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
+    Network: RpcTypes,
     Provider: BlockReader + ChainSpecProvider,
 {
     async fn block_receipts(
@@ -81,6 +82,7 @@ where
             Evm = EvmConfig,
         >,
     Provider: BlockReader,
+    Network: RpcTypes,
     EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
 {
 }

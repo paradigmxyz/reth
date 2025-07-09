@@ -20,6 +20,7 @@ use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_api::TraceApiServer;
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{Call, LoadPendingBlock, LoadTransaction, Trace, TraceExt},
     FromEthApiError, RpcNodeCore,
@@ -87,7 +88,7 @@ where
     /// Executes the given call and returns a number of possible traces for it.
     pub async fn trace_call(
         &self,
-        trace_request: TraceCallRequest,
+        trace_request: TraceCallRequest<RpcTxReq<Eth::NetworkTypes>>,
     ) -> Result<TraceResults, Eth::Error> {
         let at = trace_request.block_id.unwrap_or_default();
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
@@ -142,7 +143,7 @@ where
     /// Note: Allows tracing dependent transactions, hence all transactions are traced in sequence
     pub async fn trace_call_many(
         &self,
-        calls: Vec<(TransactionRequest, HashSet<TraceType>)>,
+        calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
         let at = block_id.unwrap_or(BlockId::pending());

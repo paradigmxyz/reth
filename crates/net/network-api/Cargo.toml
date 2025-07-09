@@ -19,8 +19,11 @@ reth-network-p2p.workspace = true
 reth-eth-wire-types.workspace = true
 reth-tokio-util.workspace = true
 reth-ethereum-forks.workspace = true
+reth-rpc-convert.workspace = true
 
 # ethereum
+alloy-consensus.workspace = true
+alloy-rpc-types-eth.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom"] }
 alloy-rpc-types-admin.workspace = true
 enr = { workspace = true, default-features = false, features = ["rust-secp256k1"] }
