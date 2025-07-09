@@ -15,7 +15,7 @@ export default defineConfig({
     { text: 'Rustdocs', link: '/docs' },
     { text: 'GitHub', link: 'https://github.com/paradigmxyz/reth' },
     {
-      text: 'v1.5.0',
+      text: 'v1.5.1',
       items: [
         {
           text: 'Releases',
