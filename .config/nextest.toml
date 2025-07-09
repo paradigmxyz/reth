@@ -7,10 +7,7 @@ filter = "test(general_state_tests)"
 slow-timeout = { period = "1m", terminate-after = 10 }
 
 # E2E tests using the testsuite framework from crates/e2e-test-utils
-# These tests are located in:
-# - crates/rpc/rpc-e2e-tests/* (dedicated e2e test crate)
-# - crates/*/tests/e2e/* (e2e test directories)
-# - tests/e2e.rs files
+# These tests are located in tests/e2e-testsuite/ directories across various crates
 [[profile.default.overrides]]
-filter = "package(reth-rpc-e2e-tests) or (test(/e2e::/) and test(/^test_/))"
+filter = "binary(e2e_testsuite)"
 slow-timeout = { period = "2m", terminate-after = 3 }

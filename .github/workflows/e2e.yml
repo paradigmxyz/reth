@@ -42,15 +42,13 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak ${{ matrix.network }}" \
-            --workspace \
-            -E "package(reth-rpc-e2e-tests) or (test(/e2e::/) and test(/^test_/))"
+            --workspace -E 'binary(e2e_testsuite)'
       - if: matrix.network == 'optimism'
         name: Run e2e tests
         run: |
           cargo nextest run \
             --locked --features "asm-keccak optimism" \
-            --workspace \
-            -E "(package(reth-rpc-e2e-tests) or (test(/e2e::/) and test(/^test_/))) and package(~reth-optimism)"
+            --workspace -E 'binary(e2e_testsuite) and package(~reth-optimism)'
 
   e2e-success:
     name: e2e success
