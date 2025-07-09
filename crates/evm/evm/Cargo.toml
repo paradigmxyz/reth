@@ -29,7 +29,7 @@ alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
 # scroll
-scroll-alloy-evm = { workspace = true, optional = true }
+scroll-alloy-evm = { workspace = true, optional = true, default-features = false }
 
 auto_impl.workspace = true
 derive_more.workspace = true

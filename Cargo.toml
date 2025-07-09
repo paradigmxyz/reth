@@ -526,7 +526,7 @@ alloy-transport-ws = { version = "1.0.13", default-features = false }
 
 # scroll
 scroll-alloy-consensus = { path = "crates/scroll/alloy/consensus", default-features = false }
-scroll-alloy-evm = { path = "crates/scroll/alloy/evm" }
+scroll-alloy-evm = { path = "crates/scroll/alloy/evm", default-features = false }
 scroll-alloy-hardforks = { path = "crates/scroll/alloy/hardforks", default-features = false }
 scroll-alloy-network = { path = "crates/scroll/alloy/network", default-features = false }
 scroll-alloy-rpc-types = { path = "crates/scroll/alloy/rpc-types", default-features = false }
