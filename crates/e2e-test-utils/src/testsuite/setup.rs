@@ -1,8 +1,8 @@
 //! Test setup utilities for configuring the initial state.
 
 use crate::{
-    setup_engine, testsuite::Environment, Adapter, NodeBuilderHelper, PayloadAttributesBuilder,
-    RpcHandleProvider, TmpNodeAddOnsHandle, TmpNodeEthApi,
+    setup_engine_with_connection, testsuite::Environment, Adapter, NodeBuilderHelper,
+    PayloadAttributesBuilder, RpcHandleProvider, TmpNodeAddOnsHandle, TmpNodeEthApi,
 };
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;

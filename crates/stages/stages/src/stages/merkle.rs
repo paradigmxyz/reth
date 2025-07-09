@@ -117,17 +117,20 @@ where
     pub const fn default_execution_with_consensus(
         consensus: Arc<dyn Consensus<P::Block, Error = ConsensusError>>,
     ) -> Self {
-        Self::Execution { rebuild_threshold: MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+        Self::Execution {
+            rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
             incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
-, consensus }
+            consensus,
+        }
     }
 
     /// Create new instance of [`MerkleStage::Execution`].
     pub const fn new_execution(
-        rebuild_threshold: u64, incremental_threshold: u64,
+        rebuild_threshold: u64,
+        incremental_threshold: u64,
         consensus: Arc<dyn Consensus<P::Block, Error = ConsensusError>>,
     ) -> Self {
-        Self::Execution { rebuild_threshold,incremental_threshold, consensus }
+        Self::Execution { rebuild_threshold, incremental_threshold, consensus }
     }
 
     /// Create new instance of [`MerkleStage::Unwind`].
@@ -208,7 +211,9 @@ where
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())));
             }
-            Self::Execution { rebuild_threshold, incremental_threshold, .. } => (*rebuild_threshold, *incremental_threshold),
+            Self::Execution { rebuild_threshold, incremental_threshold, .. } => {
+                (*rebuild_threshold, *incremental_threshold)
+            }
             #[cfg(any(test, feature = "test-utils"))]
             Self::Both { rebuild_threshold, incremental_threshold } => {
                 (*rebuild_threshold, *incremental_threshold)

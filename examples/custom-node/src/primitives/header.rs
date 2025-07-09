@@ -181,6 +181,12 @@ impl reth_db_api::table::Decompress for CustomHeader {
     }
 }
 
+impl reth_primitives_traits::block::header::BlockHeaderMut for CustomHeader {
+    fn extra_data_mut(&mut self) -> &mut Bytes {
+        &mut self.inner.extra_data
+    }
+}
+
 impl BlockHeader for CustomHeader {}
 
 impl RlpBincode for CustomHeader {}

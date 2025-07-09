@@ -68,8 +68,7 @@ pub struct ScrollEthApi<N: ScrollNodeCore, NetworkT = Scroll> {
     inner: Arc<ScrollEthApiInner<N>>,
     /// Marker for the network types.
     _nt: PhantomData<NetworkT>,
-    tx_resp_builder:
-        RpcConverter<N::Primitives, NetworkT, ScrollEthApiError, ScrollTxInfoMapper<N>>,
+    tx_resp_builder: RpcConverter<NetworkT, N::Evm, ScrollEthApiError, ScrollTxInfoMapper<N>>,
 }
 
 impl<N: ScrollNodeCore, NetworkT> ScrollEthApi<N, NetworkT> {
@@ -110,14 +109,14 @@ where
     Self: Send + Sync + fmt::Debug,
     N: ScrollNodeCore,
     NetworkT: Network + Clone + fmt::Debug,
+    <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
     type Error = ScrollEthApiError;
     type NetworkTypes = Scroll;
-    type TransactionCompat =
-        RpcConverter<N::Primitives, NetworkT, ScrollEthApiError, ScrollTxInfoMapper<N>>;
+    type RpcConvert = RpcConverter<NetworkT, N::Evm, ScrollEthApiError, ScrollTxInfoMapper<N>>;
 
-    fn tx_resp_builder(&self) -> &Self::TransactionCompat {
+    fn tx_resp_builder(&self) -> &Self::RpcConvert {
         &self.tx_resp_builder
     }
 }
@@ -199,6 +198,7 @@ where
     Self: Send + Sync + Clone + 'static,
     N: ScrollNodeCore,
     NetworkT: Network,
+    <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
     #[inline]
@@ -232,7 +232,7 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         self.inner.eth_api.fee_history_cache()
     }
 }
@@ -244,6 +244,7 @@ where
         Pool: TransactionPool,
     >,
     NetworkT: Network,
+    <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
 }
@@ -261,7 +262,11 @@ where
 
 impl<N, NetworkT> EthFees for ScrollEthApi<N, NetworkT>
 where
-    Self: LoadFee,
+    Self: LoadFee<
+        Provider: ChainSpecProvider<
+            ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>,
+        >,
+    >,
     N: ScrollNodeCore,
 {
 }

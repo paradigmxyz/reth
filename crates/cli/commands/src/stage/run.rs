@@ -299,13 +299,14 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 StageEnum::Merkle => {
                     let consensus = Arc::new(components.consensus().clone());
                     (
-                    Box::new(MerkleStage::new_execution(
-                        config.stages.merkle.rebuild_threshold,
-                        config.stages.merkle.incremental_threshold,
-                        consensus.clone(),
-                    )),
-                    Some(Box::new(MerkleStage::new_unwind(consensus))),
-                )},
+                        Box::new(MerkleStage::<N::Primitives>::new_execution(
+                            config.stages.merkle.rebuild_threshold,
+                            config.stages.merkle.incremental_threshold,
+                            consensus.clone(),
+                        )),
+                        Some(Box::new(MerkleStage::<N::Primitives>::new_unwind(consensus))),
+                    )
+                }
                 StageEnum::AccountHistory => (
                     Box::new(IndexAccountHistoryStage::new(
                         config.stages.index_account_history,

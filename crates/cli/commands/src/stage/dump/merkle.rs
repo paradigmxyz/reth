@@ -161,7 +161,7 @@ where
 
     let mut stage = MerkleStage::<N::Primitives>::Execution {
         // Forces updating the root instead of calculating from scratch
-        clean_threshold: u64::MAX,
+        rebuild_threshold: u64::MAX,
         incremental_threshold: u64::MAX,
         consensus: NoopConsensus::arc(),
     };

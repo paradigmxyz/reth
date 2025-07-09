@@ -28,4 +28,4 @@ scroll-alloy-consensus = { path = "../alloy/consensus", default-features = false
 scroll-alloy-rpc-types = { path = "../alloy/rpc-types", default-features = false }
 
 [patch.crates-io]
-revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth-v74" }
+revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth-v78" }

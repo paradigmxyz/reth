@@ -68,9 +68,9 @@ where
         };
 
         let block_env = BlockEnv {
-            number: header.number(),
+            number: U256::from(header.number()),
             beneficiary: coinbase,
-            timestamp: header.timestamp(),
+            timestamp: U256::from(header.timestamp()),
             difficulty: header.difficulty(),
             prevrandao: header.mix_hash(),
             gas_limit: header.gas_limit(),
@@ -106,9 +106,9 @@ where
         };
 
         let block_env = BlockEnv {
-            number: parent.number() + 1,
+            number: U256::from(parent.number() + 1),
             beneficiary: coinbase,
-            timestamp: attributes.timestamp,
+            timestamp: U256::from(attributes.timestamp),
             difficulty: U256::ONE,
             prevrandao: Some(B256::ZERO),
             gas_limit: attributes.gas_limit,
@@ -238,9 +238,9 @@ mod tests {
 
         // verify block env correctly updated
         let expected = BlockEnv {
-            number: header.number,
+            number: U256::from(header.number),
             beneficiary: config.chain_spec().config.fee_vault_address.unwrap(),
-            timestamp: header.timestamp,
+            timestamp: U256::from(header.timestamp),
             prevrandao: Some(header.mix_hash),
             difficulty: U256::ZERO,
             basefee: header.base_fee_per_gas.unwrap_or_default(),
@@ -286,9 +286,9 @@ mod tests {
 
         // verify block env
         let expected = BlockEnv {
-            number: header.number + 1,
+            number: U256::from(header.number + 1),
             beneficiary: config.chain_spec().config.fee_vault_address.unwrap(),
-            timestamp: attributes.timestamp,
+            timestamp: U256::from(attributes.timestamp),
             prevrandao: Some(B256::ZERO),
             difficulty: U256::ONE,
             basefee: 155157341,

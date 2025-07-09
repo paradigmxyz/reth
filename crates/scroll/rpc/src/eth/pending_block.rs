@@ -13,7 +13,7 @@ use reth_provider::{
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
-    EthApiTypes, RpcNodeCore,
+    EthApiTypes, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{error::FromEvmError, PendingBlock};
 use reth_scroll_evm::ScrollNextBlockEnvAttributes;
@@ -29,6 +29,7 @@ where
                 Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
             Error: FromEvmError<Self::Evm>,
+            RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         >,
     N: RpcNodeCore<
         Provider: BlockReaderIdExt<

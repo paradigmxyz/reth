@@ -128,8 +128,7 @@ where
         tx: Self::Tx,
     ) -> Result<ResultAndState<Self::HaltReason>, Self::Error> {
         if self.inspect {
-            self.inner.set_tx(tx.into());
-            self.inner.inspect_replay()
+            self.inner.inspect_tx(tx.into())
         } else {
             self.inner.transact(tx.into())
         }

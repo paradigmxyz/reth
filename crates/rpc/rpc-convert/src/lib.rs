@@ -25,3 +25,6 @@ pub use transaction::{
 
 #[cfg(feature = "op")]
 pub use transaction::op::*;
+
+#[cfg(feature = "scroll")]
+pub use transaction::scroll::*;

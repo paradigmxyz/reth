@@ -426,6 +426,78 @@ where
     }
 }
 
+/// Scroll specific RPC transaction compatibility implementations.
+#[cfg(feature = "scroll")]
+pub mod scroll {
+    use super::*;
+    use alloy_consensus::SignableTransaction;
+    use alloy_primitives::{Address, Bytes, Signature};
+    use reth_primitives_traits::SignedTransaction;
+    use reth_scroll_primitives::ScrollReceipt;
+    use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+    use revm_scroll::l1block::TX_L1_FEE_PRECISION_U256;
+    use scroll_alloy_consensus::{ScrollAdditionalInfo, ScrollTransactionInfo, ScrollTxEnvelope};
+    use scroll_alloy_rpc_types::ScrollTransactionRequest;
+
+    /// Creates [`ScrollTransactionInfo`] by adding [`ScrollAdditionalInfo`] to [`TransactionInfo`]
+    /// if `tx` is not a L1 message.
+    pub fn try_into_scroll_tx_info<T: ReceiptProvider<Receipt = ScrollReceipt>>(
+        provider: &T,
+        tx: &ScrollTxEnvelope,
+        tx_info: TransactionInfo,
+    ) -> Result<ScrollTransactionInfo, ProviderError> {
+        let additional_info = if tx.is_l1_message() {
+            None
+        } else {
+            provider
+                .receipt_by_hash(*tx.tx_hash())?
+                .map(|receipt| ScrollAdditionalInfo { l1_fee: receipt.l1_fee() })
+        }
+        .unwrap_or_default();
+
+        Ok(ScrollTransactionInfo::new(tx_info, additional_info))
+    }
+
+    impl FromConsensusTx<ScrollTxEnvelope> for scroll_alloy_rpc_types::Transaction {
+        type TxInfo = ScrollTransactionInfo;
+
+        fn from_consensus_tx(tx: ScrollTxEnvelope, signer: Address, tx_info: Self::TxInfo) -> Self {
+            Self::from_transaction(Recovered::new_unchecked(tx, signer), tx_info)
+        }
+    }
+
+    impl TryIntoSimTx<ScrollTxEnvelope> for ScrollTransactionRequest {
+        fn try_into_sim_tx(self) -> Result<ScrollTxEnvelope, ValueError<Self>> {
+            let tx = self
+                .build_typed_tx()
+                .map_err(|request| ValueError::new(request, "Required fields missing"))?;
+
+            // Create an empty signature for the transaction.
+            let signature = Signature::new(Default::default(), Default::default(), false);
+
+            Ok(tx.into_signed(signature).into())
+        }
+    }
+
+    impl TryIntoTxEnv<scroll_alloy_evm::ScrollTransactionIntoTxEnv<TxEnv>>
+        for ScrollTransactionRequest
+    {
+        type Err = EthTxEnvError;
+
+        fn try_into_tx_env<Spec>(
+            self,
+            cfg_env: &CfgEnv<Spec>,
+            block_env: &BlockEnv,
+        ) -> Result<scroll_alloy_evm::ScrollTransactionIntoTxEnv<TxEnv>, Self::Err> {
+            Ok(scroll_alloy_evm::ScrollTransactionIntoTxEnv::new(
+                self.as_ref().clone().try_into_tx_env(cfg_env, block_env)?,
+                Some(Bytes::new()),
+                Some(TX_L1_FEE_PRECISION_U256),
+            ))
+        }
+    }
+}
+
 /// Optimism specific RPC transaction compatibility implementations.
 #[cfg(feature = "op")]
 pub mod op {

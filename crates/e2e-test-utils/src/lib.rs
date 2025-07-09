@@ -150,6 +150,7 @@ where
     N: NodeBuilderHelper,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
+    TmpNodeAddOnsHandle<N>: RpcHandleProvider<Adapter<N>, TmpNodeEthApi<N>>,
 {
     let tasks = TaskManager::current();
     let exec = tasks.executor();

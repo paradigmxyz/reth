@@ -15,6 +15,7 @@ reth-optimism-forks.workspace = true
 reth-db-api.workspace = true
 reth-op = { workspace = true, features = ["node", "pool"] }
 reth-payload-builder.workspace = true
+reth-primitives-traits.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-engine-api.workspace = true
 reth-ethereum = { workspace = true, features = ["node-api", "network", "evm", "pool", "trie", "storage-api"] }
