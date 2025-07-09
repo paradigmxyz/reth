@@ -480,7 +480,7 @@ revm-context = { git = "https://github.com/scroll-tech/revm", branch = "feat/ret
 revm-context-interface = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth-v78", default-features = false }
 revm-database-interface = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth-v78", default-features = false }
 op-revm = { git = "https://github.com/scroll-tech/revm", branch = "feat/reth-v78", default-features = false }
-revm-scroll = { git = "https://github.com/scroll-tech/scroll-revm", branch = "feat/v78", default-features = false }
+revm-scroll = { git = "https://github.com/scroll-tech/scroll-revm", branch = "main", default-features = false }
 revm-inspectors = "0.25.0"
 
 # eth
