@@ -358,9 +358,7 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
 
     fn local_payload_attributes_builder(
         chain_spec: &Self::ChainSpec,
-    ) -> impl PayloadAttributesBuilder<
-        <Self::Payload as PayloadTypes>::PayloadAttributes,
-    > {
+    ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes> {
         LocalPayloadAttributesBuilder::new(Arc::new(chain_spec.clone()))
     }
 }
