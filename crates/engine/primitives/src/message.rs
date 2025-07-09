@@ -18,6 +18,8 @@ use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadTypes;
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
+type BeaconConsensusEngineHandle<Payload> = ConsensusEngineHandle<Payload>;
+
 /// Represents the outcome of forkchoice update.
 ///
 /// This is a future that resolves to [`ForkChoiceUpdateResult`]
@@ -192,7 +194,7 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
 ///
 /// This type mirrors consensus related functions of the engine API.
 #[derive(Debug, Clone)]
-pub struct BeaconConsensusEngineHandle<Payload>
+pub struct ConsensusEngineHandle<Payload>
 where
     Payload: PayloadTypes,
 {

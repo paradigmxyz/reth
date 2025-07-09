@@ -23,8 +23,8 @@ use reth_exex::ExExManagerHandle;
 use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
-    BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributesBuilder, PayloadTypes,
+    BuiltPayload, ConsensusEngineHandle as BeaconConsensusEngineHandle, FullNodeTypes, NodeTypes,
+    NodeTypesWithDBAdapter, PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},

@@ -2,7 +2,9 @@ use futures::{Stream, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator};
+use reth_engine_primitives::{
+    BeaconEngineMessage, ConsensusEngineEvent as BeaconConsensusEngineEvent, EngineValidator,
+};
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,

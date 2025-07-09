@@ -7,7 +7,7 @@ use futures::StreamExt;
 use parking_lot::RwLock;
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_ethereum_primitives::EthPrimitives;
-use reth_node_api::{BeaconConsensusEngineEvent, NodePrimitives};
+use reth_node_api::{ConsensusEngineEvent as BeaconConsensusEngineEvent, NodePrimitives};
 use reth_primitives_traits::{Bytecode, RecoveredBlock};
 use reth_storage_api::BlockNumReader;
 use reth_tokio_util::EventStream;

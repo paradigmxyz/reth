@@ -6,7 +6,8 @@ use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_engine_primitives::{
-    BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
+    ConsensusEngineEvent as BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress,
+    ForkchoiceStatus,
 };
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
