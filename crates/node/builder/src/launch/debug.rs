@@ -178,13 +178,7 @@ where
             let pool = handle.node.pool.clone();
             let payload_builder_handle = handle.node.payload_builder_handle.clone();
 
-            //TODO: check if we can call `dev_mining_mode` instead of reimplementing it
-            let dev_mining_mode = if let Some(interval) = config.dev.block_time {
-                reth_engine_local::MiningMode::interval(interval)
-            } else {
-                reth_engine_local::MiningMode::instant(pool)
-            };
-
+            let dev_mining_mode = handle.node.config.dev_mining_mode(pool);
             handle.node.task_executor.spawn_critical("local engine", async move {
                 LocalMiner::new(
                     blockchain_db,

@@ -22,6 +22,7 @@ use reth_storage_api::{
     BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_transaction_pool::TransactionPool;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs,
@@ -488,6 +489,15 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             pruning: self.pruning,
             engine: self.engine,
             era: self.era,
+        }
+    }
+
+    /// Returns the [`MiningMode`] intended for --dev mode.
+    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> reth_engine_local::MiningMode {
+        if let Some(interval) = self.dev.block_time {
+            reth_engine_local::MiningMode::interval(interval)
+        } else {
+            reth_engine_local::MiningMode::instant(pool)
         }
     }
 }
