@@ -65,16 +65,15 @@ where
     let (stats_tx, stats_rx) = mpsc::channel();
     tasks.spawn_blocking(move || {
         loop {
+            let instant = Instant::now();
             std::thread::sleep(Duration::from_secs(10));
             let mut total_gas = 0;
-            let mut total_elapsed = 0.0;
             let mut total_blocks = 0;
-            while let Ok((gas_used, elapsed)) = stats_rx.try_recv() {
+            while let Ok(gas_used) = stats_rx.try_recv() {
                 total_gas += gas_used;
-                total_elapsed += elapsed;
                 total_blocks += 1;
             }
-            info!(gas_per_second=?format_gas_throughput(total_gas, Duration::from_secs_f64(total_elapsed)), "Executed {total_blocks} blocks");
+            info!(throughput=?format_gas_throughput(total_gas, instant.elapsed()), "Executed {total_blocks} blocks");
         }
     });
 
@@ -137,7 +136,7 @@ where
 
                         return Err(err);
                     }
-                    stats_tx.send((block.gas_used(), instant.elapsed().as_secs_f64())).unwrap();
+                    stats_tx.send(block.gas_used()).unwrap();
 
                     // Reset DB once in a while to avoid OOM
                     if executor.size_hint() > 1_000_000 {
