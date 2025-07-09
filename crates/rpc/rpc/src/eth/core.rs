@@ -10,6 +10,7 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
+use reth_rpc_convert::{RpcTxReq, RpcTypes};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -230,6 +231,7 @@ impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
 where
     Self: Clone + Send + Sync + 'static,
     Provider: BlockReader,
+    Network: RpcTypes,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -347,6 +349,7 @@ where
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
 where
     Provider: BlockReader,
+    Network: RpcTypes,
 {
     /// Returns a handle to data on disk.
     #[inline]
@@ -420,7 +423,9 @@ where
     #[inline]
     pub const fn signers(
         &self,
-    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction>>>> {
+    ) -> &parking_lot::RwLock<
+        Vec<Box<dyn EthSigner<Provider::Transaction, Network, RpcTxReq<Network>>>>,
+    > {
         &self.signers
     }
 

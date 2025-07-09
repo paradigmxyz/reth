@@ -5,9 +5,8 @@ use std::collections::HashMap;
 use crate::EthApi;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
-use alloy_network::{eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder};
+use alloy_network::{eip2718::Encodable2718, EthereumWallet, TransactionBuilder};
 use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
-use alloy_rpc_types_eth::TransactionRequest;
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
@@ -65,8 +64,8 @@ impl DevSigner {
 }
 
 #[async_trait::async_trait]
-impl<T: Decodable2718, N: alloy_network::Network, TxReq: TransactionBuilder<N>> EthSigner<T>
-    for DevSigner
+impl<T: Decodable2718, N: alloy_network::Network, TxReq: TransactionBuilder<N>>
+    EthSigner<T, N, TxReq> for DevSigner
 {
     fn accounts(&self) -> Vec<Address> {
         self.addresses.clone()
@@ -111,7 +110,7 @@ mod tests {
     use super::*;
     use alloy_consensus::Transaction;
     use alloy_primitives::{Bytes, U256};
-    use alloy_rpc_types_eth::TransactionInput;
+    use alloy_rpc_types_eth::{TransactionInput, TransactionRequest};
     use reth_ethereum_primitives::TransactionSigned;
     use revm_primitives::TxKind;
 

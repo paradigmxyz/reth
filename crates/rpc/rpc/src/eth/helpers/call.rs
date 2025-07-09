@@ -3,7 +3,6 @@
 use crate::EthApi;
 use alloy_evm::block::BlockExecutorFactory;
 use alloy_network::TransactionBuilder;
-use alloy_rpc_types_eth::TransactionRequest;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmFactory, TxEnvFor};
 use reth_node_api::NodePrimitives;

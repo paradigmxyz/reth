@@ -4,6 +4,7 @@ use crate::EthApi;
 use alloy_consensus::transaction::{SignerRecoverable, TransactionMeta};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_rpc_convert::RpcTypes;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 use reth_storage_api::{BlockReader, ReceiptProvider, TransactionsProvider};
@@ -15,6 +16,7 @@ where
                       + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
     >,
     Provider: BlockReader + ChainSpecProvider,
+    Network: RpcTypes,
 {
     async fn build_transaction_receipt(
         &self,
