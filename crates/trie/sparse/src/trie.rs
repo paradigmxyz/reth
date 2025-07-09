@@ -49,7 +49,7 @@ pub enum SparseTrie<T = RevealedSparseTrie> {
     /// until nodes are revealed.
     ///
     /// In this state the `SparseTrie` can optionally carry with it a cleared `RevealedSparseTrie`.
-    /// This allows for re-using the trie's allocations between payload executions.
+    /// This allows for reusing the trie's allocations between payload executions.
     Blind(Option<Box<T>>),
     /// Some nodes in the Trie have been revealed.
     ///
@@ -65,7 +65,7 @@ impl<T: Default> Default for SparseTrie<T> {
     }
 }
 
-impl<T: SparseTrieInterface> SparseTrie<T> {
+impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     /// Creates a new blind sparse trie.
     ///
     /// # Examples
@@ -377,10 +377,6 @@ impl Default for RevealedSparseTrie {
 }
 
 impl SparseTrieInterface for RevealedSparseTrie {
-    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self> {
-        Self::default().with_root(root, masks, retain_updates)
-    }
-
     fn with_root(
         mut self,
         root: TrieNode,
@@ -902,6 +898,10 @@ impl SparseTrieInterface for RevealedSparseTrie {
         self.values.get(full_path)
     }
 
+    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
+        self.updates.as_ref().map_or(Cow::Owned(SparseTrieUpdates::default()), Cow::Borrowed)
+    }
+
     fn take_updates(&mut self) -> SparseTrieUpdates {
         self.updates.take().unwrap_or_default()
     }
@@ -1056,6 +1056,28 @@ impl SparseTrieInterface for RevealedSparseTrie {
 }
 
 impl RevealedSparseTrie {
+    /// Creates a new revealed sparse trie from the given root node.
+    ///
+    /// This function initializes the internal structures and then reveals the root.
+    /// It is a convenient method to create a trie when you already have the root node available.
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - The root node of the trie
+    /// * `masks` - Trie masks for root branch node
+    /// * `retain_updates` - Whether to track updates
+    ///
+    /// # Returns
+    ///
+    /// Self if successful, or an error if revealing fails.
+    pub fn from_root(
+        root: TrieNode,
+        masks: TrieMasks,
+        retain_updates: bool,
+    ) -> SparseTrieResult<Self> {
+        Self::default().with_root(root, masks, retain_updates)
+    }
+
     /// Returns a reference to the current sparse trie updates.
     ///
     /// If no updates have been made/recorded, returns an empty update set.
