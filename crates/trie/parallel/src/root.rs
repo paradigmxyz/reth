@@ -10,6 +10,7 @@ use reth_provider::{
     StateCommitmentProvider,
 };
 use reth_storage_errors::db::DatabaseError;
+use reth_tasks::{TaskSpawner, TokioTaskExecutor};
 use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     node_iter::{TrieElement, TrieNodeIter},
@@ -40,6 +41,8 @@ pub struct ParallelStateRoot<Factory> {
     view: ConsistentDbView<Factory>,
     /// Trie input.
     input: TrieInput,
+    /// Task spawner for blocking operations.
+    task_spawner: Box<dyn TaskSpawner>,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -51,6 +54,22 @@ impl<Factory> ParallelStateRoot<Factory> {
         Self {
             view,
             input,
+            task_spawner: TokioTaskExecutor::default().boxed(),
+            #[cfg(feature = "metrics")]
+            metrics: ParallelStateRootMetrics::default(),
+        }
+    }
+
+    /// Create new parallel state root calculator with a custom task spawner.
+    pub fn with_task_spawner(
+        view: ConsistentDbView<Factory>,
+        input: TrieInput,
+        task_spawner: Box<dyn TaskSpawner>,
+    ) -> Self {
+        Self {
+            view,
+            input,
+            task_spawner,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -106,7 +125,7 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            tokio::task::spawn_blocking(move || {
+            self.task_spawner.spawn_blocking(Box::pin(async move {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider_ro = view.provider_ro()?;
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -128,7 +147,7 @@ where
                     .calculate(retain_updates)?)
                 })();
                 let _ = tx.send(result);
-            });
+            }));
             storage_roots.insert(hashed_address, rx);
         }
 

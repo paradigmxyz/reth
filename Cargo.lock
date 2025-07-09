@@ -10602,6 +10602,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-storage-errors",
+ "reth-tasks",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
