@@ -15,7 +15,7 @@ use reth_ethereum::{
         providers::{ProviderNodeTypes, StaticFileProvider},
         BlockNumReader, ProviderFactory,
     },
-    storage::{BlockReader, ReceiptProvider},
+    storage::{BlockReader, ReceiptProvider, TransactionVariant},
     tasks::TaskExecutor,
 };
 use reth_evm::{execute::Executor, ConfigureEvm};
@@ -51,9 +51,8 @@ where
     let min_block = min_block.unwrap_or(1);
     let max_block = max_block.unwrap_or(latest_block);
 
-    let num_threads = 10;
-
-    let blocks_per_thread = (max_block - min_block) / num_threads;
+    let num_tasks = 10;
+    let blocks_per_task = (max_block - min_block) / num_tasks;
 
     let db_at = {
         let provider = provider_factory.clone();
@@ -77,28 +76,9 @@ where
         }
     });
 
-    for i in 0..num_threads {
-        let start_block = min_block + i * blocks_per_thread;
-        let end_block = start_block + blocks_per_thread;
-
-        let (blocks_tx, blocks_rx) = mpsc::channel();
-
-        // Spawn thread streaming blocks
-        {
-            let provider = provider_factory.clone();
-            tasks.spawn_blocking(move || {
-                for block_number in start_block..end_block {
-                    let block = provider
-                        .block_by_number(block_number.into())?
-                        .unwrap()
-                        .seal_slow()
-                        .try_recover()?;
-                    let _ = blocks_tx.send(block);
-                }
-
-                eyre::Ok(())
-            });
-        }
+    for i in 0..num_tasks {
+        let start_block = min_block + i * blocks_per_task;
+        let end_block = start_block + blocks_per_task;
 
         // Spawn thread executing blocks
         {
@@ -109,9 +89,10 @@ where
             let stats_tx = stats_tx.clone();
             tasks.spawn_blocking(move || {
                 let mut executor = evm_config.batch_executor(db_at(start_block - 1));
-                while let Ok(block) = blocks_rx.recv() {
-                    let instant = Instant::now();
+                for block in start_block..end_block {
+                    let block = provider.recovered_block(block.into(), TransactionVariant::NoHash)?.unwrap();
                     let result = executor.execute_one(&block)?;
+
                     if let Err(err) = consensus
                         .validate_block_post_execution(&block, &result)
                         .wrap_err_with(|| format!("Failed to validate block {}", block.number()))
