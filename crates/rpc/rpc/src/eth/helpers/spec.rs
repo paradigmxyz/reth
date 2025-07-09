@@ -6,7 +6,7 @@ use reth_storage_api::{BlockNumReader, BlockReader, ProviderTx, StageCheckpointR
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthApiSpec for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N> EthApiSpec for EthApi<N>
 where
     Self: RpcNodeCore<
         Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
@@ -14,9 +14,9 @@ where
                       + StageCheckpointReader,
         Network: NetworkInfo,
     >,
-    Provider: BlockReader,
+    N: RpcNodeCore<Provider: BlockReader>,
 {
-    type Transaction = ProviderTx<Provider>;
+    type Transaction = ProviderTx<N::Provider>;
 
     fn starting_block(&self) -> U256 {
         self.inner.starting_block()
