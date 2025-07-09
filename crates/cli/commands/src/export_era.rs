@@ -1,14 +1,11 @@
 //! Command exporting block data to convert them to ERA1 files.
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
-use alloy_consensus::{BlockBody, Header};
 use clap::{Args, Parser};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_era::execution_types::MAX_BLOCKS_PER_ERA1;
 use reth_era_utils as era1;
-use reth_node_api::NodeTypes;
-use reth_primitives_traits::NodePrimitives;
 use reth_provider::DatabaseProviderFactory;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
@@ -50,9 +47,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ExportEraC
     pub async fn execute<N>(self) -> eyre::Result<()>
     where
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
-        <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader: Into<Header>,
-        <<N as NodeTypes>::Primitives as NodePrimitives>::Block:
-            Into<BlockBody<<<N as NodeTypes>::Primitives as NodePrimitives>::SignedTx, Header>>,
     {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
 
