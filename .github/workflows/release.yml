@@ -20,8 +20,8 @@ env:
   OP_IMAGE_NAME: ${{ github.repository_owner }}/op-reth
   REPRODUCIBLE_IMAGE_NAME: ${{ github.repository_owner }}/reth-reproducible
   CARGO_TERM_COLOR: always
-  DOCKER_IMAGE_NAME_URL: ghcr.io/${{ github.repository_owner }}/reth
-  DOCKER_OP_IMAGE_NAME_URL: ghcr.io/${{ github.repository_owner }}/op-reth
+  DOCKER_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/reth
+  DOCKER_OP_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/op-reth
 
 jobs:
   dry-run:

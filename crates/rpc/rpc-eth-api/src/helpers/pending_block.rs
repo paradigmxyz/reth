@@ -30,7 +30,10 @@ use reth_transaction_pool::{
     TransactionPool,
 };
 use revm::context_interface::Block;
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::Mutex;
 use tracing::debug;
 
@@ -92,7 +95,7 @@ pub trait LoadPendingBlock:
 
                 return Ok(PendingBlockEnv::new(
                     evm_env,
-                    PendingBlockEnvOrigin::ActualPending(block, receipts),
+                    PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
                 ));
             }
         }
@@ -127,8 +130,8 @@ pub trait LoadPendingBlock:
     ) -> impl Future<
         Output = Result<
             Option<(
-                RecoveredBlock<<Self::Provider as BlockReader>::Block>,
-                Vec<ProviderReceipt<Self::Provider>>,
+                Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>,
+                Arc<Vec<ProviderReceipt<Self::Provider>>>,
             )>,
             Self::Error,
         >,
@@ -177,6 +180,9 @@ pub trait LoadPendingBlock:
                     return Ok(None)
                 }
             };
+
+            let sealed_block = Arc::new(sealed_block);
+            let receipts = Arc::new(receipts);
 
             let now = Instant::now();
             *lock = Some(PendingBlock::new(

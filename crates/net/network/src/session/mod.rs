@@ -174,6 +174,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         }
     }
 
+    /// Returns the currently tracked [`ForkId`].
+    pub(crate) const fn fork_id(&self) -> ForkId {
+        self.fork_filter.current()
+    }
+
     /// Check whether the provided [`ForkId`] is compatible based on the validation rules in
     /// `EIP-2124`.
     pub fn is_valid_fork_id(&self, fork_id: ForkId) -> bool {
