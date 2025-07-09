@@ -5,7 +5,7 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use proptest::{prelude::*, strategy::ValueTree};
 use rand::seq::IteratorRandom;
 use reth_trie_common::Nibbles;
-use reth_trie_sparse::{provider::DefaultTrieNodeProvider, RevealedSparseTrie, SparseTrie};
+use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SparseTrie, SerialSparseTrie};
 
 const LEAF_COUNTS: [usize; 2] = [1_000, 5_000];
 

@@ -94,7 +94,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     ///
     /// * `full_path` - The full path to the leaf
     /// * `value` - The new value for the leaf
-    /// * `provider` - The blinded provider for resolving missing nodes
+    /// * `provider` - The trie provider for resolving missing nodes
     ///
     /// # Returns
     ///
@@ -114,7 +114,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// # Arguments
     ///
     /// * `full_path` - The full path to the leaf to remove
-    /// * `provider` - The blinded provider for resolving missing nodes
+    /// * `provider` - The trie node provider for resolving missing nodes
     ///
     /// # Returns
     ///
@@ -263,12 +263,12 @@ pub struct SparseTrieUpdates {
 /// Error type for a leaf lookup operation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafLookupError {
-    /// The path leads to a blinded node, cannot determine if leaf exists.
+    /// The path leads to a trie node, cannot determine if leaf exists.
     /// This means the witness is not complete.
     TrieNode {
-        /// Path to the blinded node.
+        /// Path to the trie node.
         path: Nibbles,
-        /// Hash of the blinded node.
+        /// Hash of the trie node.
         hash: B256,
     },
     /// The path leads to a leaf with a different value than expected.
