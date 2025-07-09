@@ -2306,7 +2306,7 @@ where
                         let elapsed = execution_finish.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
-                        if state_root == block.header().state_root() {
+                        if self.consensus.validate_state_root(block.header(), state_root).is_ok() {
                             maybe_state_root = Some((state_root, trie_updates, elapsed))
                         } else {
                             warn!(
@@ -2370,7 +2370,7 @@ where
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
         // ensure state root matches
-        if state_root != block.header().state_root() {
+        if self.consensus.validate_state_root(block.header(), state_root).is_err() {
             // call post-block hook
             self.on_invalid_block(&parent_block, &block, &output, Some((&trie_output, state_root)));
             return Err((

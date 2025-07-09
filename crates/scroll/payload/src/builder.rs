@@ -262,16 +262,27 @@ impl<Txs> ScrollBuilder<'_, Txs> {
         let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, mut block } =
             builder.finish(state_provider)?;
 
-        // set the block extra data and difficulty fields using the payload attributes.
-        if let Some(block_data) = &ctx.config.attributes.block_data_hint {
-            let (mut scroll_block, senders) = block.split();
-            scroll_block = scroll_block.map_header(|mut header| {
-                header.extra_data = block_data.extra_data.clone();
-                header.difficulty = block_data.difficulty;
-                header
-            });
-            block = RecoveredBlock::new_unhashed(scroll_block, senders)
-        }
+        // set the block fields using the hints from the payload attributes.
+        let (mut scroll_block, senders) = block.split();
+        scroll_block = scroll_block.map_header(|mut header| {
+            if let Some(extra_data) = &ctx.config.attributes.block_data_hint.extra_data {
+                header.extra_data = extra_data.clone();
+            }
+            if let Some(state_root) = ctx.config.attributes.block_data_hint.state_root {
+                header.state_root = state_root;
+            }
+            if let Some(coinbase) = ctx.config.attributes.block_data_hint.coinbase {
+                header.beneficiary = coinbase;
+            }
+            if let Some(nonce) = ctx.config.attributes.block_data_hint.nonce {
+                header.nonce = nonce.into()
+            }
+            if let Some(difficulty) = ctx.config.attributes.block_data_hint.difficulty {
+                header.difficulty = difficulty;
+            }
+            header
+        });
+        block = RecoveredBlock::new_unhashed(scroll_block, senders);
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         tracing::debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
@@ -387,7 +398,7 @@ where
                 ScrollNextBlockEnvAttributes {
                     timestamp: self.attributes().timestamp(),
                     suggested_fee_recipient: self.attributes().suggested_fee_recipient(),
-                    gas_limit: builder_config.gas_limit,
+                    gas_limit: self.attributes().gas_limit.unwrap_or(builder_config.gas_limit),
                     base_fee,
                 },
             )

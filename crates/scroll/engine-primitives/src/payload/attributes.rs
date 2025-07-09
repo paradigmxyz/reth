@@ -23,9 +23,11 @@ pub struct ScrollPayloadBuilderAttributes {
     /// Decoded transactions and the original EIP-2718 encoded bytes as received in the payload
     /// attributes.
     pub transactions: Vec<WithEncoded<ScrollTransactionSigned>>,
-    /// The pre-Euclid block data hint, necessary for the block builder to derive the correct block
-    /// hash.
-    pub block_data_hint: Option<BlockDataHint>,
+    /// The block data hint, used pre-Euclid by the block builder to derive the correct block
+    /// hash and post-Euclid by the sequencer to set the difficulty of the block.
+    pub block_data_hint: BlockDataHint,
+    /// The gas limit for the generated payload.
+    pub gas_limit: Option<u64>,
 }
 
 impl PayloadBuilderAttributes for ScrollPayloadBuilderAttributes {
@@ -70,6 +72,7 @@ impl PayloadBuilderAttributes for ScrollPayloadBuilderAttributes {
             no_tx_pool: attributes.no_tx_pool,
             transactions,
             block_data_hint: attributes.block_data_hint,
+            gas_limit: attributes.gas_limit,
         })
     }
 
@@ -142,9 +145,23 @@ pub(crate) fn payload_id_scroll(
         }
     }
 
-    if let Some(block_data) = &attributes.block_data_hint {
-        hasher.update(&block_data.extra_data);
-        hasher.update(block_data.difficulty.to_be_bytes::<32>());
+    if let Some(extra_data) = &attributes.block_data_hint.extra_data {
+        hasher.update(extra_data);
+    }
+    if let Some(state_root) = &attributes.block_data_hint.state_root {
+        hasher.update(state_root.0);
+    }
+    if let Some(coinbase) = &attributes.block_data_hint.coinbase {
+        hasher.update(coinbase);
+    }
+    if let Some(nonce) = &attributes.block_data_hint.nonce {
+        hasher.update(nonce.to_be_bytes());
+    }
+    if let Some(difficulty) = &attributes.block_data_hint.difficulty {
+        hasher.update(difficulty.to_be_bytes::<32>());
+    }
+    if let Some(gas_limit) = attributes.gas_limit {
+        hasher.update(gas_limit.to_be_bytes());
     }
 
     let mut out = hasher.finalize();
@@ -169,7 +186,7 @@ mod tests {
     #[test]
     fn test_payload_id() {
         let expected =
-            PayloadId::new(FixedBytes::<8>::from_str("0x0322b5f17cf26e85").unwrap().into());
+            PayloadId::new(FixedBytes::<8>::from_str("0x036369370c155d4c").unwrap().into());
         let attrs = ScrollPayloadAttributes {
             payload_attributes: PayloadAttributes {
                 timestamp: 1728933301,
@@ -180,7 +197,14 @@ mod tests {
             },
             transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
             no_tx_pool: false,
-            block_data_hint: Some(BlockDataHint{ extra_data: bytes!("476574682f76312e302e302f6c696e75782f676f312e342e32"), difficulty: U256::from(10) } ),
+            block_data_hint: BlockDataHint{
+                extra_data: Some(bytes!("476574682f76312e302e302f6c696e75782f676f312e342e32")),
+                state_root: Some(b256!("0x000000000000000000000000000000000000000000000000000000000000dead")),
+                coinbase: Some(address!("0x000000000000000000000000000000000000dead")),
+                nonce: Some(u64::MAX),
+                difficulty: Some(U256::from(10))
+            },
+            gas_limit: Some(10_000_000),
         };
 
         assert_eq!(

@@ -75,7 +75,8 @@ where
             payload_attributes: self.build(timestamp),
             transactions: None,
             no_tx_pool: false,
-            block_data_hint: None,
+            block_data_hint: scroll_alloy_rpc_types_engine::BlockDataHint::none(),
+            gas_limit: None,
         }
     }
 }

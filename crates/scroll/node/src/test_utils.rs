@@ -11,6 +11,7 @@ use reth_payload_builder::EthPayloadBuilderAttributes;
 use reth_provider::providers::BlockchainProvider;
 use reth_scroll_chainspec::ScrollChainSpecBuilder;
 use reth_tasks::TaskManager;
+use scroll_alloy_rpc_types_engine::BlockDataHint;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -78,6 +79,7 @@ pub fn scroll_payload_attributes(timestamp: u64) -> ScrollPayloadBuilderAttribut
         payload_attributes: EthPayloadBuilderAttributes::new(B256::ZERO, attributes),
         transactions: vec![],
         no_tx_pool: false,
-        block_data_hint: None,
+        block_data_hint: BlockDataHint::none(),
+        gas_limit: None,
     }
 }
