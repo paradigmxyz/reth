@@ -4,7 +4,6 @@ use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
     rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
-    setup::build_networked_pipeline,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
@@ -19,7 +18,6 @@ use reth_engine_tree::{
     tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
-use reth_exex::ExExManagerHandle;
 use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
@@ -97,7 +95,7 @@ where
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
         // setup the launch context
-        let ctx = ctx
+        let mut ctx = ctx
             .with_configured_globals(engine_tree_config.reserved_cpu_cores())
             // load the toml config
             .with_loaded_toml_config(config)?
@@ -134,6 +132,9 @@ where
         // spawn exexs if any
         let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 
+        // Store the ExEx manager handle in the context for later use
+        ctx.set_exex_manager_handle(maybe_exex_manager_handle.clone());
+
         // create pipeline
         let network_handle = ctx.components().network().clone();
         let network_client = network_handle.fetch_client().await?;
@@ -152,19 +153,11 @@ where
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        let pipeline = build_networked_pipeline(
-            &ctx.toml_config().stages,
+        let pipeline = ctx.build_pipeline(
             network_client.clone(),
             consensus.clone(),
-            ctx.provider_factory().clone(),
-            ctx.task_executor(),
-            ctx.sync_metrics_tx(),
-            ctx.prune_config(),
             max_block,
             static_file_producer,
-            ctx.components().evm_config().clone(),
-            maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
-            ctx.era_import_source(),
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
