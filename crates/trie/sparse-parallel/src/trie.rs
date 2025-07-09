@@ -1898,7 +1898,7 @@ impl SparseSubtrieInner {
                         // need to remove the node update and add the node itself to the list of
                         // removed nodes.
                         update_actions.push(SparseTrieUpdatesAction::InsertRemoved(path));
-                    } else if branch_node_hash_masks.get(&path).is_none_or(|mask| mask.is_empty()) &&
+                    } else if branch_node_tree_masks.get(&path).is_none_or(|mask| mask.is_empty()) &&
                         branch_node_hash_masks.get(&path).is_none_or(|mask| mask.is_empty())
                     {
                         // If new tree and hash masks are empty, and they were previously empty
