@@ -605,7 +605,7 @@ where
 
     /// Returns mutable reference to the revealed account sparse trie.
     ///
-    /// If the trie is not revealed yet, its root will be revealed using the blinded node provider.
+    /// If the trie is not revealed yet, its root will be revealed using the trie node provider.
     fn revealed_trie_mut(
         &mut self,
         provider_factory: impl TrieNodeProviderFactory,

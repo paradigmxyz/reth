@@ -36,7 +36,7 @@ where
     /// It's kept as a field on the struct to prevent blocking on de-allocation in [`Self::run`].
     pub(super) trie: SparseStateTrie<A, S>,
     pub(super) metrics: MultiProofTaskMetrics,
-    /// Blinded node provider factory.
+    /// Trie node provider factory.
     blinded_provider_factory: BPF,
 }
 

@@ -238,9 +238,9 @@ where
 
 #[derive(Debug, Clone)]
 struct WitnessTrieNodeProviderFactory<F> {
-    /// Blinded node provider factory.
+    /// Trie node provider factory.
     provider_factory: F,
-    /// Sender for forwarding fetched blinded node.
+    /// Sender for forwarding fetched trie node.
     tx: mpsc::Sender<Bytes>,
 }
 
