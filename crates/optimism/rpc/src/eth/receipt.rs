@@ -1,7 +1,7 @@
 //! Loads and formats OP receipt RPC response.
 
 use crate::{OpEthApi, OpEthApiError};
-use alloy_consensus::transaction::TransactionMeta;
+use alloy_consensus::transaction::{SignerRecoverable, TransactionMeta};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::{OpDepositReceipt, OpDepositReceiptWithBloom, OpReceiptEnvelope};
@@ -11,7 +11,7 @@ use reth_node_api::{FullNodeComponents, NodeTypes};
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
-use reth_primitives_traits::{Recovered, SignedTransaction};
+use reth_primitives_traits::Recovered;
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcReceipt};
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 use reth_storage_api::{ReceiptProvider, TransactionsProvider};
@@ -43,13 +43,13 @@ where
         let mut l1_block_info =
             reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
 
-        let recovered_tx = tx.try_clone_into_recovered().map_err(|_| {
-            OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::InvalidTransactionSignature)
-        })?;
+        let recovered_tx = tx
+            .try_into_recovered_unchecked()
+            .map_err(|_| reth_rpc_eth_types::EthApiError::InvalidTransactionSignature)?;
 
         Ok(OpReceiptBuilder::new(
             &self.inner.eth_api.provider().chain_spec(),
-            &recovered_tx,
+            recovered_tx.as_recovered_ref(),
             meta,
             &receipt,
             &receipts,
@@ -227,7 +227,7 @@ impl OpReceiptBuilder {
     /// Returns a new builder.
     pub fn new(
         chain_spec: &impl OpHardforks,
-        transaction: &Recovered<OpTransactionSigned>,
+        transaction: Recovered<&OpTransactionSigned>,
         meta: TransactionMeta,
         receipt: &OpReceipt,
         all_receipts: &[OpReceipt],
@@ -235,6 +235,7 @@ impl OpReceiptBuilder {
     ) -> Result<Self, OpEthApiError> {
         let timestamp = meta.timestamp;
         let block_number = meta.block_number;
+        let tx_signed = *transaction.inner();
         let core_receipt =
             build_receipt(transaction, meta, receipt, all_receipts, None, |receipt_with_bloom| {
                 match receipt {
@@ -256,7 +257,7 @@ impl OpReceiptBuilder {
             });
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp, block_number)
-            .l1_block_info(chain_spec, transaction, l1_block_info)?
+            .l1_block_info(chain_spec, tx_signed, l1_block_info)?
             .build();
 
         Ok(Self { core_receipt, op_receipt_fields })

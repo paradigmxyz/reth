@@ -11,7 +11,7 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<R, T, E>(
-    transaction: &Recovered<T>,
+    transaction: Recovered<&T>,
     meta: TransactionMeta,
     receipt: &R,
     all_receipts: &[R],
@@ -105,7 +105,7 @@ impl EthReceiptBuilder {
     /// Note: This requires _all_ block receipts because we need to calculate the gas used by the
     /// transaction.
     pub fn new(
-        transaction: &Recovered<TransactionSigned>,
+        transaction: Recovered<&TransactionSigned>,
         meta: TransactionMeta,
         receipt: &Receipt,
         all_receipts: &[Receipt],

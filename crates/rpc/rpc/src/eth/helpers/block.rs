@@ -4,7 +4,7 @@ use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::ConfigureEvm;
-use reth_primitives_traits::{BlockBody, NodePrimitives, SignedTransaction};
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, SpawnBlocking},
@@ -46,9 +46,7 @@ where
             let blob_params = self.provider().chain_spec().blob_params_at_timestamp(timestamp);
 
             return block
-                .body()
-                .transactions()
-                .iter()
+                .transactions_recovered()
                 .zip(receipts.iter())
                 .enumerate()
                 .map(|(idx, (tx, receipt))| {
@@ -61,9 +59,7 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-                    let recovered_tx = tx.try_clone_into_recovered()?;
-                    Ok(EthReceiptBuilder::new(&recovered_tx, meta, receipt, &receipts, blob_params)
-                        .build())
+                    Ok(EthReceiptBuilder::new(tx, meta, receipt, &receipts, blob_params).build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()
                 .map(Some)
