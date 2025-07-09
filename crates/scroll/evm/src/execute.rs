@@ -407,6 +407,7 @@ mod tests {
         let oracle_bytecode = oracle.info.unwrap().code.unwrap();
         let bytecode = Bytecode::new_raw(CURIE_L1_GAS_PRICE_ORACLE_BYTECODE);
 
+        // TODO: update when we bump to revm > v78
         // Note: Eq operator fails due to the presence of `table_ptr` in the `JumpTable` struct
         // therefore we do a manual comparison.
         assert_eq!(

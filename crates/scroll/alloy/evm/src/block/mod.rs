@@ -403,3 +403,15 @@ where
         ScrollBlockExecutor::new(evm, ctx, &self.spec, &self.receipt_builder)
     }
 }
+
+// TODO: remove this when we bump revm > v78
+/// A helper function that compares asserts that two bytecode instances are equal.
+#[cfg(test)]
+fn assert_bytecode_eq(expected: &revm::bytecode::Bytecode, actual: &revm::bytecode::Bytecode) {
+    assert_eq!(expected.legacy_jump_table().unwrap().len, actual.legacy_jump_table().unwrap().len);
+    assert_eq!(
+        expected.legacy_jump_table().unwrap().table,
+        actual.legacy_jump_table().unwrap().table
+    );
+    assert_eq!(expected.bytecode(), actual.bytecode());
+}

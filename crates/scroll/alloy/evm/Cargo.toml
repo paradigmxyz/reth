@@ -42,6 +42,7 @@ reth-scroll-chainspec.workspace = true
 reth-scroll-evm.workspace = true
 
 [features]
+default = ["std"]
 std = [
     "alloy-evm/std",
     "alloy-primitives/std",
