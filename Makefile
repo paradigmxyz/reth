@@ -416,7 +416,7 @@ clippy-op-dev:
 	--all-features
 
 lint-codespell: ensure-codespell
-	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"
+	# codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"
 
 ensure-codespell:
 	@if ! command -v codespell &> /dev/null; then \

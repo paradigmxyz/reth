@@ -39,7 +39,7 @@ where
             &receipt,
             &all_receipts,
             blob_params,
-        )?
+        )
         .build())
     }
 }

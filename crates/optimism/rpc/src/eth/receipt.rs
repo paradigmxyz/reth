@@ -43,11 +43,13 @@ where
         let mut l1_block_info =
             reth_optimism_evm::extract_l1_info(block.body()).map_err(OpEthApiError::from)?;
 
+        let recovered_tx = tx.try_clone_into_recovered().map_err(|_| {
+            OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::InvalidTransactionSignature)
+        })?;
+
         Ok(OpReceiptBuilder::new(
             &self.inner.eth_api.provider().chain_spec(),
-            &tx.try_clone_into_recovered().map_err(|_| {
-                OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::InvalidTransactionSignature)
-            })?,
+            &recovered_tx,
             meta,
             &receipt,
             &receipts,
@@ -251,7 +253,7 @@ impl OpReceiptBuilder {
                         })
                     }
                 }
-            })?;
+            });
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp, block_number)
             .l1_block_info(chain_spec, transaction, l1_block_info)?

@@ -1,6 +1,5 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
-use super::EthResult;
 use alloy_consensus::{
     transaction::{Recovered, SignerRecoverable, TransactionMeta},
     ReceiptEnvelope, Transaction, TxReceipt,
@@ -18,7 +17,7 @@ pub fn build_receipt<R, T, E>(
     all_receipts: &[R],
     blob_params: Option<BlobParams>,
     build_envelope: impl FnOnce(ReceiptWithBloom<alloy_consensus::Receipt<Log>>) -> E,
-) -> EthResult<TransactionReceipt<E>>
+) -> TransactionReceipt<E>
 where
     R: TxReceipt<Log = alloy_primitives::Log>,
     T: Transaction + SignerRecoverable,
@@ -40,8 +39,10 @@ where
 
     let blob_gas_used = transaction.blob_gas_used();
     // Blob gas price should only be present if the transaction is a blob transaction
-    let blob_gas_price =
-        blob_gas_used.and_then(|_| Some(blob_params?.calc_blob_fee(meta.excess_blob_gas?)));
+    let blob_gas_price = blob_gas_used.and_then(|_| {
+        blob_params
+            .and_then(|params| meta.excess_blob_gas.map(|excess| params.calc_blob_fee(excess)))
+    });
 
     let logs_bloom = receipt.bloom();
 
@@ -78,7 +79,7 @@ where
         TxKind::Call(addr) => (None, Some(Address(*addr))),
     };
 
-    Ok(TransactionReceipt {
+    TransactionReceipt {
         inner: build_envelope(ReceiptWithBloom { receipt: rpc_receipt, logs_bloom }),
         transaction_hash: meta.tx_hash,
         transaction_index: Some(meta.index),
@@ -92,7 +93,7 @@ where
         // EIP-4844 fields
         blob_gas_price,
         blob_gas_used,
-    })
+    }
 }
 
 /// Receipt response builder.
@@ -113,7 +114,7 @@ impl EthReceiptBuilder {
         receipt: &Receipt,
         all_receipts: &[Receipt],
         blob_params: Option<BlobParams>,
-    ) -> EthResult<Self> {
+    ) -> Self {
         let base = build_receipt(
             transaction,
             meta,
@@ -127,9 +128,9 @@ impl EthReceiptBuilder {
                 TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt_with_bloom),
                 TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt_with_bloom),
             },
-        )?;
+        );
 
-        Ok(Self { base })
+        Self { base }
     }
 
     /// Builds a receipt response from the base response body, and any set additional fields.

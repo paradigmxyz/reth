@@ -61,14 +61,9 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-                    EthReceiptBuilder::new(
-                        &tx.try_clone_into_recovered()?,
-                        meta,
-                        receipt,
-                        &receipts,
-                        blob_params,
-                    )
-                    .map(|builder| builder.build())
+                    let recovered_tx = tx.try_clone_into_recovered()?;
+                    Ok(EthReceiptBuilder::new(&recovered_tx, meta, receipt, &receipts, blob_params)
+                        .build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()
                 .map(Some)
