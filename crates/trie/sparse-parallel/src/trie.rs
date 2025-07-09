@@ -2286,9 +2286,9 @@ mod tests {
         nibbles
     }
 
-    /// Mock blinded provider for testing that allows pre-setting nodes at specific paths.
+    /// Mock trie node provider for testing that allows pre-setting nodes at specific paths.
     ///
-    /// This provider can be used in tests to simulate blinded nodes that need to be revealed
+    /// This provider can be used in tests to simulate trie nodes that need to be revealed
     /// during trie operations, particularly when collapsing branch nodes during leaf removal.
     #[derive(Debug, Clone)]
     struct MockTrieNodeProvider {

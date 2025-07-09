@@ -4,7 +4,7 @@ use alloy_primitives::{Bytes, B256};
 use reth_execution_errors::SparseTrieError;
 use reth_trie_common::{Nibbles, TrieMask};
 
-/// Factory for instantiating blinded node providers.
+/// Factory for instantiating trie node providers.
 #[auto_impl::auto_impl(&)]
 pub trait TrieNodeProviderFactory {
     /// Type capable of fetching blinded account nodes.
@@ -30,14 +30,14 @@ pub struct RevealedNode {
     pub hash_mask: Option<TrieMask>,
 }
 
-/// Trie node provider for retrieving blinded nodes.
+/// Trie node provider for retrieving trie nodes.
 #[auto_impl::auto_impl(&)]
 pub trait TrieNodeProvider {
-    /// Retrieve blinded node by path.
+    /// Retrieve trie node by path.
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError>;
 }
 
-/// Default blinded node provider factory that creates [`DefaultTrieNodeProviderFactory`].
+/// Default trie node provider factory that creates [`DefaultTrieNodeProviderFactory`].
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 pub struct DefaultTrieNodeProviderFactory;
 

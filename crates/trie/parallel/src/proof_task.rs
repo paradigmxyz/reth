@@ -511,7 +511,7 @@ impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
     }
 }
 
-/// Blinded node provider for retrieving trie nodes by path.
+/// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
 pub enum ProofTaskTrieNodeProvider<Tx> {
     /// Blinded account trie node provider.
