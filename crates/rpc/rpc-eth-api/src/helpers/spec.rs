@@ -33,11 +33,7 @@ pub trait EthApiSpec:
     fn starting_block(&self) -> U256;
 
     /// Returns a handle to the signers owned by provider.
-    fn signers(
-        &self,
-    ) -> &parking_lot::RwLock<
-        Vec<Box<dyn EthSigner<Self::Transaction, Self::Rpc, RpcTxReq<Self::Rpc>>>>,
-    >;
+    fn signers(&self) -> &Signers<Self>;
 
     /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> impl Future<Output = RethResult<U64>> + Send {
@@ -96,3 +92,16 @@ pub trait EthApiSpec:
         Ok(status)
     }
 }
+
+/// A handle to [`EthSigner`]s owned by the [`EthApiSpec::Provider`].
+pub type Signers<Api> = parking_lot::RwLock<
+    Vec<
+        Box<
+            dyn EthSigner<
+                <Api as EthApiSpec>::Transaction,
+                <Api as EthApiSpec>::Rpc,
+                RpcTxReq<<Api as EthApiSpec>::Rpc>,
+            >,
+        >,
+    >,
+>;

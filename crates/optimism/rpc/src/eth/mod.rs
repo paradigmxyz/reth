@@ -21,8 +21,8 @@ use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
-        SpawnBlocking, Trace,
+        spec::Signers, AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee,
+        LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
     RpcTxReq,
@@ -184,11 +184,7 @@ where
     }
 
     #[inline]
-    fn signers(
-        &self,
-    ) -> &parking_lot::RwLock<
-        Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>, NetworkT, RpcTxReq<NetworkT>>>>,
-    > {
+    fn signers(&self) -> &Signers<Self> {
         self.inner.eth_api.signers()
     }
 }

@@ -6,6 +6,13 @@
 use core::{fmt, marker::PhantomData};
 use std::net::{IpAddr, SocketAddr};
 
+use crate::{
+    events::{NetworkPeersEvents, PeerEventStream},
+    test_utils::{PeersHandle, PeersHandleProvider},
+    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
+    NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
+    PeersInfo,
+};
 use alloy_rpc_types_admin::EthProtocolInfo;
 use enr::{secp256k1::SecretKey, Enr};
 use reth_eth_wire_types::{
@@ -17,14 +24,6 @@ use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
 use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-
-use crate::{
-    events::{NetworkPeersEvents, PeerEventStream},
-    test_utils::{PeersHandle, PeersHandleProvider},
-    BlockDownloaderProvider, DiscoveryEvent, NetworkError, NetworkEvent,
-    NetworkEventListenerProvider, NetworkInfo, NetworkStatus, PeerId, PeerInfo, PeerRequest, Peers,
-    PeersInfo,
-};
 
 /// A type that implements all network trait that does nothing.
 ///
