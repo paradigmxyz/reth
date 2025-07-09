@@ -28,5 +28,5 @@ pub(crate) struct StageMetrics {
     /// The number of total entities of the last commit for a stage, if applicable.
     pub(crate) entities_total: Gauge,
     /// The number of seconds spent executing the stage and committing the data.
-    pub(crate) elapsed_total: Gauge,
+    pub(crate) total_elapsed: Gauge,
 }

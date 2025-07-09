@@ -67,7 +67,7 @@ impl MetricsListener {
             MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number, elapsed } => {
                 let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
 
-                stage_metrics.elapsed_total.increment(elapsed.as_secs_f64());
+                stage_metrics.total_elapsed.increment(elapsed.as_secs_f64());
                 stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
                 let (processed, total) = match checkpoint.entities() {
