@@ -39,7 +39,7 @@ use tokio::{
     sync::{mpsc::Receiver, oneshot, Mutex},
     time::MissedTickBehavior,
 };
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 impl<Eth> EngineEthFilter for EthFilter<Eth>
 where
@@ -648,6 +648,14 @@ where
             let is_multi_block_range = from_block != to_block;
             if let Some(max_logs_per_response) = limits.max_logs_per_response {
                 if is_multi_block_range && all_logs.len() > max_logs_per_response {
+                    debug!(
+                        target: "rpc::eth::filter",
+                        logs_found = all_logs.len(),
+                        max_logs_per_response,
+                        from_block,
+                        to_block = num_hash.number.saturating_sub(1),
+                        "Query exceeded max logs per response limit"
+                    );
                     return Err(EthFilterError::QueryExceedsMaxResults {
                         max_logs: max_logs_per_response,
                         from_block,
