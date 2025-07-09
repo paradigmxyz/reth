@@ -316,6 +316,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // Therefore, first traverse the trie in order to find the leaf node and at most its parent
         // and grandparent.
 
+        // Always start with adding the leaf path to the prefix set
+        self.prefix_set.insert(*full_path);
+
         let leaf_path;
         let leaf_subtrie;
 
@@ -393,7 +396,6 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         // We've traversed to the leaf and collected its ancestors as necessary. Remove the leaf
         // from its SparseSubtrie.
-        self.prefix_set.insert(*full_path);
         leaf_subtrie.inner.values.remove(full_path);
         self.remove_node(&leaf_path);
 
