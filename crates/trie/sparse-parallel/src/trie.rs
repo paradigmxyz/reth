@@ -97,7 +97,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
-        // Store masks at the ParallelSparseTrie level
+        // Store masks
         if let Some(tree_mask) = masks.tree_mask {
             self.branch_node_tree_masks.insert(path, tree_mask);
         }
@@ -1351,8 +1351,6 @@ impl SparseSubtrie {
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
             return Ok(())
         }
-
-        // Note: Masks are now stored at the ParallelSparseTrie level
 
         match node {
             TrieNode::EmptyRoot => {
