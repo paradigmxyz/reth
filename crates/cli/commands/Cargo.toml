@@ -24,6 +24,7 @@ reth-db-common.workspace = true
 reth-downloaders.workspace = true
 reth-ecies.workspace = true
 reth-eth-wire.workspace = true
+reth-era.workspace = true
 reth-era-downloader.workspace = true
 reth-era-utils.workspace = true
 reth-etl.workspace = true
