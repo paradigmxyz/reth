@@ -30,7 +30,7 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
-    Either, SerialSparseTrie, SparseTrie,
+    SerialSparseTrie, SparseTrie, SparseTrieInterface,
 };
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::{
@@ -44,13 +44,13 @@ use std::{
 
 use super::precompile_cache::PrecompileCacheMap;
 
+mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
 pub mod prewarm;
 pub mod sparse_trie;
 
-/// Alias for [`Either<SerialSparseTrie, ParallelSparseTrie>`].
-type ConfiguredSparseTrie = Either<SerialSparseTrie, ParallelSparseTrie>;
+use configured_sparse_trie::ConfiguredSparseTrie;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -325,28 +325,30 @@ where
         })
     }
 
-    /// This spawns the sparse trie task, accepting only a serial sparse trie.
-    fn spawn_serial_trie_task<BPF>(
+    /// Generic function to spawn a sparse trie task for any trie type that can be converted to
+    /// `ConfiguredSparseTrie`.
+    fn spawn_trie_task<BPF, A>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
         proof_task_handle: BPF,
         state_root_tx: mpsc::Sender<
             Result<StateRootComputeOutcome<ConfiguredSparseTrie>, ParallelStateRootError>,
         >,
-        sparse_trie: Option<SparseTrie<SerialSparseTrie>>,
+        sparse_trie: Option<SparseTrie<A>>,
     ) where
         BPF: BlindedProviderFactory + Clone + Send + Sync + 'static,
         BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
         BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+        A: SparseTrieInterface + Send + Sync + Default + 'static,
+        ConfiguredSparseTrie: From<A>,
     {
-        let mut task =
-            SparseTrieTask::<_, SerialSparseTrie, SerialSparseTrie>::new_with_stored_trie(
-                self.executor.clone(),
-                sparse_trie_rx,
-                proof_task_handle,
-                self.trie_metrics.clone(),
-                sparse_trie,
-            );
+        let mut task = SparseTrieTask::<_, A, SerialSparseTrie>::new_with_stored_trie(
+            self.executor.clone(),
+            sparse_trie_rx,
+            proof_task_handle,
+            self.trie_metrics.clone(),
+            sparse_trie,
+        );
 
         self.executor.spawn_blocking(move || {
             let res = task.run();
@@ -355,61 +357,21 @@ where
                 trie_updates: outcome.trie_updates,
                 trie: match outcome.trie {
                     SparseTrie::Blind(opt) => {
-                        SparseTrie::Blind(opt.map(|t| Box::new(Either::Left(*t))))
+                        SparseTrie::Blind(opt.map(|t| Box::new(ConfiguredSparseTrie::from(*t))))
                     }
-                    SparseTrie::Revealed(t) => SparseTrie::Revealed(Box::new(Either::Left(*t))),
+                    SparseTrie::Revealed(t) => {
+                        SparseTrie::Revealed(Box::new(ConfiguredSparseTrie::from(*t)))
+                    }
                 },
             });
             let _ = state_root_tx.send(converted);
         });
     }
 
-    /// This spawns the sparse trie task, accepting only a parallel sparse trie.
-    fn spawn_parallel_trie_task<BPF>(
-        &self,
-        sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_task_handle: BPF,
-        state_root_tx: mpsc::Sender<
-            Result<StateRootComputeOutcome<ConfiguredSparseTrie>, ParallelStateRootError>,
-        >,
-        sparse_trie: Option<SparseTrie<ParallelSparseTrie>>,
-    ) where
-        BPF: BlindedProviderFactory + Clone + Send + Sync + 'static,
-        BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-        BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
-    {
-        let mut task =
-            SparseTrieTask::<_, ParallelSparseTrie, SerialSparseTrie>::new_with_stored_trie(
-                self.executor.clone(),
-                sparse_trie_rx,
-                proof_task_handle,
-                self.trie_metrics.clone(),
-                sparse_trie,
-            );
-
-        self.executor.spawn_blocking(move || {
-            let res = task.run();
-            let converted = res.map(|outcome| StateRootComputeOutcome {
-                state_root: outcome.state_root,
-                trie_updates: outcome.trie_updates,
-                trie: match outcome.trie {
-                    SparseTrie::Blind(opt) => {
-                        SparseTrie::Blind(opt.map(|t| Box::new(Either::Right(*t))))
-                    }
-                    SparseTrie::Revealed(t) => SparseTrie::Revealed(Box::new(Either::Right(*t))),
-                },
-            });
-            let _ = state_root_tx.send(converted);
-        });
-    }
-
-    /// This runs a specific trie task spawn method based on the stored trie that is passed in.
-    ///
-    /// The `is_revealed` flag should be set by the caller, this will determine if the trie should
-    /// be passed in as revealed, or blind (but allocated).
+    /// Helper to dispatch trie spawn based on the `ConfiguredSparseTrie` variant
     fn dispatch_trie_spawn<BPF>(
         &self,
-        either: ConfiguredSparseTrie,
+        configured_trie: ConfiguredSparseTrie,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
         proof_task_handle: BPF,
         state_root_tx: mpsc::Sender<
@@ -421,27 +383,22 @@ where
         BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
         BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
     {
-        match either {
-            Either::Left(serial) => {
+        match configured_trie {
+            ConfiguredSparseTrie::Serial(boxed_serial) => {
                 let trie = if is_revealed {
-                    Some(SparseTrie::Revealed(Box::new(serial)))
+                    Some(SparseTrie::Revealed(boxed_serial))
                 } else {
-                    Some(SparseTrie::Blind(Some(Box::new(serial))))
+                    Some(SparseTrie::Blind(Some(boxed_serial)))
                 };
-                self.spawn_serial_trie_task(sparse_trie_rx, proof_task_handle, state_root_tx, trie);
+                self.spawn_trie_task(sparse_trie_rx, proof_task_handle, state_root_tx, trie);
             }
-            Either::Right(parallel) => {
+            ConfiguredSparseTrie::Parallel(boxed_parallel) => {
                 let trie = if is_revealed {
-                    Some(SparseTrie::Revealed(Box::new(parallel)))
+                    Some(SparseTrie::Revealed(boxed_parallel))
                 } else {
-                    Some(SparseTrie::Blind(Some(Box::new(parallel))))
+                    Some(SparseTrie::Blind(Some(boxed_parallel)))
                 };
-                self.spawn_parallel_trie_task(
-                    sparse_trie_rx,
-                    proof_task_handle,
-                    state_root_tx,
-                    trie,
-                );
+                self.spawn_trie_task(sparse_trie_rx, proof_task_handle, state_root_tx, trie);
             }
         }
     }
@@ -475,9 +432,9 @@ where
                     true,
                 );
             }
-            Some(SparseTrie::Blind(Some(either))) => {
+            Some(SparseTrie::Blind(Some(boxed))) => {
                 self.dispatch_trie_spawn(
-                    *either,
+                    *boxed,
                     sparse_trie_rx,
                     proof_task_handle,
                     state_root_tx,
@@ -486,16 +443,16 @@ where
                 );
             }
             _ => {
-                // No stored trie with content, create new based on config
+                // No stored trie, create new based on config
                 if use_parallel_for_new {
-                    self.spawn_parallel_trie_task(
+                    self.spawn_trie_task::<_, ParallelSparseTrie>(
                         sparse_trie_rx,
                         proof_task_handle,
                         state_root_tx,
                         None,
                     );
                 } else {
-                    self.spawn_serial_trie_task(
+                    self.spawn_trie_task::<_, SerialSparseTrie>(
                         sparse_trie_rx,
                         proof_task_handle,
                         state_root_tx,
