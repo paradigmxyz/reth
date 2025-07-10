@@ -8,7 +8,7 @@ use reth_cli_commands::{
     config_cmd, db, download, dump_genesis, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
-    p2p, prune, recover, stage,
+    p2p, prune, re_execute, recover, stage,
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
@@ -186,6 +186,9 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
                 runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
             }
             Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
+            Commands::ReExecute(command) => {
+                runner.run_until_ctrl_c(command.execute::<EthereumNode>(components))
+            }
         }
     }
 
@@ -248,6 +251,9 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<C>),
+    /// Re-execute blocks in parallel to verify historical sync correctness.
+    #[command(name = "re-execute")]
+    ReExecute(re_execute::Command<C>),
 }
 
 impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
@@ -270,6 +276,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             Self::Debug(cmd) => cmd.chain_spec(),
             Self::Recover(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),
+            Self::ReExecute(cmd) => cmd.chain_spec(),
         }
     }
 }

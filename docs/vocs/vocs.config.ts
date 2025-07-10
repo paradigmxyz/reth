@@ -1,3 +1,4 @@
+import React from 'react'
 import { defineConfig } from 'vocs'
 import { sidebar } from './sidebar'
 import { basePath } from './redirects.config'
@@ -12,10 +13,12 @@ export default defineConfig({
   topNav: [
     { text: 'Run', link: '/run/ethereum' },
     { text: 'SDK', link: '/sdk/overview' },
-    { text: 'Rustdocs', link: '/docs' },
+    { 
+      element: React.createElement('a', { href: '/docs', target: '_self' }, 'Rustdocs')
+    },
     { text: 'GitHub', link: 'https://github.com/paradigmxyz/reth' },
     {
-      text: 'v1.5.0',
+      text: 'v1.5.1',
       items: [
         {
           text: 'Releases',

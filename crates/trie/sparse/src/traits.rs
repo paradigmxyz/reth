@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
@@ -18,23 +18,7 @@ use crate::blinded::BlindedProvider;
 /// This trait abstracts over different sparse trie implementations (serial vs parallel)
 /// while providing a unified interface for the core trie operations needed by the
 /// [`crate::SparseTrie`] enum.
-pub trait SparseTrieInterface: Default + Debug {
-    /// Creates a new revealed sparse trie from the given root node.
-    ///
-    /// This function initializes the internal structures and then reveals the root.
-    /// It is a convenient method to create a trie when you already have the root node available.
-    ///
-    /// # Arguments
-    ///
-    /// * `root` - The root node of the trie
-    /// * `masks` - Trie masks for root branch node
-    /// * `retain_updates` - Whether to track updates
-    ///
-    /// # Returns
-    ///
-    /// Self if successful, or an error if revealing fails.
-    fn from_root(root: TrieNode, masks: TrieMasks, retain_updates: bool) -> SparseTrieResult<Self>;
-
+pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// Configures the trie to have the given root node revealed.
     ///
     /// # Arguments
@@ -200,6 +184,11 @@ pub trait SparseTrieInterface: Default + Debug {
         full_path: &Nibbles,
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError>;
+
+    /// Returns a reference to the current sparse trie updates.
+    ///
+    /// If no updates have been made/recorded, returns an empty update set.
+    fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates>;
 
     /// Consumes and returns the currently accumulated trie updates.
     ///
