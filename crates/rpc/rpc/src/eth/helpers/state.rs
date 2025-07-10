@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to state.
 
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_rpc_convert::RpcTypes;
+use reth_rpc_convert::{RpcTxReq, RpcTypes};
 use reth_storage_api::{BlockReader, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
@@ -12,7 +12,8 @@ use reth_rpc_eth_api::{
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig> EthState
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Self: LoadState + SpawnBlocking,
     Provider: BlockReader,
@@ -23,7 +24,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig> LoadState
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Self: RpcNodeCoreExt<
         Provider: BlockReader
@@ -42,6 +44,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
+    use alloy_rpc_types_eth::TransactionRequest;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
@@ -56,7 +59,8 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::collections::HashMap;
 
-    fn noop_eth_api() -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig> {
+    fn noop_eth_api(
+    ) -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig, TransactionRequest> {
         let pool = testing_pool();
         let evm_config = EthEvmConfig::mainnet();
 
@@ -79,7 +83,7 @@ mod tests {
 
     fn mock_eth_api(
         accounts: HashMap<Address, ExtendedAccount>,
-    ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig> {
+    ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig, TransactionRequest> {
         let pool = testing_pool();
         let mock_provider = MockEthProvider::default();
 

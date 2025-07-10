@@ -45,6 +45,7 @@ pub type EthApiNodeBackend<N> = EthApiInner<
     <N as RpcNodeCore>::Pool,
     <N as RpcNodeCore>::Network,
     <N as RpcNodeCore>::Evm,
+    RpcTxReq<<N as RpcNodeCore>::Network>,
 >;
 
 /// A helper trait with requirements for [`RpcNodeCore`] to be used in [`OpEthApi`].

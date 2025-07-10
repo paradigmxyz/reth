@@ -6,7 +6,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
 use reth_node_api::NodePrimitives;
 use reth_primitives_traits::SealedHeader;
-use reth_rpc_convert::RpcConvert;
+use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
@@ -21,7 +21,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm_primitives::B256;
 
 impl<Provider, Pool, Network, EvmConfig> LoadPendingBlock
-    for EthApi<Provider, Pool, Network, EvmConfig>
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Self: SpawnBlocking<
             NetworkTypes: RpcTypes<
