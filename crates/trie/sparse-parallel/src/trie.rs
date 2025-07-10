@@ -329,6 +329,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
         let mut curr_subtrie = self.upper_subtrie.as_mut();
         let mut curr_subtrie_is_upper = true;
 
+        // List of node paths which need to have their hashes reset
+        let mut paths_to_reset_hashes = Vec::new();
+
         loop {
             let curr_node = curr_subtrie.nodes.get_mut(&curr_path).unwrap();
 
@@ -345,7 +348,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     // field unset, as it will no longer be valid once the leaf is removed.
                     match curr_node {
                         SparseNode::Branch { hash, .. } => {
-                            *hash = None;
+                            if hash.is_some() {
+                                paths_to_reset_hashes
+                                    .push((SparseSubtrieType::from_path(&curr_path), curr_path));
+                            }
 
                             // If there is already an extension leading into a branch, then that
                             // extension is no longer relevant.
@@ -360,7 +366,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
                             branch_parent_node = Some(curr_node.clone());
                         }
                         SparseNode::Extension { hash, .. } => {
-                            *hash = None;
+                            if hash.is_some() {
+                                paths_to_reset_hashes
+                                    .push((SparseSubtrieType::from_path(&curr_path), curr_path));
+                            }
 
                             // We can assume a new branch node will be found after the extension, so
                             // there's no need to modify branch_parent_path/node even if it's
@@ -392,9 +401,29 @@ impl SparseTrieInterface for ParallelSparseTrie {
         }
 
         // We've traversed to the leaf and collected its ancestors as necessary. Remove the leaf
-        // from its SparseSubtrie.
+        // from its SparseSubtrie and reset the hashes of the nodes along the path.
         self.prefix_set.insert(*full_path);
         leaf_subtrie.inner.values.remove(full_path);
+        for (subtrie_type, path) in paths_to_reset_hashes {
+            let node = match subtrie_type {
+                SparseSubtrieType::Upper => self.upper_subtrie.nodes.get_mut(&path),
+                SparseSubtrieType::Lower(idx) => self.lower_subtries[idx]
+                    .as_revealed_mut()
+                    .expect("lower subtrie is revealed")
+                    .nodes
+                    .get_mut(&path),
+            }
+            .expect("node exists");
+
+            match node {
+                SparseNode::Extension { hash, .. } | SparseNode::Branch { hash, .. } => {
+                    *hash = None
+                }
+                SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
+                    unreachable!("only branch and extension node hashes can be reset")
+                }
+            }
+        }
         self.remove_node(&leaf_path);
 
         // If the leaf was at the root replace its node with the empty value. We can stop execution
@@ -993,7 +1022,10 @@ impl ParallelSparseTrie {
                     .expect("lower subtrie node must exist");
                 // Lower subtrie root node hashes must be computed before updating upper subtrie
                 // hashes
-                debug_assert!(node.hash().is_some());
+                debug_assert!(
+                    node.hash().is_some(),
+                    "Lower subtrie root node at path {path:?} has no hash"
+                );
                 node
             };
 
@@ -1089,6 +1121,17 @@ impl ParallelSparseTrie {
         unchanged_prefix_set.extend_keys(prefix_set_iter);
 
         (changed_subtries, unchanged_prefix_set)
+    }
+
+    /// Returns an iterator over all nodes in the trie in no particular order.
+    #[cfg(test)]
+    fn all_nodes(&self) -> impl IntoIterator<Item = (&Nibbles, &SparseNode)> {
+        let mut nodes = vec![];
+        for subtrie in self.lower_subtries.iter().filter_map(LowerSparseSubtrie::as_revealed_ref) {
+            nodes.extend(subtrie.nodes.iter())
+        }
+        nodes.extend(self.upper_subtrie.nodes.iter());
+        nodes
     }
 }
 
@@ -3572,9 +3615,16 @@ mod tests {
 
         let provider = MockBlindedProvider::new();
 
+        // Remove a leaf which does not exist; this should have no effect.
+        trie.remove_leaf(&Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4, 0xF]), &provider)
+            .unwrap();
+        for (path, node) in trie.all_nodes() {
+            assert!(node.hash().is_some(), "path {path:?} should still have a hash");
+        }
+
         // Remove the leaf at path 0x01234
         let leaf_full_path = Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4]);
-        trie.remove_leaf(&leaf_full_path, provider).unwrap();
+        trie.remove_leaf(&leaf_full_path, &provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
         let lower_subtrie_10 = trie.lower_subtries[0x01].as_revealed_ref().unwrap();
