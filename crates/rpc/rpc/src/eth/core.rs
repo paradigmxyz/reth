@@ -10,7 +10,7 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_rpc_convert::{RpcTxReq, RpcTypes};
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -63,30 +63,28 @@ pub type EthApiBuilderFor<N> = EthApiBuilder<
 /// While this type requires various unrestricted generic components, trait bounds are enforced when
 /// additional traits are implemented for this type.
 #[derive(Deref)]
-pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig, TxReq> {
+pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig, Rpc: alloy_network::Network> {
     /// All nested fields bundled together.
     #[deref]
-    pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig, TxReq>>,
+    pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>>,
     /// Transaction RPC response builder.
     pub tx_resp_builder: EthRpcConverter,
 }
 
-impl<Provider, Pool, Network, EvmConfig> Clone
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> Clone
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader,
-    Network: RpcTypes,
+    Rpc: alloy_network::Network,
 {
     fn clone(&self) -> Self {
         Self { inner: self.inner.clone(), tx_resp_builder: self.tx_resp_builder.clone() }
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig>
-    EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReaderIdExt,
-    Network: RpcTypes,
 {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
     ///
@@ -159,11 +157,10 @@ where
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiTypes
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+    for EthApi<Provider, Pool, Network, EvmConfig, Ethereum>
 where
     Self: Send + Sync,
     Provider: BlockReader,
-    Network: RpcTypes,
 {
     type Error = EthApiError;
     type NetworkTypes = Ethereum;
@@ -174,13 +171,14 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> RpcNodeCore
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> RpcNodeCore
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
-    Network: RpcTypes + Send + Sync + Clone,
+    Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
+    Rpc: alloy_network::Network + Send + Sync + Clone + Unpin,
 {
     type Primitives = Provider::Primitives;
     type Provider = Provider;
@@ -210,13 +208,14 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> RpcNodeCoreExt
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
-    Network: RpcTypes + Send + Sync + Clone,
+    Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
+    Rpc: alloy_network::Network + Send + Sync + Clone + Unpin,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<ProviderBlock<Provider>, ProviderReceipt<Provider>> {
@@ -224,23 +223,22 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> std::fmt::Debug
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader,
-    Network: RpcTypes,
+    Rpc: alloy_network::Network,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> SpawnBlocking
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: Clone + Send + Sync + 'static,
     Provider: BlockReader,
-    Network: RpcTypes,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -260,7 +258,8 @@ where
 
 /// Container type `EthApi`
 #[expect(missing_debug_implementations)]
-pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig, TxReq> {
+pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig, Rpc: alloy_network::Network>
+{
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
@@ -268,7 +267,8 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig, TxReq> {
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction, Network, TxReq>>>>,
+    signers:
+        parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction, Rpc, RpcTxReq<Rpc>>>>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// The async gas oracle frontend for gas price suggestions
@@ -299,11 +299,10 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig, TxReq> {
     raw_tx_sender: broadcast::Sender<Bytes>,
 }
 
-impl<Provider, Pool, Network, EvmConfig>
-    EthApiInner<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReaderIdExt,
-    Network: RpcTypes,
+    Rpc: alloy_network::Network,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
@@ -357,11 +356,10 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig>
-    EthApiInner<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader,
-    Network: RpcTypes,
+    Rpc: alloy_network::Network,
 {
     /// Returns a handle to data on disk.
     #[inline]
@@ -435,9 +433,8 @@ where
     #[inline]
     pub const fn signers(
         &self,
-    ) -> &parking_lot::RwLock<
-        Vec<Box<dyn EthSigner<Provider::Transaction, Network, RpcTxReq<Network>>>>,
-    > {
+    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction, Rpc, RpcTxReq<Rpc>>>>>
+    {
         &self.signers
     }
 

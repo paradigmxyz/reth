@@ -2,7 +2,6 @@ use alloy_network::Ethereum;
 use alloy_primitives::U256;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_network_api::NetworkInfo;
-use reth_rpc_convert::{RpcTxReq, RpcTypes};
 use reth_rpc_eth_api::{
     helpers::{spec::Signers, EthApiSpec},
     RpcNodeCore,
@@ -12,7 +11,7 @@ use reth_storage_api::{BlockNumReader, BlockReader, ProviderTx, StageCheckpointR
 use crate::EthApi;
 
 impl<Provider, Pool, Network, EvmConfig> EthApiSpec
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+    for EthApi<Provider, Pool, Network, EvmConfig, Self::Rpc>
 where
     Self: RpcNodeCore<
         Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
@@ -21,7 +20,6 @@ where
         Network: NetworkInfo,
     >,
     Provider: BlockReader,
-    Network: RpcTypes,
 {
     type Transaction = ProviderTx<Provider>;
     type Rpc = Ethereum;
