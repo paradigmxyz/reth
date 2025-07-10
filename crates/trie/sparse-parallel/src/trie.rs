@@ -13,8 +13,8 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::{
     blinded::{BlindedProvider, RevealedNode},
-    RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrieInterface, SparseTrieUpdates,
-    TrieMasks,
+    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrieInterface,
+    SparseTrieUpdates, TrieMasks,
 };
 use smallvec::SmallVec;
 use std::sync::mpsc;
@@ -335,8 +335,11 @@ impl SparseTrieInterface for ParallelSparseTrie {
         loop {
             let curr_node = curr_subtrie.nodes.get_mut(&curr_path).unwrap();
 
-            match Self::find_next_to_leaf(&curr_path, curr_node, full_path)? {
+            match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
                 FindNextToLeafOutcome::NotFound => return Ok(()), // leaf isn't in the trie
+                FindNextToLeafOutcome::BlindedNode(hash) => {
+                    return Err(SparseTrieErrorKind::BlindedNode { path: curr_path, hash }.into())
+                }
                 FindNextToLeafOutcome::Found => {
                     // this node is the target leaf
                     leaf_path = curr_path;
@@ -378,7 +381,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
                             ext_grandparent_node = Some(curr_node.clone());
                         }
                         SparseNode::Empty | SparseNode::Hash(_) | SparseNode::Leaf { .. } => {
-                            unreachable!("find_next_to_leaf errors on non-revealed node, and return Found or NotFound on Leaf")
+                            unreachable!(
+                                "find_next_to_leaf only continues to a branch or extension"
+                            )
                         }
                     }
 
@@ -657,10 +662,65 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
     fn find_leaf(
         &self,
-        _full_path: &Nibbles,
-        _expected_value: Option<&Vec<u8>>,
-    ) -> Result<reth_trie_sparse::LeafLookup, reth_trie_sparse::LeafLookupError> {
-        todo!()
+        full_path: &Nibbles,
+        expected_value: Option<&Vec<u8>>,
+    ) -> Result<LeafLookup, LeafLookupError> {
+        // Inclusion proof
+        //
+        // First, do a quick check if the value exists in either the upper or lower subtrie's values
+        // map. We assume that if there exists a leaf node, then its value will be in the `values`
+        // map.
+        if let Some(actual_value) = std::iter::once(self.upper_subtrie.as_ref())
+            .chain(self.lower_subtrie_for_path(full_path))
+            .filter_map(|subtrie| subtrie.inner.values.get(full_path))
+            .next()
+        {
+            // We found the leaf, check if the value matches (if expected value was provided)
+            return expected_value
+                .is_none_or(|v| v == actual_value)
+                .then_some(LeafLookup::Exists)
+                .ok_or_else(|| LeafLookupError::ValueMismatch {
+                    path: *full_path,
+                    expected: expected_value.cloned(),
+                    actual: actual_value.clone(),
+                })
+        }
+
+        // If the value does not exist in the `values` map, then this means that the leaf either:
+        // - Does not exist in the trie
+        // - Is missing from the witness
+        // We traverse the trie to find the location where this leaf would have been, showing
+        // that it is not in the trie. Or we find a blinded node, showing that the witness is
+        // not complete.
+        let mut curr_path = Nibbles::new(); // start traversal from root
+        let mut curr_subtrie = self.upper_subtrie.as_ref();
+        let mut curr_subtrie_is_upper = true;
+
+        loop {
+            let curr_node = curr_subtrie.nodes.get(&curr_path).unwrap();
+
+            match Self::find_next_to_leaf(&curr_path, curr_node, full_path) {
+                FindNextToLeafOutcome::NotFound => return Ok(LeafLookup::NonExistent),
+                FindNextToLeafOutcome::BlindedNode(hash) => {
+                    // We hit a blinded node - cannot determine if leaf exists
+                    return Err(LeafLookupError::BlindedNode { path: curr_path, hash });
+                }
+                FindNextToLeafOutcome::Found => {
+                    panic!("target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap");
+                }
+                FindNextToLeafOutcome::ContinueFrom(next_path) => {
+                    curr_path = next_path;
+                    // If we were previously looking at the upper trie, and the new path is in the
+                    // lower trie, we need to pull out a ref to the lower trie.
+                    if curr_subtrie_is_upper {
+                        if let Some(lower_subtrie) = self.lower_subtrie_for_path(&curr_path) {
+                            curr_subtrie = lower_subtrie;
+                            curr_subtrie_is_upper = false;
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -759,51 +819,51 @@ impl ParallelSparseTrie {
         from_path: &Nibbles,
         from_node: &SparseNode,
         leaf_full_path: &Nibbles,
-    ) -> SparseTrieResult<FindNextToLeafOutcome> {
+    ) -> FindNextToLeafOutcome {
         debug_assert!(leaf_full_path.len() >= from_path.len());
         debug_assert!(leaf_full_path.starts_with(from_path));
 
         match from_node {
-            SparseNode::Empty => Err(SparseTrieErrorKind::Blind.into()),
-            SparseNode::Hash(hash) => {
-                Err(SparseTrieErrorKind::BlindedNode { path: *from_path, hash: *hash }.into())
-            }
+            // If empty node is found it means the subtrie doesn't have any nodes in it, let alone
+            // the target leaf.
+            SparseNode::Empty => FindNextToLeafOutcome::NotFound,
+            SparseNode::Hash(hash) => FindNextToLeafOutcome::BlindedNode(*hash),
             SparseNode::Leaf { key, .. } => {
                 let mut found_full_path = *from_path;
                 found_full_path.extend(key);
 
                 if &found_full_path == leaf_full_path {
-                    return Ok(FindNextToLeafOutcome::Found)
+                    return FindNextToLeafOutcome::Found
                 }
-                Ok(FindNextToLeafOutcome::NotFound)
+                FindNextToLeafOutcome::NotFound
             }
             SparseNode::Extension { key, .. } => {
                 if leaf_full_path.len() == from_path.len() {
-                    return Ok(FindNextToLeafOutcome::NotFound)
+                    return FindNextToLeafOutcome::NotFound
                 }
 
                 let mut child_path = *from_path;
                 child_path.extend(key);
 
                 if !leaf_full_path.starts_with(&child_path) {
-                    return Ok(FindNextToLeafOutcome::NotFound)
+                    return FindNextToLeafOutcome::NotFound
                 }
-                Ok(FindNextToLeafOutcome::ContinueFrom(child_path))
+                FindNextToLeafOutcome::ContinueFrom(child_path)
             }
             SparseNode::Branch { state_mask, .. } => {
                 if leaf_full_path.len() == from_path.len() {
-                    return Ok(FindNextToLeafOutcome::NotFound)
+                    return FindNextToLeafOutcome::NotFound
                 }
 
                 let nibble = leaf_full_path.get_unchecked(from_path.len());
                 if !state_mask.is_bit_set(nibble) {
-                    return Ok(FindNextToLeafOutcome::NotFound)
+                    return FindNextToLeafOutcome::NotFound
                 }
 
                 let mut child_path = *from_path;
                 child_path.push_unchecked(nibble);
 
-                Ok(FindNextToLeafOutcome::ContinueFrom(child_path))
+                FindNextToLeafOutcome::ContinueFrom(child_path)
             }
         }
     }
@@ -1163,6 +1223,9 @@ enum FindNextToLeafOutcome {
     /// `NotFound` indicates that there is no way to traverse to the leaf, as it is not in the
     /// trie.
     NotFound,
+    /// `BlindedNode` indicates that the node is blinded with the contained hash and cannot be
+    /// traversed.
+    BlindedNode(B256),
 }
 
 impl SparseSubtrie {
@@ -2170,7 +2233,8 @@ mod tests {
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
         blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
-        SerialSparseTrie, SparseNode, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+        LeafLookup, LeafLookupError, SerialSparseTrie, SparseNode, SparseTrieInterface,
+        SparseTrieUpdates, TrieMasks,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -5875,5 +5939,212 @@ mod tests {
         let expected_root =
             b256!("29b07de8376e9ce7b3a69e9b102199869514d3f42590b5abc6f7d48ec9b8665c");
         assert_eq!(trie.root(), expected_root);
+    }
+
+    #[test]
+    fn find_leaf_existing_leaf() {
+        // Create a simple trie with one leaf
+        let provider = DefaultBlindedProvider;
+        let mut sparse = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let value = b"test_value".to_vec();
+
+        sparse.update_leaf(path, value.clone(), &provider).unwrap();
+
+        // Check that the leaf exists
+        let result = sparse.find_leaf(&path, None);
+        assert_matches!(result, Ok(LeafLookup::Exists));
+
+        // Check with expected value matching
+        let result = sparse.find_leaf(&path, Some(&value));
+        assert_matches!(result, Ok(LeafLookup::Exists));
+    }
+
+    #[test]
+    fn find_leaf_value_mismatch() {
+        // Create a simple trie with one leaf
+        let provider = DefaultBlindedProvider;
+        let mut sparse = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+        let value = b"test_value".to_vec();
+        let wrong_value = b"wrong_value".to_vec();
+
+        sparse.update_leaf(path, value, &provider).unwrap();
+
+        // Check with wrong expected value
+        let result = sparse.find_leaf(&path, Some(&wrong_value));
+        assert_matches!(
+            result,
+            Err(LeafLookupError::ValueMismatch { path: p, expected: Some(e), actual: _a }) if p == path && e == wrong_value
+        );
+    }
+
+    #[test]
+    fn find_leaf_not_found_empty_trie() {
+        // Empty trie
+        let sparse = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
+
+        // Leaf should not exist
+        let result = sparse.find_leaf(&path, None);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
+    }
+
+    #[test]
+    fn find_leaf_empty_trie() {
+        let sparse = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+
+        let result = sparse.find_leaf(&path, None);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
+    }
+
+    #[test]
+    fn find_leaf_exists_no_value_check() {
+        let provider = DefaultBlindedProvider;
+        let mut sparse = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+        sparse.update_leaf(path, encode_account_value(0), &provider).unwrap();
+
+        let result = sparse.find_leaf(&path, None);
+        assert_matches!(result, Ok(LeafLookup::Exists));
+    }
+
+    #[test]
+    fn find_leaf_exists_with_value_check_ok() {
+        let provider = DefaultBlindedProvider;
+        let mut sparse = ParallelSparseTrie::default();
+        let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+        let value = encode_account_value(0);
+        sparse.update_leaf(path, value.clone(), &provider).unwrap();
+
+        let result = sparse.find_leaf(&path, Some(&value));
+        assert_matches!(result, Ok(LeafLookup::Exists));
+    }
+
+    #[test]
+    fn find_leaf_exclusion_branch_divergence() {
+        let provider = DefaultBlindedProvider;
+        let mut sparse = ParallelSparseTrie::default();
+        let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
+        let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]); // Belongs to same branch
+        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]); // Diverges at nibble 7
+
+        sparse.update_leaf(path1, encode_account_value(0), &provider).unwrap();
+        sparse.update_leaf(path2, encode_account_value(1), &provider).unwrap();
+
+        let result = sparse.find_leaf(&search_path, None);
+        assert_matches!(result, Ok(LeafLookup::NonExistent))
+    }
+
+    #[test]
+    fn find_leaf_exclusion_extension_divergence() {
+        let provider = DefaultBlindedProvider;
+        let mut sparse = ParallelSparseTrie::default();
+        // This will create an extension node at root with key 0x12
+        let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
+        // This path diverges from the extension key
+        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x7, 0x8]);
+
+        sparse.update_leaf(path1, encode_account_value(0), &provider).unwrap();
+
+        let result = sparse.find_leaf(&search_path, None);
+        assert_matches!(result, Ok(LeafLookup::NonExistent))
+    }
+
+    #[test]
+    fn find_leaf_exclusion_leaf_divergence() {
+        let provider = DefaultBlindedProvider;
+        let mut sparse = ParallelSparseTrie::default();
+        let existing_leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
+
+        sparse.update_leaf(existing_leaf_path, encode_account_value(0), &provider).unwrap();
+
+        let result = sparse.find_leaf(&search_path, None);
+        assert_matches!(result, Ok(LeafLookup::NonExistent))
+    }
+
+    #[test]
+    fn find_leaf_exclusion_path_ends_at_branch() {
+        let provider = DefaultBlindedProvider;
+        let mut sparse = ParallelSparseTrie::default();
+        let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
+        let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]);
+        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2]); // Path of the branch itself
+
+        sparse.update_leaf(path1, encode_account_value(0), &provider).unwrap();
+        sparse.update_leaf(path2, encode_account_value(1), &provider).unwrap();
+
+        let result = sparse.find_leaf(&search_path, None);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
+    }
+
+    #[test]
+    fn find_leaf_error_blinded_node_at_leaf_path() {
+        // Scenario: The node *at* the leaf path is blinded.
+        let blinded_hash = B256::repeat_byte(0xBB);
+        let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+
+        let sparse = new_test_trie(
+            [
+                (
+                    // Ext 0x12
+                    Nibbles::default(),
+                    SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x1, 0x2])),
+                ),
+                (
+                    // Ext 0x123
+                    Nibbles::from_nibbles_unchecked([0x1, 0x2]),
+                    SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x3])),
+                ),
+                (
+                    // Branch at 0x123, child 4
+                    Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3]),
+                    SparseNode::new_branch(TrieMask::new(0b10000)),
+                ),
+                (
+                    // Blinded node at 0x1234
+                    leaf_path,
+                    SparseNode::Hash(blinded_hash),
+                ),
+            ]
+            .into_iter(),
+        );
+
+        let result = sparse.find_leaf(&leaf_path, None);
+
+        // Should error because it hit the blinded node exactly at the leaf path
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
+            if path == leaf_path && hash == blinded_hash
+        );
+    }
+
+    #[test]
+    fn find_leaf_error_blinded_node() {
+        let blinded_hash = B256::repeat_byte(0xAA);
+        let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]);
+        let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
+
+        let sparse = new_test_trie(
+            [
+                // Root is a branch with child 0x1 (blinded) and 0x5 (revealed leaf)
+                // So we set Bit 1 and Bit 5 in the state_mask
+                (Nibbles::default(), SparseNode::new_branch(TrieMask::new(0b100010))),
+                (path_to_blind, SparseNode::Hash(blinded_hash)),
+                (
+                    Nibbles::from_nibbles_unchecked([0x5]),
+                    SparseNode::new_leaf(Nibbles::from_nibbles_unchecked([0x6, 0x7, 0x8])),
+                ),
+            ]
+            .into_iter(),
+        );
+
+        let result = sparse.find_leaf(&search_path, None);
+
+        // Should error because it hit the blinded node at path 0x1
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
+            if path == path_to_blind && hash == blinded_hash
+        );
     }
 }
