@@ -1,6 +1,5 @@
 //! E2E test implementations using the e2e test framework for engine tree functionality.
 
-use crate::tree::TreeConfig;
 use eyre::Result;
 use reth_chainspec::{ChainSpecBuilder, MAINNET};
 use reth_e2e_test_utils::testsuite::{
@@ -12,6 +11,7 @@ use reth_e2e_test_utils::testsuite::{
     setup::{NetworkSetup, Setup},
     TestBuilder,
 };
+use reth_engine_tree::tree::TreeConfig;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_node_ethereum::EthereumNode;
 use std::sync::Arc;

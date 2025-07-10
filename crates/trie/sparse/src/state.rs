@@ -1,7 +1,7 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     traits::SparseTrieInterface,
-    RevealedSparseTrie, SparseTrie, TrieMasks,
+    SerialSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -24,8 +24,8 @@ use tracing::trace;
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
-    A = RevealedSparseTrie, // Account trie implementation
-    S = RevealedSparseTrie, // Storage trie implementation
+    A = SerialSparseTrie, // Account trie implementation
+    S = SerialSparseTrie, // Storage trie implementation
 > {
     /// Sparse account trie.
     state: SparseTrie<A>,
@@ -924,7 +924,7 @@ mod tests {
 
     #[test]
     fn validate_root_node_first_node_not_root() {
-        let sparse = SparseStateTrie::<RevealedSparseTrie>::default();
+        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
         let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
         assert_matches!(
             sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
@@ -934,7 +934,7 @@ mod tests {
 
     #[test]
     fn validate_root_node_invalid_proof_with_empty_root() {
-        let sparse = SparseStateTrie::<RevealedSparseTrie>::default();
+        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
         let proof = [
             (Nibbles::default(), Bytes::from([EMPTY_STRING_CODE])),
             (Nibbles::from_nibbles([0x1]), Bytes::new()),
@@ -953,7 +953,7 @@ mod tests {
         let proofs = hash_builder.take_proof_nodes();
         assert_eq!(proofs.len(), 1);
 
-        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
         assert_eq!(sparse.state, SparseTrie::Blind(None));
 
         sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
@@ -968,7 +968,7 @@ mod tests {
         let proofs = hash_builder.take_proof_nodes();
         assert_eq!(proofs.len(), 1);
 
-        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
         assert!(sparse.storages.is_empty());
 
         sparse
@@ -983,7 +983,7 @@ mod tests {
     #[test]
     fn reveal_account_path_twice() {
         let provider_factory = DefaultBlindedProviderFactory;
-        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
@@ -1055,7 +1055,7 @@ mod tests {
     #[test]
     fn reveal_storage_path_twice() {
         let provider_factory = DefaultBlindedProviderFactory;
-        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default();
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
 
         let leaf_value = alloy_rlp::encode(TrieAccount::default());
         let leaf_1 = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
@@ -1187,7 +1187,7 @@ mod tests {
         let proof_nodes = hash_builder.take_proof_nodes();
 
         let provider_factory = DefaultBlindedProviderFactory;
-        let mut sparse = SparseStateTrie::<RevealedSparseTrie>::default().with_updates(true);
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default().with_updates(true);
         sparse
             .reveal_decoded_multiproof(
                 MultiProof {
