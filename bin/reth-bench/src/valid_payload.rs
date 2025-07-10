@@ -214,13 +214,7 @@ pub(crate) async fn call_new_payload<N: Network, P: Provider<N>>(
     version: EngineApiMessageVersion,
     params: serde_json::Value,
 ) -> TransportResult<()> {
-    let method = match version {
-        EngineApiMessageVersion::V1 => "engine_newPayloadV1",
-        EngineApiMessageVersion::V2 => "engine_newPayloadV2",
-        EngineApiMessageVersion::V3 => "engine_newPayloadV3",
-        EngineApiMessageVersion::V4 => "engine_newPayloadV4",
-        EngineApiMessageVersion::V5 => "engine_newPayloadV5",
-    };
+    let method = version.method_name();
 
     let mut status: PayloadStatus = provider.client().request(method, &params).await?;
 
