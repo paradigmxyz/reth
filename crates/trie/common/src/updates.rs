@@ -133,6 +133,13 @@ impl TrieUpdates {
                 .collect(),
         }
     }
+
+    /// Clears the nodes and storage trie maps in this `TrieUpdates`.
+    pub fn clear(&mut self) {
+        self.account_nodes.clear();
+        self.removed_nodes.clear();
+        self.storage_tries.clear();
+    }
 }
 
 /// Trie updates for storage trie of a single account.
