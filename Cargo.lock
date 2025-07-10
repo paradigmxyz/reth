@@ -9420,7 +9420,6 @@ dependencies = [
  "op-revm",
  "parking_lot",
  "reqwest",
- "reth-chain-state",
  "reth-chainspec",
  "reth-evm",
  "reth-metrics",
