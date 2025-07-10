@@ -187,6 +187,14 @@ impl EthApiError {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
     }
 
+    /// Returns the [`RpcInvalidTransactionError`] if this is a [`EthApiError::InvalidTransaction`]
+    pub const fn as_invalid_transaction(&self) -> Option<&RpcInvalidTransactionError> {
+        match self {
+            Self::InvalidTransaction(e) => Some(e),
+            _ => None,
+        }
+    }
+
     /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
     pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
     where
