@@ -37,6 +37,7 @@ pub type EthApiFor<N> = EthApi<
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Network,
     <N as FullNodeComponents>::Evm,
+    RpcTxReq<<N as FullNodeComponents>::Network>,
 >;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
@@ -62,15 +63,16 @@ pub type EthApiBuilderFor<N> = EthApiBuilder<
 /// While this type requires various unrestricted generic components, trait bounds are enforced when
 /// additional traits are implemented for this type.
 #[derive(Deref)]
-pub struct EthApi<Provider: BlockReader, Pool, Network: RpcTypes, EvmConfig> {
+pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig, TxReq> {
     /// All nested fields bundled together.
     #[deref]
-    pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig>>,
+    pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig, TxReq>>,
     /// Transaction RPC response builder.
     pub tx_resp_builder: EthRpcConverter,
 }
 
-impl<Provider, Pool, Network, EvmConfig> Clone for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig> Clone
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Provider: BlockReader,
     Network: RpcTypes,
@@ -80,7 +82,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig>
+    EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Provider: BlockReaderIdExt,
     Network: RpcTypes,
@@ -155,7 +158,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApiTypes for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig> EthApiTypes
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Self: Send + Sync,
     Provider: BlockReader,
@@ -170,7 +174,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> RpcNodeCore for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig> RpcNodeCore
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
@@ -206,7 +211,7 @@ where
 }
 
 impl<Provider, Pool, Network, EvmConfig> RpcNodeCoreExt
-    for EthApi<Provider, Pool, Network, EvmConfig>
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
@@ -220,7 +225,7 @@ where
 }
 
 impl<Provider, Pool, Network, EvmConfig> std::fmt::Debug
-    for EthApi<Provider, Pool, Network, EvmConfig>
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Provider: BlockReader,
     Network: RpcTypes,
@@ -231,7 +236,7 @@ where
 }
 
 impl<Provider, Pool, Network, EvmConfig> SpawnBlocking
-    for EthApi<Provider, Pool, Network, EvmConfig>
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Self: Clone + Send + Sync + 'static,
     Provider: BlockReader,
@@ -255,7 +260,7 @@ where
 
 /// Container type `EthApi`
 #[expect(missing_debug_implementations)]
-pub struct EthApiInner<Provider: BlockReader, Pool, Network: RpcTypes, EvmConfig> {
+pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig, TxReq> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
@@ -263,9 +268,7 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network: RpcTypes, EvmConfig
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers: parking_lot::RwLock<
-        Vec<Box<dyn EthSigner<Provider::Transaction, Network, RpcTxReq<Network>>>>,
-    >,
+    signers: parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction, Network, TxReq>>>>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// The async gas oracle frontend for gas price suggestions
@@ -296,7 +299,8 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network: RpcTypes, EvmConfig
     raw_tx_sender: broadcast::Sender<Bytes>,
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig>
+    EthApiInner<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Provider: BlockReaderIdExt,
     Network: RpcTypes,
@@ -353,7 +357,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig>
+    EthApiInner<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Provider: BlockReader,
     Network: RpcTypes,
@@ -480,6 +485,7 @@ mod tests {
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
+    use alloy_rpc_types_eth::TransactionRequest;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
@@ -507,7 +513,7 @@ mod tests {
             + 'static,
     >(
         provider: P,
-    ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
+    ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig, TransactionRequest> {
         EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
@@ -523,7 +529,11 @@ mod tests {
         mut oldest_block: Option<B256>,
         block_count: u64,
         mock_provider: MockEthProvider,
-    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>, Vec<u128>, Vec<f64>) {
+    ) -> (
+        EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig, TransactionRequest>,
+        Vec<u128>,
+        Vec<f64>,
+    ) {
         let mut rng = generators::rng();
 
         // Build mock data
@@ -609,13 +619,14 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
-            &build_test_eth_api(NoopProvider::default()),
-            U64::from(1),
-            BlockNumberOrTag::Latest,
-            None,
-        )
-        .await;
+        let response =
+            <EthApi<_, _, _, _, TransactionRequest> as EthApiServer<_, _, _, _, _>>::fee_history(
+                &build_test_eth_api(NoopProvider::default()),
+                U64::from(1),
+                BlockNumberOrTag::Latest,
+                None,
+            )
+            .await;
         assert!(response.is_err());
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
@@ -631,13 +642,14 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
-            &eth_api,
-            U64::from(newest_block + 1),
-            newest_block.into(),
-            Some(vec![10.0]),
-        )
-        .await;
+        let response =
+            <EthApi<_, _, _, _, TransactionRequest> as EthApiServer<_, _, _, _, _>>::fee_history(
+                &eth_api,
+                U64::from(newest_block + 1),
+                newest_block.into(),
+                Some(vec![10.0]),
+            )
+            .await;
 
         assert!(response.is_err());
         let error_object = response.unwrap_err();
@@ -654,13 +666,14 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
-            &eth_api,
-            U64::from(1),
-            (newest_block + 1000).into(),
-            Some(vec![10.0]),
-        )
-        .await;
+        let response =
+            <EthApi<_, _, _, _, TransactionRequest> as EthApiServer<_, _, _, _, _>>::fee_history(
+                &eth_api,
+                U64::from(1),
+                (newest_block + 1000).into(),
+                Some(vec![10.0]),
+            )
+            .await;
 
         assert!(response.is_err());
         let error_object = response.unwrap_err();
@@ -677,14 +690,15 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
-            &eth_api,
-            U64::from(0),
-            newest_block.into(),
-            None,
-        )
-        .await
-        .unwrap();
+        let response =
+            <EthApi<_, _, _, _, TransactionRequest> as EthApiServer<_, _, _, _, _>>::fee_history(
+                &eth_api,
+                U64::from(0),
+                newest_block.into(),
+                None,
+            )
+            .await
+            .unwrap();
         assert_eq!(
             response,
             FeeHistory::default(),

@@ -12,7 +12,7 @@ use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsPr
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
-    for EthApi<Provider, Pool, Network, EvmConfig>
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,
     Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
@@ -58,12 +58,13 @@ where
 }
 
 impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig>
+    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
 where
     Self: SpawnBlocking
         + FullEthApiTypes
         + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
     Provider: BlockReader,
+    Network: RpcTypes,
 {
 }
 

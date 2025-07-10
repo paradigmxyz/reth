@@ -4,6 +4,7 @@ use crate::{eth::core::EthApiInner, EthApi};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
+use reth_rpc_convert::{RpcTxReq, RpcTypes};
 use reth_rpc_eth_types::{
     fee_history::fee_history_cache_new_blocks_task, EthStateCache, EthStateCacheConfig,
     FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
@@ -154,8 +155,9 @@ where
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build_inner(self) -> EthApiInner<Provider, Pool, Network, EvmConfig>
+    pub fn build_inner(self) -> EthApiInner<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
     where
+        Network: RpcTypes,
         Provider: BlockReaderIdExt
             + StateProviderFactory
             + ChainSpecProvider
@@ -231,8 +233,9 @@ where
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
     where
+        Network: RpcTypes,
         Provider: BlockReaderIdExt
             + StateProviderFactory
             + CanonStateSubscriptions<
