@@ -8,21 +8,18 @@ use crate::{
             CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
             GAS_OUTPUT_SUFFIX,
         },
+        EngineRequests,
     },
     valid_payload::{call_forkchoice_updated, call_new_payload},
 };
 use alloy_provider::{network::AnyRpcBlock, Provider};
-use alloy_rpc_types_engine::{ExecutionData, ForkchoiceState};
+use alloy_rpc_types_engine::ForkchoiceState;
 use clap::Parser;
 use csv::Writer;
 use humantime::parse_duration;
 use reth_cli_runner::CliContext;
-use reth_node_api::EngineTypes;
 use reth_node_core::args::BenchmarkArgs;
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
 /// `reth benchmark new-payload-fcu` command
@@ -42,10 +39,10 @@ pub struct Command {
 
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
-    pub async fn execute<E: EngineTypes>(
+    pub async fn execute(
         self,
         _ctx: CliContext,
-        convert: Arc<dyn Fn(AnyRpcBlock) -> eyre::Result<ExecutionData> + Send + Sync>,
+        convert: impl Fn(AnyRpcBlock) -> eyre::Result<EngineRequests> + Send + 'static,
     ) -> eyre::Result<()> {
         let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
             BenchContext::new(&self.benchmark, self.rpc_url).await?;
@@ -56,31 +53,14 @@ impl Command {
                 let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
 
-                // Convert to execution payload
-                let execution_data = convert(block.clone()).unwrap();
-                let payload = execution_data.payload;
-                let sidecar = execution_data.sidecar;
+                let payload = convert(block.clone()).unwrap();
 
-                let block = block
-                    .into_inner()
-                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-                    .try_map_transactions(|tx| {
-                        // try to convert unknowns into op type so that we can also support optimism
-                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
-                    })
-                    .unwrap()
-                    .into_consensus();
+                let head_block_hash = block.header.hash;
+                let safe_block_hash = block_provider
+                    .get_block_by_number(block.header.number.saturating_sub(32).into());
 
-                let blob_versioned_hashes =
-                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
-
-                let header = block.header;
-                let head_block_hash = payload.block_hash();
-                let safe_block_hash =
-                    block_provider.get_block_by_number(header.number.saturating_sub(32).into());
-
-                let finalized_block_hash =
-                    block_provider.get_block_by_number(header.number.saturating_sub(64).into());
+                let finalized_block_hash = block_provider
+                    .get_block_by_number(block.header.number.saturating_sub(64).into());
 
                 let (safe, finalized) = tokio::join!(safe_block_hash, finalized_block_hash,);
 
@@ -91,10 +71,8 @@ impl Command {
                 next_block += 1;
                 sender
                     .send((
-                        header,
-                        blob_versioned_hashes,
+                        block.0.inner.header,
                         payload,
-                        sidecar,
                         head_block_hash,
                         safe_block_hash,
                         finalized_block_hash,
@@ -109,7 +87,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, versioned_hashes, payload, sidecar, head, safe, finalized)) = {
+        while let Some((header, payload, head, safe, finalized)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -129,19 +107,11 @@ impl Command {
             };
 
             let start = Instant::now();
-            let message_version = call_new_payload(
-                &auth_provider,
-                payload,
-                sidecar,
-                header.parent_beacon_block_root,
-                versioned_hashes,
-            )
-            .await?;
+            call_new_payload(&auth_provider, &payload).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
 
-            call_forkchoice_updated(&auth_provider, message_version, forkchoice_state, None)
-                .await?;
+            call_forkchoice_updated(&auth_provider, &payload, forkchoice_state).await?;
 
             // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();

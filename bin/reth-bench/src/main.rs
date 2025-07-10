@@ -20,12 +20,13 @@ pub mod bench_mode;
 pub mod valid_payload;
 
 use alloy_provider::network::AnyRpcBlock;
-use alloy_rpc_types_engine::{ExecutionData, ExecutionPayload};
+use alloy_rpc_types_engine::{ExecutionPayload, ExecutionPayloadInputV2};
 use bench::BenchmarkCommand;
 use clap::Parser;
 use eyre::Ok;
 use reth_cli_runner::{CliContext, CliRunner};
-use std::sync::Arc;
+
+use crate::bench::EngineRequests;
 
 fn main() {
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
@@ -36,24 +37,67 @@ fn main() {
     // Run until either exit or sigint or sigterm
     let runner = CliRunner::try_default_runtime().unwrap();
 
-    let convert: Arc<dyn Fn(AnyRpcBlock) -> eyre::Result<ExecutionData> + Send + Sync> =
-        Arc::new(|block: AnyRpcBlock| -> eyre::Result<ExecutionData> {
-            let block = block
-                .into_inner()
-                .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-                .try_map_transactions(|tx| {
-                    tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
-                })?
-                .into_consensus();
+    let convert = |block: AnyRpcBlock| -> eyre::Result<EngineRequests> {
+        let block = block
+            .into_inner()
+            .map_header(|header| header.map(|h| h.into_header_with_defaults()))
+            .try_map_transactions(|tx| tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>())?
+            .into_consensus();
 
-            let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-            Ok(ExecutionData { payload, sidecar })
-        });
+        let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+
+        let (method, fcu_method, params) = match payload {
+            ExecutionPayload::V3(payload) => {
+                let cancun = sidecar.cancun().unwrap();
+
+                if let Some(prague) = sidecar.prague() {
+                    (
+                        "engine_newPayloadV4",
+                        "engine_forkchoiceUpdatedV3",
+                        serde_json::to_value((
+                            payload,
+                            cancun.versioned_hashes.clone(),
+                            cancun.parent_beacon_block_root,
+                            prague.requests.requests_hash(),
+                        ))?,
+                    )
+                } else {
+                    (
+                        "engine_newPayloadV3",
+                        "engine_forkchoiceUpdatedV3",
+                        serde_json::to_value((
+                            payload,
+                            cancun.versioned_hashes.clone(),
+                            cancun.parent_beacon_block_root,
+                        ))?,
+                    )
+                }
+            }
+            ExecutionPayload::V2(payload) => {
+                let input = ExecutionPayloadInputV2 {
+                    execution_payload: payload.payload_inner,
+                    withdrawals: Some(payload.withdrawals),
+                };
+
+                (
+                    "engine_newPayloadV2",
+                    "engine_forkchoiceUpdatedV2",
+                    serde_json::to_value((input,))?,
+                )
+            }
+            ExecutionPayload::V1(payload) => (
+                "engine_newPayloadV1",
+                "engine_forkchoiceUpdatedV1",
+                serde_json::to_value((payload,))?,
+            ),
+        };
+        Ok(EngineRequests { method: method.into(), params, fcu_method: fcu_method.into() })
+    };
 
     runner
         .run_command_until_exit(|ctx: CliContext| {
             let command = BenchmarkCommand::parse();
-            command.execute::<reth_ethereum_engine_primitives::EthEngineTypes>(ctx, convert)
+            command.execute(ctx, convert)
         })
         .unwrap();
 }

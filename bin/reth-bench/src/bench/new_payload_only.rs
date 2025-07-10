@@ -7,11 +7,11 @@ use crate::{
             NewPayloadResult, TotalGasOutput, TotalGasRow, GAS_OUTPUT_SUFFIX,
             NEW_PAYLOAD_OUTPUT_SUFFIX,
         },
+        EngineRequests,
     },
     valid_payload::call_new_payload,
 };
-use alloy_provider::Provider;
-use alloy_rpc_types_engine::ExecutionPayload;
+use alloy_provider::{network::AnyRpcBlock, Provider};
 use clap::Parser;
 use csv::Writer;
 use reth_cli_runner::CliContext;
@@ -32,7 +32,11 @@ pub struct Command {
 
 impl Command {
     /// Execute `benchmark new-payload-only` command
-    pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
+    pub async fn execute(
+        self,
+        _ctx: CliContext,
+        convert: impl Fn(AnyRpcBlock) -> eyre::Result<EngineRequests> + Send + 'static,
+    ) -> eyre::Result<()> {
         let BenchContext { benchmark_mode, block_provider, auth_provider, mut next_block } =
             BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
@@ -41,21 +45,10 @@ impl Command {
             while benchmark_mode.contains(next_block) {
                 let block_res = block_provider.get_block_by_number(next_block.into()).full().await;
                 let block = block_res.unwrap().unwrap();
-                let block = block
-                    .into_inner()
-                    .map_header(|header| header.map(|h| h.into_header_with_defaults()))
-                    .try_map_transactions(|tx| {
-                        tx.try_into_either::<op_alloy_consensus::OpTxEnvelope>()
-                    })
-                    .unwrap()
-                    .into_consensus();
-
-                let blob_versioned_hashes =
-                    block.body.blob_versioned_hashes_iter().copied().collect::<Vec<_>>();
-                let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
+                let payload = convert(block.clone()).unwrap();
 
                 next_block += 1;
-                sender.send((block.header, blob_versioned_hashes, payload, sidecar)).await.unwrap();
+                sender.send((block.0.inner.header, payload)).await.unwrap();
             }
         });
 
@@ -64,7 +57,7 @@ impl Command {
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
 
-        while let Some((header, versioned_hashes, payload, sidecar)) = {
+        while let Some((header, payload)) = {
             let wait_start = Instant::now();
             let result = receiver.recv().await;
             total_wait_time += wait_start.elapsed();
@@ -72,8 +65,7 @@ impl Command {
         } {
             // just put gas used here
             let gas_used = header.gas_used;
-
-            let block_number = payload.block_number();
+            let block_number = header.number;
 
             debug!(
                 target: "reth-bench",
@@ -82,14 +74,7 @@ impl Command {
             );
 
             let start = Instant::now();
-            call_new_payload(
-                &auth_provider,
-                payload,
-                sidecar,
-                header.parent_beacon_block_root,
-                versioned_hashes,
-            )
-            .await?;
+            call_new_payload(&auth_provider, &payload).await?;
 
             let new_payload_result = NewPayloadResult { gas_used, latency: start.elapsed() };
             info!(%new_payload_result);

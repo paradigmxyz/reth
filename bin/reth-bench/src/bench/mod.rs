@@ -1,13 +1,11 @@
 //! `reth benchmark` command. Collection of various benchmarking routines.
 
 use alloy_provider::network::AnyRpcBlock;
-use alloy_rpc_types_engine::ExecutionData;
 use clap::{Parser, Subcommand};
 use reth_cli_runner::CliContext;
-use reth_node_api::EngineTypes;
 use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
-use std::sync::Arc;
+use std::borrow::Cow;
 
 mod context;
 mod new_payload_fcu;
@@ -47,19 +45,30 @@ pub enum Subcommands {
     SendPayload(send_payload::Command),
 }
 
+/// Engine requests required for reth-bench.
+#[derive(Debug, Clone)]
+pub struct EngineRequests {
+    /// `newPayload` method name. e.g `engine_newPayloadV1`
+    pub method: Cow<'static, str>,
+    /// `newPayload` parameters.
+    pub params: serde_json::Value,
+    /// `forkchoiceUpdated` method name. e.g `engine_forkChoiceUpdatedV1`
+    pub fcu_method: Cow<'static, str>,
+}
+
 impl BenchmarkCommand {
     /// Execute `benchmark` command
-    pub async fn execute<E: EngineTypes>(
+    pub async fn execute(
         self,
         ctx: CliContext,
-        convert: Arc<dyn Fn(AnyRpcBlock) -> eyre::Result<ExecutionData> + Send + Sync>,
+        convert: impl Fn(AnyRpcBlock) -> eyre::Result<EngineRequests> + Send + 'static,
     ) -> eyre::Result<()> {
         // Initialize tracing
         let _guard = self.init_tracing()?;
 
         match self.command {
-            Subcommands::NewPayloadFcu(command) => command.execute::<E>(ctx, convert).await,
-            Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
+            Subcommands::NewPayloadFcu(command) => command.execute(ctx, convert).await,
+            Subcommands::NewPayloadOnly(command) => command.execute(ctx, convert).await,
             Subcommands::SendPayload(command) => command.execute(ctx).await,
         }
     }
