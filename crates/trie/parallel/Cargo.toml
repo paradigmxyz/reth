@@ -17,7 +17,6 @@ reth-db-api.workspace = true
 reth-execution-errors.workspace = true
 reth-provider.workspace = true
 reth-storage-errors.workspace = true
-reth-tasks.workspace = true
 reth-trie-common.workspace = true
 reth-trie-db.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std"] }

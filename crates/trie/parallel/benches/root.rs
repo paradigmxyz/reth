@@ -14,6 +14,7 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseStateRoot};
 use reth_trie_parallel::root::ParallelStateRoot;
 use std::collections::HashMap;
+use tokio::runtime::{Handle, Runtime};
 
 pub fn calculate_state_root(c: &mut Criterion) {
     let mut group = c.benchmark_group("Calculate State Root");
@@ -65,9 +66,12 @@ pub fn calculate_state_root(c: &mut Criterion) {
         group.bench_function(BenchmarkId::new("parallel root", size), |b| {
             b.iter_with_setup(
                 || {
+                    let handle = Handle::try_current()
+                        .unwrap_or_else(|_| Runtime::new().unwrap().handle().clone());
                     ParallelStateRoot::new(
                         view.clone(),
                         TrieInput::from_state(updated_state.clone()),
+                        handle,
                     )
                 },
                 |calculator| calculator.incremental_root(),
