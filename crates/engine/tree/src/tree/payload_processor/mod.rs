@@ -28,7 +28,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{RevealedSparseTrie, SparseTrie};
+use reth_trie_sparse::{SerialSparseTrie, SparseTrie};
 use std::{
     collections::VecDeque,
     sync::{
@@ -200,7 +200,7 @@ where
         let sparse_trie = self.sparse_trie.take();
 
         let mut sparse_trie_task =
-            SparseTrieTask::<_, RevealedSparseTrie, RevealedSparseTrie>::new_with_stored_trie(
+            SparseTrieTask::<_, SerialSparseTrie, SerialSparseTrie>::new_with_stored_trie(
                 self.executor.clone(),
                 sparse_trie_rx,
                 proof_task.handle(),

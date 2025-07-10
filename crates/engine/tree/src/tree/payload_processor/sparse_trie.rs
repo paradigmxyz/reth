@@ -11,7 +11,7 @@ use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
-    RevealedSparseTrie, SparseStateTrie, SparseTrie, SparseTrieInterface,
+    SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieInterface,
 };
 use std::{
     sync::mpsc,
@@ -20,7 +20,7 @@ use std::{
 use tracing::{debug, trace, trace_span};
 
 /// A task responsible for populating the sparse trie.
-pub(super) struct SparseTrieTask<BPF, A = RevealedSparseTrie, S = RevealedSparseTrie>
+pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
 where
     BPF: BlindedProviderFactory + Send + Sync,
     BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
@@ -161,7 +161,7 @@ where
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
 #[derive(Debug)]
-pub struct StateRootComputeOutcome<A = RevealedSparseTrie> {
+pub struct StateRootComputeOutcome<A = SerialSparseTrie> {
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
