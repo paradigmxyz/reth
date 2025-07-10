@@ -1,31 +1,33 @@
 //! Command for debugging in-memory merkle trie calculation.
 
-use alloy_consensus::BlockHeader;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::BlockHashOrNumber;
 use backon::{ConstantBuilder, Retryable};
 use clap::Parser;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::Hardforks;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use reth_cli_commands::common::{
+    AccessRights, CliComponentsBuilder, CliNodeComponents, CliNodeTypes, Environment,
+    EnvironmentArgs,
+};
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::Config;
-use reth_ethereum_primitives::EthPrimitives;
+use reth_db::DatabaseEnv;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_network::{BlockDownloaderProvider, NetworkHandle};
 use reth_network_api::NetworkInfo;
-use reth_node_api::{BlockTy, NodePrimitives};
+use reth_node_api::{BlockTy, NodePrimitives, NodeTypesWithDBAdapter};
 use reth_node_core::{
     args::NetworkArgs,
     utils::{get_single_body, get_single_header},
 };
-use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig};
 use reth_primitives_traits::SealedBlock;
 use reth_provider::{
-    providers::ProviderNodeTypes, AccountExtReader, ChainSpecProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HashingWriter, LatestStateProviderRef, OriginalValuesKnown,
-    ProviderFactory, StageCheckpointReader, StateWriter, StorageLocation, StorageReader,
+    AccountExtReader, ChainSpecProvider, DatabaseProviderFactory, HashedPostStateProvider,
+    HashingWriter, LatestStateProviderRef, OriginalValuesKnown, ProviderFactory,
+    StageCheckpointReader, StateWriter, StorageLocation, StorageReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages::StageId;
@@ -56,28 +58,27 @@ pub struct Command<C: ChainSpecParser> {
     skip_node_depth: Option<usize>,
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
-    async fn build_network<
-        N: ProviderNodeTypes<
-            ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<
-                Block = reth_ethereum_primitives::Block,
-                Receipt = reth_ethereum_primitives::Receipt,
-                BlockHeader = alloy_consensus::Header,
-            >,
-        >,
-    >(
+impl<C: ChainSpecParser> Command<C> {
+    async fn build_network<N: CliNodeTypes<ChainSpec: Hardforks>>(
         &self,
         config: &Config,
         task_executor: TaskExecutor,
-        provider_factory: ProviderFactory<N>,
+        provider_factory: ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
         network_secret_path: PathBuf,
         default_peers_path: PathBuf,
-    ) -> eyre::Result<NetworkHandle> {
+    ) -> eyre::Result<NetworkHandle<N::NetworkPrimitives>>
+    where
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
         let secret_key = get_secret_key(&network_secret_path)?;
         let network = self
             .network
-            .network_config(config, provider_factory.chain_spec(), secret_key, default_peers_path)
+            .network_config::<N::NetworkPrimitives>(
+                config,
+                provider_factory.chain_spec(),
+                secret_key,
+                default_peers_path,
+            )
             .with_task_executor(Box::new(task_executor))
             .build(provider_factory)
             .start_network()
@@ -88,14 +89,20 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
     }
 
     /// Execute `debug in-memory-merkle` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = EthPrimitives>>(
+    pub async fn execute<N>(
         self,
         ctx: CliContext,
-    ) -> eyre::Result<()> {
+        components: impl CliComponentsBuilder<N>,
+    ) -> eyre::Result<()>
+    where
+        N: CliNodeTypes<ChainSpec: Hardforks, Primitives: NodePrimitives<BlockHeader = Header>>,
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
         let Environment { provider_factory, config, data_dir } =
             self.env.init::<N>(AccessRights::RW)?;
 
         let provider = provider_factory.provider()?;
+        let components = components(provider_factory.chain_spec());
 
         // Look up merkle checkpoint
         let merkle_checkpoint = provider
@@ -134,8 +141,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         .await?;
 
         let client = fetch_client.clone();
-        let chain = provider_factory.chain_spec();
-        let consensus = Arc::new(EthBeaconConsensus::new(chain.clone()));
+        let consensus = components.consensus();
         let block: SealedBlock<BlockTy<N>> = (move || {
             get_single_body(client.clone(), header.clone(), consensus.clone())
         })
@@ -146,7 +152,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
         let state_provider = LatestStateProviderRef::new(&provider);
         let db = StateProviderDatabase::new(&state_provider);
 
-        let evm_config = EthEvmConfig::ethereum(provider_factory.chain_spec());
+        let evm_config = components.evm_config();
         let executor = evm_config.batch_executor(db);
         let block_execution_output = executor.execute(&block.clone().try_recover()?)?;
         let execution_outcome = ExecutionOutcome::from((block_execution_output, block.number()));
@@ -172,22 +178,22 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             StorageLocation::Database,
         )?;
         let storage_lists =
-            provider_rw.changed_storages_with_range(block.number..=block.number())?;
+            provider_rw.changed_storages_with_range(block.number()..=block.number())?;
         let storages = provider_rw.plain_state_storages(storage_lists)?;
         provider_rw.insert_storage_for_hashing(storages)?;
         let account_lists =
-            provider_rw.changed_accounts_with_range(block.number..=block.number())?;
+            provider_rw.changed_accounts_with_range(block.number()..=block.number())?;
         let accounts = provider_rw.basic_accounts(account_lists)?;
         provider_rw.insert_account_for_hashing(accounts)?;
 
         let (state_root, incremental_trie_updates) = StateRoot::incremental_root_with_updates(
             provider_rw.tx_ref(),
-            block.number..=block.number(),
+            block.number()..=block.number(),
         )?;
         if state_root != block.state_root() {
             eyre::bail!(
                 "Computed incremental state root mismatch. Expected: {:?}. Got: {:?}",
-                block.state_root,
+                block.state_root(),
                 state_root
             );
         }
