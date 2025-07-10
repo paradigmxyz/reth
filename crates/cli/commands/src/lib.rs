@@ -13,6 +13,7 @@ pub mod config_cmd;
 pub mod db;
 pub mod download;
 pub mod dump_genesis;
+pub mod export_era;
 pub mod import;
 pub mod import_era;
 pub mod import_op;
