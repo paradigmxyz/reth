@@ -17,7 +17,7 @@ pub(crate) type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// Wrapper for a thread-safe, asynchronously accessible `WebSocket` connection
 #[derive(Debug, Clone)]
-pub struct ConnWrapper {
+pub(crate) struct ConnWrapper {
     /// Write-only part of the `WebSocket` stream
     writer: Arc<Mutex<SplitSink<WsStream, Message>>>,
     /// Read-only part of the `WebSocket` stream
@@ -26,14 +26,14 @@ pub struct ConnWrapper {
 
 impl ConnWrapper {
     /// Create a new connection wrapper from a `WebSocket` stream
-    pub fn new(stream: WsStream) -> Self {
+    pub(crate) fn new(stream: WsStream) -> Self {
         let (writer, reader) = stream.split();
 
         Self { writer: Arc::new(Mutex::new(writer)), reader: Arc::new(Mutex::new(reader)) }
     }
 
     /// Write a JSON string as a text message to the `WebSocket`
-    pub async fn write_json(&self, value: &str) -> Result<(), ConnectionError> {
+    pub(crate) async fn write_json(&self, value: &str) -> Result<(), ConnectionError> {
         let mut writer = self.writer.lock().await;
         writer.send(Message::Text(Utf8Bytes::from(value))).await?;
 
@@ -44,7 +44,7 @@ impl ConnWrapper {
     ///
     /// Waits for the next text message, parses it as JSON, and returns the value.
     /// Ignores non-text messages. Returns an error if the connection is closed or if parsing fails.
-    pub async fn read_json(&self) -> Result<Value, ConnectionError> {
+    pub(crate) async fn read_json(&self) -> Result<Value, ConnectionError> {
         let mut reader = self.reader.lock().await;
         while let Some(msg) = reader.next().await {
             match msg? {
@@ -58,7 +58,7 @@ impl ConnWrapper {
     }
 
     /// Close the `WebSocket` connection gracefully
-    pub async fn close(&self) -> Result<(), ConnectionError> {
+    pub(crate) async fn close(&self) -> Result<(), ConnectionError> {
         let mut writer = self.writer.lock().await;
         writer.close().await?;
 

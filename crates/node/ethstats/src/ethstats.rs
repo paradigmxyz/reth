@@ -1,5 +1,6 @@
 use crate::{
     connection::ConnWrapper,
+    credentials::EthstatsCredentials,
     error::EthStatsError,
     events::{
         AuthMsg, BlockMsg, BlockStats, HistoryMsg, LatencyMsg, NodeInfo, NodeStats, PendingMsg,
@@ -10,7 +11,7 @@ use alloy_consensus::{BlockHeader, Sealable};
 use alloy_primitives::U256;
 use reth_chain_state::{CanonStateNotification, CanonStateSubscriptions};
 use reth_network_api::{NetworkInfo, Peers};
-use reth_primitives_traits::{Block, BlockBody, InMemorySize};
+use reth_primitives_traits::{Block, BlockBody};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, NodePrimitivesProvider};
 use reth_transaction_pool::TransactionPool;
 
@@ -27,7 +28,7 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 use tokio_tungstenite::connect_async;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info};
 use url::Url;
 
 /// Number of historical blocks to include in a history update sent to the `EthStats` server
@@ -43,51 +44,6 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Maximum time to wait for reading messages from the server
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Credentials for connecting to an `EthStats` server
-///
-/// Contains the node identifier, authentication secret, and server host
-/// information needed to establish a connection with the `EthStats` service.
-#[derive(Debug, Clone)]
-pub struct EthstatsCredentials {
-    /// Unique identifier for this node in the `EthStats` network
-    pub node_id: String,
-    /// Authentication secret for the `EthStats` server
-    pub secret: String,
-    /// Host address of the `EthStats` server
-    pub host: String,
-}
-
-impl FromStr for EthstatsCredentials {
-    type Err = EthStatsError;
-
-    /// Parse credentials from a string in the format "`node_id:secret@host`"
-    ///
-    /// # Arguments
-    /// * `s` - String containing credentials in the format "`node_id:secret@host`"
-    ///
-    /// # Returns
-    /// * `Ok(EthstatsCredentials)` - Successfully parsed credentials
-    /// * `Err(EthStatsError::InvalidUrl)` - Invalid format or missing separators
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts: Vec<&str> = s.split('@').collect();
-        if parts.len() != 2 {
-            return Err(EthStatsError::InvalidUrl("Missing '@' separator".to_string()));
-        }
-        let creds = parts[0];
-        let host = parts[1].to_string();
-        let creds_parts: Vec<&str> = creds.split(':').collect();
-        if creds_parts.len() != 2 {
-            return Err(EthStatsError::InvalidUrl(
-                "Missing ':' separator in credentials".to_string(),
-            ));
-        }
-        let node_id = creds_parts[0].to_string();
-        let secret = creds_parts[1].to_string();
-
-        Ok(Self { node_id, secret, host })
-    }
-}
-
 /// Main service for interacting with an `EthStats` server
 ///
 /// This service handles all communication with the `EthStats` server including
@@ -97,17 +53,17 @@ impl FromStr for EthstatsCredentials {
 #[derive(Debug)]
 pub struct EthStatsService<Network, Provider, Pool> {
     /// Authentication credentials for the `EthStats` server
-    pub credentials: EthstatsCredentials,
+    credentials: EthstatsCredentials,
     /// `WebSocket` connection wrapper, wrapped in `Arc<RwLock>` for shared access
-    pub conn: Arc<RwLock<Option<ConnWrapper>>>,
+    conn: Arc<RwLock<Option<ConnWrapper>>>,
     /// Timestamp of the last ping sent to the server
-    pub last_ping: Arc<Mutex<Option<Instant>>>,
+    last_ping: Arc<Mutex<Option<Instant>>>,
     /// Network interface for getting peer and sync information
-    pub network: Network,
+    network: Network,
     /// Blockchain provider for reading block data and state
-    pub provider: Provider,
+    provider: Provider,
     /// Transaction pool for getting pending transaction statistics
-    pub pool: Pool,
+    pool: Pool,
 }
 
 impl<Network, Provider, Pool> EthStatsService<Network, Provider, Pool>
@@ -169,7 +125,7 @@ where
             }
             Ok(Err(e)) => Err(EthStatsError::InvalidUrl(e.to_string())),
             Err(_) => {
-                error!(target: "ethstats", "Connection to EthStats server timed out");
+                debug!(target: "ethstats", "Connection to EthStats server timed out");
                 Err(EthStatsError::Timeout)
             }
         }
@@ -235,7 +191,7 @@ where
             }
         }
 
-        error!(target: "ethstats", "Login failed: Unauthorized or unexpected login response");
+        debug!(target: "ethstats", "Login failed: Unauthorized or unexpected login response");
         Err(EthStatsError::AuthError("Unauthorized or unexpected login response".into()))
     }
 
@@ -288,7 +244,7 @@ where
             sleep(PING_TIMEOUT).await;
             let mut active = active_ping.lock().await;
             if active.is_some() {
-                warn!(target: "ethstats", "Ping timeout");
+                debug!(target: "ethstats", "Ping timeout");
                 *active = None;
                 // Clear connection to trigger reconnect
                 if let Some(conn) = conn_ref.write().await.take() {
@@ -332,7 +288,7 @@ where
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
         let pending = self.pool.pool_size().pending as u64;
 
-        debug!("Reporting pending txs: {}", pending);
+        debug!(target: "ethstats", "Reporting pending txs: {}", pending);
 
         let pending_msg =
             PendingMsg { id: self.credentials.node_id.clone(), stats: PendingStats { pending } };
@@ -380,11 +336,11 @@ where
             }
             Ok(None) => {
                 // Block not found, stop fetching
-                warn!(target: "ethstats", "Block {} not found", block_number);
+                debug!(target: "ethstats", "Block {} not found", block_number);
                 return Err(EthStatsError::BlockNotFound(block_number));
             }
             Err(e) => {
-                error!(target: "ethstats", "Error fetching block {}: {}", block_number, e);
+                debug!(target: "ethstats", "Error fetching block {}: {}", block_number, e);
                 return Err(EthStatsError::DataFetchError(e.to_string()));
             }
         };
@@ -440,9 +396,8 @@ where
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
 
-        let mut indexes = Vec::with_capacity(HISTORY_UPDATE_RANGE as usize);
-        if let Some(list) = list {
-            indexes.extend(list);
+        let indexes = if let Some(list) = list {
+            list
         } else {
             let best_block_number = self
                 .provider
@@ -451,22 +406,22 @@ where
 
             let start = best_block_number.saturating_sub(HISTORY_UPDATE_RANGE);
 
-            indexes.extend(start..=best_block_number);
-        }
+            &(start..=best_block_number).collect()
+        };
 
-        let mut blocks = Vec::with_capacity(indexes.size());
-        for block_number in indexes {
+        let mut blocks = Vec::with_capacity(indexes.len());
+        for &block_number in indexes {
             match self.provider.block_by_id(block_number.into()) {
                 Ok(Some(block)) => {
                     blocks.push(block);
                 }
                 Ok(None) => {
                     // Block not found, stop fetching
-                    warn!(target: "ethstats", "Block {} not found", block_number);
+                    debug!(target: "ethstats", "Block {} not found", block_number);
                     break;
                 }
                 Err(e) => {
-                    error!(target: "ethstats", "Error fetching block {}: {}", block_number, e);
+                    debug!(target: "ethstats", "Error fetching block {}: {}", block_number, e);
                     break;
                 }
             }
@@ -476,7 +431,7 @@ where
             blocks.iter().map(|block| self.block_to_stats(block)).collect::<Result<_, _>>()?;
 
         if history.is_empty() {
-            warn!(target: "ethstats", "No history to send to stats server");
+            debug!(target: "ethstats", "No history to send to stats server");
         } else {
             debug!(
                 target: "ethstats",
@@ -509,13 +464,34 @@ where
 
     /// Handle incoming messages from the `EthStats` server
     ///
-    /// Parses and processes server messages, dispatching to appropriate
-    /// handlers based on the message type.
+    /// # Expected Message Variants
+    ///
+    /// This function expects messages in the following format:
+    ///
+    /// ```json
+    /// { "emit": [<command: String>, <payload: Object>] }
+    /// ```
+    ///
+    /// ## Supported Commands:
+    ///
+    /// - `"node-pong"`: Indicates a pong response to a previously sent ping. The payload is
+    ///   ignored. Triggers a latency report to the server.
+    ///   - Example: ```json { "emit": [ "node-pong", { "clientTime": "2025-07-10 12:00:00.123
+    ///     +00:00 UTC", "serverTime": "2025-07-10 12:00:01.456 +00:00 UTC" } ] } ```
+    ///
+    /// - `"history"`: Requests historical block data. The payload may contain a `list` field with
+    ///   block numbers to fetch. If `list` is not present, the default range is used.
+    ///   - Example with list: `{ "emit": ["history", {"list": [1, 2, 3], "min": 1, "max": 3}] }`
+    ///   - Example without list: `{ "emit": ["history", {}] }`
+    ///
+    /// ## Other Commands:
+    ///
+    /// Any other command is logged as unhandled and ignored.
     async fn handle_message(&self, msg: Value) -> Result<(), EthStatsError> {
         let emit = match msg.get("emit") {
             Some(emit) => emit,
             None => {
-                warn!(target: "ethstats", "Stats server sent non-broadcast, msg {}", msg);
+                debug!(target: "ethstats", "Stats server sent non-broadcast, msg {}", msg);
                 return Err(EthStatsError::InvalidRequest);
             }
         };
@@ -523,7 +499,7 @@ where
         let command = match emit.get(0) {
             Some(Value::String(command)) => command.as_str(),
             _ => {
-                warn!(target: "ethstats", "Invalid stats server message type, msg {}", msg);
+                debug!(target: "ethstats", "Invalid stats server message type, msg {}", msg);
                 return Err(EthStatsError::InvalidRequest);
             }
         };
@@ -550,7 +526,7 @@ where
                     .iter()
                     .map(|val| {
                         val.as_u64().ok_or_else(|| {
-                            warn!(
+                            debug!(
                                 target: "ethstats",
                                 "Invalid stats history block number, msg {}", msg
                             );
@@ -561,7 +537,7 @@ where
 
                 self.report_history(Some(&block_numbers)).await?;
             }
-            other => warn!(target: "ethstats", "Unhandled command: {}", other),
+            other => debug!(target: "ethstats", "Unhandled command: {}", other),
         }
 
         Ok(())
@@ -601,7 +577,7 @@ where
                                 }
                             }
                             Err(e) => {
-                                error!(target: "ethstats", "Read error: {}", e);
+                                debug!(target: "ethstats", "Read error: {}", e);
                                 break;
                             }
                         }
@@ -651,7 +627,7 @@ where
                 // Handle messages from the read loop
                 Some(msg) = message_rx.recv() => {
                     if let Err(e) = self.handle_message(msg).await {
-                        error!(target: "ethstats", "Error handling message: {}", e);
+                        debug!(target: "ethstats", "Error handling message: {}", e);
                         self.disconnect().await;
                     }
                 }
@@ -659,12 +635,12 @@ where
                 // Handle new block
                 Some(head) = head_rx.recv() => {
                     if let Err(e) = self.report_block(Some(head)).await {
-                        error!(target: "ethstats", "Failed to report block: {}", e);
+                        debug!(target: "ethstats", "Failed to report block: {}", e);
                         self.disconnect().await;
                     }
 
                     if let Err(e) = self.report_pending().await {
-                        error!(target: "ethstats", "Failed to report pending: {}", e);
+                        debug!(target: "ethstats", "Failed to report pending: {}", e);
                         self.disconnect().await;
                     }
                 }
@@ -672,7 +648,7 @@ where
                 // Handle new pending tx
                 _= pending_tx_receiver.recv() => {
                     if let Err(e) = self.report_pending().await {
-                        error!(target: "ethstats", "Failed to report pending: {}", e);
+                        debug!(target: "ethstats", "Failed to report pending: {}", e);
                         self.disconnect().await;
                     }
                 }
@@ -680,7 +656,7 @@ where
                 // Handle stats reporting
                 _ = report_interval.tick() => {
                     if let Err(e) = self.report().await {
-                        error!(target: "ethstats", "Failed to report: {}", e);
+                        debug!(target: "ethstats", "Failed to report: {}", e);
                         self.disconnect().await;
                     }
                 }
@@ -689,7 +665,7 @@ where
                 _ = reconnect_interval.tick(), if self.conn.read().await.is_none() => {
                     match self.connect().await {
                         Ok(_) => info!(target: "ethstats", "Reconnected successfully"),
-                        Err(e) => error!(target: "ethstats", "Reconnect failed: {}", e),
+                        Err(e) => debug!(target: "ethstats", "Reconnect failed: {}", e),
                     }
                 }
             }
@@ -710,7 +686,7 @@ where
     async fn disconnect(&self) {
         if let Some(conn) = self.conn.write().await.take() {
             if let Err(e) = conn.close().await {
-                error!(target: "ethstats", "Error closing connection: {}", e);
+                debug!(target: "ethstats", "Error closing connection: {}", e);
             }
         }
     }
