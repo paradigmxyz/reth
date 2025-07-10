@@ -1,31 +1,28 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
-use super::EthResult;
 use alloy_consensus::{
-    transaction::{SignerRecoverable, TransactionMeta},
+    transaction::{Recovered, SignerRecoverable, TransactionMeta},
     ReceiptEnvelope, Transaction, TxReceipt,
 };
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
-use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<R, T, E>(
-    transaction: &T,
+    transaction: Recovered<&T>,
     meta: TransactionMeta,
     receipt: &R,
     all_receipts: &[R],
     blob_params: Option<BlobParams>,
     build_envelope: impl FnOnce(ReceiptWithBloom<alloy_consensus::Receipt<Log>>) -> E,
-) -> EthResult<TransactionReceipt<E>>
+) -> TransactionReceipt<E>
 where
     R: TxReceipt<Log = alloy_primitives::Log>,
     T: Transaction + SignerRecoverable,
 {
-    // Note: we assume this transaction is valid, because it's mined (or part of pending block)
-    // and we don't need to check for pre EIP-2
-    let from = transaction.recover_signer_unchecked()?;
+    let from = transaction.signer();
 
     // get the previous transaction cumulative gas used
     let gas_used = if meta.index == 0 {
@@ -78,7 +75,7 @@ where
         TxKind::Call(addr) => (None, Some(Address(*addr))),
     };
 
-    Ok(TransactionReceipt {
+    TransactionReceipt {
         inner: build_envelope(ReceiptWithBloom { receipt: rpc_receipt, logs_bloom }),
         transaction_hash: meta.tx_hash,
         transaction_index: Some(meta.index),
@@ -92,7 +89,7 @@ where
         // EIP-4844 fields
         blob_gas_price,
         blob_gas_used,
-    })
+    }
 }
 
 /// Receipt response builder.
@@ -108,28 +105,22 @@ impl EthReceiptBuilder {
     /// Note: This requires _all_ block receipts because we need to calculate the gas used by the
     /// transaction.
     pub fn new(
-        transaction: &TransactionSigned,
+        transaction: Recovered<&TransactionSigned>,
         meta: TransactionMeta,
         receipt: &Receipt,
         all_receipts: &[Receipt],
         blob_params: Option<BlobParams>,
-    ) -> EthResult<Self> {
+    ) -> Self {
         let base = build_receipt(
             transaction,
             meta,
             receipt,
             all_receipts,
             blob_params,
-            |receipt_with_bloom| match receipt.tx_type {
-                TxType::Legacy => ReceiptEnvelope::Legacy(receipt_with_bloom),
-                TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt_with_bloom),
-                TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt_with_bloom),
-                TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt_with_bloom),
-                TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt_with_bloom),
-            },
-        )?;
+            |receipt_with_bloom| ReceiptEnvelope::from_typed(receipt.tx_type, receipt_with_bloom),
+        );
 
-        Ok(Self { base })
+        Self { base }
     }
 
     /// Builds a receipt response from the base response body, and any set additional fields.

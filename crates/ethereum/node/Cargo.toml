@@ -34,6 +34,7 @@ reth-chainspec.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-trie-db.workspace = true
 reth-rpc-eth-types.workspace = true
+reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 

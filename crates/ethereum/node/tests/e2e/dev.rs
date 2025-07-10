@@ -5,7 +5,8 @@ use futures::StreamExt;
 use reth_chainspec::ChainSpec;
 use reth_node_api::{BlockBody, FullNodeComponents, FullNodePrimitives, NodeTypes};
 use reth_node_builder::{
-    rpc::RethRpcAddOns, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig, NodeHandle,
+    rpc::RethRpcAddOns, DebugNodeLauncher, EngineNodeLauncher, FullNode, NodeBuilder, NodeConfig,
+    NodeHandle,
 };
 use reth_node_core::args::DevArgs;
 use reth_node_ethereum::{node::EthereumAddOns, EthereumNode};
@@ -29,11 +30,12 @@ async fn can_run_dev_node() -> eyre::Result<()> {
         .with_components(EthereumNode::components())
         .with_add_ons(EthereumAddOns::default())
         .launch_with_fn(|builder| {
-            let launcher = EngineNodeLauncher::new(
+            let engine_launcher = EngineNodeLauncher::new(
                 builder.task_executor().clone(),
                 builder.config().datadir(),
                 Default::default(),
             );
+            let launcher = DebugNodeLauncher::new(engine_launcher);
             builder.launch_with(launcher)
         })
         .await?;
