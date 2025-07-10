@@ -410,11 +410,11 @@ where
 {
     let block_id = BlockId::Number(BlockNumberOrTag::default());
 
-    DebugApiClient::raw_header(client, block_id).await.unwrap();
-    DebugApiClient::raw_block(client, block_id).await.unwrap_err();
-    DebugApiClient::raw_transaction(client, B256::default()).await.unwrap();
-    DebugApiClient::raw_receipts(client, block_id).await.unwrap();
-    DebugApiClient::bad_blocks(client).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_header(client, block_id).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_block(client, block_id).await.unwrap_err();
+    DebugApiClient::<TransactionRequest>::raw_transaction(client, B256::default()).await.unwrap();
+    DebugApiClient::<TransactionRequest>::raw_receipts(client, block_id).await.unwrap();
+    DebugApiClient::<TransactionRequest>::bad_blocks(client).await.unwrap();
 }
 
 async fn test_basic_net_calls<C>(client: &C)
@@ -441,22 +441,39 @@ where
         count: None,
     };
 
-    TraceApiClient::trace_raw_transaction(client, Bytes::default(), HashSet::default(), None)
-        .await
-        .unwrap_err();
-    TraceApiClient::trace_call_many(client, vec![], Some(BlockNumberOrTag::Latest.into()))
-        .await
-        .unwrap_err();
-    TraceApiClient::replay_transaction(client, B256::default(), HashSet::default())
-        .await
-        .err()
-        .unwrap();
-    TraceApiClient::trace_block(client, block_id).await.unwrap_err();
-    TraceApiClient::replay_block_transactions(client, block_id, HashSet::default())
-        .await
-        .unwrap_err();
+    TraceApiClient::<TransactionRequest>::trace_raw_transaction(
+        client,
+        Bytes::default(),
+        HashSet::default(),
+        None,
+    )
+    .await
+    .unwrap_err();
+    TraceApiClient::<TransactionRequest>::trace_call_many(
+        client,
+        vec![],
+        Some(BlockNumberOrTag::Latest.into()),
+    )
+    .await
+    .unwrap_err();
+    TraceApiClient::<TransactionRequest>::replay_transaction(
+        client,
+        B256::default(),
+        HashSet::default(),
+    )
+    .await
+    .err()
+    .unwrap();
+    TraceApiClient::<TransactionRequest>::trace_block(client, block_id).await.unwrap_err();
+    TraceApiClient::<TransactionRequest>::replay_block_transactions(
+        client,
+        block_id,
+        HashSet::default(),
+    )
+    .await
+    .unwrap_err();
 
-    TraceApiClient::trace_filter(client, trace_filter).await.unwrap();
+    TraceApiClient::<TransactionRequest>::trace_filter(client, trace_filter).await.unwrap();
 }
 
 async fn test_basic_web3_calls<C>(client: &C)

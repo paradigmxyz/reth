@@ -7,6 +7,7 @@ use crate::{
     OpEngineApiBuilder, OpEngineTypes,
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
+use op_alloy_network::{EthereumWallet, NetworkWallet};
 use op_alloy_rpc_types_engine::{OpExecutionData, OpPayloadAttributes};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
@@ -444,6 +445,7 @@ where
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    EthereumWallet: NetworkWallet<NetworkT>,
 {
     type Handle = RpcHandle<N, OpEthApi<N, NetworkT>>;
 
@@ -563,6 +565,7 @@ where
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    EthereumWallet: NetworkWallet<NetworkT>,
 {
     type EthApi = OpEthApi<N, NetworkT>;
 

@@ -61,6 +61,8 @@ impl ToRpcError for EthSimulateError {
 /// given [`BlockExecutor`].
 ///
 /// Returns all executed transactions and the result of the execution.
+///
+/// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 #[expect(clippy::type_complexity)]
 pub fn execute_transactions<S, T>(
     mut builder: S,
@@ -115,6 +117,8 @@ where
 /// them into primitive transactions.
 ///
 /// This will set the defaults as defined in <https://github.com/ethereum/execution-apis/blob/e56d3208789259d0b09fa68e9d8594aa4d73c725/docs/ethsimulatev1-notes.md#default-values-for-transactions>
+///
+/// [`TransactionRequest`]: alloy_rpc_types_eth::TransactionRequest
 pub fn resolve_transaction<DB: Database, Tx, T>(
     mut tx: RpcTxReq<T::Network>,
     default_gas_limit: u64,
