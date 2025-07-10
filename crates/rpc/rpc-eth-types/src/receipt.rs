@@ -7,7 +7,7 @@ use alloy_consensus::{
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
-use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<R, T, E>(
@@ -117,13 +117,7 @@ impl EthReceiptBuilder {
             receipt,
             all_receipts,
             blob_params,
-            |receipt_with_bloom| match receipt.tx_type {
-                TxType::Legacy => ReceiptEnvelope::Legacy(receipt_with_bloom),
-                TxType::Eip2930 => ReceiptEnvelope::Eip2930(receipt_with_bloom),
-                TxType::Eip1559 => ReceiptEnvelope::Eip1559(receipt_with_bloom),
-                TxType::Eip4844 => ReceiptEnvelope::Eip4844(receipt_with_bloom),
-                TxType::Eip7702 => ReceiptEnvelope::Eip7702(receipt_with_bloom),
-            },
+            |receipt_with_bloom| ReceiptEnvelope::from_typed(receipt.tx_type, receipt_with_bloom),
         );
 
         Self { base }

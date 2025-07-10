@@ -4,7 +4,8 @@ use alloy_provider::network::AnyNetwork;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
-use reth_node_api::{BlockTy, FullNodeComponents};
+use reth_engine_local::LocalMiner;
+use reth_node_api::{BlockTy, FullNodeComponents, PayloadAttributesBuilder, PayloadTypes};
 use std::sync::Arc;
 use tracing::info;
 
@@ -56,6 +57,18 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     /// For Ethereum nodes, this typically converts from `alloy_rpc_types_eth::Block`
     /// to the node's internal block representation.
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> BlockTy<Self>;
+
+    /// Creates a payload attributes builder for local mining in dev mode.
+    ///
+    ///  It will be used by the `LocalMiner` when dev mode is enabled.
+    ///
+    /// The builder is responsible for creating the payload attributes that define how blocks should
+    /// be constructed during local mining.
+    fn local_payload_attributes_builder(
+        chain_spec: &Self::ChainSpec,
+    ) -> impl PayloadAttributesBuilder<
+        <<Self as reth_node_api::NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
+    >;
 }
 
 /// Node launcher with support for launching various debugging utilities.
@@ -154,6 +167,29 @@ where
             );
             handle.node.task_executor.spawn_critical("etherscan consensus client", async move {
                 rpc_consensus_client.run().await
+            });
+        }
+
+        if config.dev.dev {
+            info!(target: "reth::cli", "Using local payload attributes builder for dev mode");
+
+            let blockchain_db = handle.node.provider.clone();
+            let chain_spec = config.chain.clone();
+            let beacon_engine_handle = handle.node.add_ons_handle.beacon_engine_handle.clone();
+            let pool = handle.node.pool.clone();
+            let payload_builder_handle = handle.node.payload_builder_handle.clone();
+
+            let dev_mining_mode = handle.node.config.dev_mining_mode(pool);
+            handle.node.task_executor.spawn_critical("local engine", async move {
+                LocalMiner::new(
+                    blockchain_db,
+                    N::Types::local_payload_attributes_builder(&chain_spec),
+                    beacon_engine_handle,
+                    dev_mining_mode,
+                    payload_builder_handle,
+                )
+                .run()
+                .await
             });
         }
 

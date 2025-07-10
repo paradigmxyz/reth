@@ -4,6 +4,7 @@ use std::{
     future::Future,
     pin::Pin,
     task::{ready, Context, Poll},
+    time::Duration,
 };
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tracing::trace;
@@ -28,6 +29,8 @@ pub enum MetricEvent {
         /// Maximum known block number reachable by this stage.
         /// If specified, `entities_total` metric is updated.
         max_block_number: Option<BlockNumber>,
+        /// The duration of stage iteration including database commit.
+        elapsed: Duration,
     },
 }
 
@@ -57,12 +60,14 @@ impl MetricsListener {
                             stage_checkpoint: None,
                         },
                         max_block_number: Some(height),
+                        elapsed: Duration::default(),
                     });
                 }
             }
-            MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number } => {
+            MetricEvent::StageCheckpoint { stage_id, checkpoint, max_block_number, elapsed } => {
                 let stage_metrics = self.sync_metrics.get_stage_metrics(stage_id);
 
+                stage_metrics.total_elapsed.increment(elapsed.as_secs_f64());
                 stage_metrics.checkpoint.set(checkpoint.block_number as f64);
 
                 let (processed, total) = match checkpoint.entities() {
