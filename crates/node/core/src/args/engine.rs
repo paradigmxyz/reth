@@ -34,6 +34,10 @@ pub struct EngineArgs {
     #[arg(long = "engine.disable-caching-and-prewarming")]
     pub caching_and_prewarming_disabled: bool,
 
+    /// Enable the parallel sparse trie in the engine.
+    #[arg(long = "engine.parallel-sparse-trie", default_value = "false")]
+    pub parallel_sparse_trie_enabled: bool,
+
     /// Enable state provider latency metrics. This allows the engine to collect and report stats
     /// about how long state provider calls took during execution, but this does introduce slight
     /// overhead to state provider calls.
@@ -97,6 +101,7 @@ impl Default for EngineArgs {
             state_root_task_compare_updates: false,
             caching_and_prewarming_enabled: true,
             caching_and_prewarming_disabled: false,
+            parallel_sparse_trie_enabled: false,
             state_provider_metrics: false,
             cross_block_cache_size: DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB,
             accept_execution_requests_hash: false,
@@ -118,6 +123,7 @@ impl EngineArgs {
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
             .without_caching_and_prewarming(self.caching_and_prewarming_disabled)
+            .with_enable_parallel_sparse_trie(self.parallel_sparse_trie_enabled)
             .with_state_provider_metrics(self.state_provider_metrics)
             .with_always_compare_trie_updates(self.state_root_task_compare_updates)
             .with_cross_block_cache_size(self.cross_block_cache_size * 1024 * 1024)
