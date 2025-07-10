@@ -66,13 +66,13 @@ pub enum ProviderOrBlock<'a, P: BlockReader> {
 
 /// Checks if a block has any matching logs without extracting them.
 /// This is used to determine if receipts should be cached.
-pub fn block_has_matching_logs<P>(
+pub fn block_has_matching_logs<T>(
     filter: &Filter,
     block_num_hash: BlockNumHash,
-    receipts: &[P::Receipt],
+    receipts: &[T],
 ) -> bool
 where
-    P: BlockReader<Transaction: SignedTransaction>,
+    T: TxReceipt<Log = alloy_primitives::Log>,
 {
     if !filter.matches_block(&block_num_hash) {
         return false;

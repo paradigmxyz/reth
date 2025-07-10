@@ -1009,11 +1009,8 @@ impl<
             let (receipts, recovered_block) = match maybe_receipts {
                 Some(receipts) => {
                     // Already cached - check if it has matching logs
-                    let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
-                        &self.filter,
-                        header.num_hash(),
-                        &receipts,
-                    );
+                    let has_matching_logs =
+                        block_has_matching_logs(&self.filter, header.num_hash(), &receipts);
 
                     if has_matching_logs {
                         (receipts, maybe_block)
@@ -1026,11 +1023,8 @@ impl<
                     match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
                         Some(receipts) => {
                             // Check if this block has matching logs before caching
-                            let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
-                                &self.filter,
-                                header.num_hash(),
-                                &receipts,
-                            );
+                            let has_matching_logs =
+                                block_has_matching_logs(&self.filter, header.num_hash(), &receipts);
 
                             if !has_matching_logs {
                                 continue; // Skip blocks without matching logs - don't cache
@@ -1120,11 +1114,8 @@ impl<
 
             if !receipts.is_empty() {
                 // Check if this block has matching logs before adding to results
-                let has_matching_logs = block_has_matching_logs::<Eth::Provider>(
-                    &self.filter,
-                    header.num_hash(),
-                    &receipts,
-                );
+                let has_matching_logs =
+                    block_has_matching_logs(&self.filter, header.num_hash(), &receipts);
 
                 if has_matching_logs {
                     self.next.push_back(ReceiptBlockResult {
