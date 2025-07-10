@@ -347,9 +347,11 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     // Any branches/extensions along the path to the leaf will have their `hash`
                     // field unset, as it will no longer be valid once the leaf is removed.
                     match curr_node {
-                        SparseNode::Branch { .. } => {
-                            paths_to_reset_hashes
-                                .push((SparseSubtrieType::from_path(&curr_path), curr_path));
+                        SparseNode::Branch { hash, .. } => {
+                            if hash.is_some() {
+                                paths_to_reset_hashes
+                                    .push((SparseSubtrieType::from_path(&curr_path), curr_path));
+                            }
 
                             // If there is already an extension leading into a branch, then that
                             // extension is no longer relevant.
@@ -363,9 +365,11 @@ impl SparseTrieInterface for ParallelSparseTrie {
                             branch_parent_path = Some(curr_path);
                             branch_parent_node = Some(curr_node.clone());
                         }
-                        SparseNode::Extension { .. } => {
-                            paths_to_reset_hashes
-                                .push((SparseSubtrieType::from_path(&curr_path), curr_path));
+                        SparseNode::Extension { hash, .. } => {
+                            if hash.is_some() {
+                                paths_to_reset_hashes
+                                    .push((SparseSubtrieType::from_path(&curr_path), curr_path));
+                            }
 
                             // We can assume a new branch node will be found after the extension, so
                             // there's no need to modify branch_parent_path/node even if it's
@@ -1117,6 +1121,17 @@ impl ParallelSparseTrie {
         unchanged_prefix_set.extend_keys(prefix_set_iter);
 
         (changed_subtries, unchanged_prefix_set)
+    }
+
+    /// Returns an iterator over all nodes in the trie in no particular order.
+    #[cfg(test)]
+    fn all_nodes(&self) -> impl IntoIterator<Item = (&Nibbles, &SparseNode)> {
+        let mut nodes = vec![];
+        for subtrie in self.lower_subtries.iter().filter_map(LowerSparseSubtrie::as_revealed_ref) {
+            nodes.extend(subtrie.nodes.iter())
+        }
+        nodes.extend(self.upper_subtrie.nodes.iter());
+        nodes
     }
 }
 
@@ -3600,9 +3615,16 @@ mod tests {
 
         let provider = MockBlindedProvider::new();
 
+        // Remove a leaf which does not exist; this should have no effect.
+        trie.remove_leaf(&Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4, 0xF]), &provider)
+            .unwrap();
+        for (path, node) in trie.all_nodes() {
+            assert!(node.hash().is_some(), "path {path:?} should still have a hash");
+        }
+
         // Remove the leaf at path 0x01234
         let leaf_full_path = Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4]);
-        trie.remove_leaf(&leaf_full_path, provider).unwrap();
+        trie.remove_leaf(&leaf_full_path, &provider).unwrap();
 
         let upper_subtrie = &trie.upper_subtrie;
         let lower_subtrie_10 = trie.lower_subtries[0x01].as_revealed_ref().unwrap();
