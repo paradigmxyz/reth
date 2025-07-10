@@ -26,6 +26,8 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tracing::*;
 
 /// `reth re-execute` command
+///
+/// Re-execute blocks in parallel to verify historical sync correctness.
 #[derive(Debug, Parser)]
 pub struct Command<C: ChainSpecParser> {
     #[command(flatten)]
