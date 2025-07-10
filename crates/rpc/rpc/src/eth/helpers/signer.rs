@@ -9,17 +9,16 @@ use alloy_network::{eip2718::Encodable2718, EthereumWallet, NetworkWallet, Trans
 use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
 use reth_storage_api::BlockReader;
 
-impl<Provider, Pool, Network, EvmConfig> AddDevSigners
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> AddDevSigners
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader,
-    Network: alloy_network::Network,
-    EthereumWallet: NetworkWallet<Network>,
+    Rpc: alloy_network::Network,
+    EthereumWallet: NetworkWallet<Rpc>,
 {
     fn with_dev_accounts(&self) {
         *self.inner.signers().write() = DevSigner::random_signers(20)

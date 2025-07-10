@@ -1,7 +1,6 @@
 //! Contains RPC handler implementations specific to state.
 
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_rpc_convert::{RpcTxReq, RpcTypes};
 use reth_storage_api::{BlockReader, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
@@ -12,20 +11,20 @@ use reth_rpc_eth_api::{
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthState
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthState
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: LoadState + SpawnBlocking,
     Provider: BlockReader,
-    Network: RpcTypes,
+    Rpc: alloy_network::Network,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+impl<Provider, Pool, Network, EvmConfig, Rpc> LoadState
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: RpcNodeCoreExt<
         Provider: BlockReader
@@ -34,7 +33,7 @@ where
         Pool: TransactionPool,
     >,
     Provider: BlockReader,
-    Network: RpcTypes,
+    Rpc: alloy_network::Network,
 {
 }
 

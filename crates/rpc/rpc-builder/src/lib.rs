@@ -124,7 +124,7 @@ pub struct RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
 
 // === impl RpcBuilder ===
 
-impl<N, Provider, Pool, Network, EvmConfig, Consensus>
+impl<N, Provider, Pool, Network, EvmConfig, Consensus, Rpc>
     RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus>
 {
     /// Create a new instance of the builder
@@ -268,7 +268,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     /// Note: This spawns all necessary tasks.
     ///
     /// See also [`EthApiBuilder`].
-    pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+    pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig, Rpc>
     where
         N: NodePrimitives,
         Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>

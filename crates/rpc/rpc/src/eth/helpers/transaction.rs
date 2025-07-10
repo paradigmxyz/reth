@@ -2,7 +2,7 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
-use reth_rpc_convert::{RpcTxReq, RpcTypes};
+use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
@@ -12,11 +12,10 @@ use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsPr
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
 impl<Provider, Pool, Network, EvmConfig> EthTransactions
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+    for EthApi<Provider, Pool, Network, EvmConfig, Self::NetworkTypes>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>,
     Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
-    Network: RpcTypes,
 {
     #[inline]
     fn signers(
@@ -58,13 +57,12 @@ where
 }
 
 impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig, RpcTxReq<Network>>
+    for EthApi<Provider, Pool, Network, EvmConfig, Self::NetworkTypes>
 where
     Self: SpawnBlocking
         + FullEthApiTypes
         + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
     Provider: BlockReader,
-    Network: RpcTypes,
 {
 }
 
