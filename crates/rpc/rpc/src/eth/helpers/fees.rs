@@ -7,8 +7,8 @@ use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderHeader, StateProvi
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig, TxReq> EthFees
-    for EthApi<Provider, Pool, Network, EvmConfig, TxReq>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthFees
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: LoadFee<
         Provider: ChainSpecProvider<
@@ -16,16 +16,18 @@ where
         >,
     >,
     Provider: BlockReader,
+    Rpc: alloy_network::Network,
 {
 }
 
-impl<Provider, Pool, Network, EvmConfig, TxReq> LoadFee
-    for EthApi<Provider, Pool, Network, EvmConfig, TxReq>
+impl<Provider, Pool, Network, EvmConfig, Rpc> LoadFee
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: LoadBlock<Provider = Provider>,
     Provider: BlockReaderIdExt
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + StateProviderFactory,
+    Rpc: alloy_network::Network,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {

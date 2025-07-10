@@ -1,21 +1,23 @@
 //! Contains RPC handler implementations specific to transactions
 
 use crate::EthApi;
+use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256};
-use reth_rpc_convert::RpcTxReq;
+use reth_rpc_convert::{RpcTxReq, RpcTypes};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-impl<Provider, Pool, Network, EvmConfig> EthTransactions
-    for EthApi<Provider, Pool, Network, EvmConfig, Self::NetworkTypes>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthTransactions
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<NetworkTypes = Rpc>,
     Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    Rpc: alloy_network::Network + RpcTypes<TransactionRequest: TransactionBuilder<Rpc>>,
 {
     #[inline]
     fn signers(
@@ -56,13 +58,15 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig, Self::NetworkTypes>
+impl<Provider, Pool, Network, EvmConfig, Rpc> LoadTransaction
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: SpawnBlocking
         + FullEthApiTypes
-        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
+        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>
+        + EthApiTypes<NetworkTypes = Rpc>,
     Provider: BlockReader,
+    Rpc: alloy_network::Network + RpcTypes<TransactionRequest: TransactionBuilder<Rpc>>,
 {
 }
 
