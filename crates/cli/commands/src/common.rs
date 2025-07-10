@@ -244,21 +244,6 @@ pub trait CliNodeComponents<N: CliNodeTypes> {
     fn consensus(&self) -> &Self::Consensus;
 }
 
-/// Helper trait alias for an [`FnOnce`] producing [`CliNodeComponents`].
-pub trait CliComponentsBuilder<N: CliNodeTypes>:
-    FnOnce(Arc<N::ChainSpec>) -> Self::Components
-{
-    type Components: CliNodeComponents<N>;
-}
-
-impl<N: CliNodeTypes, F, Comp> CliComponentsBuilder<N> for F
-where
-    F: FnOnce(Arc<N::ChainSpec>) -> Comp,
-    Comp: CliNodeComponents<N>,
-{
-    type Components = Comp;
-}
-
 impl<N: CliNodeTypes, E, C> CliNodeComponents<N> for (E, C)
 where
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
@@ -274,4 +259,19 @@ where
     fn consensus(&self) -> &Self::Consensus {
         &self.1
     }
+}
+
+/// Helper trait alias for an [`FnOnce`] producing [`CliNodeComponents`].
+pub trait CliComponentsBuilder<N: CliNodeTypes>:
+    FnOnce(Arc<N::ChainSpec>) -> Self::Components
+{
+    type Components: CliNodeComponents<N>;
+}
+
+impl<N: CliNodeTypes, F, Comp> CliComponentsBuilder<N> for F
+where
+    F: FnOnce(Arc<N::ChainSpec>) -> Comp,
+    Comp: CliNodeComponents<N>,
+{
+    type Components = Comp;
 }
