@@ -972,7 +972,7 @@ impl SparseTrieInterface for RevealedSparseTrie {
                 Some(SparseNode::Empty) | None => {
                     // None implies no node is at the current path (even in the full trie)
                     // Empty node means there is a node at this path and it is "Empty"
-                    return Ok(LeafLookup::NonExistent { diverged_at: current });
+                    return Ok(LeafLookup::NonExistent);
                 }
                 Some(&SparseNode::Hash(hash)) => {
                     // We hit a blinded node - cannot determine if leaf exists
@@ -980,11 +980,7 @@ impl SparseTrieInterface for RevealedSparseTrie {
                 }
                 Some(SparseNode::Leaf { key, .. }) => {
                     // We found a leaf node before reaching our target depth
-
-                    // Temporarily append the leaf key to `current`
-                    let saved_len = current.len();
                     current.extend(key);
-
                     if &current == full_path {
                         // This should have been handled by our initial values map check
                         if let Some(value) = self.values.get(full_path) {
@@ -993,11 +989,9 @@ impl SparseTrieInterface for RevealedSparseTrie {
                         }
                     }
 
-                    let diverged_at = current.slice(..saved_len);
-
                     // The leaf node's path doesn't match our target path,
                     // providing an exclusion proof
-                    return Ok(LeafLookup::NonExistent { diverged_at });
+                    return Ok(LeafLookup::NonExistent);
                 }
                 Some(SparseNode::Extension { key, .. }) => {
                     // Temporarily append the extension key to `current`
@@ -1005,9 +999,8 @@ impl SparseTrieInterface for RevealedSparseTrie {
                     current.extend(key);
 
                     if full_path.len() < current.len() || !full_path.starts_with(&current) {
-                        let diverged_at = current.slice(..saved_len);
                         current.truncate(saved_len); // restore
-                        return Ok(LeafLookup::NonExistent { diverged_at });
+                        return Ok(LeafLookup::NonExistent);
                     }
                     // Prefix matched, so we keep walking with the longer `current`.
                 }
@@ -1016,7 +1009,7 @@ impl SparseTrieInterface for RevealedSparseTrie {
                     let nibble = full_path.get_unchecked(current.len());
                     if !state_mask.is_bit_set(nibble) {
                         // No child at this nibble - exclusion proof
-                        return Ok(LeafLookup::NonExistent { diverged_at: current });
+                        return Ok(LeafLookup::NonExistent);
                     }
 
                     // Continue down the branch
@@ -1041,17 +1034,12 @@ impl SparseTrieInterface for RevealedSparseTrie {
             }
             _ => {
                 // No leaf at exactly the target path
-                let parent_path = if full_path.is_empty() {
-                    Nibbles::default()
-                } else {
-                    full_path.slice(0..full_path.len() - 1)
-                };
-                return Ok(LeafLookup::NonExistent { diverged_at: parent_path });
+                return Ok(LeafLookup::NonExistent);
             }
         }
 
         // If we get here, there's no leaf at the target path
-        Ok(LeafLookup::NonExistent { diverged_at: current })
+        Ok(LeafLookup::NonExistent)
     }
 }
 
@@ -1983,10 +1971,7 @@ mod find_leaf_tests {
 
         // Leaf should not exist
         let result = sparse.find_leaf(&path, None);
-        assert_matches!(
-            result,
-            Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == Nibbles::default()
-        );
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
@@ -1995,9 +1980,7 @@ mod find_leaf_tests {
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
 
         let result = sparse.find_leaf(&path, None);
-
-        // In an empty trie, the search diverges immediately at the root.
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == Nibbles::default());
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
@@ -2035,10 +2018,7 @@ mod find_leaf_tests {
         sparse.update_leaf(path2, VALUE_B(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
-
-        // Diverged at the branch node because nibble '7' is not present.
-        let expected_divergence = Nibbles::from_nibbles_unchecked([0x1, 0x2]);
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
@@ -2053,10 +2033,7 @@ mod find_leaf_tests {
         sparse.update_leaf(path1, VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
-
-        // Diverged where the extension node started because the path doesn't match its key prefix.
-        let expected_divergence = Nibbles::default();
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
@@ -2069,12 +2046,7 @@ mod find_leaf_tests {
         sparse.update_leaf(existing_leaf_path, VALUE_A(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
-
-        // Diverged when it hit the leaf node at the root, because the search path is longer
-        // than the leaf's key stored there. The code returns the path of the node (root)
-        // where the divergence occurred.
-        let expected_divergence = Nibbles::default();
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]
@@ -2089,11 +2061,7 @@ mod find_leaf_tests {
         sparse.update_leaf(path2, VALUE_B(), &provider).unwrap();
 
         let result = sparse.find_leaf(&search_path, None);
-
-        // The path ends, but the node at the path is a branch, not a leaf.
-        // Diverged at the parent of the node found at the search path.
-        let expected_divergence = Nibbles::from_nibbles_unchecked([0x1]);
-        assert_matches!(result, Ok(LeafLookup::NonExistent { diverged_at }) if diverged_at == expected_divergence);
+        assert_matches!(result, Ok(LeafLookup::NonExistent));
     }
 
     #[test]

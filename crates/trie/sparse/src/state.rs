@@ -1,7 +1,7 @@
 use crate::{
     blinded::{BlindedProvider, BlindedProviderFactory},
     traits::SparseTrieInterface,
-    LeafLookup, RevealedSparseTrie, SparseTrie, TrieMasks,
+    RevealedSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -111,10 +111,7 @@ where
             None => return false,
         };
 
-        matches!(
-            trie.find_leaf(&path, None),
-            Ok(LeafLookup::Exists | LeafLookup::NonExistent { .. })
-        )
+        trie.find_leaf(&path, None).is_ok()
     }
 
     /// Was the storage-slot witness for (`address`,`slot`) complete?
@@ -125,10 +122,7 @@ where
             None => return false,
         };
 
-        matches!(
-            trie.find_leaf(&path, None),
-            Ok(LeafLookup::Exists | LeafLookup::NonExistent { .. })
-        )
+        trie.find_leaf(&path, None).is_ok()
     }
 
     /// Returns `true` if storage slot for account was already revealed.

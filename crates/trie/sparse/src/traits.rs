@@ -289,8 +289,5 @@ pub enum LeafLookup {
     /// Leaf exists with expected value.
     Exists,
     /// Leaf does not exist (exclusion proof found).
-    NonExistent {
-        /// Path where the search diverged from the target path.
-        diverged_at: Nibbles,
-    },
+    NonExistent ,
 }
