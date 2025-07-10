@@ -143,13 +143,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     /// use reth_ethereum_cli::interface::Cli;
     /// use reth_node_ethereum::EthereumNode;
     ///
-    /// let runtime = tokio::runtime::Builder::new_multi_thread()
-    ///     .worker_threads(4)
-    ///     .max_blocking_threads(256)
-    ///     .enable_all()
-    ///     .build()
-    ///     .unwrap();
-    /// let runner = CliRunner::from_runtime(runtime);
+    /// let runner = CliRunner::try_default_runtime().unwrap();
     ///
     /// Cli::parse_args()
     ///     .with_runner(runner, |builder, _| async move {
