@@ -60,8 +60,8 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
 
     fn reserve_nodes(&mut self, additional: usize) {
         match self {
-            Self::Serial(ref mut trie) => trie.reserve_nodes(additional),
-            Self::Parallel(ref mut trie) => trie.reserve_nodes(additional),
+            Self::Serial(trie) => trie.reserve_nodes(additional),
+            Self::Parallel(trie) => trie.reserve_nodes(additional),
         }
     }
 
@@ -72,8 +72,8 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
         match self {
-            Self::Serial(ref mut trie) => trie.reveal_node(path, node, masks),
-            Self::Parallel(ref mut trie) => trie.reveal_node(path, node, masks),
+            Self::Serial(trie) => trie.reveal_node(path, node, masks),
+            Self::Parallel(trie) => trie.reveal_node(path, node, masks),
         }
     }
 
@@ -84,8 +84,8 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         provider: P,
     ) -> SparseTrieResult<()> {
         match self {
-            Self::Serial(ref mut trie) => trie.update_leaf(full_path, value, provider),
-            Self::Parallel(ref mut trie) => trie.update_leaf(full_path, value, provider),
+            Self::Serial(trie) => trie.update_leaf(full_path, value, provider),
+            Self::Parallel(trie) => trie.update_leaf(full_path, value, provider),
         }
     }
 
@@ -95,29 +95,29 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         provider: P,
     ) -> SparseTrieResult<()> {
         match self {
-            Self::Serial(ref mut trie) => trie.remove_leaf(full_path, provider),
-            Self::Parallel(ref mut trie) => trie.remove_leaf(full_path, provider),
+            Self::Serial(trie) => trie.remove_leaf(full_path, provider),
+            Self::Parallel(trie) => trie.remove_leaf(full_path, provider),
         }
     }
 
     fn root(&mut self) -> B256 {
         match self {
-            Self::Serial(ref mut trie) => trie.root(),
-            Self::Parallel(ref mut trie) => trie.root(),
+            Self::Serial(trie) => trie.root(),
+            Self::Parallel(trie) => trie.root(),
         }
     }
 
     fn update_subtrie_hashes(&mut self) {
         match self {
-            Self::Serial(ref mut trie) => trie.update_subtrie_hashes(),
-            Self::Parallel(ref mut trie) => trie.update_subtrie_hashes(),
+            Self::Serial(trie) => trie.update_subtrie_hashes(),
+            Self::Parallel(trie) => trie.update_subtrie_hashes(),
         }
     }
 
     fn get_leaf_value(&self, full_path: &Nibbles) -> Option<&Vec<u8>> {
         match self {
-            Self::Serial(ref trie) => trie.get_leaf_value(full_path),
-            Self::Parallel(ref trie) => trie.get_leaf_value(full_path),
+            Self::Serial(trie) => trie.get_leaf_value(full_path),
+            Self::Parallel(trie) => trie.get_leaf_value(full_path),
         }
     }
 
@@ -127,36 +127,36 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         expected_value: Option<&Vec<u8>>,
     ) -> Result<LeafLookup, LeafLookupError> {
         match self {
-            Self::Serial(ref trie) => trie.find_leaf(full_path, expected_value),
-            Self::Parallel(ref trie) => trie.find_leaf(full_path, expected_value),
+            Self::Serial(trie) => trie.find_leaf(full_path, expected_value),
+            Self::Parallel(trie) => trie.find_leaf(full_path, expected_value),
         }
     }
 
     fn take_updates(&mut self) -> SparseTrieUpdates {
         match self {
-            Self::Serial(ref mut trie) => trie.take_updates(),
-            Self::Parallel(ref mut trie) => trie.take_updates(),
+            Self::Serial(trie) => trie.take_updates(),
+            Self::Parallel(trie) => trie.take_updates(),
         }
     }
 
     fn wipe(&mut self) {
         match self {
-            Self::Serial(ref mut trie) => trie.wipe(),
-            Self::Parallel(ref mut trie) => trie.wipe(),
+            Self::Serial(trie) => trie.wipe(),
+            Self::Parallel(trie) => trie.wipe(),
         }
     }
 
     fn clear(&mut self) {
         match self {
-            Self::Serial(ref mut trie) => trie.clear(),
-            Self::Parallel(ref mut trie) => trie.clear(),
+            Self::Serial(trie) => trie.clear(),
+            Self::Parallel(trie) => trie.clear(),
         }
     }
 
     fn updates_ref(&self) -> Cow<'_, SparseTrieUpdates> {
         match self {
-            Self::Serial(ref trie) => trie.updates_ref(),
-            Self::Parallel(ref trie) => trie.updates_ref(),
+            Self::Serial(trie) => trie.updates_ref(),
+            Self::Parallel(trie) => trie.updates_ref(),
         }
     }
 }
