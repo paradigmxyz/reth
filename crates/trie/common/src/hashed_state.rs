@@ -334,6 +334,12 @@ impl HashedPostState {
 
         HashedPostStateSorted { accounts, storages }
     }
+
+    /// Clears the account and storage maps of this `HashedPostState`.
+    pub fn clear(&mut self) {
+        self.accounts.clear();
+        self.storages.clear();
+    }
 }
 
 /// Representation of in-memory hashed storage.
