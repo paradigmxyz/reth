@@ -9836,6 +9836,7 @@ dependencies = [
  "reth-chain-state",
  "reth-chainspec",
  "reth-consensus",
+ "reth-db-api",
  "reth-engine-primitives",
  "reth-errors",
  "reth-ethereum-primitives",

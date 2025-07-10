@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use futures::future::TryFutureExt;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
-use reth_primitives_traits::{Block, NodePrimitives, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
     RpcNodeCore, RpcNodeCoreExt, RpcTransaction,
@@ -926,7 +926,7 @@ impl<
 
         // Determine if we should use cached mode based on range characteristics
         let use_cached_mode =
-            Self::should_use_cached_mode(&filter, &sealed_headers, block_count, distance_from_tip);
+            Self::should_use_cached_mode(&sealed_headers, block_count, distance_from_tip);
 
         if use_cached_mode && !sealed_headers.is_empty() {
             Self::Cached(CachedMode {
@@ -946,8 +946,7 @@ impl<
     }
 
     /// Determines whether to use cached mode based on bloom filter matches and range size
-    fn should_use_cached_mode(
-        filter: &Filter,
+    const fn should_use_cached_mode(
         headers: &[SealedHeader<<Eth::Provider as HeaderProvider>::Header>],
         block_count: u64,
         distance_from_tip: u64,
@@ -999,52 +998,23 @@ impl<
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         for header in self.headers_iter.by_ref() {
-            // Check cache first - this avoids database hits for recent blocks
-            let (maybe_block, maybe_receipts) = self
-                .filter_inner
-                .eth_cache()
-                .maybe_cached_block_and_receipts(header.hash())
-                .await?;
+            // Use get_receipts_and_maybe_block which has automatic fallback to provider
+            if let Some((receipts, maybe_block)) =
+                self.filter_inner.eth_cache().get_receipts_and_maybe_block(header.hash()).await?
+            {
+                // Check if this block has matching logs
+                let has_matching_logs =
+                    block_has_matching_logs(&self.filter, header.num_hash(), &receipts);
 
-            let (receipts, recovered_block) = match maybe_receipts {
-                Some(receipts) => {
-                    // Already cached - check if it has matching logs
-                    let has_matching_logs =
-                        block_has_matching_logs(&self.filter, header.num_hash(), &receipts);
-
-                    if has_matching_logs {
-                        (receipts, maybe_block)
-                    } else {
-                        continue; // Skip blocks without matching logs
-                    }
+                if has_matching_logs {
+                    return Ok(Some(ReceiptBlockResult {
+                        receipts,
+                        recovered_block: maybe_block,
+                        header,
+                    }));
                 }
-                None => {
-                    // Not in cache - fetch directly from provider without caching
-                    match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
-                        Some(receipts) => {
-                            // Check if this block has matching logs before caching
-                            let has_matching_logs =
-                                block_has_matching_logs(&self.filter, header.num_hash(), &receipts);
-
-                            if !has_matching_logs {
-                                continue; // Skip blocks without matching logs - don't cache
-                            }
-
-                            let recovered_block = self
-                                .filter_inner
-                                .provider()
-                                .block(header.hash().into())?
-                                .and_then(|block| block.try_into_recovered().ok())
-                                .map(Arc::new);
-
-                            (Arc::new(receipts), recovered_block)
-                        }
-                        None => continue, // No receipts found, try next header
-                    }
-                }
-            };
-
-            return Ok(Some(ReceiptBlockResult { receipts, recovered_block, header }));
+                // Skip blocks without matching logs
+            }
         }
 
         Ok(None) // No more headers
@@ -1621,6 +1591,22 @@ mod tests {
         let mut expected_hashes = vec![];
         let mut prev_hash = alloy_primitives::B256::default();
 
+        // Create a transaction for blocks that will have receipts
+        use alloy_consensus::TxLegacy;
+        use reth_ethereum_primitives::{TransactionSigned, TxType};
+
+        let tx_inner = TxLegacy {
+            chain_id: Some(1),
+            nonce: 0,
+            gas_price: 21_000,
+            gas_limit: 21_000,
+            to: alloy_primitives::TxKind::Call(alloy_primitives::Address::ZERO),
+            value: alloy_primitives::U256::ZERO,
+            input: alloy_primitives::Bytes::new(),
+        };
+        let signature = alloy_primitives::Signature::test_signature();
+        let tx = TransactionSigned::new_unhashed(tx_inner.into(), signature);
+
         for i in 100u64..=103 {
             let header = alloy_consensus::Header {
                 number: i,
@@ -1638,9 +1624,12 @@ mod tests {
             expected_hashes.push(hash);
             prev_hash = hash;
 
+            // Add transaction to blocks that will have receipts (100 and 102)
+            let transactions = if i == 100 || i == 102 { vec![tx.clone()] } else { vec![] };
+
             let block = reth_ethereum_primitives::Block {
                 header,
-                body: reth_ethereum_primitives::BlockBody::default(),
+                body: reth_ethereum_primitives::BlockBody { transactions, ..Default::default() },
             };
             provider.add_block(hash, block);
         }
@@ -1662,6 +1651,17 @@ mod tests {
         provider.add_receipts(101, vec![]);
         provider.add_receipts(102, vec![receipt.clone()]);
         provider.add_receipts(103, vec![]);
+
+        // Add block body indices for each block so receipts can be fetched
+        use reth_db_api::models::StoredBlockBodyIndices;
+        provider
+            .add_block_body_indices(100, StoredBlockBodyIndices { first_tx_num: 0, tx_count: 1 });
+        provider
+            .add_block_body_indices(101, StoredBlockBodyIndices { first_tx_num: 1, tx_count: 0 });
+        provider
+            .add_block_body_indices(102, StoredBlockBodyIndices { first_tx_num: 1, tx_count: 1 });
+        provider
+            .add_block_body_indices(103, StoredBlockBodyIndices { first_tx_num: 2, tx_count: 0 });
 
         let eth_api = build_test_eth_api(provider);
         let eth_filter = EthFilter::new(
