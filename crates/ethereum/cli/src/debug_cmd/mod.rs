@@ -1,16 +1,14 @@
 //! `reth debug` command. Collection of various debugging routines.
 
+use alloy_consensus::Header;
 use clap::{Parser, Subcommand};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::Hardforks;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_commands::common::CliNodeTypes;
+use reth_cli_commands::common::{CliComponentsBuilder, CliNodeTypes};
 use reth_cli_runner::CliContext;
-use reth_ethereum_primitives::EthPrimitives;
-use reth_node_ethereum::EthEngineTypes;
+use reth_node_api::NodePrimitives;
 use std::sync::Arc;
 
-mod build_block;
-mod execution;
 mod in_memory_merkle;
 mod merkle;
 
@@ -24,33 +22,25 @@ pub struct Command<C: ChainSpecParser> {
 /// `reth debug` subcommands
 #[derive(Subcommand, Debug)]
 pub enum Subcommands<C: ChainSpecParser> {
-    /// Debug the roundtrip execution of blocks as well as the generated data.
-    Execution(execution::Command<C>),
     /// Debug the clean & incremental state root calculations.
     Merkle(merkle::Command<C>),
     /// Debug in-memory state root calculation.
     InMemoryMerkle(in_memory_merkle::Command<C>),
-    /// Debug block building.
-    BuildBlock(build_block::Command<C>),
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: Hardforks>> Command<C> {
     /// Execute `debug` command
-    pub async fn execute<
-        N: CliNodeTypes<
-            Payload = EthEngineTypes,
-            Primitives = EthPrimitives,
-            ChainSpec = C::ChainSpec,
-        >,
-    >(
+    pub async fn execute<N>(
         self,
         ctx: CliContext,
-    ) -> eyre::Result<()> {
+        components: impl CliComponentsBuilder<N>,
+    ) -> eyre::Result<()>
+    where
+        N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives: NodePrimitives<BlockHeader = Header>>,
+    {
         match self.command {
-            Subcommands::Execution(command) => command.execute::<N>(ctx).await,
-            Subcommands::Merkle(command) => command.execute::<N>(ctx).await,
-            Subcommands::InMemoryMerkle(command) => command.execute::<N>(ctx).await,
-            Subcommands::BuildBlock(command) => command.execute::<N>(ctx).await,
+            Subcommands::Merkle(command) => command.execute::<N>(ctx, components).await,
+            Subcommands::InMemoryMerkle(command) => command.execute::<N>(ctx, components).await,
         }
     }
 }
@@ -59,10 +49,8 @@ impl<C: ChainSpecParser> Command<C> {
     /// Returns the underlying chain being used to run this command
     pub const fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match &self.command {
-            Subcommands::Execution(command) => command.chain_spec(),
             Subcommands::Merkle(command) => command.chain_spec(),
             Subcommands::InMemoryMerkle(command) => command.chain_spec(),
-            Subcommands::BuildBlock(command) => command.chain_spec(),
         }
     }
 }
