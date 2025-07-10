@@ -38,10 +38,12 @@ cargo nextest run --workspace \
   --exclude 'exex-subscription' \
   --exclude 'reth-bench' \
   --exclude 'ef-tests' \
+  --exclude 'op-reth' \
+  --exclude 'reth' \
   -E 'binary(e2e_testsuite)'
 ```
 
-Note: The `--exclude` flags prevent compilation of crates that don't contain e2e tests (examples, benchmarks, and EF tests), significantly reducing build time.
+Note: The `--exclude` flags prevent compilation of crates that don't contain e2e tests (examples, benchmarks, binaries, and EF tests), significantly reducing build time.
 
 ### Run e2e tests for a specific crate
 ```bash
