@@ -7263,6 +7263,7 @@ dependencies = [
  "futures",
  "humantime",
  "op-alloy-consensus",
+ "op-alloy-rpc-types-engine",
  "reqwest",
  "reth-cli-runner",
  "reth-cli-util",
