@@ -33,10 +33,15 @@ harness = true
 
 ### Run all e2e tests across the workspace
 ```bash
-cargo nextest run --workspace --exclude 'example-*' --exclude 'exex-subscription' -E 'binary(e2e_testsuite)'
+cargo nextest run --workspace \
+  --exclude 'example-*' \
+  --exclude 'exex-subscription' \
+  --exclude 'reth-bench' \
+  --exclude 'ef-tests' \
+  -E 'binary(e2e_testsuite)'
 ```
 
-Note: The `--exclude` flags prevent compilation of example crates that don't contain e2e tests, significantly reducing build time.
+Note: The `--exclude` flags prevent compilation of crates that don't contain e2e tests (examples, benchmarks, and EF tests), significantly reducing build time.
 
 ### Run e2e tests for a specific crate
 ```bash

@@ -35,6 +35,10 @@ jobs:
         run: |
           cargo nextest run \
             --locked --features "asm-keccak" \
-            --workspace --exclude 'example-*' --exclude 'exex-subscription' \
+            --workspace \
+            --exclude 'example-*' \
+            --exclude 'exex-subscription' \
+            --exclude 'reth-bench' \
+            --exclude 'ef-tests' \
             -E 'binary(e2e_testsuite)'
 
