@@ -2170,7 +2170,7 @@ mod tests {
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
         blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
-        RevealedSparseTrie, SparseNode, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+        SerialSparseTrie, SparseNode, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -4451,7 +4451,7 @@ mod tests {
 
         fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
             let default_provider = DefaultBlindedProvider;
-            let mut serial = RevealedSparseTrie::default().with_updates(true);
+            let mut serial = SerialSparseTrie::default().with_updates(true);
             let mut parallel = ParallelSparseTrie::default().with_updates(true);
 
             for (update, keys_to_delete) in updates {
