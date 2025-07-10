@@ -670,12 +670,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // First, do a quick check if the value exists in either the upper or lower subtrie's values
         // map. We assume that if there exists a leaf node, then its value will be in the `values`
         // map.
-        if let Some(actual_value) =
-            [Some(self.upper_subtrie.as_ref()), self.lower_subtrie_for_path(full_path)]
-                .iter()
-                .flatten()
-                .filter_map(|subtrie| subtrie.inner.values.get(full_path))
-                .next()
+        if let Some(actual_value) = std::iter::once(self.upper_subtrie.as_ref())
+            .chain(self.lower_subtrie_for_path(full_path))
+            .filter_map(|subtrie| subtrie.inner.values.get(full_path))
+            .next()
         {
             // We found the leaf, check if the value matches (if expected value was provided)
             return expected_value
