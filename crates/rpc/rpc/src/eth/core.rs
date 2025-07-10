@@ -41,11 +41,12 @@ pub type EthApiFor<N> = EthApi<
 >;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
-pub type EthApiBuilderFor<N> = EthApiBuilder<
+pub type EthApiBuilderFor<N, Rpc = Ethereum> = EthApiBuilder<
     <N as FullNodeTypes>::Provider,
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Network,
     <N as FullNodeComponents>::Evm,
+    Rpc,
 >;
 
 /// `Eth` API implementation.
@@ -85,6 +86,7 @@ where
 impl<Provider, Pool, Network, EvmConfig, Rpc> EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReaderIdExt,
+    Rpc: alloy_network::Network,
 {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
     ///
@@ -116,7 +118,7 @@ where
         pool: Pool,
         network: Network,
         evm_config: EvmConfig,
-    ) -> EthApiBuilder<Provider, Pool, Network, EvmConfig> {
+    ) -> EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc> {
         EthApiBuilder::new(provider, pool, network, evm_config)
     }
 
@@ -237,8 +239,9 @@ where
 impl<Provider, Pool, Network, EvmConfig, Rpc> SpawnBlocking
     for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
-    Self: Clone + Send + Sync + 'static,
+    Self: EthApiTypes<NetworkTypes = Rpc> + Clone + Send + Sync + 'static,
     Provider: BlockReader,
+    Rpc: alloy_network::Network,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -480,9 +483,9 @@ mod tests {
     use crate::{EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
+    use alloy_network::Ethereum;
     use alloy_primitives::{Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
-    use alloy_rpc_types_eth::TransactionRequest;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
     use rand::Rng;
     use reth_chain_state::CanonStateSubscriptions;
@@ -510,7 +513,7 @@ mod tests {
             + 'static,
     >(
         provider: P,
-    ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig, TransactionRequest> {
+    ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig, Ethereum> {
         EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
@@ -526,11 +529,8 @@ mod tests {
         mut oldest_block: Option<B256>,
         block_count: u64,
         mock_provider: MockEthProvider,
-    ) -> (
-        EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig, TransactionRequest>,
-        Vec<u128>,
-        Vec<f64>,
-    ) {
+    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig, Ethereum>, Vec<u128>, Vec<f64>)
+    {
         let mut rng = generators::rng();
 
         // Build mock data
@@ -616,14 +616,13 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response =
-            <EthApi<_, _, _, _, TransactionRequest> as EthApiServer<_, _, _, _, _>>::fee_history(
-                &build_test_eth_api(NoopProvider::default()),
-                U64::from(1),
-                BlockNumberOrTag::Latest,
-                None,
-            )
-            .await;
+        let response = <EthApi<_, _, _, _, Ethereum> as EthApiServer<_, _, _, _, _>>::fee_history(
+            &build_test_eth_api(NoopProvider::default()),
+            U64::from(1),
+            BlockNumberOrTag::Latest,
+            None,
+        )
+        .await;
         assert!(response.is_err());
         let error_object = response.unwrap_err();
         assert_eq!(error_object.code(), INVALID_PARAMS_CODE);
@@ -639,14 +638,13 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response =
-            <EthApi<_, _, _, _, TransactionRequest> as EthApiServer<_, _, _, _, _>>::fee_history(
-                &eth_api,
-                U64::from(newest_block + 1),
-                newest_block.into(),
-                Some(vec![10.0]),
-            )
-            .await;
+        let response = <EthApi<_, _, _, _, Ethereum> as EthApiServer<_, _, _, _, _>>::fee_history(
+            &eth_api,
+            U64::from(newest_block + 1),
+            newest_block.into(),
+            Some(vec![10.0]),
+        )
+        .await;
 
         assert!(response.is_err());
         let error_object = response.unwrap_err();
@@ -663,14 +661,13 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response =
-            <EthApi<_, _, _, _, TransactionRequest> as EthApiServer<_, _, _, _, _>>::fee_history(
-                &eth_api,
-                U64::from(1),
-                (newest_block + 1000).into(),
-                Some(vec![10.0]),
-            )
-            .await;
+        let response = <EthApi<_, _, _, _, Ethereum> as EthApiServer<_, _, _, _, _>>::fee_history(
+            &eth_api,
+            U64::from(1),
+            (newest_block + 1000).into(),
+            Some(vec![10.0]),
+        )
+        .await;
 
         assert!(response.is_err());
         let error_object = response.unwrap_err();
@@ -687,15 +684,14 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response =
-            <EthApi<_, _, _, _, TransactionRequest> as EthApiServer<_, _, _, _, _>>::fee_history(
-                &eth_api,
-                U64::from(0),
-                newest_block.into(),
-                None,
-            )
-            .await
-            .unwrap();
+        let response = <EthApi<_, _, _, _, Ethereum> as EthApiServer<_, _, _, _, _>>::fee_history(
+            &eth_api,
+            U64::from(0),
+            newest_block.into(),
+            None,
+        )
+        .await
+        .unwrap();
         assert_eq!(
             response,
             FeeHistory::default(),

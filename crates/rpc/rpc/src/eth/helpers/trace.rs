@@ -24,5 +24,6 @@ where
         Error: FromEvmError<Self::Evm>,
     >,
     Provider: BlockReader,
+    Rpc: alloy_network::Network,
 {
 }

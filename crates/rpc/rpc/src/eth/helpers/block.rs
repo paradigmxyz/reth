@@ -30,7 +30,7 @@ where
         >,
     >,
     Provider: BlockReader + ChainSpecProvider,
-    Rpc: RpcTypes<Receipt = TransactionReceipt>,
+    Rpc: alloy_network::Network + RpcTypes<Receipt = TransactionReceipt>,
 {
     async fn block_receipts(
         &self,
@@ -85,5 +85,6 @@ where
         >,
     Provider: BlockReader,
     EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
+    Rpc: alloy_network::Network,
 {
 }
