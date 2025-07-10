@@ -2,6 +2,7 @@
 //! response. This is useful for benchmarking, as it allows us to wait for a payload to be valid
 //! before sending additional calls.
 
+use alloy_eips::eip7685::Requests;
 use alloy_provider::{ext::EngineApi, network::AnyRpcBlock, Network, Provider};
 use alloy_rpc_types_engine::{
     ExecutionPayload, ExecutionPayloadInputV2, ForkchoiceState, ForkchoiceUpdated,
@@ -163,7 +164,7 @@ pub(crate) fn block_to_new_payload(
                             },
                             cancun.versioned_hashes.clone(),
                             cancun.parent_beacon_block_root,
-                            prague.requests.requests_hash(),
+                            Requests::default(),
                         ))?,
                     )
                 } else {
