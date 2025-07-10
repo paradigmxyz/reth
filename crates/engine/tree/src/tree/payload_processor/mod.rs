@@ -28,7 +28,7 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::SparseTrie;
+use reth_trie_sparse::{SerialSparseTrie, SparseTrie};
 use std::{
     collections::VecDeque,
     sync::{
@@ -199,13 +199,14 @@ where
         // take the sparse trie if it was set
         let sparse_trie = self.sparse_trie.take();
 
-        let mut sparse_trie_task = SparseTrieTask::new_with_stored_trie(
-            self.executor.clone(),
-            sparse_trie_rx,
-            proof_task.handle(),
-            self.trie_metrics.clone(),
-            sparse_trie,
-        );
+        let mut sparse_trie_task =
+            SparseTrieTask::<_, SerialSparseTrie, SerialSparseTrie>::new_with_stored_trie(
+                self.executor.clone(),
+                sparse_trie_rx,
+                proof_task.handle(),
+                self.trie_metrics.clone(),
+                sparse_trie,
+            );
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
