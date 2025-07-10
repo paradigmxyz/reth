@@ -78,9 +78,9 @@ impl<N> ProviderFactoryBuilder<N> {
     /// # Open an instance with disabled read-transaction timeout
     ///
     /// By default, read transactions are automatically terminated after a timeout to prevent
-    /// database free list growth, which can degrade performance when the database is actively
-    /// being modified. However, if the database is static (no writes occurring), this safety
-    /// mechanism can be disabled using [`ReadOnlyConfig::disable_long_read_transaction_safety`].
+    /// database free list growth. However, if the database is static (no writes occurring), this
+    /// safety mechanism can be disabled using
+    /// [`ReadOnlyConfig::disable_long_read_transaction_safety`].
     ///
     /// ```no_run
     /// use reth_chainspec::MAINNET;
@@ -155,8 +155,7 @@ impl ReadOnlyConfig {
         Self::from_dirs(datadir.join("db"), datadir.join("static_files"))
     }
 
-    /// Disables long-lived read transaction safety guarantees, such as backtrace recording and
-    /// timeout.
+    /// Disables long-lived read transaction safety guarantees.
     ///
     /// Caution: Keeping database transaction open indefinitely can cause the free list to grow if
     /// changes to the database are made.
