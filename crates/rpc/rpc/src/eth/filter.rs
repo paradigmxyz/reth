@@ -952,8 +952,8 @@ impl<
         block_count: u64,
         distance_from_tip: u64,
     ) -> bool {
-        // Count potential bloom filter matches to estimate cache pressure
-        let bloom_matches = headers.iter().filter(|h| filter.matches_bloom(h.logs_bloom())).count();
+        // Headers are already filtered by bloom, so count equals length
+        let bloom_matches = headers.len();
 
         // Calculate adjusted threshold based on bloom matches
         let adjusted_threshold = Self::calculate_adjusted_threshold(block_count, bloom_matches);
