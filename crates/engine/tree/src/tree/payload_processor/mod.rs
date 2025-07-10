@@ -101,7 +101,7 @@ where
     }
 
     /// Returns a reference to the executor.
-    pub fn executor(&self) -> &WorkloadExecutor {
+    pub const fn executor(&self) -> &WorkloadExecutor {
         &self.executor
     }
 }

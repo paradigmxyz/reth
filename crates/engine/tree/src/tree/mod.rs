@@ -2489,10 +2489,10 @@ where
             self.compute_trie_input(persisting_kind, consistent_view.provider_ro()?, parent_hash)?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
-        let handle = self.payload_processor.executor();
-        let runtime = handle.handle().clone();
+        let executor = self.payload_processor.executor();
+        let handle = executor.handle().clone();
 
-        ParallelStateRoot::new(consistent_view, input, runtime).incremental_root_with_updates()
+        ParallelStateRoot::new(consistent_view, input, handle).incremental_root_with_updates()
     }
 
     /// Computes the trie input at the provided parent hash.

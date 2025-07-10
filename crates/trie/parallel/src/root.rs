@@ -348,13 +348,9 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(
-                consistent_view,
-                TrieInput::from_state(hashed_state),
-                handle.clone(),
-            )
-            .incremental_root()
-            .unwrap(),
+            ParallelStateRoot::new(consistent_view, TrieInput::from_state(hashed_state), handle)
+                .incremental_root()
+                .unwrap(),
             test_utils::state_root(state)
         );
     }
