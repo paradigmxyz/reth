@@ -289,5 +289,5 @@ pub enum LeafLookup {
     /// Leaf exists with expected value.
     Exists,
     /// Leaf does not exist (exclusion proof found).
-    NonExistent ,
+    NonExistent,
 }
