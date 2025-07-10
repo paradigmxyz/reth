@@ -5,6 +5,7 @@ use alloy_consensus::{
     crypto::RecoveryError,
     transaction::{SignerRecoverable, TransactionMeta},
 };
+use alloy_rpc_types_eth::TransactionReceipt;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_rpc_eth_api::{
@@ -21,7 +22,7 @@ where
                           + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
         > + EthApiTypes<NetworkTypes = Rpc, Error: From<RecoveryError>>,
     Provider: BlockReader + ChainSpecProvider,
-    Rpc: alloy_network::Network,
+    Rpc: alloy_network::Network<ReceiptResponse = TransactionReceipt>,
 {
     async fn build_transaction_receipt(
         &self,

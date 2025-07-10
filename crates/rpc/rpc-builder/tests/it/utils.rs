@@ -1,11 +1,11 @@
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-
+use alloy_network::Ethereum;
 use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
 use reth_chainspec::MAINNET;
 use reth_consensus::noop::NoopConsensus;
 use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
@@ -118,9 +118,15 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 }
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
-pub fn test_rpc_builder(
-) -> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
-{
+pub fn test_rpc_builder() -> RpcModuleBuilder<
+    EthPrimitives,
+    NoopProvider,
+    TestPool,
+    NoopNetwork,
+    EthEvmConfig,
+    NoopConsensus,
+    Ethereum,
+> {
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())

@@ -12,7 +12,7 @@ use reth_optimism_primitives::DepositReceipt;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
     try_into_op_tx_info, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore,
-    RpcNodeCoreExt, RpcTxReq, TxInfoMapper,
+    RpcNodeCoreExt, RpcTxReq, RpcTypes, TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{
@@ -25,10 +25,13 @@ use std::{
     sync::Arc,
 };
 
-impl<N> EthTransactions for OpEthApi<N>
+impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<Error = OpEthApiError>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt>
+        + EthApiTypes<Error = OpEthApiError, NetworkTypes = Rpc>,
     N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
+    Rpc: op_alloy_network::Network
+        + RpcTypes<TransactionRequest: op_alloy_network::TransactionBuilder<Rpc>>,
 {
     fn signers(
         &self,
@@ -95,9 +98,10 @@ where
 {
 }
 
-impl<N> OpEthApi<N>
+impl<N, Rpc> OpEthApi<N, Rpc>
 where
     N: OpNodeCore,
+    Rpc: op_alloy_network::Network,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
@@ -110,25 +114,28 @@ where
 /// For deposits, receipt is fetched to extract `deposit_nonce` and `deposit_receipt_version`.
 /// Otherwise, it works like regular Ethereum implementation, i.e. uses [`TransactionInfo`].
 #[derive(Clone)]
-pub struct OpTxInfoMapper<N: OpNodeCore>(Arc<OpEthApiInner<N>>);
+pub struct OpTxInfoMapper<N: OpNodeCore, Rpc: op_alloy_network::Network>(
+    Arc<OpEthApiInner<N, Rpc>>,
+);
 
-impl<N: OpNodeCore> Debug for OpTxInfoMapper<N> {
+impl<N: OpNodeCore, Rpc: op_alloy_network::Network> Debug for OpTxInfoMapper<N, Rpc> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpTxInfoMapper").finish()
     }
 }
 
-impl<N: OpNodeCore> OpTxInfoMapper<N> {
+impl<N: OpNodeCore, Rpc: op_alloy_network::Network> OpTxInfoMapper<N, Rpc> {
     /// Creates [`OpTxInfoMapper`] that uses [`ReceiptProvider`] borrowed from given `eth_api`.
-    pub const fn new(eth_api: Arc<OpEthApiInner<N>>) -> Self {
+    pub const fn new(eth_api: Arc<OpEthApiInner<N, Rpc>>) -> Self {
         Self(eth_api)
     }
 }
 
-impl<N> TxInfoMapper<&OpTxEnvelope> for OpTxInfoMapper<N>
+impl<N, Rpc> TxInfoMapper<&OpTxEnvelope> for OpTxInfoMapper<N, Rpc>
 where
     N: FullNodeComponents,
     N::Provider: ReceiptProvider<Receipt: DepositReceipt>,
+    Rpc: op_alloy_network::Network,
 {
     type Out = OpTransactionInfo;
     type Err = ProviderError;

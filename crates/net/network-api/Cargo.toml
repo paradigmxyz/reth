@@ -47,4 +47,6 @@ serde = [
     "alloy-primitives/serde",
     "enr/serde",
     "reth-ethereum-forks/serde",
+    "alloy-consensus/serde",
+    "alloy-rpc-types-eth/serde",
 ]

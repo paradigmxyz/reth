@@ -10,9 +10,8 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
-    helpers::{EthSigner, SpawnBlocking},
+    helpers::{spec::SignersForRpc, SpawnBlocking},
     node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
@@ -32,12 +31,12 @@ use tokio::sync::{broadcast, Mutex};
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
-pub type EthApiFor<N> = EthApi<
+pub type EthApiFor<N, Rpc = Ethereum> = EthApi<
     <N as FullNodeTypes>::Provider,
     <N as FullNodeComponents>::Pool,
     <N as FullNodeComponents>::Network,
     <N as FullNodeComponents>::Evm,
-    RpcTxReq<<N as FullNodeComponents>::Network>,
+    Rpc,
 >;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
@@ -100,12 +99,13 @@ where
     /// # Create an instance with noop ethereum implementations
     ///
     /// ```no_run
+    /// use alloy_network::Ethereum;
     /// use reth_evm_ethereum::EthEvmConfig;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::noop::NoopProvider;
     /// use reth_rpc::EthApi;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
-    /// let eth_api = EthApi::builder(
+    /// let eth_api = EthApi::<_, _, _, _, Ethereum>::builder(
     ///     NoopProvider::default(),
     ///     NoopTransactionPool::default(),
     ///     NoopNetwork::default(),
@@ -270,8 +270,7 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig, Rpc: all
     /// An interface to interact with the network
     network: Network,
     /// All configured Signers
-    signers:
-        parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction, Rpc, RpcTxReq<Rpc>>>>>,
+    signers: SignersForRpc<Provider, Rpc>,
     /// The async cache frontend for eth related data
     eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
     /// The async gas oracle frontend for gas price suggestions
@@ -434,10 +433,7 @@ where
 
     /// Returns a handle to the signers.
     #[inline]
-    pub const fn signers(
-        &self,
-    ) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Provider::Transaction, Rpc, RpcTxReq<Rpc>>>>>
-    {
+    pub const fn signers(&self) -> &SignersForRpc<Provider, Rpc> {
         &self.signers
     }
 
@@ -499,6 +495,8 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
+    type FakeEthApi = EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig, Ethereum>;
+
     fn build_test_eth_api<
         P: BlockReaderIdExt<
                 Block = reth_ethereum_primitives::Block,
@@ -529,8 +527,7 @@ mod tests {
         mut oldest_block: Option<B256>,
         block_count: u64,
         mock_provider: MockEthProvider,
-    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig, Ethereum>, Vec<u128>, Vec<f64>)
-    {
+    ) -> (FakeEthApi, Vec<u128>, Vec<f64>) {
         let mut rng = generators::rng();
 
         // Build mock data

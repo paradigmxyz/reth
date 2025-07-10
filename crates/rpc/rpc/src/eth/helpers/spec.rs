@@ -3,7 +3,7 @@ use alloy_primitives::U256;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_network_api::NetworkInfo;
 use reth_rpc_eth_api::{
-    helpers::{spec::Signers, EthApiSpec},
+    helpers::{spec::SignersForApi, EthApiSpec},
     RpcNodeCore,
 };
 use reth_storage_api::{BlockNumReader, BlockReader, ProviderTx, StageCheckpointReader};
@@ -28,7 +28,7 @@ where
         self.inner.starting_block()
     }
 
-    fn signers(&self) -> &Signers<Self> {
+    fn signers(&self) -> &SignersForApi<Self> {
         self.inner.signers()
     }
 }
