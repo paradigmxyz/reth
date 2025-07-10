@@ -29,7 +29,7 @@ use reth_trie_parallel::{
     root::ParallelStateRootError,
 };
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory},
+    provider::{TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseTrie, SparseTrieInterface,
 };
 use reth_trie_sparse_parallel::ParallelSparseTrie;
@@ -336,9 +336,9 @@ where
         >,
         sparse_trie: Option<SparseTrie<A>>,
     ) where
-        BPF: BlindedProviderFactory + Clone + Send + Sync + 'static,
-        BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-        BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+        BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
+        BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+        BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
         A: SparseTrieInterface + Send + Sync + Default + 'static,
         ConfiguredSparseTrie: From<A>,
     {
@@ -379,9 +379,9 @@ where
         >,
         is_revealed: bool,
     ) where
-        BPF: BlindedProviderFactory + Clone + Send + Sync + 'static,
-        BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-        BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+        BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
+        BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+        BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     {
         match configured_trie {
             ConfiguredSparseTrie::Serial(boxed_serial) => {
@@ -417,9 +417,9 @@ where
         stored_trie: Option<SparseTrie<ConfiguredSparseTrie>>,
         use_parallel_for_new: bool,
     ) where
-        BPF: BlindedProviderFactory + Clone + Send + Sync + 'static,
-        BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-        BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+        BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
+        BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+        BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     {
         let is_revealed = stored_trie.as_ref().is_some_and(|trie| trie.is_revealed());
         match stored_trie {
