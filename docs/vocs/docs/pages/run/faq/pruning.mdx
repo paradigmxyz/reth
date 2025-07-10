@@ -20,29 +20,29 @@ the steps for running Reth as a full node, what caveats to expect and how to con
 
 -   Archive node – Reth node that has all historical data from genesis.
 -   Pruned node – Reth node that has its historical data pruned partially or fully through
-    a [custom configuration](/run/configuration#the-prune-section).
+    a [custom configuration](../configuration.mdx#the-prune-section).
 -   Full Node – Reth node that has the latest state and historical data for only the last 10064 blocks available
     for querying in the same way as an archive node.
 
-The node type that was chosen when first [running a node](/run/overview) **cannot** be changed after
+The node type that was chosen when first [running a node](../overview.mdx) **cannot** be changed after
 the initial sync. Turning Archive into Pruned, or Pruned into Full is not supported.
 
 ## Modes
 
 ### Archive Node
 
-Default mode, follow the steps from the previous chapter on [how to run on mainnet or official testnets](/run/ethereum).
+Default mode, follow the steps from the previous chapter on [how to run on mainnet or official testnets](../ethereum.mdx).
 
 ### Pruned Node
 
-To run Reth as a pruned node configured through a [custom configuration](/run/configuration#the-prune-section),
+To run Reth as a pruned node configured through a [custom configuration](../configuration.mdx#the-prune-section),
 modify the `reth.toml` file and run Reth in the same way as archive node by following the steps from
-the previous chapter on [how to run on mainnet or official testnets](/run/ethereum).
+the previous chapter on [how to run on mainnet or official testnets](../ethereum.mdx).
 
 ### Full Node
 
 To run Reth as a full node, follow the steps from the previous chapter on
-[how to run on mainnet or official testnets](/run/ethereum), and add a `--full` flag. For example:
+[how to run on mainnet or official testnets](../ethereum.mdx), and add a `--full` flag. For example:
 
 ```bash
 reth node \
@@ -108,7 +108,7 @@ Meaning, it prunes:
 
 ## RPC support
 
-As it was mentioned in the [pruning configuration chapter](/run/configuration#the-prune-section), there are several segments which can be pruned
+As it was mentioned in the [pruning configuration chapter](../configuration#the-prune-section), there are several segments which can be pruned
 independently of each other:
 
 -   Sender Recovery
