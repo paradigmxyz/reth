@@ -354,12 +354,11 @@ where
                 SparseTrie::Blind(opt) => {
                     SparseTrie::Blind(opt.map(|t| Box::new(ConfiguredSparseTrie::from(*t))))
                 }
-                SparseTrie::Revealed(mut t) => {
-                    t.clear();
+                SparseTrie::Revealed(t) => {
                     SparseTrie::Revealed(Box::new(ConfiguredSparseTrie::from(*t)))
                 }
             };
-            accounts_trie.lock().replace(trie);
+            accounts_trie.lock().replace(trie.clear());
         });
     }
 
