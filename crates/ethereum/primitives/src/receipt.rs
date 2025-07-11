@@ -348,9 +348,11 @@ impl From<Receipt<TxType>> for alloy_consensus::ReceiptEnvelope<Log> {
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
-    use alloy_primitives::Log;
+    use alloy_consensus::TxType;
+    use alloy_eips::eip2718::Eip2718Error;
+    use alloy_primitives::{Log, U8};
     use core::fmt::Debug;
-    use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::Receipt`] serde implementation.
@@ -370,8 +372,10 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Receipt<'a, T> {
+    #[serde(bound(deserialize = "T: TryFrom<u8, Error = Eip2718Error>"))]
+    pub struct Receipt<'a, T = TxType> {
         /// Receipt type.
+        #[serde(deserialize_with = "deserde_txtype")]
         pub tx_type: T,
         /// If transaction is executed successfully.
         ///
@@ -381,6 +385,15 @@ pub(super) mod serde_bincode_compat {
         pub cumulative_gas_used: u64,
         /// Log send from contracts.
         pub logs: Cow<'a, Vec<Log>>,
+    }
+
+    /// Ensures that txtype is deserialized symmetrically as U8
+    fn deserde_txtype<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: TryFrom<u8, Error = Eip2718Error>,
+    {
+        U8::deserialize(deserializer)?.to::<u8>().try_into().map_err(serde::de::Error::custom)
     }
 
     impl<'a, T: Copy> From<&'a super::Receipt<T>> for Receipt<'a, T> {
@@ -414,7 +427,9 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de, T: DeserializeOwned> DeserializeAs<'de, super::Receipt<T>> for Receipt<'de, T> {
+    impl<'de, T: TryFrom<u8, Error = Eip2718Error>> DeserializeAs<'de, super::Receipt<T>>
+        for Receipt<'de, T>
+    {
         fn deserialize_as<D>(deserializer: D) -> Result<super::Receipt<T>, D::Error>
         where
             D: Deserializer<'de>,
@@ -425,7 +440,7 @@ pub(super) mod serde_bincode_compat {
 
     impl<T> reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::Receipt<T>
     where
-        T: Copy + Serialize + DeserializeOwned + Debug + 'static,
+        T: Copy + Serialize + TryFrom<u8, Error = Eip2718Error> + Debug + 'static,
     {
         type BincodeRepr<'a> = Receipt<'a, T>;
 
