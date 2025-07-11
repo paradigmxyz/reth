@@ -117,17 +117,17 @@ where
         &mut self,
     ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseTrie<A>) {
         // run the main loop to completion
-        let result = self.run_to_completion();
+        let result = self.run_inner();
         // take the account trie so that we can reuse its already allocated data structures.
         let trie = self.trie.take_accounts_trie();
 
         (result, trie)
     }
 
-    /// Run the sparse trie task to completion.
+    /// Inner function to run the sparse trie task to completion.
     ///
     /// See [`Self::run`] for more information.
-    fn run_to_completion(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
+    fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut num_iterations = 0;
