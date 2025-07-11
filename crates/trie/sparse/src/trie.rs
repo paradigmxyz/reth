@@ -120,7 +120,7 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
     ///
     /// let trie = SparseTrie::<SerialSparseTrie>::blind();
     /// assert!(trie.is_blind());

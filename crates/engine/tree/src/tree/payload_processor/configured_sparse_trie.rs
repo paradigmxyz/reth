@@ -3,7 +3,7 @@
 use alloy_primitives::B256;
 use reth_trie::{Nibbles, TrieNode};
 use reth_trie_sparse::{
-    provider::TrieNodeProvider, errors::SparseTrieResult, LeafLookup, LeafLookupError,
+    errors::SparseTrieResult, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
     SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
 };
 use reth_trie_sparse_parallel::ParallelSparseTrie;
