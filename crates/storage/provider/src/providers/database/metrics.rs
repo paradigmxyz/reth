@@ -80,7 +80,8 @@ struct DatabaseProviderMetrics {
     insert_headers: Histogram,
     /// Duration of insert header numbers
     insert_header_numbers: Histogram,
-    /// Duration of insert header TD
+    /// Duration of insert header TD (deprecated after Paris/Merge)
+    #[deprecated(note = "No longer used after Paris/Merge")]
     insert_header_td: Histogram,
     /// Duration of insert block body indices
     insert_block_body_indices: Histogram,
@@ -107,6 +108,7 @@ impl DatabaseProviderMetrics {
             Action::InsertCanonicalHeaders => self.insert_canonical_headers.record(duration),
             Action::InsertHeaders => self.insert_headers.record(duration),
             Action::InsertHeaderNumbers => self.insert_header_numbers.record(duration),
+            #[expect(deprecated)]
             Action::InsertHeaderTerminalDifficulties => self.insert_header_td.record(duration),
             Action::InsertBlockBodyIndices => self.insert_block_body_indices.record(duration),
             Action::InsertTransactionBlocks => self.insert_tx_blocks.record(duration),

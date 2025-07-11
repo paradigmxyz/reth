@@ -8,7 +8,7 @@ use reth_codecs::Compact;
 use reth_db_api::table::Value;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileWriter, BlockReader, ChainStateBlockReader, DBProvider,
+    providers::StaticFileWriter, BlockReader, ChainSpecProvider, ChainStateBlockReader, DBProvider,
     DatabaseProviderFactory, StageCheckpointReader, StaticFileProviderFactory,
 };
 use reth_prune_types::PruneModes;
@@ -96,7 +96,7 @@ where
                     Receipt: Value + Compact,
                 >,
             > + StageCheckpointReader
-                          + BlockReader,
+                          + BlockReader
         >,
 {
     /// Listen for events on the `static_file_producer`.

@@ -3,7 +3,9 @@ use alloy_primitives::BlockNumber;
 use reth_codecs::Compact;
 use reth_db_api::{cursor::DbCursorRO, table::Value, tables, transaction::DbTx};
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{providers::StaticFileWriter, DBProvider, StaticFileProviderFactory};
+use reth_provider::{
+    providers::StaticFileWriter, ChainSpecProvider, DBProvider, StaticFileProviderFactory,
+};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
 use std::ops::RangeInclusive;
@@ -15,7 +17,7 @@ pub struct Headers;
 impl<Provider> Segment<Provider> for Headers
 where
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact + Value>>
-        + DBProvider,
+        + DBProvider
 {
     fn segment(&self) -> StaticFileSegment {
         StaticFileSegment::Headers
