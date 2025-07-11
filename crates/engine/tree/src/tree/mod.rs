@@ -2300,7 +2300,7 @@ where
             if use_state_root_task {
                 debug!(target: "engine::tree", block=?block_num_hash, "Using sparse trie state root algorithm");
                 match handle.state_root() {
-                    Ok(StateRootComputeOutcome { state_root, trie_updates, trie }) => {
+                    Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = execution_finish.elapsed();
                         info!(target: "engine::tree", ?state_root, ?elapsed, "State root task finished");
                         // we double check the state root here for good measure
@@ -2314,9 +2314,6 @@ where
                                 "State root task returned incorrect state root"
                             );
                         }
-
-                        // hold on to the sparse trie for the next payload
-                        self.payload_processor.set_sparse_trie(trie);
                     }
                     Err(error) => {
                         debug!(target: "engine::tree", %error, "Background parallel state root computation failed");

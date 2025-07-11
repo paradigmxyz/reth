@@ -108,7 +108,14 @@ where
     ///
     /// NOTE: This function does not take `self` by value to prevent blocking on [`SparseStateTrie`]
     /// drop.
-    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome<A>, ParallelStateRootError> {
+    ///
+    /// # Returns
+    ///
+    /// - State root computation outcome.
+    /// - Accounts trie that needs to be cleared and re-used to avoid reallocations.
+    pub(super) fn run(
+        &mut self,
+    ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseTrie<A>) {
         let now = Instant::now();
 
         let mut num_iterations = 0;
@@ -130,12 +137,15 @@ where
             );
 
             let elapsed =
-                update_sparse_trie(&mut self.trie, update, &self.blinded_provider_factory)
+                match update_sparse_trie(&mut self.trie, update, &self.blinded_provider_factory)
                     .map_err(|e| {
                         ParallelStateRootError::Other(format!(
                             "could not calculate state root: {e:?}"
                         ))
-                    })?;
+                    }) {
+                    Ok(elapsed) => elapsed,
+                    Err(err) => return (Err(err), self.trie.take_accounts_trie()),
+                };
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
@@ -144,30 +154,31 @@ where
 
         let start = Instant::now();
         let (state_root, trie_updates) =
-            self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
+            match self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            })?;
+            }) {
+                Ok(result) => result,
+                Err(err) => return (Err(err), self.trie.take_accounts_trie()),
+            };
 
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
         // take the account trie so that we can reuse its already allocated data structures.
-        let trie = self.trie.take_cleared_accounts_trie();
+        let trie = self.trie.take_accounts_trie();
 
-        Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
+        (Ok(StateRootComputeOutcome { state_root, trie_updates }), trie)
     }
 }
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
 #[derive(Debug)]
-pub struct StateRootComputeOutcome<A = SerialSparseTrie> {
+pub struct StateRootComputeOutcome {
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: TrieUpdates,
-    /// The account state trie.
-    pub trie: SparseTrie<A>,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.
