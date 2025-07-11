@@ -1,6 +1,6 @@
 //! CLI definition and entrypoint to executable
 
-use crate::{chainspec::EthereumChainSpecParser, debug_cmd};
+use crate::chainspec::EthereumChainSpecParser;
 use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -225,9 +225,6 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Debug(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<N>(ctx, components))
-            }
             Commands::Recover(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<N>(ctx))
             }
@@ -291,9 +288,6 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
-    /// Various debug routines
-    #[command(name = "debug")]
-    Debug(Box<debug_cmd::Command<C>>),
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command<C>),
@@ -323,7 +317,6 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             #[cfg(feature = "dev")]
             Self::TestVectors(_) => None,
             Self::Config(_) => None,
-            Self::Debug(cmd) => cmd.chain_spec(),
             Self::Recover(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ReExecute(cmd) => cmd.chain_spec(),
