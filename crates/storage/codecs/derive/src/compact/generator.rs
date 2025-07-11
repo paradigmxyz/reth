@@ -27,7 +27,7 @@ pub fn generate_from_to(
 
     // Extract type parameters and add Compact bounds
     let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
-    
+
     // Create where clause with Compact bounds for type parameters
     let mut where_clause = where_clause.cloned().unwrap_or_else(|| syn::parse_quote! { where });
     for param in &generics.params {
@@ -36,7 +36,7 @@ pub fn generate_from_to(
             where_clause.predicates.push(syn::parse_quote! { #ident: #reth_codecs::Compact });
         }
     }
-    
+
     let impl_compact = quote! {
         impl #impl_generics #reth_codecs::Compact for #ident #type_generics #where_clause
     };
@@ -60,7 +60,7 @@ pub fn generate_from_to(
 
     let has_lifetime = generics.lifetimes().next().is_some();
     let has_type_params = generics.type_params().next().is_some();
-    
+
     // Skip fuzz tests if there are lifetimes or type parameters
     let fuzz_tests = if has_lifetime || has_type_params {
         quote! {}

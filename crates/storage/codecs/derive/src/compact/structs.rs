@@ -132,7 +132,7 @@ impl<'a> StructHandler<'a> {
         // "T::from_compact(buf, len)" since the length of "u64" is known internally (bitpacked).
         // Check if this is a single uppercase letter (likely a generic type parameter)
         let is_generic_param = ftype.len() == 1 && ftype.chars().next().unwrap().is_uppercase();
-        
+
         assert!(
             known_types.contains(&ftype.as_str()) ||
                 is_flag_type(ftype) ||
