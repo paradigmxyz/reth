@@ -9,7 +9,7 @@ use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
     Decodable2718,
 };
-use alloy_primitives::{bytes, Bloom, Log, B256};
+use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
 
@@ -58,43 +58,6 @@ pub struct Receipt<T = TxType> {
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
     pub logs: Vec<Log>,
-}
-
-#[cfg(feature = "reth-codec")]
-impl reth_codecs::Compact for Receipt<TxType> {
-    fn to_compact<B>(&self, buf: &mut B) -> usize
-    where
-        B: bytes::BufMut + AsMut<[u8]>,
-    {
-        let mut len = 0;
-        len += self.tx_type.to_compact(buf);
-        len += self.success.to_compact(buf);
-        len += self.cumulative_gas_used.to_compact(buf);
-        len += self.logs.to_compact(buf);
-        len
-    }
-
-    fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (tx_type, buf) = TxType::from_compact(buf, len);
-        let (success, buf) = bool::from_compact(buf, len);
-        let (cumulative_gas_used, buf) = u64::from_compact(buf, len);
-        let (logs, buf) = Vec::<Log>::from_compact(buf, len);
-
-        (Self { tx_type, success, cumulative_gas_used, logs }, buf)
-    }
-}
-
-#[cfg(feature = "reth-codec")]
-impl Receipt<TxType> {
-    /// Returns the number of bytes used to encode the bitflags for this type.
-    pub const fn bitflag_encoded_bytes() -> usize {
-        1
-    }
-
-    /// Returns the bitflag unused bits for this type.
-    pub const fn bitflag_unused_bits() -> u8 {
-        0
-    }
 }
 
 impl<T: TxTy> Receipt<T> {
@@ -545,7 +508,7 @@ mod compact {
 
     pub use flags::ReceiptFlags;
 
-    impl Compact for Receipt {
+    impl<T: Compact> Compact for Receipt<T> {
         fn to_compact<B>(&self, buf: &mut B) -> usize
         where
             B: reth_codecs::__private::bytes::BufMut + AsMut<[u8]>,
@@ -590,19 +553,18 @@ mod compact {
                     let decompressed = decompressor.decompress(buf);
                     let original_buf = buf;
                     let mut buf: &[u8] = decompressed;
-                    let (tx_type, new_buf) =
-                        TxType::from_compact(buf, flags.tx_type_len() as usize);
+                    let (tx_type, new_buf) = T::from_compact(buf, flags.tx_type_len() as usize);
                     buf = new_buf;
                     let (success, new_buf) = bool::from_compact(buf, flags.success_len() as usize);
                     buf = new_buf;
                     let (cumulative_gas_used, new_buf) =
                         u64::from_compact(buf, flags.cumulative_gas_used_len() as usize);
                     buf = new_buf;
-                    let (logs, _new_buf) = Vec::from_compact(buf, buf.len());
+                    let (logs, _) = Vec::from_compact(buf, buf.len());
                     (Self { tx_type, success, cumulative_gas_used, logs }, original_buf)
                 })
             } else {
-                let (tx_type, new_buf) = TxType::from_compact(buf, flags.tx_type_len() as usize);
+                let (tx_type, new_buf) = T::from_compact(buf, flags.tx_type_len() as usize);
                 buf = new_buf;
                 let (success, new_buf) = bool::from_compact(buf, flags.success_len() as usize);
                 buf = new_buf;
