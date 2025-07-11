@@ -7182,7 +7182,6 @@ dependencies = [
  "reth-tasks",
  "reth-tokio-util",
  "reth-transaction-pool",
- "similar-asserts",
  "tempfile",
  "tokio",
  "tracing",
