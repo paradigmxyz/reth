@@ -15,7 +15,7 @@ use std::borrow::Cow;
 /// providing flexibility in choosing the appropriate implementation based on workload
 /// characteristics.
 #[derive(Debug)]
-pub enum ConfiguredSparseTrie {
+pub(crate) enum ConfiguredSparseTrie {
     /// Serial implementation of the sparse trie.
     Serial(Box<SerialSparseTrie>),
     /// Parallel implementation of the sparse trie.
