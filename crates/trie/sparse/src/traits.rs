@@ -226,7 +226,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
 ///
 /// These masks are essential for efficient trie traversal and serialization, as they
 /// determine how nodes should be encoded and stored on disk.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TrieMasks {
     /// Branch node hash mask, if any.
     ///
@@ -291,6 +291,17 @@ pub enum LeafLookup {
     Exists,
     /// Leaf does not exist (exclusion proof found).
     NonExistent,
+}
+
+/// Carries all information needed by a sparse trie to reveal a particular node.
+#[derive(Debug)]
+pub struct RevealedSparseNode {
+    /// Path of the node.
+    pub path: Nibbles,
+    /// The node itself.
+    pub node: TrieNode,
+    /// Tree and hash masks for the node, if known.
+    pub masks: TrieMasks,
 }
 
 impl<A, B> SparseTrieInterface for Either<A, B>

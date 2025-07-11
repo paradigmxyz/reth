@@ -13,11 +13,14 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::{
     blinded::{BlindedProvider, RevealedNode},
-    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrieInterface,
-    SparseTrieUpdates, TrieMasks,
+    LeafLookup, LeafLookupError, RevealedSparseNode, RlpNodeStackItem, SparseNode, SparseNodeType,
+    SparseTrieInterface, SparseTrieUpdates, TrieMasks,
 };
 use smallvec::SmallVec;
-use std::sync::mpsc;
+use std::{
+    cmp::{Ord, Ordering, PartialOrd},
+    sync::mpsc,
+};
 use tracing::{instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
@@ -101,6 +104,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         node: TrieNode,
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
+        // TODO remove this once reveal_nodes is in the trait
         // Store masks
         if let Some(tree_mask) = masks.tree_mask {
             self.branch_node_tree_masks.insert(path, tree_mask);
@@ -1230,6 +1234,135 @@ impl ParallelSparseTrie {
         nodes.extend(self.upper_subtrie.nodes.iter());
         nodes
     }
+
+    /// Example implementation of parallel node revealing
+    /// TODO move this onto the trait
+    pub fn reveal_nodes(&mut self, mut nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
+        }
+
+        // Sort nodes first by their subtrie, and secondarily by their path. This allows for
+        // grouping nodes by their subtrie using `chunk_by`.
+        nodes.sort_unstable_by(
+            |RevealedSparseNode { path: path_a, .. }, RevealedSparseNode { path: path_b, .. }| {
+                let subtrie_type_a = SparseSubtrieType::from_path(path_a);
+                let subtrie_type_b = SparseSubtrieType::from_path(path_b);
+                subtrie_type_a.cmp(&subtrie_type_b).then(path_a.cmp(path_b))
+            },
+        );
+
+        // Update the top-level branch node masks. This is simple and can't be done in parallel.
+        for RevealedSparseNode { path, masks, .. } in nodes.iter() {
+            if let Some(tree_mask) = masks.tree_mask {
+                self.branch_node_tree_masks.insert(*path, tree_mask);
+            }
+            if let Some(hash_mask) = masks.hash_mask {
+                self.branch_node_hash_masks.insert(*path, hash_mask);
+            }
+        }
+
+        let mut nodes_slice = nodes.as_slice();
+
+        // Due to the sorting, if there are any nodes to be revealed in the upper trie then the
+        // first node will be an upper trie node. Handle all upper trie reveals using
+        // `ParallelSparseTrie::reveal_node`, which deals with revealing recursively into
+        // lower-subtries as necessary.
+        if SparseSubtrieType::from_path(&nodes[0].path).lower_index().is_none() {
+            let mut num_upper_nodes = 0;
+            let upper_nodes =
+                nodes.iter().take_while(|n| SparseSubtrieType::path_len_is_upper(n.path.len()));
+
+            for node in upper_nodes {
+                // TODO once reveal_node is not on the trait we can probably make it accept
+                // references, and skip these clones.
+                self.reveal_node(node.path, node.node.clone(), node.masks.clone())?;
+                num_upper_nodes += 1;
+            }
+
+            // truncate the upper trie nodes off the front of the nodes slice.
+            nodes_slice = &nodes_slice[num_upper_nodes..];
+        }
+
+        #[cfg(not(feature = "std"))]
+        // Reveal lower subtrie nodes serially if nostd
+        for node in nodes_slice {
+            for node in nodes {
+                self.reveal_node(node.path, node.node.clone(), node.masks.clone())?;
+            }
+        }
+
+        #[cfg(feature = "std")]
+        // Reveal lower subtrie nodes in parallel
+        {
+            use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+
+            // Group the nodes by lower subtrie. This must be collected into a Vec in order for
+            // rayon's `zip` to be happy.
+            let node_groups: Vec<_> = nodes_slice
+                .chunk_by(|node_a, node_b| {
+                    SparseSubtrieType::from_path(&node_a.path) ==
+                        SparseSubtrieType::from_path(&node_b.path)
+                })
+                .collect();
+
+            // Take the lower subtries in the same order that the nodes were grouped into, so that
+            // the two can be zipped together. This also must be collected into a Vec for rayon's
+            // `zip` to be happy.
+            let lower_subtries: Vec<_> = node_groups
+                .iter()
+                .map(|nodes| {
+                    let node = nodes.first().expect("no empty groups");
+                    let Some(idx) = SparseSubtrieType::from_path(&node.path).lower_index() else {
+                        panic!("upper subtrie node {node:?} found amongst lower nodes");
+                    };
+                    // due to the nodes being sorted secondarily on their path, and chunk_by keeping
+                    // the first element of each group, the `path` here will necessarily be the
+                    // shortest path being revealed for each subtrie. Therefore we can reveal the
+                    // subtrie itself using this path and retain correct behavior.
+                    self.lower_subtries[idx].reveal(&node.path);
+                    (idx, self.lower_subtries[idx].take_revealed().expect("just revealed"))
+                })
+                .collect();
+
+            let (tx, rx) = mpsc::channel();
+
+            // Zip the lower subtries and their corresponding node groups, and reveal lower subtrie
+            // nodes in parallel
+            lower_subtries
+                .into_par_iter()
+                .zip(node_groups.into_par_iter())
+                .map(|((subtrie_idx, mut subtrie), nodes)| {
+                    // reserve space in the HashMap ahead of time; doing it on a node-by-node basis
+                    // can cause multiple re-allocations as the hashmap grows.
+                    subtrie.nodes.reserve(nodes.len());
+
+                    for node in nodes {
+                        // Reveal each node in the subtrie, returning early on any errors
+                        let res = subtrie.reveal_node(node.path, &node.node, node.masks.clone());
+                        if res.is_err() {
+                            return (subtrie_idx, subtrie, res)
+                        }
+                    }
+                    (subtrie_idx, subtrie, Ok(()))
+                })
+                .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
+
+            drop(tx);
+
+            let mut any_err = Ok(());
+            for (subtrie_idx, subtrie, res) in rx {
+                self.lower_subtries[subtrie_idx] = LowerSparseSubtrie::Revealed(subtrie);
+                if res.is_err() {
+                    any_err = res;
+                }
+            }
+
+            // TODO we're just returning the last seen error here, not sure if there's a more
+            // idiomatic thing to do...
+            any_err
+        }
+    }
 }
 
 /// This is a subtrie of the [`ParallelSparseTrie`] that contains a map from path to sparse trie
@@ -2157,6 +2290,24 @@ impl SparseSubtrieType {
             Self::Upper => None,
             Self::Lower(index) => Some(*index),
         }
+    }
+}
+
+impl Ord for SparseSubtrieType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Upper, Self::Upper) => Ordering::Equal,
+            (Self::Upper, Self::Lower(_)) => Ordering::Less,
+            (Self::Lower(_), Self::Upper) => Ordering::Greater,
+            (Self::Lower(idx_a), Self::Lower(idx_b)) if idx_a == idx_b => Ordering::Equal,
+            (Self::Lower(idx_a), Self::Lower(idx_b)) => idx_a.cmp(idx_b),
+        }
+    }
+}
+
+impl PartialOrd for SparseSubtrieType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 

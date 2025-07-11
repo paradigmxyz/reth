@@ -80,6 +80,14 @@ impl LowerSparseSubtrie {
         }
     }
 
+    /// Takes ownership of the underlying [`SparseSubtrie`] if revealed, putting this
+    /// `LowerSparseSubtrie` will be put into the blinded state.
+    ///
+    /// Otherwise returns None.
+    pub(crate) fn take_revealed(&mut self) -> Option<Box<SparseSubtrie>> {
+        self.take_revealed_if(|_| true)
+    }
+
     /// Takes ownership of the underlying [`SparseSubtrie`] if revealed and the predicate returns
     /// true.
     ///
