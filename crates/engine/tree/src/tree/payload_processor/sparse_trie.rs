@@ -116,6 +116,18 @@ where
     pub(super) fn run(
         &mut self,
     ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseTrie<A>) {
+        // run the main loop to completion
+        let result = self.run_to_completion();
+        // take the account trie so that we can reuse its already allocated data structures.
+        let trie = self.trie.take_accounts_trie();
+
+        (result, trie)
+    }
+
+    /// Run the sparse trie task to completion.
+    ///
+    /// See [`Self::run`] for more information.
+    fn run_to_completion(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut num_iterations = 0;
@@ -137,15 +149,12 @@ where
             );
 
             let elapsed =
-                match update_sparse_trie(&mut self.trie, update, &self.blinded_provider_factory)
+                update_sparse_trie(&mut self.trie, update, &self.blinded_provider_factory)
                     .map_err(|e| {
                         ParallelStateRootError::Other(format!(
                             "could not calculate state root: {e:?}"
                         ))
-                    }) {
-                    Ok(elapsed) => elapsed,
-                    Err(err) => return (Err(err), self.trie.take_accounts_trie()),
-                };
+                    })?;
             self.metrics.sparse_trie_update_duration_histogram.record(elapsed);
             trace!(target: "engine::root", ?elapsed, num_iterations, "Root calculation completed");
         }
@@ -154,20 +163,14 @@ where
 
         let start = Instant::now();
         let (state_root, trie_updates) =
-            match self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
+            self.trie.root_with_updates(&self.blinded_provider_factory).map_err(|e| {
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
-            }) {
-                Ok(result) => result,
-                Err(err) => return (Err(err), self.trie.take_accounts_trie()),
-            };
+            })?;
 
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        // take the account trie so that we can reuse its already allocated data structures.
-        let trie = self.trie.take_accounts_trie();
-
-        (Ok(StateRootComputeOutcome { state_root, trie_updates }), trie)
+        Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 }
 
