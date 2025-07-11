@@ -70,13 +70,18 @@ async function injectCargoDocs() {
       .replace(/data-static-root-path="\.\.\/static\.files\/"/g, `data-static-root-path="${BASE_PATH}/static.files/"`)
       
       // Fix search index paths
-      .replace(/data-search-index-js="([^"]+)"/g, `data-search-index-js="${BASE_PATH}/static.files/$1"`)
+      .replace(/data-search-index-js="[^"]+"/g, `data-search-index-js="${BASE_PATH}/search-index.js"`)
       .replace(/data-search-js="([^"]+)"/g, `data-search-js="${BASE_PATH}/static.files/$1"`)
       .replace(/data-settings-js="([^"]+)"/g, `data-settings-js="${BASE_PATH}/static.files/$1"`)
       
       // Fix logo paths
       .replace(/src="\.\/static\.files\/rust-logo/g, `src="${BASE_PATH}/static.files/rust-logo`)
-      .replace(/src="\.\.\/static\.files\/rust-logo/g, `src="${BASE_PATH}/static.files/rust-logo`);
+      .replace(/src="\.\.\/static\.files\/rust-logo/g, `src="${BASE_PATH}/static.files/rust-logo`)
+      
+      // Fix search functionality by ensuring correct load order
+      // Add the rustdoc-vars initialization before other scripts
+      .replace(/<script src="([^"]*storage[^"]*\.js)"><\/script>/g, 
+        `<script src="$1"></script>`);
     
     await fs.writeFile(file, content, 'utf-8');
   }
@@ -93,6 +98,47 @@ async function injectCargoDocs() {
       .replace(/"\.\.\/static\.files\//g, `"${BASE_PATH}/static.files/`)
       .replace(/"\.\/([^/]+)\/index\.html"/g, `"${BASE_PATH}/$1/index.html"`)
       .replace(/"\.\.\/([^/]+)\/index\.html"/g, `"${BASE_PATH}/$1/index.html"`);
+    
+    // Fix the search form submission issue that causes page reload
+    // Instead of submitting a form, just ensure the search functionality is loaded
+    if (file.includes('main-') && file.endsWith('.js')) {
+      content = content.replace(
+        /function sendSearchForm\(\)\{document\.getElementsByClassName\("search-form"\)\[0\]\.submit\(\)\}/g,
+        'function sendSearchForm(){/* Fixed: No form submission needed - search loads via script */}'
+      );
+      
+      // Also fix the root path references in the search functionality
+      content = content.replace(
+        /getVar\("root-path"\)/g,
+        `"${BASE_PATH}/"`
+      );
+      
+      // Fix static-root-path to avoid double paths
+      content = content.replace(
+        /getVar\("static-root-path"\)/g,
+        `"${BASE_PATH}/static.files/"`
+      );
+      
+      // Fix the search-js variable to return just the filename
+      content = content.replace(
+        /getVar\("search-js"\)/g,
+        `"search-f7877310.js"`
+      );
+      
+      // Fix the search index loading path
+      content = content.replace(
+        /resourcePath\("search-index",".js"\)/g,
+        `"${BASE_PATH}/search-index.js"`
+      );
+    }
+    
+    // Fix paths in storage.js which contains the web components
+    if (file.includes('storage-') && file.endsWith('.js')) {
+      content = content.replace(
+        /getVar\("root-path"\)/g,
+        `"${BASE_PATH}/"`
+      );
+    }
     
     await fs.writeFile(file, content, 'utf-8');
   }
