@@ -60,7 +60,7 @@ pub(crate) fn generate_flag_struct(
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
     let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags_ident}`]");
     let (impl_generics, type_generics, _where_clause) = generics.split_for_impl();
-    
+
     let impl_bitflag_encoded_bytes = quote! {
         impl #impl_generics #ident #type_generics {
             #[doc = #bitflag_encoded_bytes]
@@ -176,7 +176,7 @@ fn placeholder_flag_struct(ident: &Ident, flags: &Ident, generics: &syn::Generic
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags}`]");
     let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags}`]");
     let (impl_generics, type_generics, _where_clause) = generics.split_for_impl();
-    
+
     quote! {
         impl #impl_generics #ident #type_generics {
             #[doc = #bitflag_encoded_bytes]

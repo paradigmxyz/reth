@@ -56,7 +56,6 @@ pub fn derive(input: DeriveInput, zstd: Option<ZstdConfig>) -> TokenStream {
     output.into()
 }
 
-
 /// Given a list of fields on a struct, extract their fields and types.
 pub fn get_fields(data: &Data) -> FieldList {
     let mut fields = vec![];
