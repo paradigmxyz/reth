@@ -421,25 +421,15 @@ where
         BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
         BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
     {
+        let is_revealed = stored_trie.as_ref().is_some_and(|trie| trie.is_revealed());
         match stored_trie {
-            Some(SparseTrie::Revealed(boxed)) => {
+            Some(SparseTrie::Revealed(boxed) | SparseTrie::Blind(Some(boxed))) => {
                 self.dispatch_trie_spawn(
                     *boxed,
                     sparse_trie_rx,
                     proof_task_handle,
                     state_root_tx,
-                    // this is revealed
-                    true,
-                );
-            }
-            Some(SparseTrie::Blind(Some(boxed))) => {
-                self.dispatch_trie_spawn(
-                    *boxed,
-                    sparse_trie_rx,
-                    proof_task_handle,
-                    state_root_tx,
-                    // this is blind
-                    false,
+                    is_revealed,
                 );
             }
             _ => {
