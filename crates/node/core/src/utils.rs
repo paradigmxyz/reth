@@ -56,6 +56,7 @@ where
     };
 
     if !valid {
+        println!("INVALID");
         client.report_bad_message(peer_id);
         eyre::bail!(
             "Received invalid header. Received: {:?}. Expected: {:?}",
