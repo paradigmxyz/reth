@@ -215,7 +215,7 @@ where
             let (res, trie) = sparse_trie_task.run();
             let _ = state_root_tx.send(res);
             // Clear accounts trie and return it back to the payload processor
-            accounts_trie.lock().replace(trie);
+            accounts_trie.lock().replace(trie.clear());
         });
 
         // spawn the proof task
