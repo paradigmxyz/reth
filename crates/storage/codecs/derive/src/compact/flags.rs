@@ -6,7 +6,7 @@ use syn::Attribute;
 pub(crate) fn generate_flag_struct(
     ident: &Ident,
     attrs: &[Attribute],
-    has_lifetime: bool,
+    generics: &syn::Generics,
     fields: &FieldList,
     is_zstd: bool,
 ) -> TokenStream2 {
@@ -41,7 +41,7 @@ pub(crate) fn generate_flag_struct(
     };
 
     if total_bits == 0 {
-        return placeholder_flag_struct(ident, &flags_ident)
+        return placeholder_flag_struct(ident, &flags_ident, generics)
     }
 
     let (total_bytes, unused_bits) = pad_flag_struct(total_bits, &mut field_flags);
@@ -59,32 +59,19 @@ pub(crate) fn generate_flag_struct(
     );
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
     let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags_ident}`]");
-    let impl_bitflag_encoded_bytes = if has_lifetime {
-        quote! {
-            impl<'a> #ident<'a> {
-                #[doc = #bitflag_encoded_bytes]
-                pub const fn bitflag_encoded_bytes() -> usize {
-                    #total_bytes as usize
-                }
-                #[doc = #bitflag_unused_bits]
-                pub const fn bitflag_unused_bits() -> usize {
-                    #unused_bits as usize
-                }
-           }
-        }
-    } else {
-        quote! {
-            impl #ident {
-                #[doc = #bitflag_encoded_bytes]
-                pub const fn bitflag_encoded_bytes() -> usize {
-                    #total_bytes as usize
-                }
-                #[doc = #bitflag_unused_bits]
-                pub const fn bitflag_unused_bits() -> usize {
-                    #unused_bits as usize
-                }
-           }
-        }
+    let (impl_generics, type_generics, _where_clause) = generics.split_for_impl();
+    
+    let impl_bitflag_encoded_bytes = quote! {
+        impl #impl_generics #ident #type_generics {
+            #[doc = #bitflag_encoded_bytes]
+            pub const fn bitflag_encoded_bytes() -> usize {
+                #total_bytes as usize
+            }
+            #[doc = #bitflag_unused_bits]
+            pub const fn bitflag_unused_bits() -> usize {
+                #unused_bits as usize
+            }
+       }
     };
 
     // Generate the flag struct.
@@ -185,11 +172,13 @@ fn pad_flag_struct(total_bits: u8, field_flags: &mut Vec<TokenStream2>) -> (u8, 
 }
 
 /// Placeholder struct for when there are no bitfields to be added.
-fn placeholder_flag_struct(ident: &Ident, flags: &Ident) -> TokenStream2 {
+fn placeholder_flag_struct(ident: &Ident, flags: &Ident, generics: &syn::Generics) -> TokenStream2 {
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags}`]");
     let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags}`]");
+    let (impl_generics, type_generics, _where_clause) = generics.split_for_impl();
+    
     quote! {
-        impl #ident {
+        impl #impl_generics #ident #type_generics {
             #[doc = #bitflag_encoded_bytes]
             pub const fn bitflag_encoded_bytes() -> usize {
                 0

@@ -22,6 +22,30 @@ use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySiz
     compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
     decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
 ))]
+pub struct Receipt2<T = TxType> {
+    /// Receipt type.
+    pub tx_type: T,
+    /// If transaction is executed successfully.
+    ///
+    /// This is the `statusCode`
+    pub success: bool,
+    /// Gas used
+    pub cumulative_gas_used: u64,
+    /// Log send from contracts.
+    pub logs: Vec<Log>,
+}
+
+/// Typed ethereum transaction receipt.
+/// Receipt containing result of transaction execution.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[cfg_attr(feature = "reth-codec", derive(reth_codecs::CompactZstd))]
+#[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
+#[cfg_attr(feature = "reth-codec", reth_zstd(
+    compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
+    decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
+))]
 pub struct Receipt {
     /// Receipt type.
     pub tx_type: TxType,

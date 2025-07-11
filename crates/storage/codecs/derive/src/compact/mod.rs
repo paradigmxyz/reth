@@ -1,7 +1,7 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Ident, TokenStream as TokenStream2};
 use quote::{format_ident, quote};
-use syn::{Data, DeriveInput, Generics};
+use syn::{Data, DeriveInput};
 
 mod generator;
 use generator::*;
@@ -50,17 +50,12 @@ pub fn derive(input: DeriveInput, zstd: Option<ZstdConfig>) -> TokenStream {
 
     let DeriveInput { ident, data, generics, attrs, .. } = input;
 
-    let has_lifetime = has_lifetime(&generics);
-
     let fields = get_fields(&data);
-    output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, zstd.is_some()));
+    output.extend(generate_flag_struct(&ident, &attrs, &generics, &fields, zstd.is_some()));
     output.extend(generate_from_to(&ident, &attrs, &generics, &fields, zstd));
     output.into()
 }
 
-pub fn has_lifetime(generics: &Generics) -> bool {
-    generics.lifetimes().next().is_some()
-}
 
 /// Given a list of fields on a struct, extract their fields and types.
 pub fn get_fields(data: &Data) -> FieldList {
@@ -246,8 +241,7 @@ mod tests {
         let mut output = quote! {};
         let DeriveInput { ident, data, attrs, generics, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
-        let has_lifetime = has_lifetime(&generics);
-        output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, false));
+        output.extend(generate_flag_struct(&ident, &attrs, &generics, &fields, false));
         output.extend(generate_from_to(&ident, &attrs, &generics, &fields, None));
 
         // Expected output in a TokenStream format. Commas matter!
