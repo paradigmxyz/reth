@@ -118,6 +118,30 @@ impl TrieUpdates {
         TrieUpdatesSorted { removed_nodes: self.removed_nodes, account_nodes, storage_tries }
     }
 
+    /// Converts trie updates into [`TrieUpdatesSorted`], but keeping the maps allocated by
+    /// draining.
+    ///
+    /// This effectively clears all the fields in the [`TrieUpdatesSorted`].
+    ///
+    /// This allows us to re-use the allocated space. This allocates new space for the sorted
+    /// updates, like `into_sorted`.
+    pub fn drain_into_sorted(&mut self) -> TrieUpdatesSorted {
+        let mut account_nodes = self.account_nodes.drain().collect::<Vec<_>>();
+        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let storage_tries = self
+            .storage_tries
+            .drain()
+            .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
+            .collect();
+
+        TrieUpdatesSorted {
+            removed_nodes: self.removed_nodes.clone(),
+            account_nodes,
+            storage_tries,
+        }
+    }
+
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
     pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
