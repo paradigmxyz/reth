@@ -34,6 +34,7 @@ jobs:
           cache-all-crates: true
           shared-key: "e2e"
           prefix-key: "v1-rust"
+          save-if: true
       - name: Run e2e tests
         run: |
           cargo nextest run \
