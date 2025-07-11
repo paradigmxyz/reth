@@ -38,7 +38,7 @@ jobs:
       - name: Install Geth
         run: .github/assets/install_geth.sh
       - uses: taiki-e/install-action@nextest
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.8.0
         with:
           cache-on-failure: true
           cache-all-crates: true
@@ -80,7 +80,7 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@nextest
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.8.0
         with:
           cache-on-failure: true
           cache-all-crates: true
