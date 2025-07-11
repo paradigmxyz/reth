@@ -46,6 +46,7 @@ jobs:
           shared-key: "integration-${{ matrix.network }}"
           prefix-key: "v1-rust"
           save-if: true
+          cache-targets: true
       - if: matrix.network == 'ethereum'
         name: Run tests
         run: |
@@ -88,5 +89,6 @@ jobs:
           shared-key: "integration-era"
           prefix-key: "v1-rust"
           save-if: true
+          cache-targets: true
       - name: run era1 files integration tests
         run: cargo nextest run --package reth-era --test it -- --ignored
