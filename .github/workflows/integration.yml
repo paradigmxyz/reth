@@ -41,6 +41,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          cache-all-crates: true
+          shared-key: "nextest-cache"
       - if: matrix.network == 'ethereum'
         name: Run tests
         run: |
@@ -78,5 +80,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          cache-all-crates: true
+          shared-key: "nextest-cache"
       - name: run era1 files integration tests
         run: cargo nextest run --package reth-era --test it -- --ignored
