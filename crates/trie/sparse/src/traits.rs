@@ -64,27 +64,21 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// * `additional` - The number of additional trie nodes to reserve capacity for.
     fn reserve_nodes(&mut self, _additional: usize) {}
 
-    /// Reveals a trie node if it has not been revealed before.
+    /// Reveals one or more trie nodes if they have not been revealed before.
     ///
-    /// This function decodes a trie node and inserts it into the trie structure.
-    /// It handles different node types (leaf, extension, branch) by appropriately
-    /// adding them to the trie and recursively revealing their children.
+    /// This function decodes trie nodes and inserts them into the trie structure. It handles
+    /// different node types (leaf, extension, branch) by appropriately adding them to the trie and
+    /// recursively revealing their children.
     ///
     /// # Arguments
     ///
-    /// * `path` - The path where the node should be revealed
-    /// * `node` - The trie node to reveal
-    /// * `masks` - Trie masks for branch nodes
+    /// * `nodes` - The nodes to be revealed, each having a path and optional set of branch node
+    ///   masks. The nodes will be unsorted.
     ///
     /// # Returns
     ///
-    /// `Ok(())` if successful, or an error if the node was not revealed.
-    fn reveal_node(
-        &mut self,
-        path: Nibbles,
-        node: TrieNode,
-        masks: TrieMasks,
-    ) -> SparseTrieResult<()>;
+    /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
+    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///
@@ -226,7 +220,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
 ///
 /// These masks are essential for efficient trie traversal and serialization, as they
 /// determine how nodes should be encoded and stored on disk.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct TrieMasks {
     /// Branch node hash mask, if any.
     ///
@@ -293,6 +287,17 @@ pub enum LeafLookup {
     NonExistent,
 }
 
+/// Carries all information needed by a sparse trie to reveal a particular node.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RevealedSparseNode {
+    /// Path of the node.
+    pub path: Nibbles,
+    /// The node itself.
+    pub node: TrieNode,
+    /// Tree and hash masks for the node, if known.
+    pub masks: TrieMasks,
+}
+
 impl<A, B> SparseTrieInterface for Either<A, B>
 where
     A: SparseTrieInterface,
@@ -317,22 +322,10 @@ where
         }
     }
 
-    fn reserve_nodes(&mut self, additional: usize) {
+    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
         match self {
-            Self::Left(trie) => trie.reserve_nodes(additional),
-            Self::Right(trie) => trie.reserve_nodes(additional),
-        }
-    }
-
-    fn reveal_node(
-        &mut self,
-        path: Nibbles,
-        node: TrieNode,
-        masks: TrieMasks,
-    ) -> SparseTrieResult<()> {
-        match self {
-            Self::Left(trie) => trie.reveal_node(path, node, masks),
-            Self::Right(trie) => trie.reveal_node(path, node, masks),
+            Self::Left(trie) => trie.reveal_nodes(nodes),
+            Self::Right(trie) => trie.reveal_nodes(nodes),
         }
     }
 

@@ -13,11 +13,14 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::{
     blinded::{BlindedProvider, RevealedNode},
-    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrieInterface,
-    SparseTrieUpdates, TrieMasks,
+    LeafLookup, LeafLookupError, RevealedSparseNode, RlpNodeStackItem, SparseNode, SparseNodeType,
+    SparseTrieInterface, SparseTrieUpdates, TrieMasks,
 };
 use smallvec::SmallVec;
-use std::sync::mpsc;
+use std::{
+    cmp::{Ord, Ordering, PartialOrd},
+    sync::mpsc,
+};
 use tracing::{instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
@@ -86,7 +89,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         self = self.with_updates(retain_updates);
 
-        self.reveal_node(Nibbles::default(), root, masks)?;
+        self.reveal_upper_node(Nibbles::default(), &root, &masks)?;
         Ok(self)
     }
 
@@ -95,62 +98,133 @@ impl SparseTrieInterface for ParallelSparseTrie {
         self
     }
 
-    fn reveal_node(
-        &mut self,
-        path: Nibbles,
-        node: TrieNode,
-        masks: TrieMasks,
-    ) -> SparseTrieResult<()> {
-        // Store masks
-        if let Some(tree_mask) = masks.tree_mask {
-            self.branch_node_tree_masks.insert(path, tree_mask);
-        }
-        if let Some(hash_mask) = masks.hash_mask {
-            self.branch_node_hash_masks.insert(path, hash_mask);
+    fn reveal_nodes(&mut self, mut nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+        if nodes.is_empty() {
+            return Ok(())
         }
 
-        if let Some(subtrie) = self.lower_subtrie_for_path_mut(&path) {
-            return subtrie.reveal_node(path, &node, masks);
+        // Sort nodes first by their subtrie, and secondarily by their path. This allows for
+        // grouping nodes by their subtrie using `chunk_by`.
+        nodes.sort_unstable_by(
+            |RevealedSparseNode { path: path_a, .. }, RevealedSparseNode { path: path_b, .. }| {
+                let subtrie_type_a = SparseSubtrieType::from_path(path_a);
+                let subtrie_type_b = SparseSubtrieType::from_path(path_b);
+                subtrie_type_a.cmp(&subtrie_type_b).then(path_a.cmp(path_b))
+            },
+        );
+
+        // Update the top-level branch node masks. This is simple and can't be done in parallel.
+        for RevealedSparseNode { path, masks, .. } in &nodes {
+            if let Some(tree_mask) = masks.tree_mask {
+                self.branch_node_tree_masks.insert(*path, tree_mask);
+            }
+            if let Some(hash_mask) = masks.hash_mask {
+                self.branch_node_hash_masks.insert(*path, hash_mask);
+            }
         }
 
-        // If there is no subtrie for the path it means the path is UPPER_TRIE_MAX_DEPTH or less
-        // nibbles, and so belongs to the upper trie.
-        self.upper_subtrie.reveal_node(path, &node, masks)?;
+        let mut nodes_slice = nodes.as_slice();
 
-        // The previous upper_trie.reveal_node call will not have revealed any child nodes via
-        // reveal_node_or_hash if the child node would be found on a lower subtrie. We handle that
-        // here by manually checking the specific cases where this could happen, and calling
-        // reveal_node_or_hash for each.
-        match node {
-            TrieNode::Branch(branch) => {
-                // If a branch is at the cutoff level of the trie then it will be in the upper trie,
-                // but all of its children will be in a lower trie. Check if a child node would be
-                // in the lower subtrie, and reveal accordingly.
-                if !SparseSubtrieType::path_len_is_upper(path.len() + 1) {
-                    let mut stack_ptr = branch.as_ref().first_child_index();
-                    for idx in CHILD_INDEX_RANGE {
-                        if branch.state_mask.is_bit_set(idx) {
-                            let mut child_path = path;
-                            child_path.push_unchecked(idx);
-                            self.lower_subtrie_for_path_mut(&child_path)
-                                .expect("child_path must have a lower subtrie")
-                                .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
-                            stack_ptr += 1;
+        // Due to the sorting all upper subtrie nodes will be at the front of the slice. We split
+        // them off from the rest to be handled specially by
+        // `ParallelSparseTrie::reveal_upper_node`.
+        let num_upper_nodes = nodes
+            .iter()
+            .position(|n| !SparseSubtrieType::path_len_is_upper(n.path.len()))
+            .unwrap_or(nodes.len());
+
+        let upper_nodes = &nodes_slice[..num_upper_nodes];
+        nodes_slice = &nodes_slice[num_upper_nodes..];
+
+        // Reserve the capacity of the upper subtrie's `nodes` HashMap before iterating, so we don't
+        // end up making many small capacity changes as we loop.
+        self.upper_subtrie.nodes.reserve(upper_nodes.len());
+        for node in upper_nodes {
+            self.reveal_upper_node(node.path, &node.node, &node.masks)?;
+        }
+
+        #[cfg(not(feature = "std"))]
+        // Reveal lower subtrie nodes serially if nostd
+        for node in nodes_slice {
+            if let Some(subtrie) = self.lower_subtrie_for_path_mut(&node.path) {
+                subtrie.reveal_node(node.path, node.node.clone(), node.masks.clone())?;
+            } else {
+                panic!("upper subtrie node {node:?} found amongst lower nodes");
+            }
+        }
+
+        #[cfg(feature = "std")]
+        // Reveal lower subtrie nodes in parallel
+        {
+            use rayon::iter::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+
+            // Group the nodes by lower subtrie. This must be collected into a Vec in order for
+            // rayon's `zip` to be happy.
+            let node_groups: Vec<_> = nodes_slice
+                .chunk_by(|node_a, node_b| {
+                    SparseSubtrieType::from_path(&node_a.path) ==
+                        SparseSubtrieType::from_path(&node_b.path)
+                })
+                .collect();
+
+            // Take the lower subtries in the same order that the nodes were grouped into, so that
+            // the two can be zipped together. This also must be collected into a Vec for rayon's
+            // `zip` to be happy.
+            let lower_subtries: Vec<_> = node_groups
+                .iter()
+                .map(|nodes| {
+                    let node = &nodes[0]; // SAFETY: chunk_by won't produce empty groups
+                    let Some(idx) = SparseSubtrieType::from_path(&node.path).lower_index() else {
+                        panic!("upper subtrie node {node:?} found amongst lower nodes");
+                    };
+                    // due to the nodes being sorted secondarily on their path, and chunk_by keeping
+                    // the first element of each group, the `path` here will necessarily be the
+                    // shortest path being revealed for each subtrie. Therefore we can reveal the
+                    // subtrie itself using this path and retain correct behavior.
+                    self.lower_subtries[idx].reveal(&node.path);
+                    (idx, self.lower_subtries[idx].take_revealed().expect("just revealed"))
+                })
+                .collect();
+
+            let (tx, rx) = mpsc::channel();
+
+            // Zip the lower subtries and their corresponding node groups, and reveal lower subtrie
+            // nodes in parallel
+            lower_subtries
+                .into_par_iter()
+                .zip(node_groups.into_par_iter())
+                .map(|((subtrie_idx, mut subtrie), nodes)| {
+                    // reserve space in the HashMap ahead of time; doing it on a node-by-node basis
+                    // can cause multiple re-allocations as the hashmap grows.
+                    subtrie.nodes.reserve(nodes.len());
+
+                    for node in nodes {
+                        // Reveal each node in the subtrie, returning early on any errors
+                        let res = subtrie.reveal_node(node.path, &node.node, &node.masks);
+                        if res.is_err() {
+                            return (subtrie_idx, subtrie, res)
                         }
                     }
-                }
-            }
-            TrieNode::Extension(ext) => {
-                let mut child_path = path;
-                child_path.extend(&ext.key);
-                if let Some(subtrie) = self.lower_subtrie_for_path_mut(&child_path) {
-                    subtrie.reveal_node_or_hash(child_path, &ext.child)?;
-                }
-            }
-            TrieNode::EmptyRoot | TrieNode::Leaf(_) => (),
-        }
+                    (subtrie_idx, subtrie, Ok(()))
+                })
+                .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
 
-        Ok(())
+            drop(tx);
+
+            // Take back all lower subtries which were sent to the rayon pool, collecting the last
+            // seen error in the process and returning that. If we don't fully drain the channel
+            // then we lose lower sparse tries, putting the whole ParallelSparseTrie in an
+            // inconsistent state.
+            let mut any_err = Ok(());
+            for (subtrie_idx, subtrie, res) in rx {
+                self.lower_subtries[subtrie_idx] = LowerSparseSubtrie::Revealed(subtrie);
+                if res.is_err() {
+                    any_err = res;
+                }
+            }
+
+            any_err
+        }
     }
 
     fn update_leaf<P: BlindedProvider>(
@@ -213,7 +287,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                                 subtrie.reveal_node(
                                     reveal_path,
                                     &decoded,
-                                    TrieMasks { hash_mask, tree_mask },
+                                    &TrieMasks { hash_mask, tree_mask },
                                 )?;
                             } else {
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
@@ -496,7 +570,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                                 remaining_child_subtrie.reveal_node(
                                     remaining_child_path,
                                     &decoded,
-                                    TrieMasks { hash_mask, tree_mask },
+                                    &TrieMasks { hash_mask, tree_mask },
                                 )?;
                                 remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap()
                             } else {
@@ -1230,6 +1304,68 @@ impl ParallelSparseTrie {
         nodes.extend(self.upper_subtrie.nodes.iter());
         nodes
     }
+
+    /// Reveals a trie node in the upper trie if it has not been revealed before. When revealing
+    /// branch/extension nodes this may recurse into a lower trie to reveal a child.
+    ///
+    /// This function decodes a trie node and inserts it into the trie structure. It handles
+    /// different node types (leaf, extension, branch) by appropriately adding them to the trie and
+    /// recursively revealing their children.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path where the node should be revealed
+    /// * `node` - The trie node to reveal
+    /// * `masks` - Trie masks for branch nodes
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if successful, or an error if the node was not revealed.
+    fn reveal_upper_node(
+        &mut self,
+        path: Nibbles,
+        node: &TrieNode,
+        masks: &TrieMasks,
+    ) -> SparseTrieResult<()> {
+        // If there is no subtrie for the path it means the path is UPPER_TRIE_MAX_DEPTH or less
+        // nibbles, and so belongs to the upper trie.
+        self.upper_subtrie.reveal_node(path, node, masks)?;
+
+        // The previous upper_trie.reveal_node call will not have revealed any child nodes via
+        // reveal_node_or_hash if the child node would be found on a lower subtrie. We handle that
+        // here by manually checking the specific cases where this could happen, and calling
+        // reveal_node_or_hash for each.
+        match node {
+            TrieNode::Branch(branch) => {
+                // If a branch is at the cutoff level of the trie then it will be in the upper trie,
+                // but all of its children will be in a lower trie. Check if a child node would be
+                // in the lower subtrie, and reveal accordingly.
+                if !SparseSubtrieType::path_len_is_upper(path.len() + 1) {
+                    let mut stack_ptr = branch.as_ref().first_child_index();
+                    for idx in CHILD_INDEX_RANGE {
+                        if branch.state_mask.is_bit_set(idx) {
+                            let mut child_path = path;
+                            child_path.push_unchecked(idx);
+                            self.lower_subtrie_for_path_mut(&child_path)
+                                .expect("child_path must have a lower subtrie")
+                                .reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
+                            stack_ptr += 1;
+                        }
+                    }
+                }
+            }
+            TrieNode::Extension(ext) => {
+                let mut child_path = path;
+                child_path.extend(&ext.key);
+                if let Some(subtrie) = self.lower_subtrie_for_path_mut(&child_path) {
+                    subtrie.reveal_node_or_hash(child_path, &ext.child)?;
+                }
+            }
+            TrieNode::EmptyRoot | TrieNode::Leaf(_) => (),
+        }
+
+        Ok(())
+    }
 }
 
 /// This is a subtrie of the [`ParallelSparseTrie`] that contains a map from path to sparse trie
@@ -1334,7 +1470,7 @@ impl SparseSubtrie {
                                 self.reveal_node(
                                     reveal_path,
                                     &decoded,
-                                    TrieMasks { hash_mask, tree_mask },
+                                    &TrieMasks { hash_mask, tree_mask },
                                 )?;
                             } else {
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
@@ -1488,7 +1624,7 @@ impl SparseSubtrie {
         &mut self,
         path: Nibbles,
         node: &TrieNode,
-        masks: TrieMasks,
+        masks: &TrieMasks,
     ) -> SparseTrieResult<()> {
         debug_assert!(path.starts_with(&self.path));
 
@@ -1670,7 +1806,7 @@ impl SparseSubtrie {
             return Ok(())
         }
 
-        self.reveal_node(path, &TrieNode::decode(&mut &child[..])?, TrieMasks::none())
+        self.reveal_node(path, &TrieNode::decode(&mut &child[..])?, &TrieMasks::none())
     }
 
     /// Recalculates and updates the RLP hashes for the changed nodes in this subtrie.
@@ -2160,6 +2296,24 @@ impl SparseSubtrieType {
     }
 }
 
+impl Ord for SparseSubtrieType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Upper, Self::Upper) => Ordering::Equal,
+            (Self::Upper, Self::Lower(_)) => Ordering::Less,
+            (Self::Lower(_), Self::Upper) => Ordering::Greater,
+            (Self::Lower(idx_a), Self::Lower(idx_b)) if idx_a == idx_b => Ordering::Equal,
+            (Self::Lower(idx_a), Self::Lower(idx_b)) => idx_a.cmp(idx_b),
+        }
+    }
+}
+
+impl PartialOrd for SparseSubtrieType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 /// Collection of reusable buffers for calculating subtrie hashes.
 ///
 /// These buffers reduce allocations when computing RLP representations during trie updates.
@@ -2272,8 +2426,8 @@ mod tests {
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
         blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
-        LeafLookup, LeafLookupError, SerialSparseTrie, SparseNode, SparseTrieInterface,
-        SparseTrieUpdates, TrieMasks,
+        LeafLookup, LeafLookupError, RevealedSparseNode, SerialSparseTrie, SparseNode,
+        SparseTrieInterface, SparseTrieUpdates, TrieMasks,
     };
     use std::collections::{BTreeMap, BTreeSet};
 
@@ -2855,7 +3009,7 @@ mod tests {
             let node = create_leaf_node([0x2, 0x3], 42);
             let masks = TrieMasks::none();
 
-            trie.reveal_node(path, node, masks).unwrap();
+            trie.reveal_nodes(vec![RevealedSparseNode { path, node, masks }]).unwrap();
 
             assert_matches!(
                 trie.upper_subtrie.nodes.get(&path),
@@ -2876,7 +3030,7 @@ mod tests {
             let node = create_leaf_node([0x3, 0x4], 42);
             let masks = TrieMasks::none();
 
-            trie.reveal_node(path, node, masks).unwrap();
+            trie.reveal_nodes(vec![RevealedSparseNode { path, node, masks }]).unwrap();
 
             // Check that the lower subtrie was created
             let idx = path_subtrie_index_unchecked(&path);
@@ -2900,7 +3054,7 @@ mod tests {
             let node = create_leaf_node([0x4, 0x5], 42);
             let masks = TrieMasks::none();
 
-            trie.reveal_node(path, node, masks).unwrap();
+            trie.reveal_nodes(vec![RevealedSparseNode { path, node, masks }]).unwrap();
 
             // Check that the lower subtrie's path hasn't changed
             let idx = path_subtrie_index_unchecked(&path);
@@ -2961,7 +3115,7 @@ mod tests {
         let node = create_extension_node([0x2], child_hash);
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path, node, masks).unwrap();
+        trie.reveal_nodes(vec![RevealedSparseNode { path, node, masks }]).unwrap();
 
         // Extension node should be in upper trie
         assert_matches!(
@@ -3023,7 +3177,7 @@ mod tests {
         let node = create_branch_node_with_children(&[0x0, 0x7, 0xf], child_hashes.clone());
         let masks = TrieMasks::none();
 
-        trie.reveal_node(path, node, masks).unwrap();
+        trie.reveal_nodes(vec![RevealedSparseNode { path, node, masks }]).unwrap();
 
         // Branch node should be in upper trie
         assert_matches!(
@@ -3052,16 +3206,10 @@ mod tests {
 
     #[test]
     fn test_update_subtrie_hashes() {
-        // Create a trie with three subtries
+        // Create a trie and reveal leaf nodes using reveal_nodes
         let mut trie = ParallelSparseTrie::default();
-        let mut subtrie_1 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x0, 0x0])));
-        let subtrie_1_index = path_subtrie_index_unchecked(&subtrie_1.path);
-        let mut subtrie_2 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x1, 0x0])));
-        let subtrie_2_index = path_subtrie_index_unchecked(&subtrie_2.path);
-        let mut subtrie_3 = Box::new(SparseSubtrie::new(Nibbles::from_nibbles([0x3, 0x0])));
-        let subtrie_3_index = path_subtrie_index_unchecked(&subtrie_3.path);
 
-        // Reveal dummy leaf nodes that form an incorrect trie structure but enough to test the
+        // Create dummy leaf nodes that form an incorrect trie structure but enough to test the
         // method
         let leaf_1_full_path = Nibbles::from_nibbles([0; 64]);
         let leaf_1_path = leaf_1_full_path.slice(..2);
@@ -3075,14 +3223,19 @@ mod tests {
         let leaf_1 = create_leaf_node(leaf_1_key.to_vec(), 1);
         let leaf_2 = create_leaf_node(leaf_2_key.to_vec(), 2);
         let leaf_3 = create_leaf_node(leaf_3_key.to_vec(), 3);
-        subtrie_1.reveal_node(leaf_1_path, &leaf_1, TrieMasks::none()).unwrap();
-        subtrie_2.reveal_node(leaf_2_path, &leaf_2, TrieMasks::none()).unwrap();
-        subtrie_3.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
 
-        // Add subtries at specific positions
-        trie.lower_subtries[subtrie_1_index] = LowerSparseSubtrie::Revealed(subtrie_1);
-        trie.lower_subtries[subtrie_2_index] = LowerSparseSubtrie::Revealed(subtrie_2);
-        trie.lower_subtries[subtrie_3_index] = LowerSparseSubtrie::Revealed(subtrie_3);
+        // Reveal nodes using reveal_nodes
+        trie.reveal_nodes(vec![
+            RevealedSparseNode { path: leaf_1_path, node: leaf_1, masks: TrieMasks::none() },
+            RevealedSparseNode { path: leaf_2_path, node: leaf_2, masks: TrieMasks::none() },
+            RevealedSparseNode { path: leaf_3_path, node: leaf_3, masks: TrieMasks::none() },
+        ])
+        .unwrap();
+
+        // Calculate subtrie indexes
+        let subtrie_1_index = SparseSubtrieType::from_path(&leaf_1_path).lower_index().unwrap();
+        let subtrie_2_index = SparseSubtrieType::from_path(&leaf_2_path).lower_index().unwrap();
+        let subtrie_3_index = SparseSubtrieType::from_path(&leaf_3_path).lower_index().unwrap();
 
         let unchanged_prefix_set = PrefixSetMut::from([
             Nibbles::from_nibbles([0x0]),
@@ -3160,12 +3313,12 @@ mod tests {
         );
 
         // Reveal nodes
-        subtrie.reveal_node(branch_2_path, &branch_2, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_1_path, &leaf_1, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(extension_path, &extension, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(branch_1_path, &branch_1, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_2_path, &leaf_2, TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(branch_2_path, &branch_2, &TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_1_path, &leaf_1, &TrieMasks::none()).unwrap();
+        subtrie.reveal_node(extension_path, &extension, &TrieMasks::none()).unwrap();
+        subtrie.reveal_node(branch_1_path, &branch_1, &TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_2_path, &leaf_2, &TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_3_path, &leaf_3, &TrieMasks::none()).unwrap();
 
         // Run hash builder for two leaf nodes
         let (_, _, proof_nodes, _, _) = run_hash_builder(
@@ -3805,9 +3958,12 @@ mod tests {
 
         // Step 2: Reveal nodes in the trie
         let mut trie = ParallelSparseTrie::from_root(extension, TrieMasks::none(), true).unwrap();
-        trie.reveal_node(branch_path, branch, TrieMasks::none()).unwrap();
-        trie.reveal_node(leaf_1_path, leaf_1, TrieMasks::none()).unwrap();
-        trie.reveal_node(leaf_2_path, leaf_2, TrieMasks::none()).unwrap();
+        trie.reveal_nodes(vec![
+            RevealedSparseNode { path: branch_path, node: branch, masks: TrieMasks::none() },
+            RevealedSparseNode { path: leaf_1_path, node: leaf_1, masks: TrieMasks::none() },
+            RevealedSparseNode { path: leaf_2_path, node: leaf_2, masks: TrieMasks::none() },
+        ])
+        .unwrap();
 
         // Step 3: Reset hashes for all revealed nodes to test actual hash calculation
         // Reset upper subtrie node hashes
@@ -4339,14 +4495,18 @@ mod tests {
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
         sparse
-            .reveal_node(
-                Nibbles::default(),
-                branch,
-                TrieMasks { hash_mask: None, tree_mask: Some(TrieMask::new(0b01)) },
-            )
-            .unwrap();
-        sparse
-            .reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), TrieMasks::none())
+            .reveal_nodes(vec![
+                RevealedSparseNode {
+                    path: Nibbles::default(),
+                    node: branch,
+                    masks: TrieMasks { hash_mask: None, tree_mask: Some(TrieMask::new(0b01)) },
+                },
+                RevealedSparseNode {
+                    path: Nibbles::from_nibbles([0x1]),
+                    node: TrieNode::Leaf(leaf),
+                    masks: TrieMasks::none(),
+                },
+            ])
             .unwrap();
 
         // Removing a blinded leaf should result in an error
@@ -4384,14 +4544,18 @@ mod tests {
         // ├── 0 -> Hash (Path = 0)
         // └── 1 -> Leaf (Path = 1)
         sparse
-            .reveal_node(
-                Nibbles::default(),
-                branch,
-                TrieMasks { hash_mask: None, tree_mask: Some(TrieMask::new(0b01)) },
-            )
-            .unwrap();
-        sparse
-            .reveal_node(Nibbles::from_nibbles([0x1]), TrieNode::Leaf(leaf), TrieMasks::none())
+            .reveal_nodes(vec![
+                RevealedSparseNode {
+                    path: Nibbles::default(),
+                    node: branch,
+                    masks: TrieMasks { hash_mask: None, tree_mask: Some(TrieMask::new(0b01)) },
+                },
+                RevealedSparseNode {
+                    path: Nibbles::from_nibbles([0x1]),
+                    node: TrieNode::Leaf(leaf),
+                    masks: TrieMasks::none(),
+                },
+            ])
             .unwrap();
 
         // Removing a non-existent leaf should be a noop
@@ -4727,17 +4891,20 @@ mod tests {
                 Default::default(),
                 [key1()],
             );
-        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
-            let hash_mask = branch_node_hash_masks.get(&path).copied();
-            let tree_mask = branch_node_tree_masks.get(&path).copied();
-            sparse
-                .reveal_node(
+        let revealed_nodes: Vec<RevealedSparseNode> = hash_builder_proof_nodes
+            .nodes_sorted()
+            .into_iter()
+            .map(|(path, node)| {
+                let hash_mask = branch_node_hash_masks.get(&path).copied();
+                let tree_mask = branch_node_tree_masks.get(&path).copied();
+                RevealedSparseNode {
                     path,
-                    TrieNode::decode(&mut &node[..]).unwrap(),
-                    TrieMasks { hash_mask, tree_mask },
-                )
-                .unwrap();
-        }
+                    node: TrieNode::decode(&mut &node[..]).unwrap(),
+                    masks: TrieMasks { hash_mask, tree_mask },
+                }
+            })
+            .collect();
+        sparse.reveal_nodes(revealed_nodes).unwrap();
 
         // Check that the branch node exists with only two nibbles set
         assert_eq!(
@@ -4762,17 +4929,20 @@ mod tests {
                 Default::default(),
                 [key3()],
             );
-        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
-            let hash_mask = branch_node_hash_masks.get(&path).copied();
-            let tree_mask = branch_node_tree_masks.get(&path).copied();
-            sparse
-                .reveal_node(
+        let revealed_nodes: Vec<RevealedSparseNode> = hash_builder_proof_nodes
+            .nodes_sorted()
+            .into_iter()
+            .map(|(path, node)| {
+                let hash_mask = branch_node_hash_masks.get(&path).copied();
+                let tree_mask = branch_node_tree_masks.get(&path).copied();
+                RevealedSparseNode {
                     path,
-                    TrieNode::decode(&mut &node[..]).unwrap(),
-                    TrieMasks { hash_mask, tree_mask },
-                )
-                .unwrap();
-        }
+                    node: TrieNode::decode(&mut &node[..]).unwrap(),
+                    masks: TrieMasks { hash_mask, tree_mask },
+                }
+            })
+            .collect();
+        sparse.reveal_nodes(revealed_nodes).unwrap();
 
         // Check that nothing changed in the branch node
         assert_eq!(
@@ -4838,17 +5008,20 @@ mod tests {
                 Default::default(),
                 [key1(), Nibbles::from_nibbles_unchecked([0x01])],
             );
-        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
-            let hash_mask = branch_node_hash_masks.get(&path).copied();
-            let tree_mask = branch_node_tree_masks.get(&path).copied();
-            sparse
-                .reveal_node(
+        let revealed_nodes: Vec<RevealedSparseNode> = hash_builder_proof_nodes
+            .nodes_sorted()
+            .into_iter()
+            .map(|(path, node)| {
+                let hash_mask = branch_node_hash_masks.get(&path).copied();
+                let tree_mask = branch_node_tree_masks.get(&path).copied();
+                RevealedSparseNode {
                     path,
-                    TrieNode::decode(&mut &node[..]).unwrap(),
-                    TrieMasks { hash_mask, tree_mask },
-                )
-                .unwrap();
-        }
+                    node: TrieNode::decode(&mut &node[..]).unwrap(),
+                    masks: TrieMasks { hash_mask, tree_mask },
+                }
+            })
+            .collect();
+        sparse.reveal_nodes(revealed_nodes).unwrap();
 
         // Check that the branch node exists
         assert_eq!(
@@ -4873,17 +5046,20 @@ mod tests {
                 Default::default(),
                 [key2()],
             );
-        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
-            let hash_mask = branch_node_hash_masks.get(&path).copied();
-            let tree_mask = branch_node_tree_masks.get(&path).copied();
-            sparse
-                .reveal_node(
+        let revealed_nodes: Vec<RevealedSparseNode> = hash_builder_proof_nodes
+            .nodes_sorted()
+            .into_iter()
+            .map(|(path, node)| {
+                let hash_mask = branch_node_hash_masks.get(&path).copied();
+                let tree_mask = branch_node_tree_masks.get(&path).copied();
+                RevealedSparseNode {
                     path,
-                    TrieNode::decode(&mut &node[..]).unwrap(),
-                    TrieMasks { hash_mask, tree_mask },
-                )
-                .unwrap();
-        }
+                    node: TrieNode::decode(&mut &node[..]).unwrap(),
+                    masks: TrieMasks { hash_mask, tree_mask },
+                }
+            })
+            .collect();
+        sparse.reveal_nodes(revealed_nodes).unwrap();
 
         // Check that nothing changed in the extension node
         assert_eq!(
@@ -4955,17 +5131,20 @@ mod tests {
                 Default::default(),
                 [key1()],
             );
-        for (path, node) in hash_builder_proof_nodes.nodes_sorted() {
-            let hash_mask = branch_node_hash_masks.get(&path).copied();
-            let tree_mask = branch_node_tree_masks.get(&path).copied();
-            sparse
-                .reveal_node(
+        let revealed_nodes: Vec<RevealedSparseNode> = hash_builder_proof_nodes
+            .nodes_sorted()
+            .into_iter()
+            .map(|(path, node)| {
+                let hash_mask = branch_node_hash_masks.get(&path).copied();
+                let tree_mask = branch_node_tree_masks.get(&path).copied();
+                RevealedSparseNode {
                     path,
-                    TrieNode::decode(&mut &node[..]).unwrap(),
-                    TrieMasks { hash_mask, tree_mask },
-                )
-                .unwrap();
-        }
+                    node: TrieNode::decode(&mut &node[..]).unwrap(),
+                    masks: TrieMasks { hash_mask, tree_mask },
+                }
+            })
+            .collect();
+        sparse.reveal_nodes(revealed_nodes).unwrap();
 
         // Check that the branch node wasn't overwritten by the extension node in the proof
         assert_matches!(
@@ -5935,13 +6114,6 @@ mod tests {
             tree_mask: Some(TrieMask::new(0b0100000000000000)),
         };
 
-        trie.reveal_node(
-            Nibbles::from_nibbles([0x3]),
-            TrieNode::Branch(branch_0x3_node),
-            branch_0x3_masks,
-        )
-        .unwrap();
-
         // Reveal node at path Nibbles(0x37) - leaf node
         let leaf_path = Nibbles::from_nibbles([0x3, 0x7]);
         let leaf_key = Nibbles::unpack(
@@ -5952,7 +6124,19 @@ mod tests {
         let leaf_node = LeafNode::new(leaf_key, leaf_value);
         let leaf_masks = TrieMasks::none();
 
-        trie.reveal_node(leaf_path, TrieNode::Leaf(leaf_node), leaf_masks).unwrap();
+        trie.reveal_nodes(vec![
+            RevealedSparseNode {
+                path: Nibbles::from_nibbles([0x3]),
+                node: TrieNode::Branch(branch_0x3_node),
+                masks: branch_0x3_masks,
+            },
+            RevealedSparseNode {
+                path: leaf_path,
+                node: TrieNode::Leaf(leaf_node),
+                masks: leaf_masks,
+            },
+        ])
+        .unwrap();
 
         // Update leaf with its new value
         let mut leaf_full_path = leaf_path;
