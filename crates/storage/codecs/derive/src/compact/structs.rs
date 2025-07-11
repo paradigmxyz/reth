@@ -130,9 +130,13 @@ impl<'a> StructHandler<'a> {
         // relying on the length provided by the higher-level deserializer. For example, a
         // type "T" with two "u64" fields doesn't need the length parameter from
         // "T::from_compact(buf, len)" since the length of "u64" is known internally (bitpacked).
+        // Check if this is a single uppercase letter (likely a generic type parameter)
+        let is_generic_param = ftype.len() == 1 && ftype.chars().next().unwrap().is_uppercase();
+        
         assert!(
             known_types.contains(&ftype.as_str()) ||
                 is_flag_type(ftype) ||
+                is_generic_param ||
                 self.fields_iterator.peek().is_none(),
             "`{ftype}` field should be placed as the last one since it's not known.
             If it's an alias type (which are not supported by proc_macro), be sure to add it to either `known_types` or `get_bit_size` lists in the derive crate."

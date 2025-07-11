@@ -9,7 +9,7 @@ use syn::{Attribute, LitStr};
 pub fn generate_from_to(
     ident: &Ident,
     attrs: &[Attribute],
-    has_lifetime: bool,
+    generics: &syn::Generics,
     fields: &FieldList,
     zstd: Option<ZstdConfig>,
 ) -> TokenStream2 {
@@ -25,20 +25,20 @@ pub fn generate_from_to(
     let fuzz = format_ident!("fuzz_test_{snake_case_ident}");
     let test = format_ident!("fuzz_{snake_case_ident}");
 
-    let lifetime = if has_lifetime {
-        quote! { 'a }
-    } else {
-        quote! {}
-    };
-
-    let impl_compact = if has_lifetime {
-        quote! {
-           impl<#lifetime> #reth_codecs::Compact for #ident<#lifetime>
+    // Extract type parameters and add Compact bounds
+    let (impl_generics, type_generics, where_clause) = generics.split_for_impl();
+    
+    // Create where clause with Compact bounds for type parameters
+    let mut where_clause = where_clause.cloned().unwrap_or_else(|| syn::parse_quote! { where });
+    for param in &generics.params {
+        if let syn::GenericParam::Type(type_param) = param {
+            let ident = &type_param.ident;
+            where_clause.predicates.push(syn::parse_quote! { #ident: #reth_codecs::Compact });
         }
-    } else {
-        quote! {
-           impl #reth_codecs::Compact for #ident
-        }
+    }
+    
+    let impl_compact = quote! {
+        impl #impl_generics #reth_codecs::Compact for #ident #type_generics #where_clause
     };
 
     let has_ref_fields = fields.iter().any(|field| {
@@ -58,7 +58,11 @@ pub fn generate_from_to(
         }
     };
 
-    let fuzz_tests = if has_lifetime {
+    let has_lifetime = generics.lifetimes().next().is_some();
+    let has_type_params = generics.type_params().next().is_some();
+    
+    // Skip fuzz tests if there are lifetimes or type parameters
+    let fuzz_tests = if has_lifetime || has_type_params {
         quote! {}
     } else {
         quote! {

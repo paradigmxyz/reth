@@ -54,7 +54,7 @@ pub fn derive(input: DeriveInput, zstd: Option<ZstdConfig>) -> TokenStream {
 
     let fields = get_fields(&data);
     output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, zstd.is_some()));
-    output.extend(generate_from_to(&ident, &attrs, has_lifetime, &fields, zstd));
+    output.extend(generate_from_to(&ident, &attrs, &generics, &fields, zstd));
     output.into()
 }
 
@@ -217,6 +217,9 @@ pub fn is_flag_type(ftype: &str) -> bool {
 }
 
 #[cfg(test)]
+mod test_generics;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use similar_asserts::assert_eq;
@@ -241,10 +244,11 @@ mod tests {
 
         // Generate code that will impl the `Compact` trait.
         let mut output = quote! {};
-        let DeriveInput { ident, data, attrs, .. } = parse2(f_struct).unwrap();
+        let DeriveInput { ident, data, attrs, generics, .. } = parse2(f_struct).unwrap();
         let fields = get_fields(&data);
-        output.extend(generate_flag_struct(&ident, &attrs, false, &fields, false));
-        output.extend(generate_from_to(&ident, &attrs, false, &fields, None));
+        let has_lifetime = has_lifetime(&generics);
+        output.extend(generate_flag_struct(&ident, &attrs, has_lifetime, &fields, false));
+        output.extend(generate_from_to(&ident, &attrs, &generics, &fields, None));
 
         // Expected output in a TokenStream format. Commas matter!
         let should_output = quote! {
