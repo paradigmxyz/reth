@@ -16,12 +16,7 @@ use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySiz
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[cfg_attr(feature = "reth-codec", derive(reth_codecs::CompactZstd))]
 #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
-#[cfg_attr(feature = "reth-codec", reth_zstd(
-    compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
-    decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
-))]
 pub struct Receipt {
     /// Receipt type.
     pub tx_type: TxType,
@@ -450,6 +445,125 @@ pub(super) mod serde_bincode_compat {
         }
     }
 }
+
+#[cfg(feature = "reth-codec")]
+mod compact {
+    use super::*;
+    use reth_codecs::{
+        Compact,
+        __private::{modular_bitfield::prelude::*, Buf},
+    };
+
+    impl Receipt {
+        #[doc = "Used bytes by [`ReceiptFlags`]"]
+        pub const fn bitflag_encoded_bytes() -> usize {
+            1u8 as usize
+        }
+        #[doc = "Unused bits for new fields by [`ReceiptFlags`]"]
+        pub const fn bitflag_unused_bits() -> usize {
+            0u8 as usize
+        }
+    }
+
+    #[allow(non_snake_case, unused_parens)]
+    mod flags {
+        use super::*;
+
+        #[doc = "Fieldset that facilitates compacting the parent type. Used bytes: 1 | Unused bits: 0"]
+        #[bitfield]
+        #[derive(Clone, Copy, Debug, Default)]
+        pub struct ReceiptFlags {
+            pub tx_type_len: B2,
+            pub success_len: B1,
+            pub cumulative_gas_used_len: B4,
+            pub __zstd: B1,
+        }
+
+        impl ReceiptFlags {
+            #[doc = r" Deserializes this fieldset and returns it, alongside the original slice in an advanced position."]
+            pub fn from(mut buf: &[u8]) -> (Self, &[u8]) {
+                (Self::from_bytes([buf.get_u8()]), buf)
+            }
+        }
+    }
+
+    pub use flags::ReceiptFlags;
+
+    impl Compact for Receipt {
+        fn to_compact<B>(&self, buf: &mut B) -> usize
+        where
+            B: reth_codecs::__private::bytes::BufMut + AsMut<[u8]>,
+        {
+            let mut flags = ReceiptFlags::default();
+            let mut total_length = 0;
+            let mut buffer = reth_codecs::__private::bytes::BytesMut::new();
+
+            let tx_type_len = self.tx_type.to_compact(&mut buffer);
+            flags.set_tx_type_len(tx_type_len as u8);
+            let success_len = self.success.to_compact(&mut buffer);
+            flags.set_success_len(success_len as u8);
+            let cumulative_gas_used_len = self.cumulative_gas_used.to_compact(&mut buffer);
+            flags.set_cumulative_gas_used_len(cumulative_gas_used_len as u8);
+            self.logs.to_compact(&mut buffer);
+
+            let zstd = buffer.len() > 7;
+            if zstd {
+                flags.set___zstd(1);
+            }
+
+            let flags = flags.into_bytes();
+            total_length += flags.len() + buffer.len();
+            buf.put_slice(&flags);
+            if zstd {
+                reth_zstd_compressors::RECEIPT_COMPRESSOR.with(|compressor| {
+                    let compressed =
+                        compressor.borrow_mut().compress(&buffer).expect("Failed to compress.");
+                    buf.put(compressed.as_slice());
+                });
+            } else {
+                buf.put(buffer);
+            }
+            total_length
+        }
+
+        fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
+            let (flags, mut buf) = ReceiptFlags::from(buf);
+            if flags.__zstd() != 0 {
+                reth_zstd_compressors::RECEIPT_DECOMPRESSOR.with(|decompressor| {
+                    let decompressor = &mut decompressor.borrow_mut();
+                    let decompressed = decompressor.decompress(buf);
+                    let original_buf = buf;
+                    let mut buf: &[u8] = decompressed;
+                    let (tx_type, new_buf) =
+                        TxType::from_compact(buf, flags.tx_type_len() as usize);
+                    buf = new_buf;
+                    let (success, new_buf) = bool::from_compact(buf, flags.success_len() as usize);
+                    buf = new_buf;
+                    let (cumulative_gas_used, new_buf) =
+                        u64::from_compact(buf, flags.cumulative_gas_used_len() as usize);
+                    buf = new_buf;
+                    let (logs, _new_buf) = Vec::from_compact(buf, buf.len());
+                    (Self { tx_type, success, cumulative_gas_used, logs }, original_buf)
+                })
+            } else {
+                let (tx_type, new_buf) = TxType::from_compact(buf, flags.tx_type_len() as usize);
+                buf = new_buf;
+                let (success, new_buf) = bool::from_compact(buf, flags.success_len() as usize);
+                buf = new_buf;
+                let (cumulative_gas_used, new_buf) =
+                    u64::from_compact(buf, flags.cumulative_gas_used_len() as usize);
+                buf = new_buf;
+                let (logs, new_buf) = Vec::from_compact(buf, buf.len());
+                buf = new_buf;
+                let obj = Self { tx_type, success, cumulative_gas_used, logs };
+                (obj, buf)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "reth-codec")]
+pub use compact::*;
 
 #[cfg(test)]
 mod tests {
