@@ -51,6 +51,7 @@ jobs:
         with:
           cache-on-failure: true
           cache-all-crates: true
+          cache-workspace-crates: true
           shared-key: "unit-${{ matrix.type }}-${{ matrix.partition }}"
           prefix-key: "v1-rust"
           save-if: true
@@ -92,6 +93,7 @@ jobs:
         with:
           cache-on-failure: true
           cache-all-crates: true
+          cache-workspace-crates: true
           shared-key: "unit-state"
           prefix-key: "v1-rust"
           save-if: true
