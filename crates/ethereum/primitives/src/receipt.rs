@@ -1,15 +1,45 @@
+use core::fmt::Debug;
+
 use alloc::vec::Vec;
 use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
 use alloy_eips::{
-    eip2718::{Eip2718Result, Encodable2718, IsTyped2718},
+    eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
     Decodable2718,
 };
 use alloy_primitives::{bytes, Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
+
+/// Helper trait alias with requirements for transaction type generic to be used within [`Receipt`].
+pub trait TxTy:
+    Debug
+    + Copy
+    + Eq
+    + Send
+    + Sync
+    + InMemorySize
+    + Typed2718
+    + TryFrom<u8, Error = Eip2718Error>
+    + Decodable
+    + 'static
+{
+}
+impl<T> TxTy for T where
+    T: Debug
+        + Copy
+        + Eq
+        + Send
+        + Sync
+        + InMemorySize
+        + Typed2718
+        + TryFrom<u8, Error = Eip2718Error>
+        + Decodable
+        + 'static
+{
+}
 
 /// Typed ethereum transaction receipt.
 /// Receipt containing result of transaction execution.
@@ -18,6 +48,8 @@ use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySiz
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
 pub struct Receipt<T = TxType> {
+    /// Receipt type.
+    pub tx_type: T,
     /// If transaction is executed successfully.
     ///
     /// This is the `statusCode`
@@ -26,8 +58,6 @@ pub struct Receipt<T = TxType> {
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
     pub logs: Vec<Log>,
-    /// Receipt type.
-    pub tx_type: T,
 }
 
 #[cfg(feature = "reth-codec")]
@@ -67,7 +97,7 @@ impl Receipt<TxType> {
     }
 }
 
-impl<T> Receipt<T> {
+impl<T: TxTy> Receipt<T> {
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
         self.success.length() +
@@ -89,31 +119,11 @@ impl<T> Receipt<T> {
         Header { list: true, payload_length: self.rlp_encoded_fields_length(bloom) }
     }
 
-    /// Returns length of RLP-encoded receipt fields without the given [`Bloom`] without an RLP
-    /// header
-    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
-        self.success.length() + self.cumulative_gas_used.length() + self.logs.length()
-    }
-
-    /// RLP-encodes receipt fields without the given [`Bloom`] without an RLP header.
-    pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
-        self.success.encode(out);
-        self.cumulative_gas_used.encode(out);
-        self.logs.encode(out);
-    }
-
-    /// Returns RLP header for inner encoding.
-    pub fn rlp_header_inner_without_bloom(&self) -> Header {
-        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
-    }
-}
-
-impl Receipt<TxType> {
     /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
     /// network header.
     pub fn rlp_decode_inner(
         buf: &mut &[u8],
-        tx_type: TxType,
+        tx_type: T,
     ) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
         let header = Header::decode(buf)?;
         if !header.list {
@@ -144,12 +154,27 @@ impl Receipt<TxType> {
         ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf))
     }
 
+    /// Returns length of RLP-encoded receipt fields without the given [`Bloom`] without an RLP
+    /// header
+    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
+        self.success.length() + self.cumulative_gas_used.length() + self.logs.length()
+    }
+
+    /// RLP-encodes receipt fields without the given [`Bloom`] without an RLP header.
+    pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
+        self.success.encode(out);
+        self.cumulative_gas_used.encode(out);
+        self.logs.encode(out);
+    }
+
+    /// Returns RLP header for inner encoding.
+    pub fn rlp_header_inner_without_bloom(&self) -> Header {
+        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
+    }
+
     /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
     /// network header.
-    pub fn rlp_decode_inner_without_bloom(
-        buf: &mut &[u8],
-        tx_type: TxType,
-    ) -> alloy_rlp::Result<Self> {
+    pub fn rlp_decode_inner_without_bloom(buf: &mut &[u8], tx_type: T) -> alloy_rlp::Result<Self> {
         let header = Header::decode(buf)?;
         if !header.list {
             return Err(alloy_rlp::Error::UnexpectedString);
@@ -168,21 +193,21 @@ impl Receipt<TxType> {
     }
 }
 
-impl Eip2718EncodableReceipt for Receipt<TxType> {
+impl<T: TxTy> Eip2718EncodableReceipt for Receipt<T> {
     fn eip2718_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
         !self.tx_type.is_legacy() as usize + self.rlp_header_inner(bloom).length_with_payload()
     }
 
     fn eip2718_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
         if !self.tx_type.is_legacy() {
-            out.put_u8(self.tx_type as u8);
+            out.put_u8(self.tx_type.ty());
         }
         self.rlp_header_inner(bloom).encode(out);
         self.rlp_encode_fields(bloom, out);
     }
 }
 
-impl RlpEncodableReceipt for Receipt<TxType> {
+impl<T: TxTy> RlpEncodableReceipt for Receipt<T> {
     fn rlp_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
         let mut len = self.eip2718_encoded_length_with_bloom(bloom);
         if !self.tx_type.is_legacy() {
@@ -205,21 +230,21 @@ impl RlpEncodableReceipt for Receipt<TxType> {
     }
 }
 
-impl RlpDecodableReceipt for Receipt<TxType> {
+impl<T: TxTy> RlpDecodableReceipt for Receipt<T> {
     fn rlp_decode_with_bloom(buf: &mut &[u8]) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
         let header_buf = &mut &**buf;
         let header = Header::decode(header_buf)?;
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, TxType::Legacy)
+            return Self::rlp_decode_inner(buf, T::try_from(0)?)
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt
         *buf = *header_buf;
 
         let remaining = buf.len();
-        let tx_type = TxType::decode(buf)?;
+        let tx_type = T::decode(buf)?;
         let this = Self::rlp_decode_inner(buf, tx_type)?;
 
         if buf.len() + header.payload_length != remaining {
@@ -230,7 +255,7 @@ impl RlpDecodableReceipt for Receipt<TxType> {
     }
 }
 
-impl Encodable2718 for Receipt<TxType> {
+impl<T: TxTy> Encodable2718 for Receipt<T> {
     fn encode_2718_len(&self) -> usize {
         (!self.tx_type.is_legacy() as usize) +
             self.rlp_header_inner_without_bloom().length_with_payload()
@@ -239,24 +264,24 @@ impl Encodable2718 for Receipt<TxType> {
     // encode the header
     fn encode_2718(&self, out: &mut dyn BufMut) {
         if !self.tx_type.is_legacy() {
-            out.put_u8(self.tx_type as u8);
+            out.put_u8(self.tx_type.ty());
         }
         self.rlp_header_inner_without_bloom().encode(out);
         self.rlp_encode_fields_without_bloom(out);
     }
 }
 
-impl Decodable2718 for Receipt<TxType> {
+impl<T: TxTy> Decodable2718 for Receipt<T> {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, TxType::try_from(ty)?)?)
+        Ok(Self::rlp_decode_inner_without_bloom(buf, T::try_from(ty)?)?)
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, TxType::Legacy)?)
+        Ok(Self::rlp_decode_inner_without_bloom(buf, T::try_from(0)?)?)
     }
 }
 
-impl Encodable for Receipt<TxType> {
+impl<T: TxTy> Encodable for Receipt<T> {
     fn encode(&self, out: &mut dyn BufMut) {
         self.network_encode(out);
     }
@@ -266,13 +291,13 @@ impl Encodable for Receipt<TxType> {
     }
 }
 
-impl Decodable for Receipt<TxType> {
+impl<T: TxTy> Decodable for Receipt<T> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self::network_decode(buf)?)
     }
 }
 
-impl TxReceipt for Receipt<TxType> {
+impl<T: TxTy> TxReceipt for Receipt<T> {
     type Log = Log;
 
     fn status_or_post_state(&self) -> Eip658Value {
@@ -296,19 +321,19 @@ impl TxReceipt for Receipt<TxType> {
     }
 }
 
-impl Typed2718 for Receipt<TxType> {
+impl<T: TxTy> Typed2718 for Receipt<T> {
     fn ty(&self) -> u8 {
-        self.tx_type as u8
+        self.tx_type.ty()
     }
 }
 
-impl IsTyped2718 for Receipt<TxType> {
+impl<T: TxTy> IsTyped2718 for Receipt<T> {
     fn is_type(type_id: u8) -> bool {
         <TxType as IsTyped2718>::is_type(type_id)
     }
 }
 
-impl InMemorySize for Receipt<TxType> {
+impl<T: TxTy> InMemorySize for Receipt<T> {
     fn size(&self) -> usize {
         self.tx_type.size() +
             core::mem::size_of::<bool>() +
@@ -317,10 +342,7 @@ impl InMemorySize for Receipt<TxType> {
     }
 }
 
-impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt<TxType>
-where
-    T: Into<Log>,
-{
+impl<T: Into<Log>> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt<TxType> {
     fn from(value: alloy_consensus::ReceiptEnvelope<T>) -> Self {
         let value = value.into_primitives_receipt();
         Self {
@@ -333,8 +355,8 @@ where
     }
 }
 
-impl From<Receipt<TxType>> for alloy_consensus::Receipt<Log> {
-    fn from(value: Receipt<TxType>) -> Self {
+impl<T> From<Receipt<T>> for alloy_consensus::Receipt<Log> {
+    fn from(value: Receipt<T>) -> Self {
         Self {
             status: value.success.into(),
             cumulative_gas_used: value.cumulative_gas_used,
@@ -360,9 +382,9 @@ impl From<Receipt<TxType>> for alloy_consensus::ReceiptEnvelope<Log> {
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
-    use alloy_consensus::TxType;
-    use alloy_primitives::{Log, U8};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use alloy_primitives::Log;
+    use core::fmt::Debug;
+    use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
     /// Bincode-compatible [`super::Receipt`] serde implementation.
@@ -382,10 +404,9 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Receipt<'a> {
+    pub struct Receipt<'a, T> {
         /// Receipt type.
-        #[serde(deserialize_with = "deserde_txtype")]
-        pub tx_type: TxType,
+        pub tx_type: T,
         /// If transaction is executed successfully.
         ///
         /// This is the `statusCode`
@@ -396,17 +417,8 @@ pub(super) mod serde_bincode_compat {
         pub logs: Cow<'a, Vec<Log>>,
     }
 
-    /// Ensures that txtype is deserialized symmetrically as U8
-    fn deserde_txtype<'de, D>(deserializer: D) -> Result<TxType, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = U8::deserialize(deserializer)?;
-        value.to::<u8>().try_into().map_err(serde::de::Error::custom)
-    }
-
-    impl<'a> From<&'a super::Receipt<TxType>> for Receipt<'a> {
-        fn from(value: &'a super::Receipt) -> Self {
+    impl<'a, T: Copy> From<&'a super::Receipt<T>> for Receipt<'a, T> {
+        fn from(value: &'a super::Receipt<T>) -> Self {
             Self {
                 tx_type: value.tx_type,
                 success: value.success,
@@ -416,8 +428,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> From<Receipt<'a>> for super::Receipt<TxType> {
-        fn from(value: Receipt<'a>) -> Self {
+    impl<'a, T> From<Receipt<'a, T>> for super::Receipt<T> {
+        fn from(value: Receipt<'a, T>) -> Self {
             Self {
                 tx_type: value.tx_type,
                 success: value.success,
@@ -427,8 +439,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl SerializeAs<super::Receipt<TxType>> for Receipt<'_> {
-        fn serialize_as<S>(source: &super::Receipt, serializer: S) -> Result<S::Ok, S::Error>
+    impl<T: Copy + Serialize> SerializeAs<super::Receipt<T>> for Receipt<'_, T> {
+        fn serialize_as<S>(source: &super::Receipt<T>, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
@@ -436,17 +448,20 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de> DeserializeAs<'de, super::Receipt<TxType>> for Receipt<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::Receipt, D::Error>
+    impl<'de, T: DeserializeOwned> DeserializeAs<'de, super::Receipt<T>> for Receipt<'de, T> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::Receipt<T>, D::Error>
         where
             D: Deserializer<'de>,
         {
-            Receipt::<'_>::deserialize(deserializer).map(Into::into)
+            Receipt::<'_, T>::deserialize(deserializer).map(Into::into)
         }
     }
 
-    impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::Receipt<TxType> {
-        type BincodeRepr<'a> = Receipt<'a>;
+    impl<T> reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::Receipt<T>
+    where
+        T: Copy + Serialize + DeserializeOwned + Debug + 'static,
+    {
+        type BincodeRepr<'a> = Receipt<'a, T>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()
@@ -471,7 +486,7 @@ pub(super) mod serde_bincode_compat {
             #[derive(Debug, PartialEq, Eq)]
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             struct Data {
-                #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
+                #[serde_as(as = "serde_bincode_compat::Receipt<'_, TxType>")]
                 receipt: Receipt<TxType>,
             }
 
