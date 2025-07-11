@@ -23,8 +23,8 @@ use std::{
     sync::LazyLock,
 };
 
-const SECTION_START: &str = "{/* CLI_REFERENCE START */}";
-const SECTION_END: &str = "{/* CLI_REFERENCE END */";
+const SECTION_START: &str = r#"{/* CLI_REFERENCE START */}"#;
+const SECTION_END: &str = r#"{/* CLI_REFERENCE END */"#;
 const README: &str = r#"import Summary from './SUMMARY.mdx';
 
 # CLI Reference
@@ -128,6 +128,7 @@ fn main() -> io::Result<()> {
         .chain(once("\n".to_string()))
         .collect();
 
+    println!("Writing SUMMARY.mdx to \"{}\"", out_dir.to_string_lossy());
     write_file(&out_dir.clone().join("SUMMARY.mdx"), &summary)?;
 
     // Generate README.md.
@@ -154,7 +155,7 @@ fn main() -> io::Result<()> {
             println!("Updating root summary in \"{}\"", path.to_string_lossy());
         }
         // TODO: This is where we update the cli reference sidebar.ts
-        // update_root_summary(path, &root_summary)?;
+        update_root_summary(path, &root_summary)?;
     }
 
     Ok(())
@@ -257,10 +258,22 @@ fn cmd_summary(md_root: Option<PathBuf>, cmd: &Cmd, indent: usize) -> String {
 
 /// Replaces the CLI_REFERENCE section in the root SUMMARY.mdx file.
 fn update_root_summary(root_dir: &Path, root_summary: &str) -> io::Result<()> {
-    let summary_file = root_dir.join("SUMMARY.mdx");
+    let summary_file = root_dir.join("vocs/docs/pages/cli/SUMMARY.mdx");
+    println!("Running update_root_summary on {}", summary_file.display());
+    if !summary_file.exists() {
+        eprintln!(
+            "The file {} does not exist. Please create it with the following content:\n{}\n... CLI Reference goes here ...\n\n{}",
+            summary_file.display(),
+            SECTION_START,
+            SECTION_END
+        );
+    }
     let original_summary_content = fs::read_to_string(&summary_file)?;
 
-    let section_re = regex!(&format!(r"(?s)\s*{SECTION_START}.*?{SECTION_END}"));
+    let escaped_start = regex::escape(SECTION_START);
+    let escaped_end = regex::escape(SECTION_END);
+    let section_re = Regex::new(&format!(r"(?s)\s*{}.*?{}", escaped_start, escaped_end))
+        .expect("Failed to compile regex pattern");
     if !section_re.is_match(&original_summary_content) {
         eprintln!(
             "Could not find CLI_REFERENCE section in {}. Please add the following section to the file:\n{}\n... CLI Reference goes here ...\n\n{}",
@@ -271,7 +284,8 @@ fn update_root_summary(root_dir: &Path, root_summary: &str) -> io::Result<()> {
         process::exit(1);
     }
 
-    let section_end_re = regex!(&format!(r".*{SECTION_END}"));
+    let section_end_re = Regex::new(&format!(r".*{}", escaped_end))
+        .expect("Failed to compile regex pattern");
     let last_line = section_end_re
         .find(&original_summary_content)
         .map(|m| m.as_str().to_string())
