@@ -21,7 +21,6 @@ use reth_eth_wire_types::{
 use reth_network_p2p::{sync::NetworkSyncUpdater, NoopFullBlockClient};
 use reth_network_peers::NodeRecord;
 use reth_network_types::{PeerKind, Reputation, ReputationChangeKind};
-use reth_rpc_convert::RpcTypes;
 use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -218,11 +217,4 @@ where
     fn peers_handle(&self) -> &PeersHandle {
         &self.peers_handle
     }
-}
-
-impl RpcTypes for NoopNetwork<EthNetworkPrimitives> {
-    type Header = alloy_consensus::Header;
-    type TransactionRequest = alloy_rpc_types_eth::transaction::TransactionRequest;
-    type TransactionResponse = alloy_rpc_types_eth::Transaction;
-    type Receipt = alloy_rpc_types_eth::TransactionReceipt;
 }

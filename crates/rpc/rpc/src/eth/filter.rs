@@ -1084,6 +1084,7 @@ impl<
 mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
+    use alloy_network::Ethereum;
     use alloy_primitives::FixedBytes;
     use rand::Rng;
     use reth_chainspec::ChainSpecProvider;
@@ -1121,7 +1122,7 @@ mod tests {
     // Helper function to create a test EthApi instance
     fn build_test_eth_api(
         provider: MockEthProvider,
-    ) -> EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig> {
+    ) -> EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig, Ethereum> {
         EthApiBuilder::new(
             provider.clone(),
             testing_pool(),

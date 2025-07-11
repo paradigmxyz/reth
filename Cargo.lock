@@ -8722,7 +8722,6 @@ dependencies = [
  "reth-network-p2p",
  "reth-network-peers",
  "reth-network-types",
- "reth-rpc-convert",
  "reth-tokio-util",
  "serde",
  "thiserror 2.0.12",
