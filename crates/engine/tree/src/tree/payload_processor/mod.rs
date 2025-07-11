@@ -210,7 +210,7 @@ where
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
-        let accounts_trie = self.accounts_trie.clone();
+        let accounts_trie = Arc::clone(&self.accounts_trie);
         self.executor.spawn_blocking(move || {
             let (res, trie) = sparse_trie_task.run();
             let _ = state_root_tx.send(res);
