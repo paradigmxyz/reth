@@ -14,7 +14,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
 use multiproof::*;
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use prewarm::PrewarmMetrics;
 use reth_evm::{ConfigureEvm, OnStateHook, SpecFor};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
@@ -33,7 +33,7 @@ use std::{
     collections::VecDeque,
     sync::{
         atomic::AtomicBool,
-        mpsc::{self, channel, Sender, TryRecvError},
+        mpsc::{self, channel, Sender},
         Arc,
     },
 };
@@ -70,8 +70,7 @@ where
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// A cleared accounts sparse trie, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
-    accounts_trie_tx: mpsc::SyncSender<SparseTrie>,
-    accounts_trie_rx: mpsc::Receiver<SparseTrie>,
+    accounts_trie: Arc<Mutex<Option<SparseTrie>>>,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -87,7 +86,6 @@ where
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     ) -> Self {
-        let (sparse_trie_tx, sparse_trie_rx) = mpsc::sync_channel(1);
         Self {
             executor,
             execution_cache: Default::default(),
@@ -97,8 +95,7 @@ where
             evm_config,
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
-            accounts_trie_tx: sparse_trie_tx,
-            accounts_trie_rx: sparse_trie_rx,
+            accounts_trie: Arc::default(),
             _marker: Default::default(),
         }
     }
@@ -200,16 +197,7 @@ where
         });
 
         // take the sparse trie if it was set
-        let sparse_trie = match self.accounts_trie_rx.try_recv() {
-            Ok(trie) => Some(trie),
-            // If the accounts trie is not available, create a new one.
-            //
-            // This may happen in two cases:
-            // 1. It's the first payload that we're processing.
-            // 2. The accounts trie hasn't been returned yet.
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => panic!("sparse trie channel disconnected"),
-        };
+        let sparse_trie = self.accounts_trie.lock().take();
 
         let mut sparse_trie_task =
             SparseTrieTask::<_, SerialSparseTrie, SerialSparseTrie>::new_with_stored_trie(
@@ -222,12 +210,12 @@ where
 
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
-        let sparse_trie_tx = self.accounts_trie_tx.clone();
+        let accounts_trie = self.accounts_trie.clone();
         self.executor.spawn_blocking(move || {
             let (res, trie) = sparse_trie_task.run();
             let _ = state_root_tx.send(res);
-            // Clear accounts trie and return it back to the channel
-            let _ = sparse_trie_tx.send(trie.clear());
+            // Clear accounts trie and return it back to the payload processor
+            accounts_trie.lock().replace(trie);
         });
 
         // spawn the proof task
