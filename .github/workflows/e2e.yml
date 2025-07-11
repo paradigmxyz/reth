@@ -31,6 +31,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
+          cache-all-crates: true
+          shared-key: "nextest-cache"
       - name: Run e2e tests
         run: |
           cargo nextest run \
