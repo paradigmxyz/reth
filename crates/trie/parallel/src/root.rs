@@ -21,6 +21,7 @@ use reth_trie::{
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
+use tokio::runtime::Handle;
 use tracing::*;
 
 /// Parallel incremental state root calculator.
@@ -40,6 +41,8 @@ pub struct ParallelStateRoot<Factory> {
     view: ConsistentDbView<Factory>,
     /// Trie input.
     input: TrieInput,
+    /// Task spawner for blocking operations.
+    executor: Handle,
     /// Parallel state root metrics.
     #[cfg(feature = "metrics")]
     metrics: ParallelStateRootMetrics,
@@ -47,10 +50,11 @@ pub struct ParallelStateRoot<Factory> {
 
 impl<Factory> ParallelStateRoot<Factory> {
     /// Create new parallel state root calculator.
-    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput) -> Self {
+    pub fn new(view: ConsistentDbView<Factory>, input: TrieInput, handle: Handle) -> Self {
         Self {
             view,
             input,
+            executor: handle,
             #[cfg(feature = "metrics")]
             metrics: ParallelStateRootMetrics::default(),
         }
@@ -106,7 +110,7 @@ where
 
             let (tx, rx) = std::sync::mpsc::sync_channel(1);
 
-            rayon::spawn_fifo(move || {
+            self.executor.spawn_blocking(move || {
                 let result = (|| -> Result<_, ParallelStateRootError> {
                     let provider_ro = view.provider_ro()?;
                     let trie_cursor_factory = InMemoryTrieCursorFactory::new(
@@ -265,8 +269,8 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::{test_utils, HashedPostState, HashedStorage};
 
-    #[test]
-    fn random_parallel_root() {
+    #[tokio::test]
+    async fn random_parallel_root() {
         let factory = create_test_provider_factory();
         let consistent_view = ConsistentDbView::new(factory.clone(), None);
 
@@ -310,8 +314,9 @@ mod tests {
             provider_rw.commit().unwrap();
         }
 
+        let handle = Handle::try_current().unwrap();
         assert_eq!(
-            ParallelStateRoot::new(consistent_view.clone(), Default::default())
+            ParallelStateRoot::new(consistent_view.clone(), Default::default(), handle.clone())
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state.clone())
@@ -343,7 +348,7 @@ mod tests {
         }
 
         assert_eq!(
-            ParallelStateRoot::new(consistent_view, TrieInput::from_state(hashed_state))
+            ParallelStateRoot::new(consistent_view, TrieInput::from_state(hashed_state), handle)
                 .incremental_root()
                 .unwrap(),
             test_utils::state_root(state)

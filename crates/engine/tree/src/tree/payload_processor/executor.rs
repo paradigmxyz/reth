@@ -38,7 +38,7 @@ impl WorkloadExecutor {
     }
 
     /// Returns the handle to the tokio runtime
-    pub(super) const fn handle(&self) -> &Handle {
+    pub const fn handle(&self) -> &Handle {
         &self.inner.handle
     }
 

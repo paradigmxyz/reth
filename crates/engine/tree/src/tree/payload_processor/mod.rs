@@ -109,6 +109,11 @@ where
             _marker: Default::default(),
         }
     }
+
+    /// Returns a reference to the executor.
+    pub const fn executor(&self) -> &WorkloadExecutor {
+        &self.executor
+    }
 }
 
 impl<N, Evm> PayloadProcessor<N, Evm>
