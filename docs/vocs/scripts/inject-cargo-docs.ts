@@ -94,6 +94,15 @@ async function injectCargoDocs() {
       .replace(/"\.\/([^/]+)\/index\.html"/g, `"${BASE_PATH}/$1/index.html"`)
       .replace(/"\.\.\/([^/]+)\/index\.html"/g, `"${BASE_PATH}/$1/index.html"`);
     
+    // Fix the search form submission issue that causes page reload
+    // Replace the problematic sendSearchForm function with a no-op
+    if (file.includes('main-') && file.endsWith('.js')) {
+      content = content.replace(
+        /function sendSearchForm\(\)\{document\.getElementsByClassName\("search-form"\)\[0\]\.submit\(\)\}/g,
+        'function sendSearchForm(){/* Fixed: Removed form submission that causes page reload */}'
+      );
+    }
+    
     await fs.writeFile(file, content, 'utf-8');
   }
 
