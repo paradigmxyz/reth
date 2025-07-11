@@ -1,6 +1,6 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, StateProvider, StateRootProvider,
+    HashedPostStateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -38,10 +38,27 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     }
 }
 
-impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> AccountReader
+    for LatestStateProviderRef<'_, Provider>
+{
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         self.tx().get_by_encoded_key::<tables::PlainAccountState>(address).map_err(Into::into)
+    }
+
+    /// Get storage.
+    fn storage(
+        &self,
+        account: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+        if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
+            if entry.key == storage_key {
+                return Ok(Some(entry.value))
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -160,25 +177,6 @@ impl<Provider: DBProvider + StateCommitmentProvider> HashedPostStateProvider
     }
 }
 
-impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProvider
-    for LatestStateProviderRef<'_, Provider>
-{
-    /// Get storage.
-    fn storage(
-        &self,
-        account: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
-        if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? {
-            if entry.key == storage_key {
-                return Ok(Some(entry.value))
-            }
-        }
-        Ok(None)
-    }
-}
-
 impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> BytecodeReader
     for LatestStateProviderRef<'_, Provider>
 {
@@ -221,6 +219,7 @@ delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvid
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_storage_api::StateProvider;
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
