@@ -51,7 +51,8 @@ jobs:
         with:
           cache-on-failure: true
           cache-all-crates: true
-          shared-key: "nextest-cache"
+          shared-key: "unit-${{ matrix.type }}-${{ matrix.partition }}"
+          prefix-key: "v1-rust"
       - uses: taiki-e/install-action@nextest
       - if: "${{ matrix.type == 'book' }}"
         uses: arduino/setup-protoc@v3
@@ -90,7 +91,8 @@ jobs:
         with:
           cache-on-failure: true
           cache-all-crates: true
-          shared-key: "nextest-cache"
+          shared-key: "unit-${{ matrix.type }}-${{ matrix.partition }}"
+          prefix-key: "v1-rust"
       - run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 
   doc:

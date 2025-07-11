@@ -32,7 +32,8 @@ jobs:
         with:
           cache-on-failure: true
           cache-all-crates: true
-          shared-key: "nextest-cache"
+          shared-key: "e2e"
+          prefix-key: "v1-rust"
       - name: Run e2e tests
         run: |
           cargo nextest run \
