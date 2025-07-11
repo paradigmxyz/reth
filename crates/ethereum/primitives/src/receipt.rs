@@ -305,7 +305,10 @@ impl<T: TxTy> InMemorySize for Receipt<T> {
     }
 }
 
-impl<T: Into<Log>> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt<TxType> {
+impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt<TxType>
+where
+    T: Into<Log>,
+{
     fn from(value: alloy_consensus::ReceiptEnvelope<T>) -> Self {
         let value = value.into_primitives_receipt();
         Self {
