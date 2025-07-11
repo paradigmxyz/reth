@@ -5,26 +5,20 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-pathdiff = "0.2"
 regex = "1"
 ---
 use clap::Parser;
 use regex::Regex;
 use std::{
     borrow::Cow,
-    fmt,
-    fs::{self, File},
-    io::{self, Write},
+    fmt, fs, io,
     iter::once,
     path::{Path, PathBuf},
-    process,
     process::{Command, Stdio},
     str,
     sync::LazyLock,
 };
 
-const SECTION_START: &str = r#"{/* CLI_REFERENCE START */}"#;
-const SECTION_END: &str = r#"{/* CLI_REFERENCE END */"#;
 const README: &str = r#"import Summary from './SUMMARY.mdx';
 
 # CLI Reference
@@ -124,7 +118,7 @@ fn main() -> io::Result<()> {
     // Generate SUMMARY.mdx.
     let summary: String = output
         .iter()
-        .map(|(cmd, _)| cmd_summary(None, cmd, 0))
+        .map(|(cmd, _)| cmd_summary(cmd, 0))
         .chain(once("\n".to_string()))
         .collect();
 
@@ -144,10 +138,7 @@ fn main() -> io::Result<()> {
     if args.root_summary {
         let root_summary: String = output
             .iter()
-            .map(|(cmd, _)| {
-                let root_path = pathdiff::diff_paths(&out_dir, &args.root_dir);
-                cmd_summary(root_path, cmd, args.root_indentation)
-            })
+            .map(|(cmd, _)| cmd_summary(cmd, args.root_indentation))
             .collect();
 
         let path = Path::new(args.root_dir.as_str());
@@ -245,60 +236,20 @@ fn parse_description(s: &str) -> (&str, &str) {
 }
 
 /// Returns the summary for a command and its subcommands.
-fn cmd_summary(md_root: Option<PathBuf>, cmd: &Cmd, indent: usize) -> String {
+fn cmd_summary(cmd: &Cmd, indent: usize) -> String {
     let cmd_s = cmd.to_string();
     let cmd_path = cmd_s.replace(" ", "/");
-    let full_cmd_path = match md_root {
-        None => cmd_path,
-        Some(md_root) => format!("{}/{}", md_root.to_string_lossy(), cmd_path),
-    };
     let indent_string = " ".repeat(indent + (cmd.subcommands.len() * 2));
-    format!("{}- [`{}`](/cli/{})\n", indent_string, cmd_s, full_cmd_path)
+    format!("{}- [`{}`](/cli/{})\n", indent_string, cmd_s, cmd_path)
 }
 
-/// Replaces the CLI_REFERENCE section in the root SUMMARY.mdx file.
+/// Overwrites the root SUMMARY.mdx file with the generated content.
 fn update_root_summary(root_dir: &Path, root_summary: &str) -> io::Result<()> {
     let summary_file = root_dir.join("vocs/docs/pages/cli/SUMMARY.mdx");
-    println!("Running update_root_summary on {}", summary_file.display());
-    if !summary_file.exists() {
-        eprintln!(
-            "The file {} does not exist. Please create it with the following content:\n{}\n... CLI Reference goes here ...\n\n{}",
-            summary_file.display(),
-            SECTION_START,
-            SECTION_END
-        );
-    }
-    let original_summary_content = fs::read_to_string(&summary_file)?;
+    println!("Overwriting {}", summary_file.display());
 
-    let escaped_start = regex::escape(SECTION_START);
-    let escaped_end = regex::escape(SECTION_END);
-    let section_re = Regex::new(&format!(r"(?s)\s*{}.*?{}", escaped_start, escaped_end))
-        .expect("Failed to compile regex pattern");
-    if !section_re.is_match(&original_summary_content) {
-        eprintln!(
-            "Could not find CLI_REFERENCE section in {}. Please add the following section to the file:\n{}\n... CLI Reference goes here ...\n\n{}",
-            summary_file.display(),
-            SECTION_START,
-            SECTION_END
-        );
-        process::exit(1);
-    }
-
-    let section_end_re = Regex::new(&format!(r".*{}", escaped_end))
-        .expect("Failed to compile regex pattern");
-    let last_line = section_end_re
-        .find(&original_summary_content)
-        .map(|m| m.as_str().to_string())
-        .expect("Could not extract last line of CLI_REFERENCE section");
-
-    let root_summary_s = root_summary.trim_end().replace("\n\n", "\n");
-    let replace_with = format!(" {}\n{}\n{}", SECTION_START, root_summary_s, last_line);
-
-    let new_root_summary =
-        section_re.replace(&original_summary_content, replace_with.as_str()).to_string();
-
-    let mut root_summary_file = File::create(&summary_file)?;
-    root_summary_file.write_all(new_root_summary.as_bytes())
+    // Simply write the root summary content to the file
+    write_file(&summary_file, root_summary)
 }
 
 /// Preprocesses the help output of a command.
