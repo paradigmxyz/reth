@@ -91,7 +91,7 @@ jobs:
         with:
           cache-on-failure: true
           cache-all-crates: true
-          shared-key: "unit-${{ matrix.type }}-${{ matrix.partition }}"
+          shared-key: "unit-state"
           prefix-key: "v1-rust"
       - run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 

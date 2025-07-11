@@ -82,7 +82,7 @@ jobs:
         with:
           cache-on-failure: true
           cache-all-crates: true
-          shared-key: "integration-${{ matrix.network }}"
+          shared-key: "integration-era"
           prefix-key: "v1-rust"
       - name: run era1 files integration tests
         run: cargo nextest run --package reth-era --test it -- --ignored
