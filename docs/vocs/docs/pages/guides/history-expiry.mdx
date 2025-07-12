@@ -34,7 +34,7 @@ If enabled, importing blocks from ERA1 files can be done automatically with no m
 
 #### Enabling the ERA stage
 
-The import from ERA1 files within the pre-merge block range is included in the [reth node](../cli/reth/node.mdx) synchronization pipeline. It is disabled by default. To enable it, pass the `--era.enable` flag when running the [`node`](../cli/reth/node.mdx) command.
+The import from ERA1 files within the pre-merge block range is included in the [reth node](../cli/reth/node.mdx) synchronization pipeline. It is disabled by default. To enable it, pass the `--era.enable` flag when running the [`node`](/cli/reth/node) command.
 
 The benefit of using this option is significant increase in the synchronization speed for the headers and mainly bodies stage of the pipeline within the ERA1 block range. We encourage you to use it! Eventually, it will become enabled by default.
 
