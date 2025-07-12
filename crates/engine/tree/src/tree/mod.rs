@@ -1452,6 +1452,7 @@ where
                 self.persisting_kind_for(block.recovered_block().header()),
                 self.provider.database_provider_ro()?,
                 block.recovered_block().parent_hash(),
+                None,
             )?;
             // Extend with block we are generating trie updates for.
             trie_input.append_ref(block.hashed_state());
@@ -2210,12 +2211,16 @@ where
             let consistent_view =
                 ensure_ok!(ConsistentDbView::new_with_latest_tip(self.provider.clone()));
 
+            // get allocated trie input if it exists
+            let allocated_trie_input = self.payload_processor.take_trie_input();
+
             // Compute trie input
             let trie_input_start = Instant::now();
             let res = self.compute_trie_input(
                 persisting_kind,
                 ensure_ok!(consistent_view.provider_ro()),
                 block.header().parent_hash(),
+                allocated_trie_input,
             );
             let trie_input = match res {
                 Ok(val) => val,
@@ -2480,8 +2485,12 @@ where
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
-        let mut input =
-            self.compute_trie_input(persisting_kind, consistent_view.provider_ro()?, parent_hash)?;
+        let mut input = self.compute_trie_input(
+            persisting_kind,
+            consistent_view.provider_ro()?,
+            parent_hash,
+            None,
+        )?;
         // Extend with block we are validating root for.
         input.append_ref(hashed_state);
 
@@ -2508,8 +2517,10 @@ where
         persisting_kind: PersistingKind,
         provider: TP,
         parent_hash: B256,
+        allocated_trie_input: Option<TrieInput>,
     ) -> ProviderResult<TrieInput> {
-        let mut input = TrieInput::default();
+        // get allocated trie input or use a default trie input
+        let mut input = allocated_trie_input.unwrap_or_default();
 
         let best_block_number = provider.best_block_number()?;
 
