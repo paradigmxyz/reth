@@ -38,7 +38,7 @@ pub enum Subcommands {
     ///
     /// One powerful use case is pairing this command with the `cast block` command, for example:
     ///
-    /// `cast block latest--full --json | reth-bench send-payload --rpc-url localhost:5000
+    /// `cast block latest --full --json | reth-bench send-payload --rpc-url localhost:5000
     /// --jwt-secret $(cat ~/.local/share/reth/mainnet/jwt.hex)`
     SendPayload(send_payload::Command),
 }
