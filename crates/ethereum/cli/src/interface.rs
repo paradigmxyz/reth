@@ -1,17 +1,19 @@
 //! CLI definition and entrypoint to executable
 
-use crate::{chainspec::EthereumChainSpecParser, debug_cmd};
+use crate::chainspec::EthereumChainSpecParser;
 use clap::{Parser, Subcommand};
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    config_cmd, db, download, dump_genesis, import, import_era, init_cmd, init_state,
+    common::{CliComponentsBuilder, CliNodeTypes},
+    config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
-    p2p, prune, recover, stage,
+    p2p, prune, re_execute, recover, stage,
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
+use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::LogArgs,
@@ -55,7 +57,7 @@ impl Cli {
     }
 }
 
-impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     /// Execute the configured cli command.
     ///
     /// This accepts a closure that is used to launch the node via the
@@ -102,8 +104,33 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
+        C: ChainSpecParser<ChainSpec = ChainSpec>,
     {
         self.with_runner(CliRunner::try_default_runtime()?, launcher)
+    }
+
+    /// Execute the configured cli command with the provided [`CliComponentsBuilder`].
+    ///
+    /// This accepts a closure that is used to launch the node via the
+    /// [`NodeCommand`](node::NodeCommand).
+    ///
+    /// This command will be run on the [default tokio runtime](reth_cli_runner::tokio_runtime).
+    pub fn run_with_components<N>(
+        self,
+        components: impl CliComponentsBuilder<N>,
+        launcher: impl AsyncFnOnce(
+            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            Ext,
+        ) -> eyre::Result<()>,
+    ) -> eyre::Result<()>
+    where
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
+            ChainSpec: Hardforks,
+        >,
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
+        self.with_runner_and_components(CliRunner::try_default_runtime()?, components, launcher)
     }
 
     /// Execute the configured cli command with the provided [`CliRunner`].
@@ -116,13 +143,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     /// use reth_ethereum_cli::interface::Cli;
     /// use reth_node_ethereum::EthereumNode;
     ///
-    /// let runtime = tokio::runtime::Builder::new_multi_thread()
-    ///     .worker_threads(4)
-    ///     .max_blocking_threads(256)
-    ///     .enable_all()
-    ///     .build()
-    ///     .unwrap();
-    /// let runner = CliRunner::from_runtime(runtime);
+    /// let runner = CliRunner::try_default_runtime().unwrap();
     ///
     /// Cli::parse_args()
     ///     .with_runner(runner, |builder, _| async move {
@@ -131,15 +152,45 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
     ///     })
     ///     .unwrap();
     /// ```
-    pub fn with_runner<L, Fut>(mut self, runner: CliRunner, launcher: L) -> eyre::Result<()>
+    pub fn with_runner<L, Fut>(self, runner: CliRunner, launcher: L) -> eyre::Result<()>
     where
         L: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
         Fut: Future<Output = eyre::Result<()>>,
+        C: ChainSpecParser<ChainSpec = ChainSpec>,
+    {
+        let components = |spec: Arc<C::ChainSpec>| {
+            (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
+        };
+
+        self.with_runner_and_components::<EthereumNode>(
+            runner,
+            components,
+            async move |builder, ext| launcher(builder, ext).await,
+        )
+    }
+
+    /// Execute the configured cli command with the provided [`CliRunner`] and
+    /// [`CliComponentsBuilder`].
+    pub fn with_runner_and_components<N>(
+        mut self,
+        runner: CliRunner,
+        components: impl CliComponentsBuilder<N>,
+        launcher: impl AsyncFnOnce(
+            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            Ext,
+        ) -> eyre::Result<()>,
+    ) -> eyre::Result<()>
+    where
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
+            ChainSpec: Hardforks,
+        >,
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.command.chain_spec() {
             self.logs.log_file_directory =
-                self.logs.log_file_directory.join(chain_spec.chain.to_string());
+                self.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
         let _guard = self.init_tracing()?;
         info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
@@ -147,45 +198,40 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
 
-        let components = |spec: Arc<C::ChainSpec>| {
-            (EthEvmConfig::ethereum(spec.clone()), EthBeaconConsensus::new(spec))
-        };
         match self.command {
             Commands::Node(command) => runner.run_command_until_exit(|ctx| {
                 command.execute(ctx, FnLauncher::new::<C, Ext>(launcher))
             }),
-            Commands::Init(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
-            }
+            Commands::Init(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
             Commands::InitState(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<N>())
             }
             Commands::Import(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode, _>(components))
+                runner.run_blocking_until_ctrl_c(command.execute::<N, _>(components))
             }
             Commands::ImportEra(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+                runner.run_blocking_until_ctrl_c(command.execute::<N>())
+            }
+            Commands::ExportEra(command) => {
+                runner.run_blocking_until_ctrl_c(command.execute::<N>())
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
+            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+            Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+            Commands::Stage(command) => {
+                runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
             }
-            Commands::Download(command) => {
-                runner.run_blocking_until_ctrl_c(command.execute::<EthereumNode>())
-            }
-            Commands::Stage(command) => runner
-                .run_command_until_exit(|ctx| command.execute::<EthereumNode, _>(ctx, components)),
-            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
+            Commands::P2P(command) => runner.run_until_ctrl_c(command.execute::<N>()),
             #[cfg(feature = "dev")]
             Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
             Commands::Config(command) => runner.run_until_ctrl_c(command.execute()),
-            Commands::Debug(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
-            }
             Commands::Recover(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<EthereumNode>(ctx))
+                runner.run_command_until_exit(|ctx| command.execute::<N>(ctx))
             }
-            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<EthereumNode>()),
+            Commands::Prune(command) => runner.run_until_ctrl_c(command.execute::<N>()),
+            Commands::ReExecute(command) => {
+                runner.run_until_ctrl_c(command.execute::<N>(components))
+            }
         }
     }
 
@@ -218,6 +264,9 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// This syncs ERA encoded blocks from a directory.
     #[command(name = "import-era")]
     ImportEra(import_era::ImportEraCommand<C>),
+    /// Exports block to era1 files in a specified directory.
+    #[command(name = "export-era")]
+    ExportEra(export_era::ExportEraCommand<C>),
     /// Dumps genesis block JSON configuration to stdout.
     DumpGenesis(dump_genesis::DumpGenesisCommand<C>),
     /// Database debugging utilities
@@ -239,15 +288,15 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Write config to stdout
     #[command(name = "config")]
     Config(config_cmd::Command),
-    /// Various debug routines
-    #[command(name = "debug")]
-    Debug(Box<debug_cmd::Command<C>>),
     /// Scripts for node recovery
     #[command(name = "recover")]
     Recover(recover::Command<C>),
     /// Prune according to the configuration without any limits
     #[command(name = "prune")]
     Prune(prune::PruneCommand<C>),
+    /// Re-execute blocks in parallel to verify historical sync correctness.
+    #[command(name = "re-execute")]
+    ReExecute(re_execute::Command<C>),
 }
 
 impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
@@ -258,6 +307,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             Self::Init(cmd) => cmd.chain_spec(),
             Self::InitState(cmd) => cmd.chain_spec(),
             Self::Import(cmd) => cmd.chain_spec(),
+            Self::ExportEra(cmd) => cmd.chain_spec(),
             Self::ImportEra(cmd) => cmd.chain_spec(),
             Self::DumpGenesis(cmd) => cmd.chain_spec(),
             Self::Db(cmd) => cmd.chain_spec(),
@@ -267,9 +317,9 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             #[cfg(feature = "dev")]
             Self::TestVectors(_) => None,
             Self::Config(_) => None,
-            Self::Debug(cmd) => cmd.chain_spec(),
             Self::Recover(cmd) => cmd.chain_spec(),
             Self::Prune(cmd) => cmd.chain_spec(),
+            Self::ReExecute(cmd) => cmd.chain_spec(),
         }
     }
 }

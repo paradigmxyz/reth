@@ -187,6 +187,14 @@ impl EthApiError {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
     }
 
+    /// Returns the [`RpcInvalidTransactionError`] if this is a [`EthApiError::InvalidTransaction`]
+    pub const fn as_invalid_transaction(&self) -> Option<&RpcInvalidTransactionError> {
+        match self {
+            Self::InvalidTransaction(e) => Some(e),
+            _ => None,
+        }
+    }
+
     /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
     pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
     where
@@ -201,6 +209,11 @@ impl EthApiError {
         E: Into<Self>,
     {
         err.into()
+    }
+
+    /// Converts this error into the rpc error object.
+    pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+        self.into()
     }
 }
 
@@ -586,9 +599,7 @@ impl RpcInvalidTransactionError {
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
-}
 
-impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
     pub const fn error_code(&self) -> i32 {
         match self {
@@ -626,6 +637,11 @@ impl RpcInvalidTransactionError {
             OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
         }
+    }
+
+    /// Converts this error into the rpc error object.
+    pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+        self.into()
     }
 }
 

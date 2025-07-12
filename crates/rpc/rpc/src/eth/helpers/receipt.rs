@@ -34,7 +34,7 @@ where
         let blob_params = self.provider().chain_spec().blob_params_at_timestamp(meta.timestamp);
 
         Ok(EthReceiptBuilder::new(
-            // Note: we assume this transaction is valid, because it's mined and therefor valid
+            // Note: we assume this transaction is valid, because it's mined and therefore valid
             tx.try_into_recovered_unchecked()?.as_recovered_ref(),
             meta,
             Cow::Owned(receipt),
