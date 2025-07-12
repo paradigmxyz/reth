@@ -11,7 +11,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::eip2930::AccessListResult;
 use alloy_evm::{
     call::caller_gas_allowance,
-    overrides::{apply_block_overrides, apply_state_overrides},
+    overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes},
 };
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rpc_types_eth::{
@@ -31,7 +31,6 @@ use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
-    DatabaseRef,
 };
 use reth_rpc_convert::{RpcConvert, RpcTypes};
 use reth_rpc_eth_types::{
@@ -735,12 +734,12 @@ pub trait Call:
         &self,
         mut evm_env: EvmEnvFor<Self::Evm>,
         mut request: TransactionRequest,
-        db: &mut CacheDB<DB>,
+        db: &mut DB,
         overrides: EvmOverrides,
     ) -> Result<(EvmEnvFor<Self::Evm>, TxEnvFor<Self::Evm>), Self::Error>
     where
-        DB: DatabaseRef,
-        EthApiError: From<<DB as DatabaseRef>::Error>,
+        DB: Database + DatabaseCommit + OverrideBlockHashes,
+        EthApiError: From<<DB as Database>::Error>,
     {
         if request.gas > Some(self.call_gas_limit()) {
             // configured gas exceeds limit

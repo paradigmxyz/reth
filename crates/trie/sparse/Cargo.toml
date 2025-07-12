@@ -26,6 +26,7 @@ alloy-rlp.workspace = true
 # misc
 auto_impl.workspace = true
 smallvec = { workspace = true, features = ["const_new"] }
+either.workspace = true
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -62,6 +63,7 @@ std = [
     "reth-storage-api/std",
     "reth-trie-common/std",
     "tracing/std",
+    "either/std",
 ]
 metrics = ["dep:reth-metrics", "dep:metrics", "std"]
 test-utils = [

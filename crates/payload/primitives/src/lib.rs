@@ -413,6 +413,17 @@ impl EngineApiMessageVersion {
     pub const fn is_v5(&self) -> bool {
         matches!(self, Self::V5)
     }
+
+    /// Returns the method name for the given version.
+    pub const fn method_name(&self) -> &'static str {
+        match self {
+            Self::V1 => "engine_newPayloadV1",
+            Self::V2 => "engine_newPayloadV2",
+            Self::V3 => "engine_newPayloadV3",
+            Self::V4 => "engine_newPayloadV4",
+            Self::V5 => "engine_newPayloadV5",
+        }
+    }
 }
 
 /// Determines how we should choose the payload to return.

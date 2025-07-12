@@ -147,11 +147,19 @@ impl DatabaseArguments {
     }
 
     /// Set the maximum duration of a read transaction.
+    pub const fn max_read_transaction_duration(
+        &mut self,
+        max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+    ) {
+        self.max_read_transaction_duration = max_read_transaction_duration;
+    }
+
+    /// Set the maximum duration of a read transaction.
     pub const fn with_max_read_transaction_duration(
         mut self,
         max_read_transaction_duration: Option<MaxReadTransactionDuration>,
     ) -> Self {
-        self.max_read_transaction_duration = max_read_transaction_duration;
+        self.max_read_transaction_duration(max_read_transaction_duration);
         self
     }
 
