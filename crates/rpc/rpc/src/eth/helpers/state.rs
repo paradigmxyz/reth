@@ -6,30 +6,34 @@ use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::{
     helpers::{EthState, LoadState, SpawnBlocking},
-    RpcNodeCoreExt,
+    EthApiTypes, RpcNodeCoreExt,
 };
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthState
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: LoadState + SpawnBlocking,
     Provider: BlockReader,
+    Rpc: alloy_network::Network,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> LoadState
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: RpcNodeCoreExt<
-        Provider: BlockReader
-                      + StateProviderFactory
-                      + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-        Pool: TransactionPool,
-    >,
+            Provider: BlockReader
+                          + StateProviderFactory
+                          + ChainSpecProvider<ChainSpec: EthereumHardforks>,
+            Pool: TransactionPool,
+        > + EthApiTypes<NetworkTypes = Rpc>,
     Provider: BlockReader,
+    Rpc: alloy_network::Network,
 {
 }
 
@@ -38,6 +42,7 @@ mod tests {
     use super::*;
     use alloy_consensus::Header;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
+    use alloy_network::Ethereum;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
@@ -53,7 +58,7 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::collections::HashMap;
 
-    fn noop_eth_api() -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig> {
+    fn noop_eth_api() -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig, Ethereum> {
         let pool = testing_pool();
         let evm_config = EthEvmConfig::mainnet();
 
@@ -76,7 +81,7 @@ mod tests {
 
     fn mock_eth_api(
         accounts: HashMap<Address, ExtendedAccount>,
-    ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig> {
+    ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig, Ethereum> {
         let pool = testing_pool();
         let mock_provider = MockEthProvider::default();
 

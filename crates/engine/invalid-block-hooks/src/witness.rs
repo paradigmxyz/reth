@@ -230,8 +230,11 @@ where
         if let Some(healthy_node_client) = &self.healthy_node_client {
             // Compare the witness against the healthy node.
             let healthy_node_witness = futures::executor::block_on(async move {
-                DebugApiClient::debug_execution_witness(healthy_node_client, block.number().into())
-                    .await
+                DebugApiClient::<()>::debug_execution_witness(
+                    healthy_node_client,
+                    block.number().into(),
+                )
+                .await
             })?;
 
             let healthy_path = self.save_file(

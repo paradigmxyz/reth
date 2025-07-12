@@ -13,14 +13,14 @@ use reth_rpc_server_types::constants::{
 };
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
 /// A helper to build the `EthApi` handler instance.
 ///
 /// This builder type contains all settings to create an [`EthApiInner`] or an [`EthApi`] instance
 /// directly.
 #[derive(Debug)]
-pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig>
+pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReaderIdExt,
 {
@@ -28,6 +28,7 @@ where
     pool: Pool,
     network: Network,
     evm_config: EvmConfig,
+    rpc: PhantomData<Rpc>,
     gas_cap: GasCap,
     max_simulate_blocks: u64,
     eth_proof_window: u64,
@@ -41,9 +42,10 @@ where
     task_spawner: Box<dyn TaskSpawner + 'static>,
 }
 
-impl<Provider, Pool, Network, EvmConfig> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReaderIdExt,
+    Rpc: alloy_network::Network,
 {
     /// Creates a new `EthApiBuilder` instance.
     pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: EvmConfig) -> Self
@@ -55,6 +57,7 @@ where
             pool,
             network,
             evm_config,
+            rpc: PhantomData,
             eth_cache: None,
             gas_oracle: None,
             gas_cap: GasCap::default(),
@@ -154,7 +157,7 @@ where
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build_inner(self) -> EthApiInner<Provider, Pool, Network, EvmConfig>
+    pub fn build_inner(self) -> EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>
     where
         Provider: BlockReaderIdExt
             + StateProviderFactory
@@ -173,6 +176,7 @@ where
             provider,
             pool,
             network,
+            rpc: _,
             evm_config,
             eth_state_cache_config,
             gas_oracle_config,
@@ -231,7 +235,7 @@ where
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    pub fn build(self) -> EthApi<Provider, Pool, Network, EvmConfig, Rpc>
     where
         Provider: BlockReaderIdExt
             + StateProviderFactory
