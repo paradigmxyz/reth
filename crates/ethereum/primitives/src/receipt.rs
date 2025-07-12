@@ -286,7 +286,6 @@ impl<T: TxTy> TxReceipt for Receipt<T> {
     fn into_logs(self) -> Vec<Log> {
         self.logs
     }
-
 }
 
 impl<T: TxTy> Typed2718 for Receipt<T> {

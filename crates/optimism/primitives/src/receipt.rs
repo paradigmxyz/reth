@@ -358,8 +358,7 @@ impl TxReceipt for OpReceipt {
         self.as_receipt().logs()
     }
 
-    fn into_logs(self) -> Vec<Self::Log>
-    {
+    fn into_logs(self) -> Vec<Self::Log> {
         match self {
             Self::Legacy(receipt) |
             Self::Eip2930(receipt) |
