@@ -9,8 +9,8 @@ use reth_errors::ProviderError;
 use reth_revm::state::Bytecode;
 use reth_trie_common::{HashedPostState, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE};
 use reth_trie_sparse::{
-    blinded::{DefaultBlindedProvider, DefaultBlindedProviderFactory},
     errors::SparseStateTrieResult,
+    provider::{DefaultTrieNodeProvider, DefaultTrieNodeProviderFactory},
     SparseStateTrie, SparseTrie, SparseTrieInterface,
 };
 
@@ -175,7 +175,7 @@ fn verify_execution_witness(
     witness: &ExecutionWitness,
     pre_state_root: B256,
 ) -> Result<(SparseStateTrie, B256Map<Bytecode>), StatelessValidationError> {
-    let provider_factory = DefaultBlindedProviderFactory;
+    let provider_factory = DefaultTrieNodeProviderFactory;
     let mut trie = SparseStateTrie::new();
     let mut state_witness = B256Map::default();
     let mut bytecode = B256Map::default();
@@ -239,8 +239,8 @@ fn calculate_state_root(
 
     // In `verify_execution_witness` a `DefaultBlindedProviderFactory` is used, so we use the same
     // again in here.
-    let provider_factory = DefaultBlindedProviderFactory;
-    let storage_provider = DefaultBlindedProvider;
+    let provider_factory = DefaultTrieNodeProviderFactory;
+    let storage_provider = DefaultTrieNodeProvider;
 
     for (address, storage) in state.storages.into_iter().sorted_unstable_by_key(|(addr, _)| *addr) {
         // Take the existing storage trie (or create an empty, “revealed” one)

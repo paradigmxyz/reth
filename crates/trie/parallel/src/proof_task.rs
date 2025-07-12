@@ -19,14 +19,14 @@ use reth_provider::{
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory,
     prefix_set::TriePrefixSetsMut,
-    proof::{ProofBlindedProviderFactory, StorageProof},
+    proof::{ProofTrieNodeProviderFactory, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdatesSorted,
     DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
 };
 use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use reth_trie_sparse::blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode};
+use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
     collections::VecDeque,
     sync::{
@@ -40,7 +40,7 @@ use tokio::runtime::Handle;
 use tracing::debug;
 
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
-type BlindedNodeResult = Result<Option<RevealedNode>, SparseTrieError>;
+type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
 /// A task that manages sending multiproof requests to a number of tasks that have longer-running
 /// database transactions
@@ -291,7 +291,7 @@ where
     fn blinded_account_node(
         self,
         path: Nibbles,
-        result_sender: Sender<BlindedNodeResult>,
+        result_sender: Sender<TrieNodeProviderResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         debug!(
@@ -302,14 +302,14 @@ where
 
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
+        let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
             trie_cursor_factory,
             hashed_cursor_factory,
             self.task_ctx.prefix_sets.clone(),
         );
 
         let start = Instant::now();
-        let result = blinded_provider_factory.account_node_provider().blinded_node(&path);
+        let result = blinded_provider_factory.account_node_provider().trie_node(&path);
         debug!(
             target: "trie::proof_task",
             ?path,
@@ -335,7 +335,7 @@ where
         self,
         account: B256,
         path: Nibbles,
-        result_sender: Sender<BlindedNodeResult>,
+        result_sender: Sender<TrieNodeProviderResult>,
         tx_sender: Sender<ProofTaskMessage<Tx>>,
     ) {
         debug!(
@@ -347,14 +347,14 @@ where
 
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
-        let blinded_provider_factory = ProofBlindedProviderFactory::new(
+        let blinded_provider_factory = ProofTrieNodeProviderFactory::new(
             trie_cursor_factory,
             hashed_cursor_factory,
             self.task_ctx.prefix_sets.clone(),
         );
 
         let start = Instant::now();
-        let result = blinded_provider_factory.storage_node_provider(account).blinded_node(&path);
+        let result = blinded_provider_factory.storage_node_provider(account).trie_node(&path);
         debug!(
             target: "trie::proof_task",
             ?account,
@@ -449,9 +449,9 @@ pub enum ProofTaskKind {
     /// A storage proof request.
     StorageProof(StorageProofInput, Sender<StorageProofResult>),
     /// A blinded account node request.
-    BlindedAccountNode(Nibbles, Sender<BlindedNodeResult>),
+    BlindedAccountNode(Nibbles, Sender<TrieNodeProviderResult>),
     /// A blinded storage node request.
-    BlindedStorageNode(B256, Nibbles, Sender<BlindedNodeResult>),
+    BlindedStorageNode(B256, Nibbles, Sender<TrieNodeProviderResult>),
 }
 
 /// A handle that wraps a single proof task sender that sends a terminate message on `Drop` if the
@@ -498,22 +498,22 @@ impl<Tx> Drop for ProofTaskManagerHandle<Tx> {
     }
 }
 
-impl<Tx: DbTx> BlindedProviderFactory for ProofTaskManagerHandle<Tx> {
-    type AccountNodeProvider = ProofTaskBlindedNodeProvider<Tx>;
-    type StorageNodeProvider = ProofTaskBlindedNodeProvider<Tx>;
+impl<Tx: DbTx> TrieNodeProviderFactory for ProofTaskManagerHandle<Tx> {
+    type AccountNodeProvider = ProofTaskTrieNodeProvider<Tx>;
+    type StorageNodeProvider = ProofTaskTrieNodeProvider<Tx>;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
-        ProofTaskBlindedNodeProvider::AccountNode { sender: self.sender.clone() }
+        ProofTaskTrieNodeProvider::AccountNode { sender: self.sender.clone() }
     }
 
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
-        ProofTaskBlindedNodeProvider::StorageNode { account, sender: self.sender.clone() }
+        ProofTaskTrieNodeProvider::StorageNode { account, sender: self.sender.clone() }
     }
 }
 
-/// Blinded node provider for retrieving trie nodes by path.
+/// Trie node provider for retrieving trie nodes by path.
 #[derive(Debug)]
-pub enum ProofTaskBlindedNodeProvider<Tx> {
+pub enum ProofTaskTrieNodeProvider<Tx> {
     /// Blinded account trie node provider.
     AccountNode {
         /// Sender to the proof task.
@@ -528,8 +528,8 @@ pub enum ProofTaskBlindedNodeProvider<Tx> {
     },
 }
 
-impl<Tx: DbTx> BlindedProvider for ProofTaskBlindedNodeProvider<Tx> {
-    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+impl<Tx: DbTx> TrieNodeProvider for ProofTaskTrieNodeProvider<Tx> {
+    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let (tx, rx) = channel();
         match self {
             Self::AccountNode { sender } => {
