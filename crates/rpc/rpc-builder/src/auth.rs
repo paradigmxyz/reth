@@ -1,9 +1,13 @@
-use crate::error::{RpcError, ServerKind};
+use crate::{
+    error::{RpcError, ServerKind},
+    middleware::RethRpcMiddleware,
+};
 use http::header::AUTHORIZATION;
 use jsonrpsee::{
     core::{client::SubscriptionClientT, RegisterMethodError},
     http_client::HeaderMap,
     server::{AlreadyStoppedError, RpcModule},
+    ws_client::RpcServiceBuilder,
     Methods,
 };
 use reth_rpc_api::servers::*;
@@ -21,7 +25,7 @@ pub use reth_ipc::server::Builder as IpcServerBuilder;
 
 /// Server configuration for the auth server.
 #[derive(Debug)]
-pub struct AuthServerConfig {
+pub struct AuthServerConfig<Middleware = Identity> {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
     /// The secret for the auth layer of the server.
@@ -32,11 +36,13 @@ pub struct AuthServerConfig {
     pub(crate) ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     /// IPC endpoint
     pub(crate) ipc_endpoint: Option<String>,
+    /// Configurable RPC middleware
+    pub(crate) rpc_middleware: Middleware,
 }
 
 // === impl AuthServerConfig ===
 
-impl AuthServerConfig {
+impl<Middleware> AuthServerConfig<Middleware> {
     /// Convenience function to create a new `AuthServerConfig`.
     pub const fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
         AuthServerConfigBuilder::new(secret)
@@ -48,17 +54,30 @@ impl AuthServerConfig {
     }
 
     /// Convenience function to start a server in one step.
-    pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError> {
-        let Self { socket_addr, secret, server_config, ipc_server_config, ipc_endpoint } = self;
+    pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError>
+    where
+        Middleware: RethRpcMiddleware,
+    {
+        let Self {
+            socket_addr,
+            secret,
+            server_config,
+            ipc_server_config,
+            ipc_endpoint,
+            rpc_middleware,
+        } = self;
 
         // Create auth middleware.
         let middleware =
             tower::ServiceBuilder::new().layer(AuthLayer::new(JwtAuthValidator::new(secret)));
 
+        let rpc_middleware = RpcServiceBuilder::default().layer(rpc_middleware);
+
         // By default, both http and ws are enabled.
         let server = ServerBuilder::new()
             .set_config(server_config.build())
             .set_http_middleware(middleware)
+            .set_rpc_middleware(rpc_middleware)
             .build(socket_addr)
             .await
             .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
@@ -85,12 +104,13 @@ impl AuthServerConfig {
 
 /// Builder type for configuring an `AuthServerConfig`.
 #[derive(Debug)]
-pub struct AuthServerConfigBuilder {
+pub struct AuthServerConfigBuilder<Middleware = Identity> {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerConfigBuilder>,
     ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     ipc_endpoint: Option<String>,
+    rpc_middleware: Option<Middleware>,
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -104,6 +124,7 @@ impl AuthServerConfigBuilder {
             server_config: None,
             ipc_server_config: None,
             ipc_endpoint: None,
+            rpc_middleware: None,
         }
     }
 
@@ -181,6 +202,7 @@ impl AuthServerConfigBuilder {
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
             ipc_endpoint: self.ipc_endpoint,
+            rpc_middleware: self.rpc_middleware.unwrap_or_default(),
         }
     }
 }
