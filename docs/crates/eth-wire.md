@@ -10,7 +10,7 @@ This crate can be thought of as having 2 components:
 
 (Note that ECIES is implemented in a separate `reth-ecies` crate.)
 ## Types
-The most basic Eth-wire type is an `ProtocolMessage`. It describes all messages that reth can send/receive.
+The most basic Eth-wire type is a `ProtocolMessage`. It describes all messages that reth can send/receive.
 
 [File: crates/net/eth-wire/src/types/message.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/types/message.rs)
 ```rust, ignore
@@ -78,7 +78,7 @@ In reth all [RLP](https://ethereum.org/en/developers/docs/data-structures-and-en
 Note that the `ProtocolMessage` itself implements these traits, so any stream of bytes can be converted into it by calling `ProtocolMessage::decode()` and vice versa with `ProtocolMessage::encode()`. The message type is determined by the first byte of the byte stream.
 
 ### Example: The Transactions message
-Let's understand how an `EthMessage` is implemented by taking a look at the `Transactions` Message. The eth specification describes a Transaction message as a list of RLP encoded transactions:
+Let's understand how an `EthMessage` is implemented by taking a look at the `Transactions` Message. The eth specification describes a Transaction message as a list of RLP-encoded transactions:
 
 [File: ethereum/devp2p/caps/eth.md](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#transactions-0x02)
 ```
@@ -138,7 +138,7 @@ Now that we know how the types work, let's take a look at how these are utilized
 ## P2PStream
 The lowest level stream to communicate with other peers is the P2P stream. It takes an underlying Tokio stream and does the following:
 
-- Tracks and Manages Ping and pong messages and sends them when needed.
+- Tracks and Manages Ping and Pong messages and sends them when needed.
 - Keeps track of the SharedCapabilities between the reth node and its peers.
 - Receives bytes from peers, decompresses and forwards them to its parent stream.
 - Receives bytes from its parent stream, compresses them and sends it to peers.
@@ -161,7 +161,7 @@ pub struct P2PStream<S> {
 }
 ```
 ### Pinger
-To manage pinging, an instance of the `Pinger` struct is used. This is a state machine which keeps track of how many pings
+To manage pinging, an instance of the `Pinger` struct is used. This is a state machine that keeps track of how many pings
 we have sent/received and the timeouts associated with them.
 
 [File: crates/net/eth-wire/src/pinger.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/eth-wire/src/pinger.rs)
@@ -218,7 +218,7 @@ pub(crate) fn poll_ping(
 ```
 
 ### Sending and receiving data
-To send and receive data, the P2PStream itself is a future which implements the `Stream` and `Sink` traits from the `futures` crate.
+To send and receive data, the P2PStream itself is a future that implements the `Stream` and `Sink` traits from the `futures` crate.
 
 For the `Stream` trait, the `inner` stream is polled, decompressed and returned. Most of the code is just
 error handling and is omitted here for clarity.

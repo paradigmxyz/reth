@@ -13,7 +13,7 @@ The main difference between metrics and traces is therefore that metrics are sys
 **For most things, you likely want a metric**, except for two scenarios:
 
 - For contributors, traces are a good profiling tool
-- For end-users that run complicated infrastructure, traces in the RPC component makes sense
+- For end-users who run complicated infrastructure, traces in the RPC component make sense
 
 ### How to add a metric
 
