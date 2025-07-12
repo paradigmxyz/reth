@@ -436,8 +436,6 @@ pub struct RpcAddOns<
     /// This middleware is applied to all RPC requests across all transports (HTTP, WS, IPC).
     /// See [`RpcAddOns::with_rpc_middleware`] for more details.
     rpc_middleware: RpcMiddleware,
-    /// Whether to disable the auth server (engine API). Defaults to false.
-    disable_auth_server: bool,
 }
 
 impl<Node, EthB, EV, EB, RpcMiddleware> Debug for RpcAddOns<Node, EthB, EV, EB, RpcMiddleware>
@@ -454,7 +452,6 @@ where
             .field("engine_validator_builder", &self.engine_validator_builder)
             .field("engine_api_builder", &self.engine_api_builder)
             .field("rpc_middleware", &"...")
-            .field("disable_auth_server", &self.disable_auth_server)
             .finish()
     }
 }
@@ -477,7 +474,6 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
-            disable_auth_server: false,
         }
     }
 
@@ -491,7 +487,6 @@ where
             eth_api_builder,
             engine_validator_builder,
             rpc_middleware,
-            disable_auth_server,
             ..
         } = self;
         RpcAddOns {
@@ -500,7 +495,6 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
-            disable_auth_server,
         }
     }
 
@@ -514,7 +508,6 @@ where
             eth_api_builder,
             engine_api_builder,
             rpc_middleware,
-            disable_auth_server,
             ..
         } = self;
         RpcAddOns {
@@ -523,7 +516,6 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
-            disable_auth_server,
         }
     }
 
@@ -571,7 +563,6 @@ where
             eth_api_builder,
             engine_validator_builder,
             engine_api_builder,
-            disable_auth_server,
             ..
         } = self;
         RpcAddOns {
@@ -580,7 +571,6 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
-            disable_auth_server,
         }
     }
 
@@ -595,7 +585,6 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
-            disable_auth_server,
         } = self;
         let rpc_middleware = Stack::new(rpc_middleware, layer);
         RpcAddOns {
@@ -604,7 +593,6 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
-            disable_auth_server,
         }
     }
 
@@ -617,28 +605,6 @@ where
         self.layer_rpc_middleware(layer)
     }
 
-    /// Sets whether to disable the auth server (engine API).
-    ///
-    /// By default, the auth server is enabled (`disable_auth_server` = false). Use this method to
-    /// disable it if you don't need the Engine API functionality.
-    pub const fn with_disable_auth_server(mut self, disable: bool) -> Self {
-        self.disable_auth_server = disable;
-        self
-    }
-
-    /// Disables the auth server (engine API).
-    ///
-    /// This is a convenience method for `with_disable_auth_server(true)`.
-    pub const fn disable_auth_server(self) -> Self {
-        self.with_disable_auth_server(true)
-    }
-
-    /// Disables the auth server (engine API) on a mutable reference.
-    ///
-    /// This is used by the trait implementation.
-    pub const fn disable_auth_server_mut(&mut self) {
-        self.disable_auth_server = true;
-    }
 
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
@@ -733,7 +699,7 @@ where
     }
 
     /// Launches the RPC servers with the given context and an additional hook for extending
-    /// modules. Whether the auth server is launched depends on the `disable_auth_server` setting.
+    /// modules. Whether the auth server is launched depends on the CLI configuration.
     pub async fn launch_add_ons_with<F>(
         self,
         ctx: AddOnsContext<'_, N>,
@@ -743,7 +709,7 @@ where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         // Check CLI config to determine if auth server should be disabled
-        let disable_auth = self.disable_auth_server || ctx.config.rpc.disable_auth_server;
+        let disable_auth = ctx.config.rpc.disable_auth_server;
         self.launch_add_ons_with_opt_engine(ctx, ext, disable_auth).await
     }
 
@@ -980,11 +946,6 @@ pub trait RethRpcAddOns<N: FullNodeComponents>:
     /// Returns a mutable reference to RPC hooks.
     fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>;
 
-    /// Disables the auth server (engine API).
-    ///
-    /// Default implementation does nothing. Implementors should override this
-    /// to actually disable the auth server if they support it.
-    fn disable_auth_server(&mut self) {}
 }
 
 impl<N: FullNodeComponents, EthB, EV, EB, RpcMiddleware> RethRpcAddOns<N>
@@ -997,10 +958,6 @@ where
 
     fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi> {
         &mut self.hooks
-    }
-
-    fn disable_auth_server(&mut self) {
-        self.disable_auth_server_mut();
     }
 }
 

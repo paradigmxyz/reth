@@ -296,10 +296,6 @@ where
     fn hooks_mut(&mut self) -> &mut reth_node_builder::rpc::RpcHooks<N, Self::EthApi> {
         self.inner.hooks_mut()
     }
-
-    fn disable_auth_server(&mut self) {
-        self.inner.disable_auth_server_mut();
-    }
 }
 
 impl<N, EthB, EV, EB> EngineValidatorAddOn<N> for EthereumAddOns<N, EthB, EV, EB>
