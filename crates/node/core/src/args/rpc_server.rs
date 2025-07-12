@@ -119,6 +119,13 @@ pub struct RpcServerArgs {
     #[arg(long = "auth-ipc.path", default_value_t = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())]
     pub auth_ipc_path: String,
 
+    /// Disable the auth/engine API server.
+    ///
+    /// This will prevent the authenticated engine-API server from starting. Use this if you're
+    /// running a node that doesn't need to serve engine API requests.
+    #[arg(long = "disable-auth-server", alias = "disable-engine-api")]
+    pub disable_auth_server: bool,
+
     /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and
     /// `--ws.api`.
     ///
@@ -335,6 +342,7 @@ impl Default for RpcServerArgs {
             auth_jwtsecret: None,
             auth_ipc: false,
             auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
+            disable_auth_server: false,
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
