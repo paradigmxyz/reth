@@ -482,13 +482,7 @@ where
         self,
         engine_api_builder: T,
     ) -> RpcAddOns<Node, EthB, EV, T, RpcMiddleware> {
-        let Self {
-            hooks,
-            eth_api_builder,
-            engine_validator_builder,
-            rpc_middleware,
-            ..
-        } = self;
+        let Self { hooks, eth_api_builder, engine_validator_builder, rpc_middleware, .. } = self;
         RpcAddOns {
             hooks,
             eth_api_builder,
@@ -503,13 +497,7 @@ where
         self,
         engine_validator_builder: T,
     ) -> RpcAddOns<Node, EthB, T, EB, RpcMiddleware> {
-        let Self {
-            hooks,
-            eth_api_builder,
-            engine_api_builder,
-            rpc_middleware,
-            ..
-        } = self;
+        let Self { hooks, eth_api_builder, engine_api_builder, rpc_middleware, .. } = self;
         RpcAddOns {
             hooks,
             eth_api_builder,
@@ -558,13 +546,8 @@ where
     /// - The default middleware is `Identity` (no-op), which passes through requests unchanged
     /// - Middleware layers are applied in the order they are added via `.layer()`
     pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> RpcAddOns<Node, EthB, EV, EB, T> {
-        let Self {
-            hooks,
-            eth_api_builder,
-            engine_validator_builder,
-            engine_api_builder,
-            ..
-        } = self;
+        let Self { hooks, eth_api_builder, engine_validator_builder, engine_api_builder, .. } =
+            self;
         RpcAddOns {
             hooks,
             eth_api_builder,
@@ -604,7 +587,6 @@ where
         let layer = layer.map(Either::Left).unwrap_or(Either::Right(Identity::new()));
         self.layer_rpc_middleware(layer)
     }
-
 
     /// Sets the hook that is run once the rpc server is started.
     pub fn on_rpc_started<F>(mut self, hook: F) -> Self
@@ -945,7 +927,6 @@ pub trait RethRpcAddOns<N: FullNodeComponents>:
 
     /// Returns a mutable reference to RPC hooks.
     fn hooks_mut(&mut self) -> &mut RpcHooks<N, Self::EthApi>;
-
 }
 
 impl<N: FullNodeComponents, EthB, EV, EB, RpcMiddleware> RethRpcAddOns<N>
