@@ -77,6 +77,7 @@ exclude_crates=(
   reth-era-downloader # tokio
   reth-era-utils # tokio
   reth-tracing-otlp
+  reth-node-ethstats
 )
 
 # Array to hold the results
