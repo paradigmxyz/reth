@@ -41,6 +41,8 @@ where
     let blob_gas_price =
         blob_gas_used.and_then(|_| Some(blob_params?.calc_blob_fee(meta.excess_blob_gas?)));
 
+    let status = receipt.status_or_post_state();
+    let cumulative_gas_used = receipt.cumulative_gas_used();
     let logs_bloom = receipt.bloom();
 
     // get number of logs in the block
@@ -50,7 +52,6 @@ where
     }
 
     let logs: Vec<Log> = receipt
-        .clone()
         .into_owned()
         .into_logs() //TODO: check how to improve because still clone
         .into_iter()
@@ -67,11 +68,7 @@ where
         })
         .collect();
 
-    let rpc_receipt = alloy_rpc_types_eth::Receipt {
-        status: receipt.status_or_post_state(),
-        cumulative_gas_used: receipt.cumulative_gas_used(),
-        logs,
-    };
+    let rpc_receipt = alloy_rpc_types_eth::Receipt { status, cumulative_gas_used, logs };
 
     let (contract_address, to) = match transaction.kind() {
         TxKind::Create => (Some(from.create(transaction.nonce())), None),
