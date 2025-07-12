@@ -51,22 +51,28 @@ where
         num_logs += prev_receipt.logs().len();
     }
 
-    let logs: Vec<Log> = receipt
-        .into_owned()
-        .into_logs() //TODO: check how to improve because still clone
-        .into_iter()
-        .enumerate()
-        .map(|(tx_log_idx, log)| Log {
-            inner: log,
-            block_hash: Some(meta.block_hash),
-            block_number: Some(meta.block_number),
-            block_timestamp: Some(meta.timestamp),
-            transaction_hash: Some(meta.tx_hash),
-            transaction_index: Some(meta.index),
-            log_index: Some((num_logs + tx_log_idx) as u64),
-            removed: false,
-        })
-        .collect();
+    macro_rules! build_rpc_logs {
+        ($logs:expr) => {
+            $logs
+                .enumerate()
+                .map(|(tx_log_idx, log)| Log {
+                    inner: log,
+                    block_hash: Some(meta.block_hash),
+                    block_number: Some(meta.block_number),
+                    block_timestamp: Some(meta.timestamp),
+                    transaction_hash: Some(meta.tx_hash),
+                    transaction_index: Some(meta.index),
+                    log_index: Some((num_logs + tx_log_idx) as u64),
+                    removed: false,
+                })
+                .collect()
+        };
+    }
+
+    let logs = match receipt {
+        Cow::Borrowed(r) => build_rpc_logs!(r.logs().iter().cloned()),
+        Cow::Owned(r) => build_rpc_logs!(r.into_logs().into_iter()),
+    };
 
     let rpc_receipt = alloy_rpc_types_eth::Receipt { status, cumulative_gas_used, logs };
 
