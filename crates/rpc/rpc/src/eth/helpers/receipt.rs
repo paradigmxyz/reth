@@ -7,6 +7,7 @@ use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_rpc_eth_api::{helpers::LoadReceipt, FromEthApiError, RpcNodeCoreExt, RpcReceipt};
 use reth_rpc_eth_types::{EthApiError, EthReceiptBuilder};
 use reth_storage_api::{BlockReader, ReceiptProvider, TransactionsProvider};
+use std::borrow::Cow;
 
 impl<Provider, Pool, Network, EvmConfig> LoadReceipt for EthApi<Provider, Pool, Network, EvmConfig>
 where
@@ -36,7 +37,7 @@ where
             // Note: we assume this transaction is valid, because it's mined and therefor valid
             tx.try_into_recovered_unchecked()?.as_recovered_ref(),
             meta,
-            &receipt,
+            Cow::Owned(receipt),
             &all_receipts,
             blob_params,
         )

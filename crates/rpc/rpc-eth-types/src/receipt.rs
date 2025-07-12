@@ -8,12 +8,13 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
 use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use std::borrow::Cow;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<R, T, E>(
     transaction: Recovered<&T>,
     meta: TransactionMeta,
-    receipt: &R,
+    receipt: Cow<'_, R>,
     all_receipts: &[R],
     blob_params: Option<BlobParams>,
     build_envelope: impl FnOnce(ReceiptWithBloom<alloy_consensus::Receipt<Log>>) -> E,
@@ -49,11 +50,13 @@ where
     }
 
     let logs: Vec<Log> = receipt
-        .logs()
-        .iter()
+        .clone()
+        .into_owned()
+        .into_logs() //TODO: check how to improve because still clone
+        .into_iter()
         .enumerate()
         .map(|(tx_log_idx, log)| Log {
-            inner: log.clone(),
+            inner: log,
             block_hash: Some(meta.block_hash),
             block_number: Some(meta.block_number),
             block_timestamp: Some(meta.timestamp),
@@ -107,17 +110,19 @@ impl EthReceiptBuilder {
     pub fn new(
         transaction: Recovered<&TransactionSigned>,
         meta: TransactionMeta,
-        receipt: &Receipt,
+        receipt: Cow<'_, Receipt>,
         all_receipts: &[Receipt],
         blob_params: Option<BlobParams>,
     ) -> Self {
+        let tx_type = receipt.tx_type;
+
         let base = build_receipt(
             transaction,
             meta,
             receipt,
             all_receipts,
             blob_params,
-            |receipt_with_bloom| ReceiptEnvelope::from_typed(receipt.tx_type, receipt_with_bloom),
+            |receipt_with_bloom| ReceiptEnvelope::from_typed(tx_type, receipt_with_bloom),
         );
 
         Self { base }
