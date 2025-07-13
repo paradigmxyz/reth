@@ -340,7 +340,7 @@ impl HashedPostState {
     ///
     /// This effectively clears all the fields in the [`HashedPostStateSorted`].
     ///
-    /// This allows us to re-use the allocated space. This allocates new space for the sorted hashed
+    /// This allows us to reuse the allocated space. This allocates new space for the sorted hashed
     /// post state, like `into_sorted`.
     pub fn drain_into_sorted(&mut self) -> HashedPostStateSorted {
         let mut updated_accounts = Vec::new();
