@@ -123,7 +123,7 @@ impl TrieUpdates {
     ///
     /// This effectively clears all the fields in the [`TrieUpdatesSorted`].
     ///
-    /// This allows us to re-use the allocated space. This allocates new space for the sorted
+    /// This allows us to reuse the allocated space. This allocates new space for the sorted
     /// updates, like `into_sorted`.
     pub fn drain_into_sorted(&mut self) -> TrieUpdatesSorted {
         let mut account_nodes = self.account_nodes.drain().collect::<Vec<_>>();
