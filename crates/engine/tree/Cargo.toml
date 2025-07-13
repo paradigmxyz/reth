@@ -32,6 +32,7 @@ reth-tasks.workspace = true
 reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
+reth-trie-sparse-parallel = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
 
 # alloy
@@ -139,3 +140,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
+
+[[test]]
+name = "e2e_testsuite"
+path = "tests/e2e-testsuite/main.rs"

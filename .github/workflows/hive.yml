@@ -32,8 +32,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ethereum/hive
-          # TODO: unpin when https://github.com/ethereum/hive/issues/1306 is fixed
-          ref: edd9969338dd1798ba2e61f049c7e3a15cef53e6
           path: hivetests
 
       - uses: actions/setup-go@v5
