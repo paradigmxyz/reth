@@ -6,7 +6,7 @@ use futures::Future;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthereumHardforks};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
-use reth_rpc_convert::RpcTxReq;
+use reth_rpc_convert::{RpcTxReq, RpcTypes};
 use reth_storage_api::{BlockNumReader, StageCheckpointReader, TransactionsProvider};
 
 use crate::{helpers::EthSigner, RpcNodeCore};
@@ -27,7 +27,7 @@ pub trait EthApiSpec:
     type Transaction;
 
     /// The RPC requests and responses.
-    type Rpc: alloy_network::Network;
+    type Rpc: RpcTypes;
 
     /// Returns the block node is started on.
     fn starting_block(&self) -> U256;

@@ -3,8 +3,9 @@
 
 use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
-    helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
-    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
+    helpers::{estimate::EstimateCall, spec::SignersForRpc},
+    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
+    RpcTransaction,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -57,20 +58,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Signer access in default (L1) trait method implementations.
-    #[expect(clippy::type_complexity)]
-    fn signers(
-        &self,
-    ) -> &parking_lot::RwLock<
-        Vec<
-            Box<
-                dyn EthSigner<
-                    ProviderTx<Self::Provider>,
-                    Self::NetworkTypes,
-                    RpcTxReq<Self::NetworkTypes>,
-                >,
-            >,
-        >,
-    >;
+    fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes>;
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///

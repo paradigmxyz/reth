@@ -1,7 +1,7 @@
 //! An abstraction over ethereum signers.
 
 use alloy_dyn_abi::TypedData;
-use alloy_network::{Ethereum, TransactionBuilder};
+use alloy_network::Ethereum;
 use alloy_primitives::{Address, Signature};
 use alloy_rpc_types_eth::TransactionRequest;
 use dyn_clone::DynClone;
@@ -13,12 +13,7 @@ pub type Result<T> = result::Result<T, SignError>;
 
 /// An Ethereum Signer used via RPC.
 #[async_trait::async_trait]
-pub trait EthSigner<
-    T,
-    N: alloy_network::Network = Ethereum,
-    TxReq: TransactionBuilder<N> = TransactionRequest,
->: Send + Sync + DynClone
-{
+pub trait EthSigner<T, N = Ethereum, TxReq = TransactionRequest>: Send + Sync + DynClone {
     /// Returns the available accounts for this signer.
     fn accounts(&self) -> Vec<Address>;
 

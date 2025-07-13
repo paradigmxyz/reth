@@ -98,6 +98,7 @@ use crate::middleware::RethRpcMiddleware;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc::eth::sim_bundle::EthSimBundle;
+use reth_rpc_eth_api::RpcTypes;
 
 // Rpc rate limiter
 pub mod rate_limiter;
@@ -128,7 +129,7 @@ pub struct RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus, Rp
 impl<N, Provider, Pool, Network, EvmConfig, Consensus, Rpc>
     RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus, Rpc>
 where
-    Rpc: alloy_network::Network,
+    Rpc: RpcTypes,
 {
     /// Create a new instance of the builder
     pub const fn new(

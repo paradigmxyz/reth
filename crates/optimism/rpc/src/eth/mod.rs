@@ -25,6 +25,7 @@ use reth_rpc_eth_api::{
         LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
+    RpcTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{
@@ -61,15 +62,20 @@ impl<T> OpNodeCore for T where T: RpcNodeCore<Provider: BlockReader> {}
 ///
 /// This type implements the [`FullEthApi`](reth_rpc_eth_api::helpers::FullEthApi) by implemented
 /// all the `Eth` helper traits and prerequisite traits.
-#[derive(Clone)]
-pub struct OpEthApi<N: OpNodeCore, NetworkT: op_alloy_network::Network = Optimism> {
+pub struct OpEthApi<N: OpNodeCore, NetworkT: RpcTypes = Optimism> {
     /// Gateway to node's core components.
     inner: Arc<OpEthApiInner<N, NetworkT>>,
     /// Converter for RPC types.
     tx_resp_builder: RpcConverter<NetworkT, N::Evm, OpEthApiError, OpTxInfoMapper<N, NetworkT>>,
 }
 
-impl<N: OpNodeCore, NetworkT: op_alloy_network::Network> OpEthApi<N, NetworkT> {
+impl<N: OpNodeCore, NetworkT: RpcTypes> Clone for OpEthApi<N, NetworkT> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone(), tx_resp_builder: self.tx_resp_builder.clone() }
+    }
+}
+
+impl<N: OpNodeCore, NetworkT: RpcTypes> OpEthApi<N, NetworkT> {
     /// Creates a new `OpEthApi`.
     pub fn new(
         eth_api: EthApiNodeBackend<N, NetworkT>,
@@ -103,7 +109,7 @@ impl<N, NetworkT> EthApiTypes for OpEthApi<N, NetworkT>
 where
     Self: Send + Sync + fmt::Debug,
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network + Clone + fmt::Debug,
+    NetworkT: RpcTypes + Send + Sync + fmt::Debug,
     <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
@@ -119,7 +125,7 @@ where
 impl<N, NetworkT> RpcNodeCore for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes + Send + Sync,
 {
     type Primitives = N::Primitives;
     type Provider = N::Provider;
@@ -157,7 +163,7 @@ where
 impl<N, NetworkT> RpcNodeCoreExt for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes + Send + Sync,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>> {
@@ -173,7 +179,7 @@ where
                       + StageCheckpointReader,
         Network: NetworkInfo,
     >,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes + Send + Sync,
 {
     type Transaction = ProviderTx<Self::Provider>;
     type Rpc = NetworkT;
@@ -193,7 +199,7 @@ impl<N, NetworkT> SpawnBlocking for OpEthApi<N, NetworkT>
 where
     Self: Send + Sync + Clone + 'static,
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes + Send + Sync + fmt::Debug,
     <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
@@ -221,7 +227,7 @@ where
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
                       + StateProviderFactory,
     >,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
@@ -245,7 +251,7 @@ where
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
     >,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes + Send + Sync + fmt::Debug,
     <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
@@ -255,7 +261,7 @@ impl<N, NetworkT> EthState for OpEthApi<N, NetworkT>
 where
     Self: LoadState + SpawnBlocking,
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes,
 {
     #[inline]
     fn max_proof_window(&self) -> u64 {
@@ -271,7 +277,7 @@ where
         >,
     >,
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes,
 {
 }
 
@@ -288,7 +294,7 @@ where
             Error: FromEvmError<Self::Evm>,
         >,
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network,
+    NetworkT: RpcTypes,
 {
 }
 
@@ -303,14 +309,14 @@ where
     }
 }
 
-impl<N: OpNodeCore, NetworkT: op_alloy_network::Network> fmt::Debug for OpEthApi<N, NetworkT> {
+impl<N: OpNodeCore, NetworkT: RpcTypes> fmt::Debug for OpEthApi<N, NetworkT> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApi").finish_non_exhaustive()
     }
 }
 
 /// Container type `OpEthApi`
-pub struct OpEthApiInner<N: OpNodeCore, Rpc: op_alloy_network::Network> {
+pub struct OpEthApiInner<N: OpNodeCore, Rpc: RpcTypes> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N, Rpc>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -322,13 +328,13 @@ pub struct OpEthApiInner<N: OpNodeCore, Rpc: op_alloy_network::Network> {
     min_suggested_priority_fee: U256,
 }
 
-impl<N: OpNodeCore, Rpc: op_alloy_network::Network> fmt::Debug for OpEthApiInner<N, Rpc> {
+impl<N: OpNodeCore, Rpc: RpcTypes> fmt::Debug for OpEthApiInner<N, Rpc> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApiInner").finish()
     }
 }
 
-impl<N: OpNodeCore, Rpc: op_alloy_network::Network> OpEthApiInner<N, Rpc> {
+impl<N: OpNodeCore, Rpc: RpcTypes> OpEthApiInner<N, Rpc> {
     /// Returns a reference to the [`EthApiNodeBackend`].
     const fn eth_api(&self) -> &EthApiNodeBackend<N, Rpc> {
         &self.eth_api

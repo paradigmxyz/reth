@@ -1,6 +1,7 @@
 //! Contains RPC handler implementations for fee history.
 
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_rpc_convert::RpcTypes;
 use reth_rpc_eth_api::helpers::{EthFees, LoadBlock, LoadFee};
 use reth_rpc_eth_types::{FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderHeader, StateProviderFactory};
@@ -16,7 +17,7 @@ where
         >,
     >,
     Provider: BlockReader,
-    Rpc: alloy_network::Network,
+    Rpc: RpcTypes,
 {
 }
 
@@ -27,7 +28,7 @@ where
     Provider: BlockReaderIdExt
         + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
         + StateProviderFactory,
-    Rpc: alloy_network::Network,
+    Rpc: RpcTypes,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {

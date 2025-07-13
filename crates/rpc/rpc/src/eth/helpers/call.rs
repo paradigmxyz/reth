@@ -30,7 +30,7 @@ where
         >,
     EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
     Provider: BlockReader,
-    Rpc: alloy_network::Network + RpcTypes<TransactionRequest: TransactionBuilder<Rpc>>,
+    Rpc: RpcTypes,
 {
 }
 
@@ -70,6 +70,6 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> EstimateCall
 where
     Self: Call<NetworkTypes = Rpc>,
     Provider: BlockReader,
-    Rpc: alloy_network::Network,
+    Rpc: RpcTypes,
 {
 }

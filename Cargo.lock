@@ -9384,7 +9384,6 @@ dependencies = [
  "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "op-revm",
- "parking_lot",
  "reqwest",
  "reth-chainspec",
  "reth-evm",

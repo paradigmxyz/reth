@@ -8,6 +8,7 @@ use alloy_consensus::{
 use alloy_rpc_types_eth::TransactionReceipt;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
+use reth_rpc_convert::RpcTypes;
 use reth_rpc_eth_api::{
     helpers::LoadReceipt, EthApiTypes, FromEthApiError, RpcNodeCoreExt, RpcReceipt,
 };
@@ -22,7 +23,7 @@ where
                           + ReceiptProvider<Receipt = reth_ethereum_primitives::Receipt>,
         > + EthApiTypes<NetworkTypes = Rpc, Error: From<RecoveryError>>,
     Provider: BlockReader + ChainSpecProvider,
-    Rpc: alloy_network::Network<ReceiptResponse = TransactionReceipt>,
+    Rpc: RpcTypes<Receipt = TransactionReceipt>,
 {
     async fn build_transaction_receipt(
         &self,

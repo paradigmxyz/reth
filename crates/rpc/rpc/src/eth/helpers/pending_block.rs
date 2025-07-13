@@ -46,8 +46,7 @@ where
             >,
         >,
     Provider: BlockReader,
-    Rpc: alloy_network::Network
-        + RpcTypes<Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>>,
+    Rpc: RpcTypes<Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>>,
 {
     #[inline]
     fn pending_block(

@@ -4,6 +4,7 @@ use crate::{eth::core::EthApiInner, EthApi};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
+use reth_rpc_convert::RpcTypes;
 use reth_rpc_eth_types::{
     fee_history::fee_history_cache_new_blocks_task, EthStateCache, EthStateCacheConfig,
     FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
@@ -45,7 +46,7 @@ where
 impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReaderIdExt,
-    Rpc: alloy_network::Network,
+    Rpc: RpcTypes,
 {
     /// Creates a new `EthApiBuilder` instance.
     pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: EvmConfig) -> Self
