@@ -20,7 +20,12 @@ See also [Partial history expiry announcement](https://blog.ethereum.org/2025/07
 
 ## File format
 
-The historical data is packaged and distributed in files of special formats with different names, all of which are based on [e2store](https://github.com/status-im/nimbus-eth2/blob/613f4a9a50c9c4bd8568844eaffb3ac15d067e56/docs/e2store.md#introduction). The most important ones are the **ERA1**, which deals with block range from genesis until the last pre-merge block, and **ERA**, which deals with block range from the merge onwards. See their [specification](https://github.com/eth-clients/e2store-format-specs) for more details.
+The historical data is packaged and distributed in files of special formats with different names, all of which are based on [e2store](https://github.com/status-im/nimbus-eth2/blob/613f4a9a50c9c4bd8568844eaffb3ac15d067e56/docs/e2store.md#introduction). The most important ones are the **ERA1**, which deals with block range from genesis until the last pre-merge block, and **ERA**, which deals with block range from the merge onwards.
+
+See the following specifications for more details :
+- [E2store specification](https://github.com/eth-clients/e2store-format-specs)
+- [ERA1 specification](https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md)
+- [ERA specification](https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md)
 
 The contents of these archives is an ordered sequence of blocks. We're mostly concerned with headers and transactions. For ERA1, there is 8192 blocks per file except for the last one, i.e. the one containing pre-merge block, which can be less than that.
 
@@ -57,3 +62,19 @@ There are two kinds of data sources for the ERA1 import.
 * Local from a file-system directory. Use the option `--era.path` with a directory containing ERA1 files.
 
 Both options cannot be used at the same time. If no option is specified, the remote source is used with a URL derived from the chain ID. Only Mainnet and Sepolia have ERA1 files. If the node is running on a different chain, no source is provided and nothing is imported.
+
+## Export
+
+In this section we discuss how to export blocks data into ERA1 files.
+
+### Manual export
+You can manually export block data from your database to ERA1 files using the [`export-era`](../cli/reth/export-era) command.
+
+The CLI reads block headers, bodies, and receipts from your local database and packages them into the standardized ERA1 format with up to 8,192 blocks per file.
+
+#### Set up
+The export command allows you to specify:
+
+- Block ranges with `--first-block-number` and `--last-block-number`
+- Output directory with `--path` for the export destination
+- File size limits with `--max-blocks-per-file` with a maximum of 8,192 blocks per ERA1 file
