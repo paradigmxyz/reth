@@ -424,10 +424,9 @@ impl DiskFileBlobStoreInner {
         if let Some(blob) = self.blob_cache.lock().get(&tx) {
             return Ok(Some(blob.clone()))
         }
-        let blob = self.read_one(tx)?;
 
-        if let Some(blob) = &blob {
-            let blob_arc = Arc::new(blob.clone());
+        if let Some(blob) = self.read_one(tx)? {
+            let blob_arc = Arc::new(blob);
             self.blob_cache.lock().insert(tx, blob_arc.clone());
             return Ok(Some(blob_arc))
         }
@@ -542,11 +541,18 @@ impl DiskFileBlobStoreInner {
         if from_disk.is_empty() {
             return Ok(res)
         }
+        let from_disk = from_disk
+            .into_iter()
+            .map(|(tx, data)| {
+                let data = Arc::new(data);
+                res.push((tx, data.clone()));
+                (tx, data)
+            })
+            .collect::<Vec<_>>();
+
         let mut cache = self.blob_cache.lock();
         for (tx, data) in from_disk {
-            let arc = Arc::new(data.clone());
-            cache.insert(tx, arc.clone());
-            res.push((tx, arc.clone()));
+            cache.insert(tx, data);
         }
 
         Ok(res)
