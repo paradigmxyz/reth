@@ -410,6 +410,10 @@ impl SparseTrieInterface for SerialSparseTrie {
         self
     }
 
+    fn reserve_nodes(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
+    }
+
     fn reveal_nodes(&mut self, mut nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
         nodes.sort_unstable_by(|a, b| a.path.cmp(&b.path));
         self.nodes.reserve(nodes.len());

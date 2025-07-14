@@ -145,12 +145,15 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         #[cfg(not(feature = "std"))]
         // Reveal lower subtrie nodes serially if nostd
-        for node in nodes_slice {
-            if let Some(subtrie) = self.lower_subtrie_for_path_mut(&node.path) {
-                subtrie.reveal_node(node.path, node.node.clone(), node.masks.clone())?;
-            } else {
-                panic!("upper subtrie node {node:?} found amongst lower nodes");
+        {
+            for node in nodes_slice {
+                if let Some(subtrie) = self.lower_subtrie_for_path_mut(&node.path) {
+                    subtrie.reveal_node(node.path, &node.node, &node.masks)?;
+                } else {
+                    panic!("upper subtrie node {node:?} found amongst lower nodes");
+                }
             }
+            Ok(())
         }
 
         #[cfg(feature = "std")]

@@ -92,9 +92,9 @@ where
         self
     }
 
-    /// Takes the accounts trie.
-    pub fn take_accounts_trie(&mut self) -> SparseTrie<A> {
-        core::mem::take(&mut self.state)
+    /// Takes the `SparseTrie` from within the state root and clears it if it is not blinded.
+    pub fn take_cleared_accounts_trie(&mut self) -> SparseTrie<A> {
+        core::mem::take(&mut self.state).clear()
     }
 
     /// Returns `true` if account was already revealed.
@@ -322,7 +322,7 @@ where
         let FilterMappedProofNodes {
             root_node,
             nodes,
-            new_nodes: _,
+            new_nodes,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
         } = filter_map_revealed_nodes(
@@ -350,6 +350,10 @@ where
             // Reveal root node if it wasn't already.
             let trie =
                 self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?;
+
+            // Reserve the capacity for new nodes ahead of time, if the trie implementation
+            // supports doing so.
+            trie.reserve_nodes(new_nodes);
 
             // Reveal the remaining nodes, having marked them as revealed.
             for node in &nodes {
@@ -415,7 +419,8 @@ where
                 self.retain_updates,
             )?;
 
-            // Reserve the capacity for new nodes ahead of time.
+            // Reserve the capacity for new nodes ahead of time, if the trie implementation
+            // supports doing so.
             trie.reserve_nodes(new_nodes);
 
             // Reveal the remaining nodes, having marked them as revealed.
@@ -731,7 +736,7 @@ where
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             // The account was revealed, either...
             if let Some(value) = self.get_account_value(&address) {
-                // ..it exists and we should take its current storage root or...
+                // ..it exists and we should take it's current storage root or...
                 TrieAccount::decode(&mut &value[..])?.storage_root
             } else {
                 // ...the account is newly created and the storage trie is empty.
