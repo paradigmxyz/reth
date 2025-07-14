@@ -266,17 +266,15 @@ mod tests {
     #[test]
     fn test_precompile_cache_basic() {
         let dyn_precompile: DynPrecompile = |_input: PrecompileInput<'_>| -> PrecompileResult {
-            Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default() })
+            Ok(PrecompileOutput::new(0, Bytes::default()))
         }
         .into();
 
         let cache =
             CachedPrecompile::new(dyn_precompile, PrecompileCache::default(), SpecId::PRAGUE, None);
 
-        let output = PrecompileOutput {
-            gas_used: 50,
-            bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
-        };
+        let output =
+            PrecompileOutput::new(50, alloy_primitives::Bytes::copy_from_slice(b"cached_result"));
 
         let key = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
         let expected = CacheEntry(output);
@@ -304,10 +302,10 @@ mod tests {
             move |input: PrecompileInput<'_>| -> PrecompileResult {
                 assert_eq!(input.data, input_data);
 
-                Ok(PrecompileOutput {
-                    gas_used: 5000,
-                    bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
-                })
+                Ok(PrecompileOutput::new(
+                    5000,
+                    alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
+                ))
             }
         }
         .into();
@@ -317,10 +315,10 @@ mod tests {
             move |input: PrecompileInput<'_>| -> PrecompileResult {
                 assert_eq!(input.data, input_data);
 
-                Ok(PrecompileOutput {
-                    gas_used: 7000,
-                    bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
-                })
+                Ok(PrecompileOutput::new(
+                    7000,
+                    alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
+                ))
             }
         }
         .into();
