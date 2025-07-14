@@ -1,4 +1,4 @@
-import React from 'react'
+import * as React from 'react'
 import { defineConfig } from 'vocs'
 import { sidebar } from './sidebar'
 import { basePath } from './redirects.config'
@@ -68,6 +68,6 @@ export default defineConfig({
     }
   },
   editLink: {
-    pattern: "https://github.com/paradigmxyz/reth/edit/main/book/vocs/docs/pages/:path",
+    pattern: "https://github.com/paradigmxyz/reth/edit/main/docs/vocs/docs/pages/:path",
   }
 })

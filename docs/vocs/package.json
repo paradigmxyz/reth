@@ -13,6 +13,7 @@
     "inject-cargo-docs": "bun scripts/inject-cargo-docs.ts"
   },
   "dependencies": {
+    "@rollup/rollup-darwin-x64": "4.45.0",
     "react": "latest",
     "react-dom": "latest",
     "vocs": "latest"
