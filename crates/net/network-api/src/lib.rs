@@ -35,7 +35,8 @@ pub use events::{
 };
 
 use reth_eth_wire_types::{
-    capability::Capabilities, DisconnectReason, EthVersion, NetworkPrimitives, UnifiedStatus,
+    capability::Capabilities, Capability, DisconnectReason, EthVersion, NetworkPrimitives,
+    UnifiedStatus,
 };
 use reth_network_p2p::sync::NetworkSyncUpdater;
 use reth_network_peers::NodeRecord;
@@ -285,4 +286,6 @@ pub struct NetworkStatus {
     pub protocol_version: u64,
     /// Information about the Ethereum Wire Protocol.
     pub eth_protocol_info: EthProtocolInfo,
+    /// The list of supported capabilities and their versions.
+    pub capabilities: Vec<Capability>,
 }

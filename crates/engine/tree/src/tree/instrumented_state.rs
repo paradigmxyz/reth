@@ -5,8 +5,8 @@ use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
 use reth_provider::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
+    StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
@@ -191,7 +191,9 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
         self.record_storage_fetch(start.elapsed());
         res
     }
+}
 
+impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         let start = Instant::now();
         let res = self.state_provider.bytecode_by_hash(code_hash);

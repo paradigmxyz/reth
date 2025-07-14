@@ -33,11 +33,17 @@ pub mod wallet;
 /// Helper for payload operations
 mod payload;
 
+/// Helper for setting up nodes with pre-imported chain data
+pub mod setup_import;
+
 /// Helper for network operations
 mod network;
 
 /// Helper for rpc operations
 mod rpc;
+
+/// Utilities for creating and writing RLP test data
+pub mod test_rlp_utils;
 
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
@@ -119,6 +125,35 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
+    setup_engine_with_connection::<N>(
+        num_nodes,
+        chain_spec,
+        is_dev,
+        tree_config,
+        attributes_generator,
+        true,
+    )
+    .await
+}
+
+/// Creates the initial setup with `num_nodes` started and optionally interconnected.
+pub async fn setup_engine_with_connection<N>(
+    num_nodes: usize,
+    chain_spec: Arc<N::ChainSpec>,
+    is_dev: bool,
+    tree_config: reth_node_api::TreeConfig,
+    attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
+    connect_nodes: bool,
+) -> eyre::Result<(
+    Vec<NodeHelperType<N, BlockchainProvider<NodeTypesWithDBAdapter<N, TmpDB>>>>,
+    TaskManager,
+    Wallet,
+)>
+where
+    N: NodeBuilderHelper,
+    LocalPayloadAttributesBuilder<N::ChainSpec>:
+        PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
+{
     let tasks = TaskManager::current();
     let exec = tasks.executor();
 
@@ -165,15 +200,17 @@ where
         let genesis = node.block_hash(0);
         node.update_forkchoice(genesis, genesis).await?;
 
-        // Connect each node in a chain.
-        if let Some(previous_node) = nodes.last_mut() {
-            previous_node.connect(&mut node).await;
-        }
+        // Connect each node in a chain if requested.
+        if connect_nodes {
+            if let Some(previous_node) = nodes.last_mut() {
+                previous_node.connect(&mut node).await;
+            }
 
-        // Connect last node with the first if there are more than two
-        if idx + 1 == num_nodes && num_nodes > 2 {
-            if let Some(first_node) = nodes.first_mut() {
-                node.connect(first_node).await;
+            // Connect last node with the first if there are more than two
+            if idx + 1 == num_nodes && num_nodes > 2 {
+                if let Some(first_node) = nodes.first_mut() {
+                    node.connect(first_node).await;
+                }
             }
         }
 

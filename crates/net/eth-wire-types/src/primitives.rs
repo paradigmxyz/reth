@@ -9,8 +9,23 @@ use reth_primitives_traits::{
     Block, BlockBody, BlockHeader, BlockTy, NodePrimitives, SignedTransaction,
 };
 
-/// Abstraction over primitive types which might appear in network messages. See
-/// [`crate::EthMessage`] for more context.
+/// Abstraction over primitive types which might appear in network messages.
+///
+/// This trait defines the types used in the Ethereum Wire Protocol (devp2p) for
+/// peer-to-peer communication. While [`NodePrimitives`] defines the core types
+/// used throughout the node (consensus format), `NetworkPrimitives` defines how
+/// these types are represented when transmitted over the network.
+///
+/// The key distinction is in transaction handling:
+/// - [`NodePrimitives`] defines `SignedTx` - the consensus format stored in blocks
+/// - `NetworkPrimitives` defines `BroadcastedTransaction` and `PooledTransaction` - the formats
+///   used for network propagation with additional data like blob sidecars
+///
+/// These traits work together through implementations like [`NetPrimitivesFor`],
+/// which ensures type compatibility between a node's internal representation and
+/// its network representation.
+///
+/// See [`crate::EthMessage`] for more context.
 pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
     /// The block header type.
     type BlockHeader: BlockHeader + 'static;
@@ -24,12 +39,20 @@ pub trait NetworkPrimitives: Send + Sync + Unpin + Clone + Debug + 'static {
         + Decodable
         + 'static;
 
-    /// The transaction type which peers announce in `Transactions` messages. It is different from
-    /// `PooledTransactions` to account for Ethereum case where EIP-4844 transactions are not being
-    /// announced and can only be explicitly requested from peers.
+    /// The transaction type which peers announce in `Transactions` messages.
+    ///
+    /// This is different from `PooledTransactions` to account for the Ethereum case where
+    /// EIP-4844 blob transactions are not announced over the network and can only be
+    /// explicitly requested from peers. This is because blob transactions can be quite
+    /// large and broadcasting them to all peers would cause
+    /// significant bandwidth usage.
     type BroadcastedTransaction: SignedTransaction + 'static;
 
     /// The transaction type which peers return in `PooledTransactions` messages.
+    ///
+    /// For EIP-4844 blob transactions, this includes the full blob sidecar with
+    /// KZG commitments and proofs that are needed for validation but are not
+    /// included in the consensus block format.
     type PooledTransaction: SignedTransaction + TryFrom<Self::BroadcastedTransaction> + 'static;
 
     /// The transaction type which peers return in `GetReceipts` messages.

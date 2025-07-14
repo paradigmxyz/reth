@@ -5,6 +5,7 @@ use super::SpawnBlocking;
 use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
+use alloy_primitives::U256;
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
@@ -18,6 +19,7 @@ use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
@@ -28,7 +30,10 @@ use reth_transaction_pool::{
     TransactionPool,
 };
 use revm::context_interface::Block;
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::Mutex;
 use tracing::debug;
 
@@ -41,6 +46,7 @@ pub trait LoadPendingBlock:
             Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
         >,
         Error: FromEvmError<Self::Evm>,
+        RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
     > + RpcNodeCore<
         Provider: BlockReaderIdExt<Receipt: Receipt>
                       + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
@@ -89,7 +95,7 @@ pub trait LoadPendingBlock:
 
                 return Ok(PendingBlockEnv::new(
                     evm_env,
-                    PendingBlockEnvOrigin::ActualPending(block, receipts),
+                    PendingBlockEnvOrigin::ActualPending(Arc::new(block), Arc::new(receipts)),
                 ));
             }
         }
@@ -124,8 +130,8 @@ pub trait LoadPendingBlock:
     ) -> impl Future<
         Output = Result<
             Option<(
-                RecoveredBlock<<Self::Provider as BlockReader>::Block>,
-                Vec<ProviderReceipt<Self::Provider>>,
+                Arc<RecoveredBlock<<Self::Provider as BlockReader>::Block>>,
+                Arc<Vec<ProviderReceipt<Self::Provider>>>,
             )>,
             Self::Error,
         >,
@@ -152,7 +158,7 @@ pub trait LoadPendingBlock:
             // check if the block is still good
             if let Some(pending_block) = lock.as_ref() {
                 // this is guaranteed to be the `latest` header
-                if pending.evm_env.block_env.number == pending_block.block.number() &&
+                if pending.evm_env.block_env.number == U256::from(pending_block.block.number()) &&
                     parent.hash() == pending_block.block.parent_hash() &&
                     now <= pending_block.expires_at
                 {
@@ -174,6 +180,9 @@ pub trait LoadPendingBlock:
                     return Ok(None)
                 }
             };
+
+            let sealed_block = Arc::new(sealed_block);
+            let receipts = Arc::new(receipts);
 
             let now = Instant::now();
             *lock = Some(PendingBlock::new(

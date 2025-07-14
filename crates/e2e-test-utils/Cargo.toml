@@ -34,8 +34,19 @@ reth-engine-local.workspace = true
 reth-tasks.workspace = true
 reth-node-ethereum.workspace = true
 reth-ethereum-primitives.workspace = true
+reth-cli-commands.workspace = true
+reth-config.workspace = true
+reth-consensus.workspace = true
+reth-evm.workspace = true
+reth-static-file.workspace = true
+reth-ethereum-consensus.workspace = true
+reth-primitives.workspace = true
+reth-prune-types.workspace = true
+reth-db-common.workspace = true
+reth-primitives-traits.workspace = true
 
 revm.workspace = true
+tempfile.workspace = true
 
 # rpc
 jsonrpsee.workspace = true
@@ -44,17 +55,24 @@ url.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-eips.workspace = true
-
-futures-util.workspace = true
-eyre.workspace = true
-tokio.workspace = true
-tokio-stream.workspace = true
-serde_json.workspace = true
+alloy-rlp.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local = { workspace = true, features = ["mnemonic"] }
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-network.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-genesis.workspace = true
+
+futures-util.workspace = true
+eyre.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+serde_json.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
+
+[[test]]
+name = "e2e_testsuite"
+path = "tests/e2e-testsuite/main.rs"

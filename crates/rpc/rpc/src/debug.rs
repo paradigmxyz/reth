@@ -1,7 +1,7 @@
 use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
@@ -34,7 +34,7 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
@@ -277,6 +277,7 @@ where
 
         let this = self.clone();
         if let Some(tracer) = tracer {
+            #[allow(unreachable_patterns)]
             return match tracer {
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
@@ -362,7 +363,7 @@ where
                                 let db = db.0;
 
                                 let tx_info = TransactionInfo {
-                                    block_number: Some(evm_env.block_env.number),
+                                    block_number: Some(evm_env.block_env.number.saturating_to()),
                                     base_fee: Some(evm_env.block_env.basefee),
                                     hash: None,
                                     block_hash: None,
@@ -443,6 +444,11 @@ where
                         .await?;
 
                     Ok(GethTrace::JS(res))
+                }
+                _ => {
+                    // Note: this match is non-exhaustive in case we need to add support for
+                    // additional tracers
+                    Err(EthApiError::Unsupported("unsupported tracer").into())
                 }
             }
         }
@@ -574,8 +580,8 @@ where
                         results.push(trace);
                     }
                     // Increment block_env number and timestamp for the next bundle
-                    evm_env.block_env.number += 1;
-                    evm_env.block_env.timestamp += 12;
+                    evm_env.block_env.number += uint!(1_U256);
+                    evm_env.block_env.timestamp += uint!(12_U256);
 
                     all_bundles.push(results);
                 }
@@ -727,11 +733,12 @@ where
                 .map(|c| c.tx_index.map(|i| i as u64))
                 .unwrap_or_default(),
             block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
-            block_number: Some(evm_env.block_env.number),
+            block_number: Some(evm_env.block_env.number.saturating_to()),
             base_fee: Some(evm_env.block_env.basefee),
         };
 
         if let Some(tracer) = tracer {
+            #[allow(unreachable_patterns)]
             return match tracer {
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
@@ -846,6 +853,11 @@ where
                         .json_result(res, &tx_env, &evm_env.block_env, db)
                         .map_err(Eth::Error::from_eth_err)?;
                     Ok((GethTrace::JS(result), state))
+                }
+                _ => {
+                    // Note: this match is non-exhaustive in case we need to add support for
+                    // additional tracers
+                    Err(EthApiError::Unsupported("unsupported tracer").into())
                 }
             }
         }

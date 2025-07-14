@@ -917,7 +917,7 @@ where
             .collect()
     }
 
-    /// Returns all pending transactions filted by [`TransactionOrigin`]
+    /// Returns all pending transactions filtered by [`TransactionOrigin`]
     pub fn get_pending_transactions_by_origin(
         &self,
         origin: TransactionOrigin,

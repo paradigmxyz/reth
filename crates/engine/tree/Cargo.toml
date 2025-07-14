@@ -32,6 +32,7 @@ reth-tasks.workspace = true
 reth-trie-db.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }
+reth-trie-sparse-parallel = { workspace = true, features = ["std"] }
 reth-trie.workspace = true
 
 # alloy
@@ -82,7 +83,7 @@ reth-exex-types.workspace = true
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-prune-types.workspace = true
 reth-prune.workspace = true
-reth-rpc-types-compat.workspace = true
+reth-rpc-convert.workspace = true
 reth-stages = { workspace = true, features = ["test-utils"] }
 reth-static-file.workspace = true
 reth-testing-utils.workspace = true
@@ -139,3 +140,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
+
+[[test]]
+name = "e2e_testsuite"
+path = "tests/e2e-testsuite/main.rs"

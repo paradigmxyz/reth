@@ -50,6 +50,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 proptest = { workspace = true, optional = true }
 proptest-arbitrary-interop = { workspace = true, optional = true }
 rayon = { workspace = true, optional = true }
+alloy-rpc-types-eth = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-codecs.workspace = true
@@ -93,6 +94,7 @@ std = [
     "reth-chainspec/std",
     "revm-bytecode/std",
     "revm-state/std",
+    "alloy-rpc-types-eth?/std",
 ]
 secp256k1 = ["alloy-consensus/secp256k1"]
 test-utils = [
@@ -115,6 +117,7 @@ arbitrary = [
     "op-alloy-consensus?/arbitrary",
     "alloy-trie/arbitrary",
     "reth-chainspec/arbitrary",
+    "alloy-rpc-types-eth?/arbitrary",
 ]
 serde-bincode-compat = [
     "serde",
@@ -123,6 +126,7 @@ serde-bincode-compat = [
     "alloy-eips/serde-bincode-compat",
     "op-alloy-consensus?/serde",
     "op-alloy-consensus?/serde-bincode-compat",
+    "alloy-genesis/serde-bincode-compat",
 ]
 serde = [
     "dep:serde",
@@ -140,6 +144,7 @@ serde = [
     "revm-bytecode/serde",
     "revm-state/serde",
     "rand_08/serde",
+    "alloy-rpc-types-eth?/serde",
 ]
 reth-codec = [
     "dep:reth-codecs",
@@ -153,3 +158,4 @@ op = [
 rayon = [
     "dep:rayon",
 ]
+rpc-compat = ["alloy-rpc-types-eth"]

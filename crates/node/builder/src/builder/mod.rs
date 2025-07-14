@@ -160,6 +160,48 @@ impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     pub const fn new(config: NodeConfig<ChainSpec>) -> Self {
         Self { config, database: () }
     }
+}
+
+impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
+    /// Returns a reference to the node builder's config.
+    pub const fn config(&self) -> &NodeConfig<ChainSpec> {
+        &self.config
+    }
+
+    /// Returns a mutable reference to the node builder's config.
+    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
+        &mut self.config
+    }
+
+    /// Returns a reference to the node's database
+    pub const fn db(&self) -> &DB {
+        &self.database
+    }
+
+    /// Returns a mutable reference to the node's database
+    pub const fn db_mut(&mut self) -> &mut DB {
+        &mut self.database
+    }
+
+    /// Applies a fallible function to the builder.
+    pub fn try_apply<F, R>(self, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        f(self)
+    }
+
+    /// Applies a fallible function to the builder, if the condition is `true`.
+    pub fn try_apply_if<F, R>(self, cond: bool, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        if cond {
+            f(self)
+        } else {
+            Ok(self)
+        }
+    }
 
     /// Apply a function to the builder
     pub fn apply<F>(self, f: F) -> Self
@@ -182,18 +224,6 @@ impl<ChainSpec> NodeBuilder<(), ChainSpec> {
     }
 }
 
-impl<DB, ChainSpec> NodeBuilder<DB, ChainSpec> {
-    /// Returns a reference to the node builder's config.
-    pub const fn config(&self) -> &NodeConfig<ChainSpec> {
-        &self.config
-    }
-
-    /// Returns a mutable reference to the node builder's config.
-    pub const fn config_mut(&mut self) -> &mut NodeConfig<ChainSpec> {
-        &mut self.config
-    }
-}
-
 impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Configures the underlying database that the node will use.
     pub fn with_database<D>(self, database: D) -> NodeBuilder<D, ChainSpec> {
@@ -210,14 +240,25 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
     #[cfg(feature = "test-utils")]
     pub fn testing_node(
-        mut self,
+        self,
         task_executor: TaskExecutor,
     ) -> WithLaunchContext<
         NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec>,
     > {
-        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(
-            reth_db::test_utils::tempdir_path(),
-        );
+        let path = reth_db::test_utils::tempdir_path();
+        self.testing_node_with_datadir(task_executor, path)
+    }
+
+    /// Creates a preconfigured node for testing purposes with a specific datadir.
+    #[cfg(feature = "test-utils")]
+    pub fn testing_node_with_datadir(
+        mut self,
+        task_executor: TaskExecutor,
+        datadir: impl Into<std::path::PathBuf>,
+    ) -> WithLaunchContext<
+        NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec>,
+    > {
+        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(datadir.into());
         self.config = self.config.with_datadir_args(reth_node_core::args::DatadirArgs {
             datadir: path.clone(),
             ..Default::default()
@@ -270,7 +311,7 @@ where
     }
 }
 
-/// A [`NodeBuilder`] with it's launch context already configured.
+/// A [`NodeBuilder`] with its launch context already configured.
 ///
 /// This exposes the same methods as [`NodeBuilder`] but with the launch context already configured,
 /// See [`WithLaunchContext::launch`]
@@ -411,6 +452,36 @@ where
     /// Returns a reference to the node builder's config.
     pub const fn config(&self) -> &NodeConfig<<T::Types as NodeTypes>::ChainSpec> {
         &self.builder.config
+    }
+
+    /// Returns a reference to node's database.
+    pub const fn db(&self) -> &T::DB {
+        &self.builder.adapter.database
+    }
+
+    /// Returns a mutable reference to node's database.
+    pub const fn db_mut(&mut self) -> &mut T::DB {
+        &mut self.builder.adapter.database
+    }
+
+    /// Applies a fallible function to the builder.
+    pub fn try_apply<F, R>(self, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        f(self)
+    }
+
+    /// Applies a fallible function to the builder, if the condition is `true`.
+    pub fn try_apply_if<F, R>(self, cond: bool, f: F) -> Result<Self, R>
+    where
+        F: FnOnce(Self) -> Result<Self, R>,
+    {
+        if cond {
+            f(self)
+        } else {
+            Ok(self)
+        }
     }
 
     /// Apply a function to the builder

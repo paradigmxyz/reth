@@ -20,9 +20,6 @@ jobs:
           - type: ethereum
             args: --workspace --lib --examples --tests --benches --locked
             features: "ethereum asm-keccak jemalloc jemalloc-prof min-error-logs min-warn-logs min-info-logs min-debug-logs min-trace-logs"
-          - type: book
-            args: --manifest-path book/sources/Cargo.toml --workspace --bins
-            features: ""
     steps:
       - uses: actions/checkout@v4
       - uses: rui314/setup-mold@v1
@@ -158,8 +155,6 @@ jobs:
           components: rustfmt
       - name: Run fmt
         run: cargo fmt --all --check
-      - name: Run fmt on book sources
-        run: cargo fmt --manifest-path book/sources/Cargo.toml --all --check
 
   udeps:
     name: udeps
@@ -189,8 +184,8 @@ jobs:
       - run: cargo build --bin reth --workspace --features ethereum
         env:
           RUSTFLAGS: -D warnings
-      - run: ./book/cli/update.sh target/debug/reth
-      - name: Check book changes
+      - run: ./docs/cli/update.sh target/debug/reth
+      - name: Check docs changes
         run: git diff --exit-code
 
   codespell:
@@ -209,7 +204,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
       - name: Run dprint
-        uses: dprint/check@v2.2
+        uses: dprint/check@v2.3
         with:
           config-path: dprint.json
 

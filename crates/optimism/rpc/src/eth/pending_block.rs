@@ -1,5 +1,7 @@
 //! Loads OP pending block for a RPC response.
 
+use std::sync::Arc;
+
 use crate::OpEthApi;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
@@ -9,12 +11,11 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::{OpBlock, OpReceipt, OpTransactionSigned};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_rpc_eth_api::{
     helpers::{LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
-    EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
 use reth_storage_api::{
@@ -31,19 +32,16 @@ where
                 Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
             >,
             Error: FromEvmError<Self::Evm>,
+            RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         >,
     N: RpcNodeCore<
-        Provider: BlockReaderIdExt<
-            Transaction = OpTransactionSigned,
-            Block = OpBlock,
-            Receipt = OpReceipt,
-            Header = alloy_consensus::Header,
-        > + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
+        Provider: BlockReaderIdExt
+                      + ChainSpecProvider<ChainSpec: EthChainSpec + OpHardforks>
                       + StateProviderFactory,
         Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<N::Provider>>>,
         Evm: ConfigureEvm<
             Primitives = <Self as RpcNodeCore>::Primitives,
-            NextBlockEnvCtx = OpNextBlockEnvAttributes,
+            NextBlockEnvCtx: From<OpNextBlockEnvAttributes>,
         >,
         Primitives: NodePrimitives<
             BlockHeader = ProviderHeader<Self::Provider>,
@@ -72,8 +70,9 @@ where
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
             parent_beacon_block_root: parent.parent_beacon_block_root(),
-            extra_data: parent.extra_data.clone(),
-        })
+            extra_data: parent.extra_data().clone(),
+        }
+        .into())
     }
 
     /// Returns the locally built pending block
@@ -81,8 +80,8 @@ where
         &self,
     ) -> Result<
         Option<(
-            RecoveredBlock<ProviderBlock<Self::Provider>>,
-            Vec<ProviderReceipt<Self::Provider>>,
+            Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>,
+            Arc<Vec<ProviderReceipt<Self::Provider>>>,
         )>,
         Self::Error,
     > {
@@ -105,6 +104,6 @@ where
             .map_err(Self::Error::from_eth_err)?
             .ok_or(EthApiError::ReceiptsNotFound(block_id.into()))?;
 
-        Ok(Some((block, receipts)))
+        Ok(Some((Arc::new(block), Arc::new(receipts))))
     }
 }

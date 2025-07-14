@@ -1,10 +1,7 @@
 //! API of a signed transaction.
 
-use crate::{
-    crypto::secp256k1::recover_signer_unchecked, InMemorySize, MaybeCompact, MaybeSerde,
-    MaybeSerdeBincodeCompat,
-};
-use alloc::{fmt, vec::Vec};
+use crate::{InMemorySize, MaybeCompact, MaybeSerde, MaybeSerdeBincodeCompat};
+use alloc::fmt;
 use alloy_consensus::{
     transaction::{Recovered, RlpEcdsaEncodableTx, SignerRecoverable},
     EthereumTxEnvelope, SignableTransaction,
@@ -21,6 +18,15 @@ pub trait FullSignedTx: SignedTransaction + MaybeCompact + MaybeSerdeBincodeComp
 impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
 
 /// A signed transaction.
+///
+/// # Recovery Methods
+///
+/// This trait provides two types of recovery methods:
+/// - Standard methods (e.g., `try_recover`) - enforce EIP-2 low-s signature requirement
+/// - Unchecked methods (e.g., `try_recover_unchecked`) - skip EIP-2 validation for pre-EIP-2
+///   transactions
+///
+/// Use unchecked methods only when dealing with historical pre-EIP-2 transactions.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait SignedTransaction:
     Send
@@ -68,14 +74,6 @@ pub trait SignedTransaction:
         self.recover_signer_unchecked()
     }
 
-    /// Same as [`SignerRecoverable::recover_signer_unchecked`] but receives a buffer to operate on.
-    /// This is used during batch recovery to avoid allocating a new buffer for each
-    /// transaction.
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError>;
-
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     fn recalculate_hash(&self) -> B256 {
@@ -86,6 +84,12 @@ pub trait SignedTransaction:
     #[auto_impl(keep_default_for(&, Arc))]
     fn try_clone_into_recovered(&self) -> Result<Recovered<Self>, RecoveryError> {
         self.recover_signer().map(|signer| Recovered::new_unchecked(self.clone(), signer))
+    }
+
+    /// Tries to recover signer and return [`Recovered`] by cloning the type.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn try_clone_into_recovered_unchecked(&self) -> Result<Recovered<Self>, RecoveryError> {
+        self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self.clone(), signer))
     }
 
     /// Tries to recover signer and return [`Recovered`].
@@ -141,21 +145,6 @@ where
             Self::Eip4844(tx) => tx.hash(),
         }
     }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        match self {
-            Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
-            Self::Eip4844(tx) => tx.tx().encode_for_signing(buf),
-        }
-        let signature_hash = keccak256(buf);
-        recover_signer_unchecked(self.signature(), signature_hash)
-    }
 }
 
 #[cfg(feature = "op")]
@@ -172,20 +161,6 @@ mod op {
                 Self::Eip7702(tx) => tx.hash(),
             }
         }
-
-        fn recover_signer_unchecked_with_buf(
-            &self,
-            buf: &mut Vec<u8>,
-        ) -> Result<Address, RecoveryError> {
-            match self {
-                Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
-            }
-            let signature_hash = keccak256(buf);
-            recover_signer_unchecked(self.signature(), signature_hash)
-        }
     }
 
     impl SignedTransaction for OpTxEnvelope {
@@ -197,28 +172,6 @@ mod op {
                 Self::Eip7702(tx) => tx.hash(),
                 Self::Deposit(tx) => tx.hash_ref(),
             }
-        }
-
-        fn recover_signer_unchecked_with_buf(
-            &self,
-            buf: &mut Vec<u8>,
-        ) -> Result<Address, RecoveryError> {
-            match self {
-                Self::Deposit(tx) => return Ok(tx.from),
-                Self::Legacy(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip2930(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip1559(tx) => tx.tx().encode_for_signing(buf),
-                Self::Eip7702(tx) => tx.tx().encode_for_signing(buf),
-            }
-            let signature_hash = keccak256(buf);
-            let signature = match self {
-                Self::Legacy(tx) => tx.signature(),
-                Self::Eip2930(tx) => tx.signature(),
-                Self::Eip1559(tx) => tx.signature(),
-                Self::Eip7702(tx) => tx.signature(),
-                Self::Deposit(_) => unreachable!("Deposit transactions should not be handled here"),
-            };
-            recover_signer_unchecked(signature, signature_hash)
         }
     }
 }

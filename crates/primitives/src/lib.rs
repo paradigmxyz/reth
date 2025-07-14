@@ -31,8 +31,8 @@ pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
 pub use receipt::{gas_spent_by_transactions, Receipt};
 pub use reth_primitives_traits::{
     logs_bloom, Account, BlockTy, BodyTy, Bytecode, GotExpected, GotExpectedBoxed, Header,
-    HeaderError, HeaderTy, Log, LogData, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
-    StorageEntry, TxTy,
+    HeaderTy, Log, LogData, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, StorageEntry,
+    TxTy,
 };
 pub use static_file::StaticFileSegment;
 

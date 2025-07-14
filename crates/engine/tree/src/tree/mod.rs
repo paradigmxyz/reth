@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_evm::block::BlockExecutor;
-use alloy_primitives::B256;
+use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -18,7 +18,7 @@ use error::{InsertBlockError, InsertBlockErrorKind, InsertBlockFatalError};
 use instrumented_state::InstrumentedStateProvider;
 use payload_processor::sparse_trie::StateRootComputeOutcome;
 use persistence_state::CurrentPersistenceAction;
-use precompile_cache::{CachedPrecompile, PrecompileCacheMap};
+use precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
     MemoryOverlayStateProvider, NewCanonicalChain,
@@ -50,6 +50,7 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use state::TreeState;
 use std::{
     borrow::Cow,
+    collections::HashMap,
     fmt::Debug,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
@@ -65,8 +66,6 @@ use tracing::*;
 
 mod block_buffer;
 mod cached_state;
-#[cfg(test)]
-mod e2e_tests;
 pub mod error;
 mod instrumented_state;
 mod invalid_block_hook;
@@ -276,6 +275,8 @@ where
     evm_config: C,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
+    /// Metrics for precompile cache, stored per address to avoid re-allocation.
+    precompile_cache_metrics: HashMap<Address, CachedPrecompileMetrics>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -370,6 +371,7 @@ where
             payload_processor,
             evm_config,
             precompile_cache_map,
+            precompile_cache_metrics: HashMap::new(),
         }
     }
 
@@ -1203,18 +1205,18 @@ where
         debug!(target: "engine::tree", "received backfill sync finished event");
         self.backfill_sync_state = BackfillSyncState::Idle;
 
-        // backfill height is the block number that the backfill finished at
-        let mut backfill_height = ctrl.block_number();
-
         // Pipeline unwound, memorize the invalid block and wait for CL for next sync target.
-        if let ControlFlow::Unwind { bad_block, target } = &ctrl {
+        let backfill_height = if let ControlFlow::Unwind { bad_block, target } = &ctrl {
             warn!(target: "engine::tree", invalid_block=?bad_block, "Bad block detected in unwind");
             // update the `invalid_headers` cache with the new invalid header
             self.state.invalid_headers.insert(**bad_block);
 
             // if this was an unwind then the target is the new height
-            backfill_height = Some(*target);
-        }
+            Some(*target)
+        } else {
+            // backfill height is the block number that the backfill finished at
+            ctrl.block_number()
+        };
 
         // backfill height is the block number that the backfill finished at
         let Some(backfill_height) = backfill_height else { return Ok(()) };
@@ -1505,8 +1507,8 @@ where
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
-        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash).cloned() {
-            return Ok(Some(block.block))
+        if let Some(block) = self.state.tree_state.executed_block_by_hash(hash) {
+            return Ok(Some(block.block.clone()))
         }
 
         let (block, senders) = self
@@ -1776,20 +1778,18 @@ where
     ) -> Option<B256> {
         let sync_target_state = self.state.forkchoice_state_tracker.sync_target_state();
 
-        // check if the distance exceeds the threshold for backfill sync
-        let mut exceeds_backfill_threshold =
-            self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number);
-
         // check if the downloaded block is the tracked finalized block
-        if let Some(buffered_finalized) = sync_target_state
+        let mut exceeds_backfill_threshold = if let Some(buffered_finalized) = sync_target_state
             .as_ref()
             .and_then(|state| self.state.buffer.block(&state.finalized_block_hash))
         {
             // if we have buffered the finalized block, we should check how far
             // we're off
-            exceeds_backfill_threshold =
-                self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_finalized.number());
-        }
+            self.exceeds_backfill_run_threshold(canonical_tip_num, buffered_finalized.number())
+        } else {
+            // check if the distance exceeds the threshold for backfill sync
+            self.exceeds_backfill_run_threshold(canonical_tip_num, target_block_number)
+        };
 
         // If this is invoked after we downloaded a block we can check if this block is the
         // finalized block
@@ -1914,12 +1914,13 @@ where
             let old = old
                 .iter()
                 .filter_map(|block| {
-                    let (_, trie) = self
+                    let trie = self
                         .state
                         .tree_state
                         .persisted_trie_updates
-                        .get(&block.recovered_block.hash())
-                        .cloned()?;
+                        .get(&block.recovered_block.hash())?
+                        .1
+                        .clone();
                     Some(ExecutedBlockWithTrieUpdates {
                         block: block.clone(),
                         trie: ExecutedTrieUpdates::Present(trie),
@@ -2183,9 +2184,21 @@ where
         //    root task proof calculation will include a lot of unrelated paths in the prefix sets.
         //    It's cheaper to run a parallel state root that does one walk over trie tables while
         //    accounting for the prefix sets.
+        let has_ancestors_with_missing_trie_updates =
+            self.has_ancestors_with_missing_trie_updates(block.sealed_header());
         let mut use_state_root_task = run_parallel_state_root &&
             self.config.use_state_root_task() &&
-            !self.has_ancestors_with_missing_trie_updates(block.sealed_header());
+            !has_ancestors_with_missing_trie_updates;
+
+        debug!(
+            target: "engine::tree",
+            block=?block_num_hash,
+            run_parallel_state_root,
+            has_ancestors_with_missing_trie_updates,
+            use_state_root_task,
+            config_allows_state_root_task=self.config.use_state_root_task(),
+            "Deciding which state root algorithm to run"
+        );
 
         // use prewarming background task
         let header = block.clone_sealed_header();
@@ -2225,6 +2238,7 @@ where
                     &self.config,
                 )
             } else {
+                debug!(target: "engine::tree", block=?block_num_hash, "Disabling state root task due to non-empty prefix sets");
                 use_state_root_task = false;
                 self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder)
             }
@@ -2282,6 +2296,7 @@ where
             // if we new payload extends the current canonical change we attempt to use the
             // background task or try to compute it in parallel
             if use_state_root_task {
+                debug!(target: "engine::tree", block=?block_num_hash, "Using sparse trie state root algorithm");
                 match handle.state_root() {
                     Ok(StateRootComputeOutcome { state_root, trie_updates }) => {
                         let elapsed = execution_finish.elapsed();
@@ -2303,6 +2318,7 @@ where
                     }
                 }
             } else {
+                debug!(target: "engine::tree", block=?block_num_hash, "Using parallel state root algorithm");
                 match self.compute_state_root_parallel(
                     persisting_kind,
                     block.header().parent_hash(),
@@ -2420,10 +2436,16 @@ where
 
         if !self.config.precompile_cache_disabled() {
             executor.evm_mut().precompiles_mut().map_precompiles(|address, precompile| {
+                let metrics = self
+                    .precompile_cache_metrics
+                    .entry(*address)
+                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
+                    .clone();
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
                     *self.evm_config.evm_env(block.header()).spec_id(),
+                    Some(metrics),
                 )
             });
         }

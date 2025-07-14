@@ -230,7 +230,7 @@ where
         self.metrics.buffered_responses.set(self.buffered_responses.len() as f64);
     }
 
-    /// Returns a response if it's first block number matches the next expected.
+    /// Returns a response if its first block number matches the next expected.
     fn try_next_buffered(&mut self) -> Option<Vec<BlockResponse<B>>> {
         if let Some(next) = self.buffered_responses.peek() {
             let expected = self.next_expected_block_number();
