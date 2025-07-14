@@ -356,8 +356,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
     /// Returns the number of transactions that are ready for inclusion in the next block and the
-    /// number of transactions that are ready for inclusion in future blocks.
-    fn pending_and_queue_txn_count(&self) -> (usize, usize);
+    /// number of transactions that are ready for inclusion in future blocks: `(pending, queued)`.
+    fn pending_and_queued_txn_count(&self) -> (usize, usize);
 
     /// Returns all transactions that are currently in the pool grouped by whether they are ready
     /// for inclusion in the next block or not.

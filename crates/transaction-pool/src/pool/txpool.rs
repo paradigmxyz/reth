@@ -436,7 +436,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns the number of transactions from the pending sub-pool
     pub(crate) fn pending_transactions_count(&self) -> usize {
-        self.pending_pool.all().count()
+        self.pending_pool.len()
     }
 
     /// Returns all pending transactions filtered by predicate
@@ -469,7 +469,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns the number of transactions in parked pools
     pub(crate) fn queued_transactions_count(&self) -> usize {
-        self.basefee_pool.all().len() + self.queued_pool.all().len()
+        self.basefee_pool.len() + self.queued_pool.len()
     }
 
     /// Returns queued and pending transactions for the specified sender

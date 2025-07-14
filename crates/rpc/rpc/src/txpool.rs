@@ -88,7 +88,7 @@ where
     /// Handler for `txpool_status`
     async fn txpool_status(&self) -> RpcResult<TxpoolStatus> {
         trace!(target: "rpc::eth", "Serving txpool_status");
-        let (pending, queued) = self.pool.pending_and_queue_txn_count();
+        let (pending, queued) = self.pool.pending_and_queued_txn_count();
         Ok(TxpoolStatus { pending: pending as u64, queued: queued as u64 })
     }
 
