@@ -123,8 +123,6 @@ impl SparseTrieInterface for ParallelSparseTrie {
             }
         }
 
-        let mut nodes_slice = nodes.as_slice();
-
         // Due to the sorting all upper subtrie nodes will be at the front of the slice. We split
         // them off from the rest to be handled specially by
         // `ParallelSparseTrie::reveal_upper_node`.
@@ -133,8 +131,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
             .position(|n| !SparseSubtrieType::path_len_is_upper(n.path.len()))
             .unwrap_or(nodes.len());
 
-        let upper_nodes = &nodes_slice[..num_upper_nodes];
-        nodes_slice = &nodes_slice[num_upper_nodes..];
+        let all_nodes = nodes.as_slice();
+        let upper_nodes = &all_nodes[..num_upper_nodes];
+        let lower_nodes = &all_nodes[num_upper_nodes..];
 
         // Reserve the capacity of the upper subtrie's `nodes` HashMap before iterating, so we don't
         // end up making many small capacity changes as we loop.
@@ -146,7 +145,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         #[cfg(not(feature = "std"))]
         // Reveal lower subtrie nodes serially if nostd
         {
-            for node in nodes_slice {
+            for node in lower_nodes {
                 if let Some(subtrie) = self.lower_subtrie_for_path_mut(&node.path) {
                     subtrie.reveal_node(node.path, &node.node, &node.masks)?;
                 } else {
@@ -163,7 +162,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
             // Group the nodes by lower subtrie. This must be collected into a Vec in order for
             // rayon's `zip` to be happy.
-            let node_groups: Vec<_> = nodes_slice
+            let node_groups: Vec<_> = lower_nodes
                 .chunk_by(|node_a, node_b| {
                     SparseSubtrieType::from_path(&node_a.path) ==
                         SparseSubtrieType::from_path(&node_b.path)
