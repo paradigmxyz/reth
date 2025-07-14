@@ -132,7 +132,6 @@ where
 /// - Compares the ommer hash in the block header to the block body
 /// - Compares the transactions root in the block header to the block body
 /// - Pre-execution transaction validation
-/// - (Optionally) Compares the receipts root in the block header to the block body
 pub fn validate_block_pre_execution<B, ChainSpec>(
     block: &SealedBlock<B>,
     chain_spec: &ChainSpec,

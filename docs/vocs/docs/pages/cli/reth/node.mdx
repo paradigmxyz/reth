@@ -705,6 +705,9 @@ Pruning:
       --prune.receipts.full
           Prunes all receipt data
 
+      --prune.receipts.pre-merge
+          Prune receipts before the merge block
+
       --prune.receipts.distance <BLOCKS>
           Prune receipts before the `head-N` block number. In other words, keep last N + 1 blocks
 
@@ -757,6 +760,9 @@ Engine:
 
       --engine.disable-caching-and-prewarming
           Disable cross-block caching and parallel prewarming
+
+      --engine.parallel-sparse-trie
+          Enable the parallel sparse trie in the engine
 
       --engine.state-provider-metrics
           Enable state provider latency metrics. This allows the engine to collect and report stats about how long state provider calls took during execution, but this does introduce slight overhead to state provider calls

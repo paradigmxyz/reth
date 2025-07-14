@@ -20,9 +20,6 @@ use reth_rpc_builder::auth::AuthServerHandle;
 use std::sync::Arc;
 use url::Url;
 
-#[cfg(test)]
-mod examples;
-
 /// Client handles for both regular RPC and Engine API endpoints
 #[derive(Clone)]
 pub struct NodeClient {
@@ -289,6 +286,17 @@ where
 
     /// Set the test setup
     pub fn with_setup(mut self, setup: Setup<I>) -> Self {
+        self.setup = Some(setup);
+        self
+    }
+
+    /// Set the test setup with chain import from RLP file
+    pub fn with_setup_and_import(
+        mut self,
+        mut setup: Setup<I>,
+        rlp_path: impl Into<std::path::PathBuf>,
+    ) -> Self {
+        setup.import_rlp_path = Some(rlp_path.into());
         self.setup = Some(setup);
         self
     }

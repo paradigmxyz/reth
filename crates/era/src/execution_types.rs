@@ -161,9 +161,9 @@ impl CompressedHeader {
         self.decode()
     }
 
-    /// Create a [`CompressedHeader`] from an `alloy_consensus::Header`
-    pub fn from_header(header: &Header) -> Result<Self, E2sError> {
-        let encoder = SnappyRlpCodec::<Header>::new();
+    /// Create a [`CompressedHeader`] from a header.
+    pub fn from_header<H: Encodable>(header: &H) -> Result<Self, E2sError> {
+        let encoder = SnappyRlpCodec::new();
         let compressed = encoder.encode(header)?;
         Ok(Self::new(compressed))
     }
@@ -248,9 +248,9 @@ impl CompressedBody {
             .map_err(|e| E2sError::Rlp(format!("Failed to decode RLP data: {e}")))
     }
 
-    /// Create a [`CompressedBody`] from an `alloy_consensus::BlockBody`
-    pub fn from_body<T: Encodable, H: Encodable>(body: &BlockBody<T, H>) -> Result<Self, E2sError> {
-        let encoder = SnappyRlpCodec::<BlockBody<T, H>>::new();
+    /// Create a [`CompressedBody`] from a block body (e.g.  `alloy_consensus::BlockBody`)
+    pub fn from_body<B: Encodable>(body: &B) -> Result<Self, E2sError> {
+        let encoder = SnappyRlpCodec::new();
         let compressed = encoder.encode(body)?;
         Ok(Self::new(compressed))
     }

@@ -627,7 +627,8 @@ fn execution_checkpoint<N: NodePrimitives>(
     })
 }
 
-fn calculate_gas_used_from_headers<N: NodePrimitives>(
+/// Calculates the total amount of gas used from the headers in the given range.
+pub fn calculate_gas_used_from_headers<N: NodePrimitives>(
     provider: &StaticFileProvider<N>,
     range: RangeInclusive<BlockNumber>,
 ) -> Result<u64, ProviderError> {

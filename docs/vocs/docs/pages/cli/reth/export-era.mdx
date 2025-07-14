@@ -1,12 +1,12 @@
-# reth debug build-block
+# reth export-era
 
-Debug block building
+Exports block to era1 files in a specified directory
 
 ```bash
-$ reth debug build-block --help
+$ reth export-era --help
 ```
 ```txt
-Usage: reth debug build-block [OPTIONS] --prev-randao <PREV_RANDAO> --timestamp <TIMESTAMP> --suggested-fee-recipient <SUGGESTED_FEE_RECIPIENT>
+Usage: reth export-era [OPTIONS]
 
 Options:
   -h, --help
@@ -67,23 +67,21 @@ Database:
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
 
-      --parent-beacon-block-root <PARENT_BEACON_BLOCK_ROOT>
+      --first-block-number <first-block-number>
+          Optional first block number to export from the db.
+          It is by default 0.
 
+      --last-block-number <last-block-number>
+          Optional last block number to export from the db.
+          It is by default 8191.
 
-      --prev-randao <PREV_RANDAO>
+      --max-blocks-per-file <max-blocks-per-file>
+          The maximum number of blocks per file, it can help you to decrease the size of the files.
+          Must be less than or equal to 8192.
 
-
-      --timestamp <TIMESTAMP>
-
-
-      --suggested-fee-recipient <SUGGESTED_FEE_RECIPIENT>
-
-
-      --transactions <TRANSACTIONS>
-          Array of transactions. NOTE: 4844 transactions must be provided in the same order as they appear in the blobs bundle
-
-      --blobs-bundle-path <BLOBS_BUNDLE_PATH>
-          Path to the file that contains a corresponding blobs bundle
+      --path <EXPORT_ERA1_PATH>
+          The directory path where to export era1 files.
+          The block data are read from the database.
 
 Logging:
       --log.stdout.format <FORMAT>

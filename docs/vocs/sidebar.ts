@@ -314,6 +314,10 @@ export const sidebar: SidebarItem[] = [
                         link: "/cli/reth/import-era"
                     },
                     {
+                        text: "reth export-era",
+                        link: "/cli/reth/export-era"
+                    },
+                    {
                         text: "reth dump-genesis",
                         link: "/cli/reth/dump-genesis"
                     },

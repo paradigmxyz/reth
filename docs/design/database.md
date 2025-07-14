@@ -23,7 +23,7 @@
 
 ### Table layout
 
-Historical state changes are indexed by `BlockNumber`. This means that `reth` stores the state for every account after every block that touched it, and it provides indexes for accessing that data quickly. While this may make the database size bigger (needs benchmark once `reth` is closer to prod), it provides fast access to historical state.
+Historical state changes are indexed by `BlockNumber`. This means that `reth` stores the state for every account after every block that touched it, and it provides indexes for accessing that data quickly. While this may make the database size bigger (needs benchmark once `reth` is closer to prod), it provides fast access to the historical state.
 
 Below, you can see the table design that implements this scheme:
 

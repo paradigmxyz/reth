@@ -1254,6 +1254,7 @@ mod tests {
                     transaction_lookup_distance: None,
                     transaction_lookup_before: None,
                     receipts_full: false,
+                    receipts_pre_merge: false,
                     receipts_distance: None,
                     receipts_before: None,
                     account_history_full: false,

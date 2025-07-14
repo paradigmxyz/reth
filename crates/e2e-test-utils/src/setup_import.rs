@@ -53,6 +53,9 @@ impl std::fmt::Debug for ChainImportResult {
 /// Note: This function is currently specific to `EthereumNode` because the import process
 /// uses Ethereum-specific consensus and block format. It can be made generic in the future
 /// by abstracting the import process.
+/// It uses `NoopConsensus` during import to bypass validation checks like gas limit constraints,
+/// which allows importing test chains that may not strictly conform to mainnet consensus rules. The
+/// nodes themselves still run with proper consensus when started.
 pub async fn setup_engine_with_chain_import(
     num_nodes: usize,
     chain_spec: Arc<ChainSpec>,
@@ -128,12 +131,14 @@ pub async fn setup_engine_with_chain_import(
         reth_db_common::init::init_genesis(&provider_factory)?;
 
         // Import the chain data
+        // Use no_state to skip state validation for test chains
         let import_config = ImportConfig::default();
         let config = Config::default();
 
         // Create EVM and consensus for Ethereum
         let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
-        let consensus = reth_ethereum_consensus::EthBeaconConsensus::new(chain_spec.clone());
+        // Use NoopConsensus to skip gas limit validation for test imports
+        let consensus = reth_consensus::noop::NoopConsensus::arc();
 
         let result = import_blocks_from_file(
             rlp_path,
@@ -141,7 +146,7 @@ pub async fn setup_engine_with_chain_import(
             provider_factory.clone(),
             &config,
             evm_config,
-            Arc::new(consensus),
+            consensus,
         )
         .await?;
 
@@ -248,7 +253,8 @@ pub fn load_forkchoice_state(path: &Path) -> eyre::Result<alloy_rpc_types_engine
     let json_str = std::fs::read_to_string(path)?;
     let fcu_data: serde_json::Value = serde_json::from_str(&json_str)?;
 
-    let state = &fcu_data["forkchoiceState"];
+    // The headfcu.json file contains a JSON-RPC request with the forkchoice state in params[0]
+    let state = &fcu_data["params"][0];
     Ok(alloy_rpc_types_engine::ForkchoiceState {
         head_block_hash: state["headBlockHash"]
             .as_str()
@@ -330,7 +336,8 @@ mod tests {
             let import_config = ImportConfig::default();
             let config = Config::default();
             let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
-            let consensus = reth_ethereum_consensus::EthBeaconConsensus::new(chain_spec.clone());
+            // Use NoopConsensus to skip gas limit validation for test imports
+            let consensus = reth_consensus::noop::NoopConsensus::arc();
 
             let result = import_blocks_from_file(
                 &rlp_path,
@@ -338,7 +345,7 @@ mod tests {
                 provider_factory.clone(),
                 &config,
                 evm_config,
-                Arc::new(consensus),
+                consensus,
             )
             .await
             .unwrap();
@@ -480,7 +487,8 @@ mod tests {
         let import_config = ImportConfig::default();
         let config = Config::default();
         let evm_config = reth_node_ethereum::EthEvmConfig::new(chain_spec.clone());
-        let consensus = reth_ethereum_consensus::EthBeaconConsensus::new(chain_spec.clone());
+        // Use NoopConsensus to skip gas limit validation for test imports
+        let consensus = reth_consensus::noop::NoopConsensus::arc();
 
         let result = import_blocks_from_file(
             &rlp_path,
@@ -488,7 +496,7 @@ mod tests {
             provider_factory.clone(),
             &config,
             evm_config,
-            Arc::new(consensus),
+            consensus,
         )
         .await
         .unwrap();

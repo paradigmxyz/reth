@@ -8,6 +8,16 @@ In this chapter, we will learn how to use tools for dealing with historical data
 
 We will use [reth cli](../cli/cli) to import and export historical data.
 
+## Enabling Pre-merge history expiry
+
+Opting in into pre-merge history expiry will remove all pre-merge transaction/receipt data (static files) for mainnet and sepolia.
+
+For new and existing nodes:
+
+Use the flags `--prune.bodies.pre-merge` `--prune.receipts.pre-merge`
+
+See also [Partial history expiry announcement](https://blog.ethereum.org/2025/07/08/partial-history-exp)
+
 ## File format
 
 The historical data is packaged and distributed in files of special formats with different names, all of which are based on [e2store](https://github.com/status-im/nimbus-eth2/blob/613f4a9a50c9c4bd8568844eaffb3ac15d067e56/docs/e2store.md#introduction). The most important ones are the **ERA1**, which deals with block range from genesis until the last pre-merge block, and **ERA**, which deals with block range from the merge onwards. See their [specification](https://github.com/eth-clients/e2store-format-specs) for more details.
@@ -24,7 +34,7 @@ If enabled, importing blocks from ERA1 files can be done automatically with no m
 
 #### Enabling the ERA stage
 
-The import from ERA1 files within the pre-merge block range is included in the [reth node](../cli/reth/node) synchronization pipeline. It is disabled by default. To enable it, pass the `--era.enable` flag when running the [`node`](../cli/reth/node) command.
+The import from ERA1 files within the pre-merge block range is included in the [reth node](/cli/reth/node) synchronization pipeline. It is disabled by default. To enable it, pass the `--era.enable` flag when running the [`node`](/cli/reth/node) command.
 
 The benefit of using this option is significant increase in the synchronization speed for the headers and mainly bodies stage of the pipeline within the ERA1 block range. We encourage you to use it! Eventually, it will become enabled by default.
 

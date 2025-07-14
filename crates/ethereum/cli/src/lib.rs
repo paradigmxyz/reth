@@ -10,7 +10,6 @@
 
 /// Chain specification parser.
 pub mod chainspec;
-pub mod debug_cmd;
 pub mod interface;
 pub use interface::Cli;
 

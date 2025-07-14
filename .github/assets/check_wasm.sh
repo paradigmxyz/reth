@@ -48,6 +48,7 @@ exclude_crates=(
   reth-rpc-api
   reth-rpc-api-testing-util
   reth-rpc-builder
+  reth-rpc-e2e-tests
   reth-rpc-engine-api
   reth-rpc-eth-api
   reth-rpc-eth-types

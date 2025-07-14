@@ -4,7 +4,7 @@
 
 use crate::{
     e2s_types::{E2sError, Entry},
-    execution_types::{Accumulator, BlockTuple},
+    execution_types::{Accumulator, BlockTuple, MAX_BLOCKS_PER_ERA1},
 };
 use alloy_primitives::BlockNumber;
 
@@ -155,6 +155,7 @@ pub struct Era1Id {
     pub block_count: u32,
 
     /// Optional hash identifier for this file
+    /// First 4 bytes of the last historical root in the last state in the era file
     pub hash: Option<[u8; 4]>,
 }
 
@@ -174,23 +175,37 @@ impl Era1Id {
         self
     }
 
-    /// Convert to file name following the era1 file naming:
-    /// `<network-name>-<start-block>-<block-count>.era1`
-    /// inspired from era file naming convention in
+    /// Convert to file name following the era file naming:
+    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era(1)`
     /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
     /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
     pub fn to_file_name(&self) -> String {
+        // Find which era the first block belongs to
+        let era_number = self.start_block / MAX_BLOCKS_PER_ERA1 as u64;
+        let era_count = self.calculate_era_count(era_number);
         if let Some(hash) = self.hash {
-            // Format with zero-padded era number and hash:
-            // For example network-00000-5ec1ffb8.era1
             format!(
-                "{}-{:05}-{:02x}{:02x}{:02x}{:02x}.era1",
-                self.network_name, self.start_block, hash[0], hash[1], hash[2], hash[3]
+                "{}-{:05}-{:05}-{:02x}{:02x}{:02x}{:02x}.era1",
+                self.network_name, era_number, era_count, hash[0], hash[1], hash[2], hash[3]
             )
         } else {
-            // Original format without hash
-            format!("{}-{}-{}.era1", self.network_name, self.start_block, self.block_count)
+            // era spec format with placeholder hash when no hash available
+            // Format: `<config-name>-<era-number>-<era-count>-00000000.era1`
+            format!("{}-{:05}-{:05}-00000000.era1", self.network_name, era_number, era_count)
         }
+    }
+
+    // Helper function to calculate the number of eras per era1 file,
+    // If the user can decide how many blocks per era1 file there are, we need to calculate it.
+    // Most of the time it should be 1, but it can never be more than 2 eras per file
+    // as there is a maximum of 8192 blocks per era1 file.
+    const fn calculate_era_count(&self, first_era: u64) -> u64 {
+        // Calculate the actual last block number in the range
+        let last_block = self.start_block + self.block_count as u64 - 1;
+        // Find which era the last block belongs to
+        let last_era = last_block / MAX_BLOCKS_PER_ERA1 as u64;
+        // Count how many eras we span
+        last_era - first_era + 1
     }
 }
 
@@ -330,33 +345,33 @@ mod tests {
 
     #[test_case::test_case(
         Era1Id::new("mainnet", 0, 8192).with_hash([0x5e, 0xc1, 0xff, 0xb8]),
-        "mainnet-00000-5ec1ffb8.era1";
-        "Mainnet 00000"
+        "mainnet-00000-00001-5ec1ffb8.era1";
+        "Mainnet era 0"
     )]
     #[test_case::test_case(
-        Era1Id::new("mainnet", 12, 8192).with_hash([0x5e, 0xcb, 0x9b, 0xf9]),
-        "mainnet-00012-5ecb9bf9.era1";
-        "Mainnet 00012"
+        Era1Id::new("mainnet", 8192, 8192).with_hash([0x5e, 0xcb, 0x9b, 0xf9]),
+        "mainnet-00001-00001-5ecb9bf9.era1";
+        "Mainnet era 1"
     )]
     #[test_case::test_case(
-        Era1Id::new("sepolia", 5, 8192).with_hash([0x90, 0x91, 0x84, 0x72]),
-        "sepolia-00005-90918472.era1";
-        "Sepolia 00005"
+        Era1Id::new("sepolia", 0, 8192).with_hash([0x90, 0x91, 0x84, 0x72]),
+        "sepolia-00000-00001-90918472.era1";
+        "Sepolia era 0"
     )]
     #[test_case::test_case(
-        Era1Id::new("sepolia", 19, 8192).with_hash([0xfa, 0x77, 0x00, 0x19]),
-        "sepolia-00019-fa770019.era1";
-        "Sepolia 00019"
+        Era1Id::new("sepolia", 155648, 8192).with_hash([0xfa, 0x77, 0x00, 0x19]),
+        "sepolia-00019-00001-fa770019.era1";
+        "Sepolia era 19"
     )]
     #[test_case::test_case(
         Era1Id::new("mainnet", 1000, 100),
-        "mainnet-1000-100.era1";
+        "mainnet-00000-00001-00000000.era1";
         "ID without hash"
     )]
     #[test_case::test_case(
-        Era1Id::new("sepolia", 12345, 8192).with_hash([0xab, 0xcd, 0xef, 0x12]),
-        "sepolia-12345-abcdef12.era1";
-        "Large block number"
+        Era1Id::new("sepolia", 101130240, 8192).with_hash([0xab, 0xcd, 0xef, 0x12]),
+        "sepolia-12345-00001-abcdef12.era1";
+        "Large block number era 12345"
     )]
     fn test_era1id_file_naming(id: Era1Id, expected_file_name: &str) {
         let actual_file_name = id.to_file_name();

@@ -86,6 +86,12 @@ pub trait SignedTransaction:
         self.recover_signer().map(|signer| Recovered::new_unchecked(self.clone(), signer))
     }
 
+    /// Tries to recover signer and return [`Recovered`] by cloning the type.
+    #[auto_impl(keep_default_for(&, Arc))]
+    fn try_clone_into_recovered_unchecked(&self) -> Result<Recovered<Self>, RecoveryError> {
+        self.recover_signer_unchecked().map(|signer| Recovered::new_unchecked(self.clone(), signer))
+    }
+
     /// Tries to recover signer and return [`Recovered`].
     ///
     /// Returns `Err(Self)` if the transaction's signature is invalid, see also

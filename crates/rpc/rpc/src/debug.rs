@@ -277,6 +277,7 @@ where
 
         let this = self.clone();
         if let Some(tracer) = tracer {
+            #[allow(unreachable_patterns)]
             return match tracer {
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
@@ -443,6 +444,11 @@ where
                         .await?;
 
                     Ok(GethTrace::JS(res))
+                }
+                _ => {
+                    // Note: this match is non-exhaustive in case we need to add support for
+                    // additional tracers
+                    Err(EthApiError::Unsupported("unsupported tracer").into())
                 }
             }
         }
@@ -732,6 +738,7 @@ where
         };
 
         if let Some(tracer) = tracer {
+            #[allow(unreachable_patterns)]
             return match tracer {
                 GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
                     GethDebugBuiltInTracerType::FourByteTracer => {
@@ -846,6 +853,11 @@ where
                         .json_result(res, &tx_env, &evm_env.block_env, db)
                         .map_err(Eth::Error::from_eth_err)?;
                     Ok((GethTrace::JS(result), state))
+                }
+                _ => {
+                    // Note: this match is non-exhaustive in case we need to add support for
+                    // additional tracers
+                    Err(EthApiError::Unsupported("unsupported tracer").into())
                 }
             }
         }

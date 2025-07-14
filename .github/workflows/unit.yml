@@ -61,7 +61,7 @@ jobs:
             ${{ matrix.args }} --workspace \
             --exclude ef-tests --no-tests=warn \
             --partition hash:${{ matrix.partition }}/2 \
-            -E "!kind(test)"
+            -E "!kind(test) and not binary(e2e_testsuite)"
 
   state:
     name: Ethereum state tests

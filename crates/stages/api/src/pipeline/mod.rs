@@ -14,7 +14,10 @@ use reth_provider::{
 use reth_prune::PrunerBuilder;
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::{EventSender, EventStream};
-use std::pin::Pin;
+use std::{
+    pin::Pin,
+    time::{Duration, Instant},
+};
 use tokio::sync::watch;
 use tracing::*;
 
@@ -138,6 +141,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 stage_id,
                 checkpoint: provider.get_stage_checkpoint(stage_id)?.unwrap_or_default(),
                 max_block_number: None,
+                elapsed: Duration::default(),
             });
         }
         Ok(())
@@ -338,6 +342,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 "Starting unwind"
             );
             while checkpoint.block_number > to {
+                let unwind_started_at = Instant::now();
                 let input = UnwindInput { checkpoint, unwind_to: to, bad_block };
                 self.event_sender.notify(PipelineEvent::Unwind { stage_id, input });
 
@@ -353,6 +358,13 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             done = checkpoint.block_number == to,
                             "Stage unwound"
                         );
+
+                        provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
+
+                        // Notify event listeners and update metrics.
+                        self.event_sender
+                            .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
+
                         if let Some(metrics_tx) = &mut self.metrics_tx {
                             let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
                                 stage_id,
@@ -360,12 +372,9 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                                 // We assume it was set in the previous execute iteration, so it
                                 // doesn't change when we unwind.
                                 max_block_number: None,
+                                elapsed: unwind_started_at.elapsed(),
                             });
                         }
-                        provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
-
-                        self.event_sender
-                            .notify(PipelineEvent::Unwound { stage_id, result: unwind_output });
 
                         // update finalized block if needed
                         let last_saved_finalized_block_number =
@@ -452,6 +461,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 };
             }
 
+            let stage_started_at = Instant::now();
             let provider_rw = self.provider_factory.database_provider_rw()?;
 
             self.event_sender.notify(PipelineEvent::Run {
@@ -466,18 +476,16 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
             match self.stage(stage_index).execute(&provider_rw, exec_input) {
                 Ok(out @ ExecOutput { checkpoint, done }) => {
-                    made_progress |=
-                        checkpoint.block_number != prev_checkpoint.unwrap_or_default().block_number;
-
-                    if let Some(metrics_tx) = &mut self.metrics_tx {
-                        let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
-                            stage_id,
-                            checkpoint,
-                            max_block_number: target,
-                        });
-                    }
+                    // Update stage checkpoint.
                     provider_rw.save_stage_checkpoint(stage_id, checkpoint)?;
 
+                    // Commit processed data to the database.
+                    UnifiedStorageWriter::commit(provider_rw)?;
+
+                    // Invoke stage post commit hook.
+                    self.stage(stage_index).post_execute_commit()?;
+
+                    // Notify event listeners and update metrics.
                     self.event_sender.notify(PipelineEvent::Ran {
                         pipeline_stages_progress: PipelineStagesProgress {
                             current: stage_index + 1,
@@ -486,13 +494,19 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                         stage_id,
                         result: out.clone(),
                     });
+                    if let Some(metrics_tx) = &mut self.metrics_tx {
+                        let _ = metrics_tx.send(MetricEvent::StageCheckpoint {
+                            stage_id,
+                            checkpoint,
+                            max_block_number: target,
+                            elapsed: stage_started_at.elapsed(),
+                        });
+                    }
 
-                    UnifiedStorageWriter::commit(provider_rw)?;
-
-                    self.stage(stage_index).post_execute_commit()?;
-
+                    let block_number = checkpoint.block_number;
+                    let prev_block_number = prev_checkpoint.unwrap_or_default().block_number;
+                    made_progress |= block_number != prev_block_number;
                     if done {
-                        let block_number = checkpoint.block_number;
                         return Ok(if made_progress {
                             ControlFlow::Continue { block_number }
                         } else {

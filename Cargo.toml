@@ -105,6 +105,7 @@ members = [
     "crates/rpc/rpc-layer",
     "crates/rpc/rpc-server-types/",
     "crates/rpc/rpc-testing-util/",
+    "crates/rpc/rpc-e2e-tests/",
     "crates/rpc/rpc-convert/",
     "crates/rpc/rpc/",
     "crates/stages/api/",
@@ -421,6 +422,7 @@ reth-rpc = { path = "crates/rpc/rpc" }
 reth-rpc-api = { path = "crates/rpc/rpc-api" }
 reth-rpc-api-testing-util = { path = "crates/rpc/rpc-testing-util" }
 reth-rpc-builder = { path = "crates/rpc/rpc-builder" }
+reth-rpc-e2e-tests = { path = "crates/rpc/rpc-e2e-tests" }
 reth-rpc-engine-api = { path = "crates/rpc/rpc-engine-api" }
 reth-rpc-eth-api = { path = "crates/rpc/rpc-eth-api" }
 reth-rpc-eth-types = { path = "crates/rpc/rpc-eth-types", default-features = false }
@@ -516,6 +518,7 @@ op-alloy-rpc-jsonrpsee = { version = "0.18.7", default-features = false }
 op-alloy-flz = { version = "0.13.1", default-features = false }
 
 # misc
+either = { version = "1.15.0", default-features = false }
 aquamarine = "0.6"
 auto_impl = "1"
 backon = { version = "1.2", default-features = false, features = ["std-blocking-sleep", "tokio-sleep"] }

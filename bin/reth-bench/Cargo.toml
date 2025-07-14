@@ -35,6 +35,7 @@ alloy-transport-ipc.workspace = true
 alloy-transport-ws.workspace = true
 alloy-transport.workspace = true
 op-alloy-consensus = { workspace = true, features = ["alloy-compat"] }
+op-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 
 # reqwest
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots"] }

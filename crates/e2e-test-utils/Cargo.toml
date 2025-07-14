@@ -63,6 +63,7 @@ alloy-rpc-types-engine.workspace = true
 alloy-network.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
 alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-genesis.workspace = true
 
 futures-util.workspace = true
 eyre.workspace = true
@@ -71,3 +72,7 @@ tokio-stream.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
+
+[[test]]
+name = "e2e_testsuite"
+path = "tests/e2e-testsuite/main.rs"
