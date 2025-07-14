@@ -86,6 +86,22 @@ async function injectCargoDocs() {
     await fs.writeFile(file, content, 'utf-8');
   }
 
+  // Find the actual search JS filename from the HTML files
+  let actualSearchJsFile = '';
+  for (const htmlFile of htmlFiles) {
+    const htmlContent = await fs.readFile(htmlFile, 'utf-8');
+    const searchMatch = htmlContent.match(/data-search-js="[^"]*\/([^"]+)"/);
+    if (searchMatch && searchMatch[1]) {
+      actualSearchJsFile = searchMatch[1];
+      break;
+    }
+  }
+  
+  if (!actualSearchJsFile) {
+    console.error('Could not detect search JS filename from HTML files');
+    process.exit(1);
+  }
+  
   // Also fix paths in JavaScript files
   const jsFiles = await glob(`${VOCS_DIST_PATH}/**/*.js`);
   
@@ -102,9 +118,28 @@ async function injectCargoDocs() {
     // Fix the search form submission issue that causes page reload
     // Instead of submitting a form, just ensure the search functionality is loaded
     if (file.includes('main-') && file.endsWith('.js')) {
+      // First, add a failsafe counter to prevent infinite reloads
+      content = content.replace(
+        /window\.searchState=\{/g,
+        'window.searchFailureCount=(window.searchFailureCount||0);window.searchState={'
+      );
+      
       content = content.replace(
         /function sendSearchForm\(\)\{document\.getElementsByClassName\("search-form"\)\[0\]\.submit\(\)\}/g,
-        'function sendSearchForm(){/* Fixed: No form submission needed - search loads via script */}'
+        `function sendSearchForm(){
+          /* Fixed: Prevent infinite reload loop */
+          window.searchFailureCount++;
+          if(window.searchFailureCount>2){
+            console.error("Search functionality unavailable after multiple attempts");
+            const search=window.searchState.outputElement();
+            if(search){
+              search.innerHTML='<div class="search-error">No Results</div>';
+              window.searchState.showResults(search);
+            }
+            return;
+          }
+          console.warn("Search script failed to load, attempt "+window.searchFailureCount);
+        }`
       );
       
       // Also fix the root path references in the search functionality
@@ -120,9 +155,10 @@ async function injectCargoDocs() {
       );
       
       // Fix the search-js variable to return just the filename
+      // Use the detected search filename
       content = content.replace(
         /getVar\("search-js"\)/g,
-        `"search-f7877310.js"`
+        `"${actualSearchJsFile}"`
       );
       
       // Fix the search index loading path
