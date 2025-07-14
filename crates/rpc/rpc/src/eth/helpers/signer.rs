@@ -5,20 +5,19 @@ use std::collections::HashMap;
 use crate::EthApi;
 use alloy_dyn_abi::TypedData;
 use alloy_eips::eip2718::Decodable2718;
-use alloy_network::{eip2718::Encodable2718, EthereumWallet, NetworkWallet, TransactionBuilder};
 use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
+use reth_rpc_convert::{RpcTypes, SignableTxRequest};
 use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
 use reth_rpc_eth_types::SignError;
-use reth_storage_api::BlockReader;
+use reth_storage_api::{BlockReader, ProviderTx};
 
 impl<Provider, Pool, Network, EvmConfig, Rpc> AddDevSigners
     for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader,
-    Rpc: alloy_network::Network,
-    EthereumWallet: NetworkWallet<Rpc>,
+    Rpc: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<Provider>>>,
 {
     fn with_dev_accounts(&self) {
         *self.inner.signers().write() = DevSigner::random_signers(20)
@@ -33,24 +32,11 @@ pub struct DevSigner {
 }
 
 impl DevSigner {
-    /// Generates a random dev signer which satisfies [`EthSigner`] trait
-    pub fn random<T: Decodable2718>() -> Box<dyn EthSigner<T>> {
-        let mut signers = Self::random_signers(1);
-        signers.pop().expect("expect to generate at least one signer")
-    }
-
     /// Generates provided number of random dev signers
     /// which satisfy [`EthSigner`] trait
-    pub fn random_signers<
-        T: Decodable2718,
-        N: alloy_network::Network,
-        TxReq: TransactionBuilder<N>,
-    >(
+    pub fn random_signers<T: Decodable2718, TxReq: SignableTxRequest<T>>(
         num: u32,
-    ) -> Vec<Box<dyn EthSigner<T, N, TxReq> + 'static>>
-    where
-        EthereumWallet: NetworkWallet<N>,
-    {
+    ) -> Vec<Box<dyn EthSigner<T, TxReq> + 'static>> {
         let mut signers = Vec::with_capacity(num as usize);
         for _ in 0..num {
             let sk = PrivateKeySigner::random();
@@ -59,7 +45,7 @@ impl DevSigner {
             let addresses = vec![address];
 
             let accounts = HashMap::from([(address, sk)]);
-            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T, N, TxReq>>);
+            signers.push(Box::new(Self { addresses, accounts }) as Box<dyn EthSigner<T, TxReq>>);
         }
         signers
     }
@@ -75,11 +61,7 @@ impl DevSigner {
 }
 
 #[async_trait::async_trait]
-impl<T: Decodable2718, N: alloy_network::Network, TxReq: TransactionBuilder<N>>
-    EthSigner<T, N, TxReq> for DevSigner
-where
-    EthereumWallet: NetworkWallet<N>,
-{
+impl<T: Decodable2718, TxReq: SignableTxRequest<T>> EthSigner<T, TxReq> for DevSigner {
     fn accounts(&self) -> Vec<Address> {
         self.addresses.clone()
     }
@@ -98,18 +80,14 @@ where
     async fn sign_transaction(&self, request: TxReq, address: &Address) -> Result<T> {
         // create local signer wallet from signing key
         let signer = self.accounts.get(address).ok_or(SignError::NoAccount)?.clone();
-        let wallet = EthereumWallet::from(signer);
 
         // build and sign transaction with signer
-        let txn_envelope =
-            request.build(&wallet).await.map_err(|_| SignError::InvalidTransactionRequest)?;
-
-        // decode transaction into signed transaction type
-        let encoded = txn_envelope.encoded_2718();
-        let txn_signed = T::decode_2718(&mut encoded.as_ref())
+        let tx = request
+            .try_build_and_sign(&signer)
+            .await
             .map_err(|_| SignError::InvalidTransactionRequest)?;
 
-        Ok(txn_signed)
+        Ok(tx)
     }
 
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature> {

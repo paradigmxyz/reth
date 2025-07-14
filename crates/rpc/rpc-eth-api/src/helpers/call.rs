@@ -32,7 +32,7 @@ use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
 };
-use reth_rpc_convert::{RpcConvert, RpcTxReq, RpcTypes};
+use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     error::{api::FromEvmHalt, ensure_success, FromEthApiError},
@@ -145,9 +145,9 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     let default_gas_limit = {
                         let total_specified_gas =
-                            calls.iter().filter_map(|tx| tx.gas_limit()).sum::<u64>();
+                            calls.iter().filter_map(|tx| tx.as_ref().gas_limit()).sum::<u64>();
                         let txs_without_gas_limit =
-                            calls.iter().filter(|tx| tx.gas_limit().is_none()).count();
+                            calls.iter().filter(|tx| tx.as_ref().gas_limit().is_none()).count();
 
                         if total_specified_gas > block_gas_limit {
                             return Err(EthApiError::Other(Box::new(
@@ -404,14 +404,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         // Disabled because eth_createAccessList is sometimes used with non-eoa senders
         evm_env.cfg_env.disable_eip3607 = true;
 
-        if request.gas_limit().is_none() && tx_env.gas_price() > 0 {
+        if request.as_ref().gas_limit().is_none() && tx_env.gas_price() > 0 {
             let cap = caller_gas_allowance(&mut db, &tx_env).map_err(Self::Error::from_eth_err)?;
             // no gas limit was provided in the request, so we need to cap the request's gas limit
             tx_env.set_gas_limit(cap.min(evm_env.block_env.gas_limit));
         }
 
         // can consume the list since we're not using the request anymore
-        let initial = request.access_list().cloned().unwrap_or_default();
+        let initial = request.as_ref().access_list().cloned().unwrap_or_default();
 
         let mut inspector = AccessListInspector::new(initial);
 
@@ -462,13 +462,7 @@ pub trait Call:
                 SignedTx = ProviderTx<Self::Provider>,
             >,
         >,
-        RpcConvert: RpcConvert<
-            TxEnv = TxEnvFor<Self::Evm>,
-            Network: alloy_network::Network
-                         + RpcTypes<
-                TransactionRequest: TransactionBuilder<<Self::RpcConvert as RpcConvert>::Network>,
-            >,
-        >,
+        RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
                    + From<ProviderError>,
@@ -707,13 +701,13 @@ pub trait Call:
         mut request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
         mut db: impl Database<Error: Into<EthApiError>>,
     ) -> Result<TxEnvFor<Self::Evm>, Self::Error> {
-        if request.nonce().is_none() {
-            request.set_nonce(
-                db.basic(request.from().unwrap_or_default())
-                    .map_err(Into::into)?
-                    .map(|acc| acc.nonce)
-                    .unwrap_or_default(),
-            );
+        if request.as_ref().nonce().is_none() {
+            let nonce = db
+                .basic(request.as_ref().from().unwrap_or_default())
+                .map_err(Into::into)?
+                .map(|acc| acc.nonce)
+                .unwrap_or_default();
+            request.as_mut().set_nonce(nonce);
         }
 
         Ok(self.tx_resp_builder().tx_env(request, &evm_env.cfg_env, &evm_env.block_env)?)
@@ -744,7 +738,7 @@ pub trait Call:
         DB: Database + DatabaseCommit + OverrideBlockHashes,
         EthApiError: From<<DB as Database>::Error>,
     {
-        if request.gas_limit() > Some(self.call_gas_limit()) {
+        if request.as_ref().gas_limit() > Some(self.call_gas_limit()) {
             // configured gas exceeds limit
             return Err(
                 EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
@@ -764,7 +758,7 @@ pub trait Call:
         evm_env.cfg_env.disable_base_fee = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
-        request.take_nonce();
+        request.as_mut().take_nonce();
 
         if let Some(block_overrides) = overrides.block {
             apply_block_overrides(*block_overrides, db, &mut evm_env.block_env);
@@ -774,7 +768,7 @@ pub trait Call:
                 .map_err(EthApiError::from_state_overrides_err)?;
         }
 
-        let request_gas = request.gas_limit();
+        let request_gas = request.as_ref().gas_limit();
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
 
         if request_gas.is_none() {

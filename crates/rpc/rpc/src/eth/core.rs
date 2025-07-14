@@ -181,7 +181,7 @@ where
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
-    Rpc: RpcTypes + Send + Sync + Clone + Unpin,
+    Rpc: RpcTypes,
 {
     type Primitives = Provider::Primitives;
     type Provider = Provider;
@@ -218,7 +218,7 @@ where
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
     EvmConfig: Send + Sync + Clone + Unpin,
-    Rpc: RpcTypes + Send + Sync + Clone + Unpin,
+    Rpc: RpcTypes,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<ProviderBlock<Provider>, ProviderReceipt<Provider>> {

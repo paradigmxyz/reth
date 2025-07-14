@@ -105,6 +105,7 @@ serde-bincode-compat = [
     "alloy-consensus/serde-bincode-compat",
     "dep:serde_with",
     "alloy-genesis/serde-bincode-compat",
+    "alloy-rpc-types-eth?/serde-bincode-compat",
 ]
 test-utils = [
     "dep:plain_hasher",

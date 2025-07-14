@@ -54,11 +54,11 @@ pub trait EstimateCall: Call {
         evm_env.cfg_env.disable_base_fee = true;
 
         // set nonce to None so that the correct nonce is chosen by the EVM
-        request.take_nonce();
+        request.as_mut().take_nonce();
 
         // Keep a copy of gas related request values
-        let tx_request_gas_limit = request.gas_limit();
-        let tx_request_gas_price = request.gas_price();
+        let tx_request_gas_limit = request.as_ref().gas_limit();
+        let tx_request_gas_price = request.as_ref().gas_price();
         // the gas limit of the corresponding block
         let block_env_gas_limit = evm_env.block_env.gas_limit;
 

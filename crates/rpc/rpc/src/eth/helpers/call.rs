@@ -2,7 +2,6 @@
 
 use crate::EthApi;
 use alloy_evm::block::BlockExecutorFactory;
-use alloy_network::TransactionBuilder;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmFactory, TxEnvFor};
 use reth_node_api::NodePrimitives;
@@ -52,7 +51,7 @@ where
                        + From<ProviderError>,
         > + SpawnBlocking,
     Provider: BlockReader,
-    Rpc: alloy_network::Network + RpcTypes<TransactionRequest: TransactionBuilder<Rpc>>,
+    Rpc: RpcTypes,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
