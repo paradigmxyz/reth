@@ -385,7 +385,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         Self: EthApiSpec + LoadBlock + EstimateCall,
     {
         async move {
-            let from = match request.from() {
+            let from = match request.as_ref().from() {
                 Some(from) => from,
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
@@ -395,18 +395,18 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             // set nonce if not already set before
-            if request.nonce().is_none() {
+            if request.as_ref().nonce().is_none() {
                 let nonce = self.next_available_nonce(from).await?;
-                request.set_nonce(nonce);
+                request.as_mut().set_nonce(nonce);
             }
 
             let chain_id = self.chain_id();
-            request.set_chain_id(chain_id.to());
+            request.as_mut().set_chain_id(chain_id.to());
 
             let estimated_gas =
                 self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
             let gas_limit = estimated_gas;
-            request.set_gas_limit(gas_limit.to());
+            request.as_mut().set_gas_limit(gas_limit.to());
 
             let transaction = self.sign_request(&from, request).await?.with_signer(from);
 
@@ -465,7 +465,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
-            let from = match request.from() {
+            let from = match request.as_ref().from() {
                 Some(from) => from,
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };

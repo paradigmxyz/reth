@@ -19,12 +19,12 @@ pub trait RpcTypes: Send + Sync + Clone + Unpin + Debug + 'static {
     /// Transaction response type.
     type TransactionResponse: RpcObject + TransactionResponse;
     /// Transaction response type.
-    type TransactionRequest: RpcObject;
+    type TransactionRequest: RpcObject + AsRef<TransactionRequest> + AsMut<TransactionRequest>;
 }
 
 impl<T> RpcTypes for T
 where
-    T: Network + Unpin,
+    T: Network<TransactionRequest: AsRef<TransactionRequest> + AsMut<TransactionRequest>> + Unpin,
 {
     type Header = T::HeaderResponse;
     type Receipt = T::ReceiptResponse;
