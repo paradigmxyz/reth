@@ -3,7 +3,7 @@ use crate::{
     traits::SparseTrieInterface,
     RevealedSparseNode, SerialSparseTrie, SparseTrie, TrieMasks,
 };
-use alloc::{collections::VecDeque, vec::Vec};
+use alloc::{collections::VecDeque, vec, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
     Bytes, B256,
