@@ -433,13 +433,15 @@ where
             });
         }
 
-        let mut listener = self.event_listener.write();
+        {
+            let mut listener = self.event_listener.write();
 
-        for tx in &promoted {
-            listener.pending(tx.hash(), None);
-        }
-        for tx in &discarded {
-            listener.discarded(tx.hash());
+            for tx in &promoted {
+                listener.pending(tx.hash(), None);
+            }
+            for tx in &discarded {
+                listener.discarded(tx.hash());
+            }
         }
 
         // This deletes outdated blob txs from the blob store, based on the account's nonce. This is
