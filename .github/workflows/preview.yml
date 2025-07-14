@@ -21,6 +21,20 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          components: rustfmt
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Install bun
         uses: oven-sh/setup-bun@v2
@@ -34,8 +48,14 @@ jobs:
 
       - name: Build Rust documentation
         run: |
-          cd docs/vocs/ && bash scripts/build-cargo-docs.sh
-          echo "Cargo docs built successfully"
+          echo "Starting in directory: $(pwd)"
+          cd docs/vocs/
+          echo "Now in directory: $(pwd)"
+          bash scripts/build-cargo-docs.sh
+          echo "Back in directory: $(pwd)"
+          echo "Checking if docs exist at ../../target/doc:"
+          ls -la ../../target/doc 2>/dev/null | head -10 || echo "../../target/doc not found"
+          echo "Cargo docs build step completed"
 
       - name: Build Vocs
         run: |
@@ -49,7 +69,12 @@ jobs:
 
       - name: Inject cargo docs
         run: |
-          cd docs/vocs/ && bun scripts/inject-cargo-docs.ts
+          cd docs/vocs/
+          echo "Current directory: $(pwd)"
+          echo "Checking target/doc from here:"
+          ls -la ../../target/doc 2>/dev/null | head -5 || echo "target/doc not found"
+          echo "Running inject script..."
+          bun scripts/inject-cargo-docs.ts
           echo "Cargo docs injected"
 
       - name: Setup Pages
