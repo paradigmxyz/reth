@@ -2,22 +2,24 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
+use reth_rpc_convert::RpcTypes;
 use reth_rpc_eth_api::{
-    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
+    EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-impl<Provider, Pool, Network, EvmConfig> EthTransactions
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthTransactions
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<NetworkTypes = Rpc>,
     Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    Rpc: RpcTypes,
 {
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
     }
 
@@ -43,13 +45,15 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> LoadTransaction
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: SpawnBlocking
         + FullEthApiTypes
-        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
+        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>
+        + EthApiTypes<NetworkTypes = Rpc>,
     Provider: BlockReader,
+    Rpc: RpcTypes,
 {
 }
 
