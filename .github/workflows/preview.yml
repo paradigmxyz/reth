@@ -32,10 +32,25 @@ jobs:
           bun i
           npx playwright install --with-deps chromium
 
+      - name: Build Rust documentation
+        run: |
+          cd docs/vocs/ && bash scripts/build-cargo-docs.sh
+          echo "Cargo docs built successfully"
+
       - name: Build Vocs
         run: |
-          cd docs/vocs/ && bun run build
+          cd docs/vocs/ && vocs build
           echo "Vocs Build Complete"
+
+      - name: Generate redirects
+        run: |
+          cd docs/vocs/ && bun scripts/generate-redirects.ts
+          echo "Redirects generated"
+
+      - name: Inject cargo docs
+        run: |
+          cd docs/vocs/ && bun scripts/inject-cargo-docs.ts
+          echo "Cargo docs injected"
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
