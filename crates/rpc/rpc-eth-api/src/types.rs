@@ -63,7 +63,6 @@ where
                 Network = Self::NetworkTypes,
                 Error = RpcError<Self>,
             >,
-            NetworkTypes: RpcTypes,
         >,
 {
 }
