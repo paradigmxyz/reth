@@ -88,13 +88,13 @@ In the meantime, consider setting up [observability](/run/monitoring) to monitor
 
 {/* TODO: Add more logs to help node operators debug any weird CL to EL messages! */}
 
-[installation]: ./../installation/overview
+[installation]: ./../../installation/overview
 [docs]: https://github.com/paradigmxyz/reth/tree/main/docs
 [metrics]: https://github.com/paradigmxyz/reth/blob/main/docs/design/metrics.md#metrics
 
 ## Running without a Consensus Layer
 
-We provide a method for running Reth without a Consensus Layer via the `--debug.tip <HASH>` parameter. If you provide that to your node, it will simulate sending an `engine_forkchoiceUpdated` message _once_ and will trigger syncing to the provided block hash. This is useful for testing and debugging purposes, but in order to have a node that can keep up with the tip you'll need to run a CL alongside it. At the moment we have no plans of including a Consensus Layer implementation in Reth, and we are open to including light clients other methods of syncing like importing Lighthouse as a library.
+We provide a method for running Reth without a Consensus Layer via the `--debug.tip <HASH>` parameter. If you provide that to your node, it will simulate sending an `engine_forkchoiceUpdated` message _once_ and will trigger syncing to the provided block hash. This is useful for testing and debugging purposes, but in order to have a node that can keep up with the tip you'll need to run a CL alongside it. At the moment we have no plans of including a Consensus Layer implementation in Reth, and we are open to including light clients and other methods of syncing like importing Lighthouse as a library.
 
 ## Running with Etherscan as Block Source
 

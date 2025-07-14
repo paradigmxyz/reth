@@ -434,6 +434,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.all()
     }
 
+    /// Returns the number of transactions from the pending sub-pool
+    pub(crate) fn pending_transactions_count(&self) -> usize {
+        self.pending_pool.len()
+    }
+
     /// Returns all pending transactions filtered by predicate
     pub(crate) fn pending_transactions_with_predicate(
         &self,
@@ -460,6 +465,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
     ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.basefee_pool.all().chain(self.queued_pool.all())
+    }
+
+    /// Returns the number of transactions in parked pools
+    pub(crate) fn queued_transactions_count(&self) -> usize {
+        self.basefee_pool.len() + self.queued_pool.len()
     }
 
     /// Returns queued and pending transactions for the specified sender
@@ -1368,11 +1378,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 };
             }
-            // tracks the balance if the sender was changed in the block
-            let mut changed_balance = None;
 
+            // track the balance if the sender was changed in the block
             // check if this is a changed account
-            if let Some(info) = changed_accounts.get(&id.sender) {
+            let changed_balance = if let Some(info) = changed_accounts.get(&id.sender) {
                 // discard all transactions with a nonce lower than the current state nonce
                 if id.nonce < info.state_nonce {
                     updates.push(PoolUpdate {
@@ -1397,8 +1406,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 }
 
-                changed_balance = Some(&info.balance);
-            }
+                Some(&info.balance)
+            } else {
+                None
+            };
 
             // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
             if tx.state.has_nonce_gap() {

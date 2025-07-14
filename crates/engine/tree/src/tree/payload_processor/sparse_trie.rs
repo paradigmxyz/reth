@@ -108,7 +108,26 @@ where
     ///
     /// NOTE: This function does not take `self` by value to prevent blocking on [`SparseStateTrie`]
     /// drop.
-    pub(super) fn run(&mut self) -> Result<StateRootComputeOutcome<A>, ParallelStateRootError> {
+    ///
+    /// # Returns
+    ///
+    /// - State root computation outcome.
+    /// - Accounts trie that needs to be cleared and re-used to avoid reallocations.
+    pub(super) fn run(
+        &mut self,
+    ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseTrie<A>) {
+        // run the main loop to completion
+        let result = self.run_inner();
+        // take the account trie so that we can reuse its already allocated data structures.
+        let trie = self.trie.take_accounts_trie();
+
+        (result, trie)
+    }
+
+    /// Inner function to run the sparse trie task to completion.
+    ///
+    /// See [`Self::run`] for more information.
+    fn run_inner(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         let now = Instant::now();
 
         let mut num_iterations = 0;
@@ -151,23 +170,18 @@ where
         self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
         self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
 
-        // take the account trie so that we can reuse its already allocated data structures.
-        let trie = self.trie.take_cleared_accounts_trie();
-
-        Ok(StateRootComputeOutcome { state_root, trie_updates, trie })
+        Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
 }
 
 /// Outcome of the state root computation, including the state root itself with
 /// the trie updates.
 #[derive(Debug)]
-pub struct StateRootComputeOutcome<A = SerialSparseTrie> {
+pub struct StateRootComputeOutcome {
     /// The state root.
     pub state_root: B256,
     /// The trie updates.
     pub trie_updates: TrieUpdates,
-    /// The account state trie.
-    pub trie: SparseTrie<A>,
 }
 
 /// Updates the sparse trie with the given proofs and state, and returns the elapsed time.

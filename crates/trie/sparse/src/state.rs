@@ -92,9 +92,9 @@ where
         self
     }
 
-    /// Takes the `SparseTrie` from within the state root and clears it if it is not blinded.
-    pub fn take_cleared_accounts_trie(&mut self) -> SparseTrie<A> {
-        core::mem::take(&mut self.state).clear()
+    /// Takes the accounts trie.
+    pub fn take_accounts_trie(&mut self) -> SparseTrie<A> {
+        core::mem::take(&mut self.state)
     }
 
     /// Returns `true` if account was already revealed.
@@ -731,7 +731,7 @@ where
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             // The account was revealed, either...
             if let Some(value) = self.get_account_value(&address) {
-                // ..it exists and we should take it's current storage root or...
+                // ..it exists and we should take its current storage root or...
                 TrieAccount::decode(&mut &value[..])?.storage_root
             } else {
                 // ...the account is newly created and the storage trie is empty.

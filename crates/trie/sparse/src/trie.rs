@@ -67,22 +67,6 @@ impl<T: Default> Default for SparseTrie<T> {
 }
 
 impl<T: SparseTrieInterface + Default> SparseTrie<T> {
-    /// Creates a new blind sparse trie.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SerialSparseTrie, SparseTrie};
-    ///
-    /// let trie = SparseTrie::<SerialSparseTrie>::blind();
-    /// assert!(trie.is_blind());
-    /// let trie = SparseTrie::<SerialSparseTrie>::default();
-    /// assert!(trie.is_blind());
-    /// ```
-    pub const fn blind() -> Self {
-        Self::Blind(None)
-    }
-
     /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
     ///
     /// # Examples
@@ -129,10 +113,33 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
 
         Ok(self.as_revealed_mut().unwrap())
     }
+}
+
+impl<T: SparseTrieInterface> SparseTrie<T> {
+    /// Creates a new blind sparse trie.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SerialSparseTrie, SparseTrie};
+    ///
+    /// let trie = SparseTrie::<SerialSparseTrie>::blind();
+    /// assert!(trie.is_blind());
+    /// let trie = SparseTrie::<SerialSparseTrie>::default();
+    /// assert!(trie.is_blind());
+    /// ```
+    pub const fn blind() -> Self {
+        Self::Blind(None)
+    }
 
     /// Returns `true` if the sparse trie has no revealed nodes.
     pub const fn is_blind(&self) -> bool {
         matches!(self, Self::Blind(_))
+    }
+
+    /// Returns `true` if the sparse trie is revealed.
+    pub const fn is_revealed(&self) -> bool {
+        matches!(self, Self::Revealed(_))
     }
 
     /// Returns an immutable reference to the underlying revealed sparse trie.
