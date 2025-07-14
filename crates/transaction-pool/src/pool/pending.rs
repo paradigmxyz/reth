@@ -158,7 +158,7 @@ impl<T: TransactionOrdering> PendingPool<T> {
     /// Returns an iterator over all transactions in the pool
     pub(crate) fn all(
         &self,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+    ) -> impl ExactSizeIterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.by_id.values().map(|tx| tx.transaction.clone())
     }
 
