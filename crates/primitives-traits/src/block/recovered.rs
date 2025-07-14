@@ -73,6 +73,7 @@ impl<B: Block> RecoveredBlock<B> {
     }
 
     /// Returns the recovered senders.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn senders(&self) -> &[Address] {
         &self.senders
     }
@@ -815,7 +816,6 @@ pub(super) mod serde_bincode_compat {
             bound = "serde_bincode_compat::SealedBlock<'a, T>: Serialize + serde::de::DeserializeOwned"
         )]
         block: serde_bincode_compat::SealedBlock<'a, T>,
-        #[expect(clippy::owned_cow)]
         senders: Cow<'a, Vec<Address>>,
     }
 

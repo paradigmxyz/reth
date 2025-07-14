@@ -99,8 +99,8 @@ where
 }
 
 #[instrument(name = "method_call", fields(method = req.method.as_ref()), skip(req, rpc_service), level = "TRACE")]
-pub(crate) async fn execute_call_with_tracing<'a, S>(
-    req: Request<'a>,
+pub(crate) async fn execute_call_with_tracing<S>(
+    req: Request<'_>,
     rpc_service: &S,
 ) -> MethodResponse
 where

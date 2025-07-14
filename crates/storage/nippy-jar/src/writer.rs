@@ -430,6 +430,7 @@ impl<H: NippyJarHeader> NippyJarWriter<H> {
 
     /// Returns a reference to the offsets vector.
     #[cfg(test)]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn offsets(&self) -> &[u64] {
         &self.offsets
     }

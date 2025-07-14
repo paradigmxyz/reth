@@ -130,11 +130,13 @@ where
     /// Returns a copy of the raw pointer to the underlying MDBX transaction.
     #[doc(hidden)]
     #[cfg(test)]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn txn(&self) -> *mut ffi::MDBX_txn {
         self.inner.txn.txn
     }
 
     /// Returns a raw pointer to the MDBX environment.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn env(&self) -> &Environment {
         &self.inner.env
     }

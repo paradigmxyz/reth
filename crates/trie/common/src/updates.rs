@@ -143,7 +143,7 @@ impl TrieUpdates {
     }
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
-    pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
+    pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
@@ -435,6 +435,7 @@ pub struct TrieUpdatesSorted {
 
 impl TrieUpdatesSorted {
     /// Returns reference to updated account nodes.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn account_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
         &self.account_nodes
     }
@@ -481,6 +482,7 @@ impl StorageTrieUpdatesSorted {
     }
 
     /// Returns reference to updated storage nodes.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn storage_nodes_ref(&self) -> &[(Nibbles, BranchNodeCompact)] {
         &self.storage_nodes
     }

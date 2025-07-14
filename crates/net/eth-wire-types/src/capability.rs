@@ -160,6 +160,7 @@ pub struct Capabilities {
 impl Capabilities {
     /// Returns all capabilities.
     #[inline]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn capabilities(&self) -> &[Capability] {
         &self.inner
     }

@@ -355,6 +355,7 @@ impl ChainSpec {
     }
 
     /// Get the header for the genesis block.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn genesis_header(&self) -> &Header {
         &self.genesis_header
     }

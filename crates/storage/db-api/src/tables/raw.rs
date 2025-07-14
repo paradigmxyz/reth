@@ -136,6 +136,7 @@ impl<V: Value> RawValue<V> {
     }
 
     /// Returns the raw value as seen on the database.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn raw_value(&self) -> &[u8] {
         &self.value
     }
