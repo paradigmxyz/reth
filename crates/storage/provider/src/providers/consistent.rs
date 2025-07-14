@@ -1182,7 +1182,7 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
                 stored_indices.tx_count = 0;
 
                 // Iterate from the lowest block in memory until our target block
-                for state in block_state.chain().collect::<Vec<_>>().into_iter().rev() {
+                for state in block_state.chain().rev() {
                     let block_tx_count =
                         state.block_ref().recovered_block().body().transactions().len() as u64;
                     if state.block_ref().recovered_block().number() == number {
