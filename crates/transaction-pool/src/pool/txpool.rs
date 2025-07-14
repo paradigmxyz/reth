@@ -1368,11 +1368,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 };
             }
-            // tracks the balance if the sender was changed in the block
-            let mut changed_balance = None;
 
+            // track the balance if the sender was changed in the block
             // check if this is a changed account
-            if let Some(info) = changed_accounts.get(&id.sender) {
+            let changed_balance = if let Some(info) = changed_accounts.get(&id.sender) {
                 // discard all transactions with a nonce lower than the current state nonce
                 if id.nonce < info.state_nonce {
                     updates.push(PoolUpdate {
@@ -1397,8 +1396,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 }
 
-                changed_balance = Some(&info.balance);
-            }
+                Some(&info.balance)
+            } else {
+                None
+            };
 
             // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
             if tx.state.has_nonce_gap() {
