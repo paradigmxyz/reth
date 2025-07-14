@@ -18,7 +18,7 @@ use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
     transaction::TransactionRequest,
-    BlockId, Bundle, EthCallResponse, StateContext, TransactionInfo,
+    BlockId, BlockOverrides, Bundle, EthCallResponse, StateContext, TransactionInfo,
 };
 use futures::Future;
 use reth_errors::{ProviderError, RethError};
@@ -48,6 +48,7 @@ use revm::{
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
+use std::cmp::Ordering;
 use tracing::trace;
 
 /// Result type for `eth_simulateV1` RPC method.
@@ -69,7 +70,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
     /// `eth_simulateV1` executes an arbitrary number of transactions on top of the requested state.
     /// The transactions are packed into individual blocks. Overrides can be provided.
     ///
-    /// See also: <https://github.com/ethereum/go-ethereum/pull/27720>
+    /// See also: <https://github.com/ethereum/go-ethereum/pull/27720> and <https://github.com/ethereum/execution-apis/blob/main/docs/ethsimulatev1-notes.md>
     fn simulate_v1(
         &self,
         payload: SimulatePayload,
@@ -103,7 +104,47 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                     State::builder().with_database(StateProviderDatabase::new(state)).build();
                 let mut blocks: Vec<SimulatedBlock<RpcBlock<Self::NetworkTypes>>> =
                     Vec::with_capacity(block_state_calls.len());
-                for block in block_state_calls {
+
+                let mut block_iter = block_state_calls.into_iter().peekable();
+
+                // yields the next simulated block to execute, if the user provided overrides, this ensures that gaps are filled with empty simulated blocks with the correct block number
+                let mut next_sim_block = |last_block_number: Option<u64>| {
+                    // ensure we still have blocks to process
+                    let Some(next_sim) = block_iter.peek() else { return Ok(None)};
+                    // ensure that if the next sim block has an override it is gapless, if not we ned to inject empty blocks in between
+                    if let Some(number_override) = next_sim.block_number_override() {
+                        if let Some(last) = last_block_number {
+                            let next_expected_block_number = U256::from(last.saturating_add(1));
+                            match number_override.cmp(&next_expected_block_number) {
+                                Ordering::Less => {
+                                    return  Err(EthApiError::InvalidParams(format!(
+                                        "block numbers must be in order: {number_override} <= {next_expected_block_number}",
+                                    )))
+                                }
+                                Ordering::Equal => {
+                                    // gapless
+                                }
+                                Ordering::Greater => {
+
+                                    // the user configured override would create a gap
+                                    return
+                                        Ok(Some(SimBlock::default().with_block_overrides(
+                                            BlockOverrides::default().with_number(next_expected_block_number)
+                                        )))
+                                }
+                            }
+                        }
+                    }
+                    // return next block
+                    Ok(block_iter.next())
+                };
+
+                while let Some(block) = next_sim_block(blocks.last().map(|b|b.inner.number()))? {
+                    // we need to check this here because user input can create gaps that need to be filled with empty blocks
+                    if blocks.len() > this.max_simulate_blocks() as usize {
+                        return Err(EthApiError::InvalidParams("too many blocks.".to_string()).into())
+                    }
+
                     let mut evm_env = this
                         .evm_config()
                         .next_evm_env(&parent, &this.next_env_attributes(&parent)?)
