@@ -37,7 +37,7 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
+    OtterscanApi, RPCApi, RethApi, RpcTypes, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -98,7 +98,6 @@ use crate::middleware::RethRpcMiddleware;
 pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc::eth::sim_bundle::EthSimBundle;
-use reth_rpc_eth_api::RpcTypes;
 
 // Rpc rate limiter
 pub mod rate_limiter;

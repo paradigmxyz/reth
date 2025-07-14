@@ -11,7 +11,7 @@ mod pending_block;
 use crate::{eth::transaction::OpTxInfoMapper, OpEthApiError, SequencerClient};
 use alloy_primitives::U256;
 use eyre::WrapErr;
-use op_alloy_network::{EthereumWallet, NetworkWallet, Optimism};
+use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
@@ -25,7 +25,7 @@ use reth_rpc_eth_api::{
         LoadState, SpawnBlocking, Trace,
     },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
-    RpcTypes,
+    RpcTypes, SignableTxRequest,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{
@@ -109,7 +109,7 @@ impl<N, NetworkT> EthApiTypes for OpEthApi<N, NetworkT>
 where
     Self: Send + Sync + fmt::Debug,
     N: OpNodeCore,
-    NetworkT: RpcTypes + Send + Sync + fmt::Debug,
+    NetworkT: RpcTypes,
     <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
@@ -125,7 +125,7 @@ where
 impl<N, NetworkT> RpcNodeCore for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore,
-    NetworkT: RpcTypes + Send + Sync,
+    NetworkT: RpcTypes,
 {
     type Primitives = N::Primitives;
     type Provider = N::Provider;
@@ -163,7 +163,7 @@ where
 impl<N, NetworkT> RpcNodeCoreExt for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore,
-    NetworkT: RpcTypes + Send + Sync,
+    NetworkT: RpcTypes,
 {
     #[inline]
     fn cache(&self) -> &EthStateCache<ProviderBlock<N::Provider>, ProviderReceipt<N::Provider>> {
@@ -179,7 +179,7 @@ where
                       + StageCheckpointReader,
         Network: NetworkInfo,
     >,
-    NetworkT: RpcTypes + Send + Sync,
+    NetworkT: RpcTypes,
 {
     type Transaction = ProviderTx<Self::Provider>;
     type Rpc = NetworkT;
@@ -199,7 +199,7 @@ impl<N, NetworkT> SpawnBlocking for OpEthApi<N, NetworkT>
 where
     Self: Send + Sync + Clone + 'static,
     N: OpNodeCore,
-    NetworkT: RpcTypes + Send + Sync + fmt::Debug,
+    NetworkT: RpcTypes,
     <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
@@ -251,7 +251,7 @@ where
         Provider: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
         Pool: TransactionPool,
     >,
-    NetworkT: RpcTypes + Send + Sync + fmt::Debug,
+    NetworkT: RpcTypes,
     <N as RpcNodeCore>::Evm: fmt::Debug,
     <N as RpcNodeCore>::Primitives: fmt::Debug,
 {
@@ -301,8 +301,7 @@ where
 impl<N, NetworkT> AddDevSigners for OpEthApi<N, NetworkT>
 where
     N: OpNodeCore,
-    NetworkT: op_alloy_network::Network,
-    EthereumWallet: NetworkWallet<NetworkT>,
+    NetworkT: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<N::Provider>>>,
 {
     fn with_dev_accounts(&self) {
         *self.inner.eth_api.signers().write() = DevSigner::random_signers(20)
@@ -404,9 +403,8 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
 impl<N, NetworkT> EthApiBuilder<N> for OpEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents,
-    OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
-    NetworkT: op_alloy_network::Network + Unpin,
-    EthereumWallet: NetworkWallet<NetworkT>,
+    NetworkT: RpcTypes,
+    OpEthApi<N, NetworkT>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
 {
     type EthApi = OpEthApi<N, NetworkT>;
 

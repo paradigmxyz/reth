@@ -95,19 +95,11 @@ pub trait EthApiSpec:
 
 /// A handle to [`EthSigner`]s with its generics set from [`EthApiSpec`].
 pub type SignersForApi<Api> = parking_lot::RwLock<
-    Vec<
-        Box<
-            dyn EthSigner<
-                <Api as EthApiSpec>::Transaction,
-                <Api as EthApiSpec>::Rpc,
-                RpcTxReq<<Api as EthApiSpec>::Rpc>,
-            >,
-        >,
-    >,
+    Vec<Box<dyn EthSigner<<Api as EthApiSpec>::Transaction, RpcTxReq<<Api as EthApiSpec>::Rpc>>>>,
 >;
 
 /// A handle to [`EthSigner`]s with its generics set from [`TransactionsProvider`] and
 /// [`reth_rpc_convert::RpcTypes`].
 pub type SignersForRpc<Provider, Rpc> = parking_lot::RwLock<
-    Vec<Box<dyn EthSigner<<Provider as TransactionsProvider>::Transaction, Rpc, RpcTxReq<Rpc>>>>,
+    Vec<Box<dyn EthSigner<<Provider as TransactionsProvider>::Transaction, RpcTxReq<Rpc>>>>,
 >;

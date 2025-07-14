@@ -490,13 +490,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         &self,
         account: &Address,
     ) -> Result<
-        Box<
-            dyn EthSigner<
-                    ProviderTx<Self::Provider>,
-                    Self::NetworkTypes,
-                    RpcTxReq<Self::NetworkTypes>,
-                > + 'static,
-        >,
+        Box<dyn EthSigner<ProviderTx<Self::Provider>, RpcTxReq<Self::NetworkTypes>> + 'static>,
         Self::Error,
     > {
         self.signers()

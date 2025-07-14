@@ -38,6 +38,7 @@ use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{eth::core::EthApiFor, ValidationApi};
 use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
+use reth_rpc_eth_api::helpers::AddDevSigners;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -137,7 +138,7 @@ pub struct EthereumEthApiBuilder;
 impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
 where
     N: FullNodeComponents,
-    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
 {
     type EthApi = EthApiFor<N>;
 
