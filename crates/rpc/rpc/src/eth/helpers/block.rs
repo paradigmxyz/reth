@@ -1,5 +1,7 @@
 //! Contains RPC handler implementations specific to blocks.
 
+use std::borrow::Cow;
+
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
@@ -59,7 +61,14 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-                    Ok(EthReceiptBuilder::new(tx, meta, receipt, &receipts, blob_params).build())
+                    Ok(EthReceiptBuilder::new(
+                        tx,
+                        meta,
+                        Cow::Borrowed(receipt),
+                        &receipts,
+                        blob_params,
+                    )
+                    .build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()
                 .map(Some)
