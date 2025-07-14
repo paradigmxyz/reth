@@ -6,7 +6,7 @@ use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B2
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+    BytecodeReader, DBProvider, StateCommitmentProvider, StateProofProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
@@ -177,7 +177,11 @@ impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> StateProv
         }
         Ok(None)
     }
+}
 
+impl<Provider: DBProvider + BlockHashReader + StateCommitmentProvider> BytecodeReader
+    for LatestStateProviderRef<'_, Provider>
+{
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         self.tx().get_by_encoded_key::<tables::Bytecodes>(code_hash).map_err(Into::into)

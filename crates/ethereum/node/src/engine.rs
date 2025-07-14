@@ -5,7 +5,7 @@ pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::{EngineValidator, PayloadValidator};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_ethereum_primitives::Block;
@@ -19,11 +19,11 @@ use std::sync::Arc;
 
 /// Validator for the ethereum engine API.
 #[derive(Debug, Clone)]
-pub struct EthereumEngineValidator {
+pub struct EthereumEngineValidator<ChainSpec = reth_chainspec::ChainSpec> {
     inner: EthereumExecutionPayloadValidator<ChainSpec>,
 }
 
-impl EthereumEngineValidator {
+impl<ChainSpec> EthereumEngineValidator<ChainSpec> {
     /// Instantiates a new validator.
     pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
         Self { inner: EthereumExecutionPayloadValidator::new(chain_spec) }
@@ -36,7 +36,10 @@ impl EthereumEngineValidator {
     }
 }
 
-impl PayloadValidator for EthereumEngineValidator {
+impl<ChainSpec> PayloadValidator for EthereumEngineValidator<ChainSpec>
+where
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
+{
     type Block = Block;
     type ExecutionData = ExecutionData;
 
@@ -49,8 +52,9 @@ impl PayloadValidator for EthereumEngineValidator {
     }
 }
 
-impl<Types> EngineValidator<Types> for EthereumEngineValidator
+impl<ChainSpec, Types> EngineValidator<Types> for EthereumEngineValidator<ChainSpec>
 where
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
     Types: PayloadTypes<PayloadAttributes = EthPayloadAttributes, ExecutionData = ExecutionData>,
 {
     fn validate_version_specific_fields(

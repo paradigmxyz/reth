@@ -5,14 +5,13 @@ use crate::{
     hooks::NodeHooks,
     rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
-    AddOns, AddOnsContext, ExExLauncher, FullNode, LaunchContext, LaunchNode, NodeAdapter,
+    AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 use alloy_consensus::BlockHeader;
-use futures::{future::Either, stream, stream_select, StreamExt};
+use futures::{stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_engine_local::{LocalMiner, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
@@ -20,21 +19,21 @@ use reth_engine_tree::{
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
-use reth_network::{NetworkSyncUpdater, SyncState};
+use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
-    args::DefaultEraHost,
     dirs::{ChainPath, DataDirPath},
     exit::NodeExitFuture,
     primitives::Head,
 };
-use reth_node_events::{cl::ConsensusLayerHealthEvents, node};
-use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
-use reth_stages::stages::EraImportSource;
+use reth_node_events::node;
+use reth_provider::{
+    providers::{BlockchainProvider, NodeTypesForProvider},
+    BlockNumReader,
+};
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
@@ -76,9 +75,6 @@ where
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-    LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
-        <<Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-    >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -127,15 +123,11 @@ where
             })?
             .with_components(components_builder, on_component_initialized).await?;
 
-        // spawn exexs
-        let exex_manager_handle = ExExLauncher::new(
-            ctx.head(),
-            ctx.node_adapter().clone(),
-            installed_exex,
-            ctx.configs().clone(),
-        )
-        .launch()
-        .await?;
+        // Try to expire pre-merge transaction history if configured
+        ctx.expire_pre_merge_transactions()?;
+
+        // spawn exexs if any
+        let maybe_exex_manager_handle = ctx.launch_exex(installed_exex).await?;
 
         // create pipeline
         let network_handle = ctx.components().network().clone();
@@ -155,21 +147,6 @@ where
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
-        // Configure the pipeline
-        let pipeline_exex_handle =
-            exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty);
-
-        let era_import_source = if node_config.era.enabled {
-            EraImportSource::maybe_new(
-                node_config.era.source.path.clone(),
-                node_config.era.source.url.clone(),
-                || node_config.chain.chain().kind().default_era_host(),
-                || node_config.datadir().data_dir().join("era").into(),
-            )
-        } else {
-            None
-        };
-
         let pipeline = build_networked_pipeline(
             &ctx.toml_config().stages,
             network_client.clone(),
@@ -181,8 +158,8 @@ where
             max_block,
             static_file_producer,
             ctx.components().evm_config().clone(),
-            pipeline_exex_handle,
-            era_import_source,
+            maybe_exex_manager_handle.clone().unwrap_or_else(ExExManagerHandle::empty),
+            ctx.era_import_source(),
         )?;
 
         // The new engine writes directly to static files. This ensures that they're up to the tip.
@@ -191,7 +168,7 @@ where
         let pipeline_events = pipeline.events();
 
         let mut pruner_builder = ctx.pruner_builder();
-        if let Some(exex_manager_handle) = &exex_manager_handle {
+        if let Some(exex_manager_handle) = &maybe_exex_manager_handle {
             pruner_builder =
                 pruner_builder.finished_exex_height(exex_manager_handle.finished_height());
         }
@@ -243,38 +220,17 @@ where
             ctx.components().payload_builder_handle().clone(),
             engine_payload_validator,
             engine_tree_config,
-            ctx.invalid_block_hook()?,
+            ctx.invalid_block_hook().await?,
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
         );
-
-        if ctx.is_dev() {
-            ctx.task_executor().spawn_critical(
-                "local engine",
-                LocalMiner::new(
-                    ctx.blockchain_db().clone(),
-                    LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
-                    beacon_engine_handle.clone(),
-                    ctx.dev_mining_mode(ctx.components().pool()),
-                    ctx.components().payload_builder_handle().clone(),
-                )
-                .run(),
-            );
-        }
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
         let events = stream_select!(
             event_sender.new_listener().map(Into::into),
             pipeline_events.map(Into::into),
-            if ctx.node_config().debug.tip.is_none() && !ctx.is_dev() {
-                Either::Left(
-                    ConsensusLayerHealthEvents::new(Box::new(ctx.blockchain_db().clone()))
-                        .map(Into::into),
-                )
-            } else {
-                Either::Right(stream::empty())
-            },
+            ctx.consensus_layer_events(),
             pruner_events.map(Into::into),
             static_file_producer_events.map(Into::into),
         );
@@ -301,7 +257,9 @@ where
             .map_err(|e| eyre::eyre!("Failed to subscribe to payload builder events: {:?}", e))?
             .into_built_payload_stream()
             .fuse();
+
         let chainspec = ctx.chain_spec();
+        let provider = ctx.blockchain_db().clone();
         let (exit, rx) = oneshot::channel();
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
@@ -345,7 +303,7 @@ where
                                 if let Some(head) = ev.canonical_header() {
                                     // Once we're progressing via live sync, we can consider the node is not syncing anymore
                                     network_handle.update_sync_state(SyncState::Idle);
-                                    let head_block = Head {
+                                                                        let head_block = Head {
                                         number: head.number(),
                                         hash: head.hash(),
                                         difficulty: head.difficulty(),
@@ -353,6 +311,13 @@ where
                                         total_difficulty: chainspec.final_paris_total_difficulty().filter(|_| chainspec.is_paris_active_at_block(head.number())).unwrap_or_default(),
                                     };
                                     network_handle.update_status(head_block);
+
+                                    let updated = BlockRangeUpdate {
+                                        earliest: provider.earliest_block_number().unwrap_or_default(),
+                                        latest:head.number(),
+                                        latest_hash:head.hash()
+                                    };
+                                    network_handle.update_block_range(updated);
                                 }
                                 event_sender.notify(ev);
                             }

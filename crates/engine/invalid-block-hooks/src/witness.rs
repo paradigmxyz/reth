@@ -281,7 +281,7 @@ where
 
             let filename = format!("{}_{}.bundle_state.diff", block.number(), block.hash());
             // Convert bundle state to sorted struct which has BTreeMap instead of HashMap to
-            // have deterministric ordering
+            // have deterministic ordering
             let bundle_state_sorted = BundleStateSorted::from_bundle_state(&bundle_state);
             let output_state_sorted = BundleStateSorted::from_bundle_state(&output.state);
 
@@ -317,13 +317,15 @@ where
 
             if &trie_output != original_updates {
                 // Trie updates are too big to diff, so we just save the original and re-executed
+                let trie_output_sorted = &trie_output.into_sorted_ref();
+                let original_updates_sorted = &original_updates.into_sorted_ref();
                 let original_path = self.save_file(
                     format!("{}_{}.trie_updates.original.json", block.number(), block.hash()),
-                    original_updates,
+                    original_updates_sorted,
                 )?;
                 let re_executed_path = self.save_file(
                     format!("{}_{}.trie_updates.re_executed.json", block.number(), block.hash()),
-                    &trie_output,
+                    trie_output_sorted,
                 )?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",

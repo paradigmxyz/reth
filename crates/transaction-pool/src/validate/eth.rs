@@ -28,7 +28,7 @@ use reth_primitives_traits::{
     constants::MAX_TX_GAS_LIMIT_OSAKA, transaction::error::InvalidTransactionError, Block,
     GotExpected, SealedBlock,
 };
-use reth_storage_api::{StateProvider, StateProviderFactory};
+use reth_storage_api::{AccountInfoReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::{
     marker::PhantomData,
@@ -61,6 +61,57 @@ impl<Client, Tx> EthTransactionValidator<Client, Tx> {
     pub fn client(&self) -> &Client {
         &self.inner.client
     }
+
+    /// Returns the tracks activated forks relevant for transaction validation
+    pub fn fork_tracker(&self) -> &ForkTracker {
+        &self.inner.fork_tracker
+    }
+
+    /// Returns if there are EIP-2718 type transactions
+    pub fn eip2718(&self) -> bool {
+        self.inner.eip2718
+    }
+
+    /// Returns if there are EIP-1559 type transactions
+    pub fn eip1559(&self) -> bool {
+        self.inner.eip1559
+    }
+
+    /// Returns if there are EIP-4844 blob transactions
+    pub fn eip4844(&self) -> bool {
+        self.inner.eip4844
+    }
+
+    /// Returns if there are EIP-7702 type transactions
+    pub fn eip7702(&self) -> bool {
+        self.inner.eip7702
+    }
+
+    /// Returns the current tx fee cap limit in wei locally submitted into the pool
+    pub fn tx_fee_cap(&self) -> &Option<u128> {
+        &self.inner.tx_fee_cap
+    }
+
+    /// Returns the minimum priority fee to enforce for acceptance into the pool
+    pub fn minimum_priority_fee(&self) -> &Option<u128> {
+        &self.inner.minimum_priority_fee
+    }
+
+    /// Returns the setup and parameters needed for validating KZG proofs.
+    pub fn kzg_settings(&self) -> &EnvKzgSettings {
+        &self.inner.kzg_settings
+    }
+
+    /// Returns the config to handle [`TransactionOrigin::Local`](TransactionOrigin) transactions..
+    pub fn local_transactions_config(&self) -> &LocalTransactionConfig {
+        &self.inner.local_transactions_config
+    }
+
+    /// Returns the maximum size in bytes a single transaction can have in order to be accepted into
+    /// the pool.
+    pub fn max_tx_input_bytes(&self) -> usize {
+        self.inner.max_tx_input_bytes
+    }
 }
 
 impl<Client, Tx> EthTransactionValidator<Client, Tx>
@@ -68,6 +119,11 @@ where
     Client: ChainSpecProvider<ChainSpec: EthereumHardforks> + StateProviderFactory,
     Tx: EthPoolTransaction,
 {
+    /// Returns the current max gas limit
+    pub fn block_gas_limit(&self) -> u64 {
+        self.inner.max_gas_limit()
+    }
+
     /// Validates a single transaction.
     ///
     /// See also [`TransactionValidator::validate_transaction`]
@@ -76,7 +132,7 @@ where
         origin: TransactionOrigin,
         transaction: Tx,
     ) -> TransactionValidationOutcome<Tx> {
-        self.inner.validate_one(origin, transaction)
+        self.inner.validate_one_with_provider(origin, transaction, &mut None)
     }
 
     /// Validates a single transaction with the provided state provider.
@@ -89,34 +145,9 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn StateProvider>>,
+        state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.inner.validate_one_with_provider(origin, transaction, state)
-    }
-
-    /// Validates all given transactions.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub fn validate_all(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        self.inner.validate_batch(transactions)
-    }
-
-    /// Validates all given transactions with origin.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub fn validate_all_with_origin(
-        &self,
-        origin: TransactionOrigin,
-        transactions: impl IntoIterator<Item = Tx> + Send,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        self.inner.validate_batch_with_origin(origin, transactions)
     }
 }
 
@@ -139,7 +170,7 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions)
+        self.inner.validate_batch(transactions)
     }
 
     async fn validate_transactions_with_origin(
@@ -147,7 +178,7 @@ where
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = Self::Transaction> + Send,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all_with_origin(origin, transactions)
+        self.inner.validate_batch_with_origin(origin, transactions)
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)
@@ -200,6 +231,8 @@ pub(crate) struct EthTransactionValidatorInner<Client, T> {
     local_transactions_config: LocalTransactionConfig,
     /// Maximum size in bytes a single transaction can have in order to be accepted into the pool.
     max_tx_input_bytes: usize,
+    /// Maximum gas limit for individual transactions
+    max_tx_gas_limit: Option<u64>,
     /// Marker for the transaction type
     _marker: PhantomData<T>,
     /// Metrics for tsx pool validation
@@ -232,7 +265,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        maybe_state: &mut Option<Box<dyn StateProvider>>,
+        maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
@@ -241,7 +274,7 @@ where
                 if maybe_state.is_none() {
                     match self.client.latest() {
                         Ok(new_state) => {
-                            *maybe_state = Some(new_state);
+                            *maybe_state = Some(Box::new(new_state));
                         }
                         Err(err) => {
                             return TransactionValidationOutcome::Error(
@@ -318,6 +351,15 @@ where
             }
         };
 
+        // Reject transactions with a nonce equal to U64::max according to EIP-2681
+        let tx_nonce = transaction.nonce();
+        if tx_nonce == u64::MAX {
+            return Err(TransactionValidationOutcome::Invalid(
+                transaction,
+                InvalidPoolTransactionError::Eip2681,
+            ))
+        }
+
         // Reject transactions over defined size to prevent DOS attacks
         let tx_input_len = transaction.input().len();
         if tx_input_len > self.max_tx_input_bytes {
@@ -345,6 +387,19 @@ where
                     block_gas_limit,
                 ),
             ))
+        }
+
+        // Check individual transaction gas limit if configured
+        if let Some(max_tx_gas_limit) = self.max_tx_gas_limit {
+            if transaction_gas_limit > max_tx_gas_limit {
+                return Err(TransactionValidationOutcome::Invalid(
+                    transaction,
+                    InvalidPoolTransactionError::MaxTxGasLimitExceeded(
+                        transaction_gas_limit,
+                        max_tx_gas_limit,
+                    ),
+                ))
+            }
         }
 
         // Ensure max_priority_fee_per_gas (if EIP1559) is less than max_fee_per_gas if any.
@@ -389,7 +444,11 @@ where
         {
             return Err(TransactionValidationOutcome::Invalid(
                 transaction,
-                InvalidPoolTransactionError::Underpriced,
+                InvalidPoolTransactionError::PriorityFeeBelowMinimum {
+                    minimum_priority_fee: self
+                        .minimum_priority_fee
+                        .expect("minimum priority fee is expected inside if statement"),
+                },
             ))
         }
 
@@ -481,7 +540,7 @@ where
         state: P,
     ) -> TransactionValidationOutcome<Tx>
     where
-        P: StateProvider,
+        P: AccountInfoReader,
     {
         // Use provider to get account info
         let account = match state.basic_account(transaction.sender_ref()) {
@@ -633,16 +692,6 @@ where
         }
     }
 
-    /// Validates a single transaction.
-    fn validate_one(
-        &self,
-        origin: TransactionOrigin,
-        transaction: Tx,
-    ) -> TransactionValidationOutcome<Tx> {
-        let mut provider = None;
-        self.validate_one_with_provider(origin, transaction, &mut provider)
-    }
-
     /// Validates all given transactions.
     fn validate_batch(
         &self,
@@ -691,7 +740,7 @@ where
         {
             self.fork_tracker
                 .max_blob_count
-                .store(blob_params.max_blob_count, std::sync::atomic::Ordering::Relaxed);
+                .store(blob_params.max_blobs_per_tx, std::sync::atomic::Ordering::Relaxed);
         }
 
         self.block_gas_limit.store(new_tip_block.gas_limit(), std::sync::atomic::Ordering::Relaxed);
@@ -741,17 +790,20 @@ pub struct EthTransactionValidatorBuilder<Client> {
     local_transactions_config: LocalTransactionConfig,
     /// Max size in bytes of a single transaction allowed
     max_tx_input_bytes: usize,
+    /// Maximum gas limit for individual transactions
+    max_tx_gas_limit: Option<u64>,
 }
 
 impl<Client> EthTransactionValidatorBuilder<Client> {
     /// Creates a new builder for the given client
     ///
-    /// By default this assumes the network is on the `Cancun` hardfork and the following
+    /// By default this assumes the network is on the `Prague` hardfork and the following
     /// transactions are allowed:
     ///  - Legacy
     ///  - EIP-2718
     ///  - EIP-1559
     ///  - EIP-4844
+    ///  - EIP-7702
     pub fn new(client: Client) -> Self {
         Self {
             block_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M.into(),
@@ -762,6 +814,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             local_transactions_config: Default::default(),
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             tx_fee_cap: Some(1e18 as u128),
+            max_tx_gas_limit: None,
             // by default all transaction types are allowed
             eip2718: true,
             eip1559: true,
@@ -781,7 +834,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             osaka: false,
 
             // max blob count is prague by default
-            max_blob_count: BlobParams::prague().max_blob_count,
+            max_blob_count: BlobParams::prague().max_blobs_per_tx,
         }
     }
 
@@ -878,8 +931,8 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     }
 
     /// Sets a minimum priority fee that's enforced for acceptance into the pool.
-    pub const fn with_minimum_priority_fee(mut self, minimum_priority_fee: u128) -> Self {
-        self.minimum_priority_fee = Some(minimum_priority_fee);
+    pub const fn with_minimum_priority_fee(mut self, minimum_priority_fee: Option<u128>) -> Self {
+        self.minimum_priority_fee = minimum_priority_fee;
         self
     }
 
@@ -905,7 +958,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             .chain_spec()
             .blob_params_at_timestamp(timestamp)
             .unwrap_or_else(BlobParams::cancun)
-            .max_blob_count;
+            .max_blobs_per_tx;
         self
     }
 
@@ -931,6 +984,12 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         self
     }
 
+    /// Sets the maximum gas limit for individual transactions
+    pub const fn with_max_tx_gas_limit(mut self, max_tx_gas_limit: Option<u64>) -> Self {
+        self.max_tx_gas_limit = max_tx_gas_limit;
+        self
+    }
+
     /// Builds a the [`EthTransactionValidator`] without spawning validator tasks.
     pub fn build<Tx, S>(self, blob_store: S) -> EthTransactionValidator<Client, Tx>
     where
@@ -952,14 +1011,14 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             kzg_settings,
             local_transactions_config,
             max_tx_input_bytes,
+            max_tx_gas_limit,
             ..
         } = self;
 
-        // TODO: use osaka max blob count once <https://github.com/alloy-rs/alloy/pull/2427> is released
         let max_blob_count = if prague {
-            BlobParams::prague().max_blob_count
+            BlobParams::prague().max_blobs_per_tx
         } else {
-            BlobParams::cancun().max_blob_count
+            BlobParams::cancun().max_blobs_per_tx
         };
 
         let fork_tracker = ForkTracker {
@@ -984,6 +1043,7 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
             kzg_settings,
             local_transactions_config,
             max_tx_input_bytes,
+            max_tx_gas_limit,
             _marker: Default::default(),
             validation_metrics: TxPoolValidationMetrics::default(),
         };
@@ -1045,7 +1105,7 @@ pub struct ForkTracker {
     pub prague: AtomicBool,
     /// Tracks if osaka is activated at the block's timestamp.
     pub osaka: AtomicBool,
-    /// Tracks max blob count at the block's timestamp.
+    /// Tracks max blob count per transaction at the block's timestamp.
     pub max_blob_count: AtomicU64,
 }
 
@@ -1070,7 +1130,7 @@ impl ForkTracker {
         self.osaka.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Returns the max blob count.
+    /// Returns the max allowed blob count per transaction.
     pub fn max_blob_count(&self) -> u64 {
         self.max_blob_count.load(std::sync::atomic::Ordering::Relaxed)
     }
@@ -1281,5 +1341,242 @@ mod tests {
 
         let outcome = validator.validate_one(TransactionOrigin::Local, transaction);
         assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn invalid_on_max_tx_gas_limit_exceeded() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .with_max_tx_gas_limit(Some(500_000)) // Set limit lower than transaction gas limit (1_015_288)
+            .build(blob_store.clone());
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        assert!(outcome.is_invalid());
+
+        let pool =
+            Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
+
+        let res = pool.add_external_transaction(transaction.clone()).await;
+        assert!(res.is_err());
+        assert!(matches!(
+            res.unwrap_err().kind,
+            PoolErrorKind::InvalidTransaction(InvalidPoolTransactionError::MaxTxGasLimitExceeded(
+                1_015_288, 500_000
+            ))
+        ));
+        let tx = pool.get(transaction.hash());
+        assert!(tx.is_none());
+    }
+
+    #[tokio::test]
+    async fn valid_on_max_tx_gas_limit_disabled() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .with_max_tx_gas_limit(None) // disabled
+            .build(blob_store);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_max_tx_gas_limit_within_limit() {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+
+        let blob_store = InMemoryBlobStore::default();
+        let validator = EthTransactionValidatorBuilder::new(provider)
+            .with_max_tx_gas_limit(Some(2_000_000)) // Set limit higher than transaction gas limit (1_015_288)
+            .build(blob_store);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    // Helper function to set up common test infrastructure for priority fee tests
+    fn setup_priority_fee_test() -> (EthPooledTransaction, MockEthProvider) {
+        let transaction = get_transaction();
+        let provider = MockEthProvider::default();
+        provider.add_account(
+            transaction.sender(),
+            ExtendedAccount::new(transaction.nonce(), U256::MAX),
+        );
+        (transaction, provider)
+    }
+
+    // Helper function to create a validator with minimum priority fee
+    fn create_validator_with_minimum_fee(
+        provider: MockEthProvider,
+        minimum_priority_fee: Option<u128>,
+        local_config: Option<LocalTransactionConfig>,
+    ) -> EthTransactionValidator<MockEthProvider, EthPooledTransaction> {
+        let blob_store = InMemoryBlobStore::default();
+        let mut builder = EthTransactionValidatorBuilder::new(provider)
+            .with_minimum_priority_fee(minimum_priority_fee);
+
+        if let Some(config) = local_config {
+            builder = builder.with_local_transactions_config(config);
+        }
+
+        builder.build(blob_store)
+    }
+
+    #[tokio::test]
+    async fn invalid_on_priority_fee_lower_than_configured_minimum() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Verify the test transaction is a dynamic fee transaction
+        assert!(transaction.is_dynamic_fee());
+
+        // Set minimum priority fee to be double the transaction's priority fee
+        let minimum_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected") * 2;
+
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        // External transaction should be rejected due to low priority fee
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction.clone());
+        assert!(outcome.is_invalid());
+
+        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+            assert!(matches!(
+                err,
+                InvalidPoolTransactionError::PriorityFeeBelowMinimum { minimum_priority_fee: min_fee }
+                if min_fee == minimum_priority_fee
+            ));
+        }
+
+        // Test pool integration
+        let blob_store = InMemoryBlobStore::default();
+        let pool =
+            Pool::new(validator, CoinbaseTipOrdering::default(), blob_store, Default::default());
+
+        let res = pool.add_external_transaction(transaction.clone()).await;
+        assert!(res.is_err());
+        assert!(matches!(
+            res.unwrap_err().kind,
+            PoolErrorKind::InvalidTransaction(
+                InvalidPoolTransactionError::PriorityFeeBelowMinimum { .. }
+            )
+        ));
+        let tx = pool.get(transaction.hash());
+        assert!(tx.is_none());
+
+        // Local transactions should still be accepted regardless of minimum priority fee
+        let (_, local_provider) = setup_priority_fee_test();
+        let validator_local =
+            create_validator_with_minimum_fee(local_provider, Some(minimum_priority_fee), None);
+
+        let local_outcome = validator_local.validate_one(TransactionOrigin::Local, transaction);
+        assert!(local_outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_priority_fee_equal_to_minimum() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Set minimum priority fee equal to transaction's priority fee
+        let tx_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected");
+        let validator = create_validator_with_minimum_fee(provider, Some(tx_priority_fee), None);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_priority_fee_above_minimum() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Set minimum priority fee below transaction's priority fee
+        let tx_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected");
+        let minimum_priority_fee = tx_priority_fee / 2; // Half of transaction's priority fee
+
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn valid_on_minimum_priority_fee_disabled() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // No minimum priority fee set (default is None)
+        let validator = create_validator_with_minimum_fee(provider, None, None);
+
+        let outcome = validator.validate_one(TransactionOrigin::External, transaction);
+        assert!(outcome.is_valid());
+    }
+
+    #[tokio::test]
+    async fn priority_fee_validation_applies_to_private_transactions() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Set minimum priority fee to be double the transaction's priority fee
+        let minimum_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected") * 2;
+
+        let validator =
+            create_validator_with_minimum_fee(provider, Some(minimum_priority_fee), None);
+
+        // Private transactions are also subject to minimum priority fee validation
+        // because they are not considered "local" by default unless specifically configured
+        let outcome = validator.validate_one(TransactionOrigin::Private, transaction);
+        assert!(outcome.is_invalid());
+
+        if let TransactionValidationOutcome::Invalid(_, err) = outcome {
+            assert!(matches!(
+                err,
+                InvalidPoolTransactionError::PriorityFeeBelowMinimum { minimum_priority_fee: min_fee }
+                if min_fee == minimum_priority_fee
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn valid_on_local_config_exempts_private_transactions() {
+        let (transaction, provider) = setup_priority_fee_test();
+
+        // Set minimum priority fee to be double the transaction's priority fee
+        let minimum_priority_fee =
+            transaction.max_priority_fee_per_gas().expect("priority fee is expected") * 2;
+
+        // Configure local transactions to include all private transactions
+        let local_config =
+            LocalTransactionConfig { propagate_local_transactions: true, ..Default::default() };
+
+        let validator = create_validator_with_minimum_fee(
+            provider,
+            Some(minimum_priority_fee),
+            Some(local_config),
+        );
+
+        // With appropriate local config, the behavior depends on the local transaction logic
+        // This test documents the current behavior - private transactions are still validated
+        // unless the sender is specifically whitelisted in local_transactions_config
+        let outcome = validator.validate_one(TransactionOrigin::Private, transaction);
+        assert!(outcome.is_invalid()); // Still invalid because sender not in whitelist
     }
 }

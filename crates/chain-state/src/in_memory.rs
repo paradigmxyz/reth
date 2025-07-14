@@ -159,7 +159,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
 }
 
 type PendingBlockAndReceipts<N> =
-    (SealedBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
+    (RecoveredBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
 
 /// This type is responsible for providing the blocks, receipts, and state for
 /// all canonical blocks not on disk yet and keeps track of the block range that
@@ -480,7 +480,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     pub fn pending_block_and_receipts(&self) -> Option<PendingBlockAndReceipts<N>> {
         self.pending_state().map(|block_state| {
             (
-                block_state.block_ref().recovered_block().sealed_block().clone(),
+                block_state.block_ref().recovered_block().clone(),
                 block_state.executed_block_receipts(),
             )
         })
@@ -996,8 +996,8 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
     use reth_primitives_traits::{Account, Bytecode};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-        StateRootProvider, StorageRootProvider,
+        AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider,
+        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
         AccountProof, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
@@ -1045,7 +1045,9 @@ mod tests {
         ) -> ProviderResult<Option<StorageValue>> {
             Ok(None)
         }
+    }
 
+    impl BytecodeReader for MockStateProvider {
         fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
             Ok(None)
         }
@@ -1345,7 +1347,7 @@ mod tests {
         // Check the pending block and receipts
         assert_eq!(
             state.pending_block_and_receipts().unwrap(),
-            (block2.recovered_block().sealed_block().clone(), vec![])
+            (block2.recovered_block().clone(), vec![])
         );
     }
 

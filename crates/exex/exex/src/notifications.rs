@@ -350,7 +350,7 @@ where
 
     /// Compares the node head against the ExEx head, and backfills if needed.
     ///
-    /// CAUTON: This method assumes that the ExEx head is <= the node head, and that it's on the
+    /// CAUTION: This method assumes that the ExEx head is <= the node head, and that it's on the
     /// canonical chain.
     ///
     /// Possible situations are:

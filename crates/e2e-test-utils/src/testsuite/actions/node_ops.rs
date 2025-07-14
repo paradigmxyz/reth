@@ -1,11 +1,13 @@
 //! Node-specific operations for multi-node testing.
 
 use crate::testsuite::{Action, Environment};
-use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction};
+use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
 use reth_node_api::EngineTypes;
 use reth_rpc_api::clients::EthApiClient;
+use std::time::Duration;
+use tokio::time::{sleep, timeout};
 use tracing::debug;
 
 /// Action to select which node should be active for subsequent single-node operations.
@@ -72,7 +74,7 @@ where
             let node_b_client = &env.node_clients[self.node_b];
 
             // Get latest block from each node
-            let block_a = EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+            let block_a = EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::block_by_number(
                 &node_a_client.rpc,
                 alloy_eips::BlockNumberOrTag::Latest,
                 false,
@@ -80,7 +82,7 @@ where
             .await?
             .ok_or_else(|| eyre::eyre!("Failed to get latest block from node {}", self.node_a))?;
 
-            let block_b = EthApiClient::<Transaction, Block, Receipt, Header>::block_by_number(
+            let block_b = EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::block_by_number(
                 &node_b_client.rpc,
                 alloy_eips::BlockNumberOrTag::Latest,
                 false,
@@ -207,6 +209,171 @@ where
             debug!(
                 "Validated block tag '{}': block {} (hash: {}) from node {}",
                 self.tag, block_info.number, block_info.hash, node_idx
+            );
+
+            Ok(())
+        })
+    }
+}
+
+/// Action that waits for two nodes to sync and have the same chain tip.
+#[derive(Debug)]
+pub struct WaitForSync {
+    /// First node index
+    pub node_a: usize,
+    /// Second node index
+    pub node_b: usize,
+    /// Maximum time to wait for sync (default: 30 seconds)
+    pub timeout_secs: u64,
+    /// Polling interval (default: 1 second)
+    pub poll_interval_secs: u64,
+}
+
+impl WaitForSync {
+    /// Create a new `WaitForSync` action with default timeouts
+    pub const fn new(node_a: usize, node_b: usize) -> Self {
+        Self { node_a, node_b, timeout_secs: 30, poll_interval_secs: 1 }
+    }
+
+    /// Set custom timeout
+    pub const fn with_timeout(mut self, timeout_secs: u64) -> Self {
+        self.timeout_secs = timeout_secs;
+        self
+    }
+
+    /// Set custom poll interval
+    pub const fn with_poll_interval(mut self, poll_interval_secs: u64) -> Self {
+        self.poll_interval_secs = poll_interval_secs;
+        self
+    }
+}
+
+impl<Engine> Action<Engine> for WaitForSync
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            if self.node_a >= env.node_count() || self.node_b >= env.node_count() {
+                return Err(eyre::eyre!("Node index out of bounds"));
+            }
+
+            let timeout_duration = Duration::from_secs(self.timeout_secs);
+            let poll_interval = Duration::from_secs(self.poll_interval_secs);
+
+            debug!(
+                "Waiting for nodes {} and {} to sync (timeout: {}s, poll interval: {}s)",
+                self.node_a, self.node_b, self.timeout_secs, self.poll_interval_secs
+            );
+
+            let sync_check = async {
+                loop {
+                    let node_a_client = &env.node_clients[self.node_a];
+                    let node_b_client = &env.node_clients[self.node_b];
+
+                    // Get latest block from each node
+                    let block_a = EthApiClient::<
+                        TransactionRequest,
+                        Transaction,
+                        Block,
+                        Receipt,
+                        Header,
+                    >::block_by_number(
+                        &node_a_client.rpc,
+                        alloy_eips::BlockNumberOrTag::Latest,
+                        false,
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        eyre::eyre!("Failed to get latest block from node {}", self.node_a)
+                    })?;
+
+                    let block_b = EthApiClient::<
+                        TransactionRequest,
+                        Transaction,
+                        Block,
+                        Receipt,
+                        Header,
+                    >::block_by_number(
+                        &node_b_client.rpc,
+                        alloy_eips::BlockNumberOrTag::Latest,
+                        false,
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        eyre::eyre!("Failed to get latest block from node {}", self.node_b)
+                    })?;
+
+                    debug!(
+                        "Sync check: Node {} tip: {} (block {}), Node {} tip: {} (block {})",
+                        self.node_a,
+                        block_a.header.hash,
+                        block_a.header.number,
+                        self.node_b,
+                        block_b.header.hash,
+                        block_b.header.number
+                    );
+
+                    if block_a.header.hash == block_b.header.hash {
+                        debug!(
+                            "Nodes {} and {} successfully synced to block {} (hash: {})",
+                            self.node_a, self.node_b, block_a.header.number, block_a.header.hash
+                        );
+                        return Ok(());
+                    }
+
+                    sleep(poll_interval).await;
+                }
+            };
+
+            match timeout(timeout_duration, sync_check).await {
+                Ok(result) => result,
+                Err(_) => Err(eyre::eyre!(
+                    "Timeout waiting for nodes {} and {} to sync after {}s",
+                    self.node_a,
+                    self.node_b,
+                    self.timeout_secs
+                )),
+            }
+        })
+    }
+}
+
+/// Action to assert the current chain tip is at a specific block number.
+#[derive(Debug)]
+pub struct AssertChainTip {
+    /// Expected block number
+    pub expected_block_number: u64,
+}
+
+impl AssertChainTip {
+    /// Create a new `AssertChainTip` action
+    pub const fn new(expected_block_number: u64) -> Self {
+        Self { expected_block_number }
+    }
+}
+
+impl<Engine> Action<Engine> for AssertChainTip
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let current_block = env
+                .current_block_info()
+                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
+
+            if current_block.number != self.expected_block_number {
+                return Err(eyre::eyre!(
+                    "Expected chain tip to be at block {}, but found block {}",
+                    self.expected_block_number,
+                    current_block.number
+                ));
+            }
+
+            debug!(
+                "Chain tip verified at block {} (hash: {})",
+                current_block.number, current_block.hash
             );
 
             Ok(())

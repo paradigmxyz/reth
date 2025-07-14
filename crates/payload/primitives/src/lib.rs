@@ -1,4 +1,6 @@
-//! This crate defines abstractions to create and update payloads (blocks)
+//! Abstractions for working with execution payloads.
+//!
+//! This crate provides types and traits for execution and building payloads.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -22,8 +24,6 @@ pub use error::{
     PayloadBuilderError, VersionSpecificValidationError,
 };
 
-/// Contains traits to abstract over payload attributes types and default implementations of the
-/// [`PayloadAttributes`] trait for ethereum mainnet and optimism types.
 mod traits;
 pub use traits::{
     BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
@@ -32,22 +32,32 @@ pub use traits::{
 mod payload;
 pub use payload::{ExecutionPayload, PayloadOrAttributes};
 
-/// The types that are used by the engine API.
+/// Core trait that defines the associated types for working with execution payloads.
 pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static {
-    /// The execution payload type provided as input
+    /// The format for execution payload data that can be processed and validated.
+    ///
+    /// This type represents the canonical format for block data that includes
+    /// all necessary information for execution and validation.
     type ExecutionData: ExecutionPayload;
-    /// The built payload type.
+    /// The type representing a successfully built payload/block.
     type BuiltPayload: BuiltPayload + Clone + Unpin;
 
-    /// The RPC payload attributes type the CL node emits via the engine API.
+    /// Attributes that specify how a payload should be constructed.
+    ///
+    /// These attributes typically come from external sources (e.g., consensus layer over RPC such
+    /// as the Engine API) and contain parameters like timestamp, fee recipient, and randomness.
     type PayloadAttributes: PayloadAttributes + Unpin;
 
-    /// The payload attributes type that contains information about a running payload job.
+    /// Extended attributes used internally during payload building.
+    ///
+    /// This type augments the basic payload attributes with additional information
+    /// needed during the building process, such as unique identifiers and parent
+    /// block references.
     type PayloadBuilderAttributes: PayloadBuilderAttributes<RpcPayloadAttributes = Self::PayloadAttributes>
         + Clone
         + Unpin;
 
-    /// Converts a block into an execution payload.
+    /// Converts a sealed block into the execution payload format.
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
@@ -402,6 +412,17 @@ impl EngineApiMessageVersion {
     /// Returns true if the version is V5.
     pub const fn is_v5(&self) -> bool {
         matches!(self, Self::V5)
+    }
+
+    /// Returns the method name for the given version.
+    pub const fn method_name(&self) -> &'static str {
+        match self {
+            Self::V1 => "engine_newPayloadV1",
+            Self::V2 => "engine_newPayloadV2",
+            Self::V3 => "engine_newPayloadV3",
+            Self::V4 => "engine_newPayloadV4",
+            Self::V5 => "engine_newPayloadV5",
+        }
     }
 }
 

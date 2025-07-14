@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, Receipt, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, Typed2718,
@@ -357,6 +358,16 @@ impl TxReceipt for OpReceipt {
     fn logs(&self) -> &[Log] {
         self.as_receipt().logs()
     }
+
+    fn into_logs(self) -> Vec<Self::Log> {
+        match self {
+            Self::Legacy(receipt) |
+            Self::Eip2930(receipt) |
+            Self::Eip1559(receipt) |
+            Self::Eip7702(receipt) => receipt.logs,
+            Self::Deposit(receipt) => receipt.inner.logs,
+        }
+    }
 }
 
 impl Typed2718 for OpReceipt {
@@ -376,8 +387,6 @@ impl InMemorySize for OpReceipt {
         self.as_receipt().size()
     }
 }
-
-impl reth_primitives_traits::Receipt for OpReceipt {}
 
 /// Trait for deposit receipt.
 pub trait DepositReceipt: reth_primitives_traits::Receipt {
@@ -602,17 +611,17 @@ pub(super) mod serde_bincode_compat {
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::OpReceipt<'_>")]
-                reseipt: OpReceipt,
+                receipt: OpReceipt,
             }
 
             let mut bytes = [0u8; 1024];
             rand::rng().fill(bytes.as_mut_slice());
             let mut data = Data {
-                reseipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
+                receipt: OpReceipt::arbitrary(&mut arbitrary::Unstructured::new(&bytes)).unwrap(),
             };
-            let success = data.reseipt.as_receipt_mut().status.coerce_status();
+            let success = data.receipt.as_receipt_mut().status.coerce_status();
             // // ensure we don't have an invalid poststate variant
-            data.reseipt.as_receipt_mut().status = success.into();
+            data.receipt.as_receipt_mut().status = success.into();
 
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();

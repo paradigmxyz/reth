@@ -14,7 +14,8 @@ use alloy_primitives::{BlockNumber, B256};
 use eyre::eyre;
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
-use reth_ethereum_forks::Head;
+use reth_engine_local::MiningMode;
+use reth_ethereum_forks::{EthereumHardforks, Head};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives_traits::SealedHeader;
 use reth_stages_types::StageId;
@@ -22,6 +23,7 @@ use reth_storage_api::{
     BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_transaction_pool::TransactionPool;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs,
@@ -288,8 +290,11 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Returns pruning configuration.
-    pub fn prune_config(&self) -> Option<PruneConfig> {
-        self.pruning.prune_config()
+    pub fn prune_config(&self) -> Option<PruneConfig>
+    where
+        ChainSpec: EthereumHardforks,
+    {
+        self.pruning.prune_config(&self.chain)
     }
 
     /// Returns the max block that the node should run to, looking it up from the network if
@@ -485,6 +490,15 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             pruning: self.pruning,
             engine: self.engine,
             era: self.era,
+        }
+    }
+
+    /// Returns the [`MiningMode`] intended for --dev mode.
+    pub fn dev_mining_mode(&self, pool: impl TransactionPool) -> MiningMode {
+        if let Some(interval) = self.dev.block_time {
+            MiningMode::interval(interval)
+        } else {
+            MiningMode::instant(pool)
         }
     }
 }

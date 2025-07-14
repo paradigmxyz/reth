@@ -1,3 +1,5 @@
+//! Types and traits for execution payload data structures.
+
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
 use alloy_eips::{eip4895::Withdrawal, eip7685::Requests};
@@ -6,29 +8,37 @@ use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
 
-/// An execution payload.
+/// Represents the core data structure of an execution payload.
+///
+/// Contains all necessary information to execute and validate a block, including
+/// headers, transactions, and consensus fields. Provides a unified interface
+/// regardless of protocol version.
 pub trait ExecutionPayload:
     Serialize + DeserializeOwned + Debug + Clone + Send + Sync + 'static
 {
-    /// Returns the parent hash of the block.
+    /// Returns the hash of this block's parent.
     fn parent_hash(&self) -> B256;
 
-    /// Returns the hash of the block.
+    /// Returns this block's hash.
     fn block_hash(&self) -> B256;
 
-    /// Returns the number of the block.
+    /// Returns this block's number (height).
     fn block_number(&self) -> u64;
 
-    /// Returns the withdrawals for the payload, if it exists.
+    /// Returns the withdrawals included in this payload.
+    ///
+    /// Returns `None` for pre-Shanghai blocks.
     fn withdrawals(&self) -> Option<&Vec<Withdrawal>>;
 
-    /// Return the parent beacon block root for the payload, if it exists.
+    /// Returns the beacon block root associated with this payload.
+    ///
+    /// Returns `None` for pre-merge payloads.
     fn parent_beacon_block_root(&self) -> Option<B256>;
 
-    /// Returns the timestamp to be used in the payload.
+    /// Returns this block's timestamp (seconds since Unix epoch).
     fn timestamp(&self) -> u64;
 
-    /// Gas used by the payload
+    /// Returns the total gas consumed by all transactions in this block.
     fn gas_used(&self) -> u64;
 }
 
@@ -62,25 +72,25 @@ impl ExecutionPayload for ExecutionData {
     }
 }
 
-/// Either a type that implements the [`ExecutionPayload`] or a type that implements the
-/// [`PayloadAttributes`] trait.
+/// A unified type for handling both execution payloads and payload attributes.
 ///
-/// This is a helper type to unify pre-validation of version specific fields of the engine API.
+/// Enables generic validation and processing logic for both complete payloads
+/// and payload attributes, useful for version-specific validation.
 #[derive(Debug)]
 pub enum PayloadOrAttributes<'a, Payload, Attributes> {
-    /// An [`ExecutionPayload`]
+    /// A complete execution payload containing block data
     ExecutionPayload(&'a Payload),
-    /// A payload attributes type.
+    /// Attributes specifying how to build a new payload
     PayloadAttributes(&'a Attributes),
 }
 
 impl<'a, Payload, Attributes> PayloadOrAttributes<'a, Payload, Attributes> {
-    /// Construct a [`PayloadOrAttributes::ExecutionPayload`] variant
+    /// Creates a `PayloadOrAttributes` from an execution payload reference
     pub const fn from_execution_payload(payload: &'a Payload) -> Self {
         Self::ExecutionPayload(payload)
     }
 
-    /// Construct a [`PayloadOrAttributes::PayloadAttributes`] variant
+    /// Creates a `PayloadOrAttributes` from a payload attributes reference
     pub const fn from_attributes(attributes: &'a Attributes) -> Self {
         Self::PayloadAttributes(attributes)
     }
@@ -91,7 +101,7 @@ where
     Payload: ExecutionPayload,
     Attributes: PayloadAttributes,
 {
-    /// Return the withdrawals for the payload or attributes.
+    /// Returns withdrawals from either the payload or attributes.
     pub fn withdrawals(&self) -> Option<&Vec<Withdrawal>> {
         match self {
             Self::ExecutionPayload(payload) => payload.withdrawals(),
@@ -99,7 +109,7 @@ where
         }
     }
 
-    /// Return the timestamp for the payload or attributes.
+    /// Returns the timestamp from either the payload or attributes.
     pub fn timestamp(&self) -> u64 {
         match self {
             Self::ExecutionPayload(payload) => payload.timestamp(),
@@ -107,7 +117,7 @@ where
         }
     }
 
-    /// Return the parent beacon block root for the payload or attributes.
+    /// Returns the parent beacon block root from either the payload or attributes.
     pub fn parent_beacon_block_root(&self) -> Option<B256> {
         match self {
             Self::ExecutionPayload(payload) => payload.parent_beacon_block_root(),
@@ -115,7 +125,7 @@ where
         }
     }
 
-    /// Return a [`MessageValidationKind`] for the payload or attributes.
+    /// Determines the validation context based on the contained type.
     pub const fn message_validation_kind(&self) -> MessageValidationKind {
         match self {
             Self::ExecutionPayload { .. } => MessageValidationKind::Payload,
@@ -165,19 +175,15 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
     }
 }
 
-/// Special implementation for Ethereum types that provides additional helper methods
+/// Extended functionality for Ethereum execution payloads
 impl<Attributes> PayloadOrAttributes<'_, ExecutionData, Attributes>
 where
     Attributes: PayloadAttributes,
 {
-    /// Return the execution requests from the payload, if available.
+    /// Extracts execution layer requests from the payload.
     ///
-    /// This will return `Some(requests)` only if:
-    /// - The payload is an `ExecutionData` (not `PayloadAttributes`)
-    /// - The payload has Prague payload fields
-    /// - The Prague fields contain requests (not a hash)
-    ///
-    /// Returns `None` in all other cases.
+    /// Returns `Some(requests)` if this is an execution payload with request data,
+    /// `None` otherwise.
     pub fn execution_requests(&self) -> Option<&Requests> {
         if let Self::ExecutionPayload(payload) = self {
             payload.sidecar.requests()

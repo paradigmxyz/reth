@@ -4,7 +4,6 @@ use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::BlockId;
 use op_alloy_rpc_types::OpTransactionReceipt;
 use reth_chainspec::ChainSpecProvider;
-use reth_node_api::BlockBody;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
 use reth_rpc_eth_api::{
@@ -40,12 +39,20 @@ where
             let excess_blob_gas = block.excess_blob_gas();
             let timestamp = block.timestamp();
 
-            let mut l1_block_info = reth_optimism_evm::extract_l1_info(block.body())?;
+            let mut l1_block_info = match reth_optimism_evm::extract_l1_info(block.body()) {
+                Ok(l1_block_info) => l1_block_info,
+                Err(err) => {
+                    // If it is the genesis block (i.e block number is 0), there is no L1 info, so
+                    // we return an empty l1_block_info.
+                    if block_number == 0 {
+                        return Ok(Some(vec![]));
+                    }
+                    return Err(err.into());
+                }
+            };
 
             return block
-                .body()
-                .transactions()
-                .iter()
+                .transactions_recovered()
                 .zip(receipts.iter())
                 .enumerate()
                 .map(|(idx, (tx, receipt))| -> Result<_, _> {
