@@ -92,9 +92,9 @@ where
         self
     }
 
-    /// Takes the `SparseTrie` from within the state root and clears it if it is not blinded.
-    pub fn take_cleared_accounts_trie(&mut self) -> SparseTrie<A> {
-        core::mem::take(&mut self.state).clear()
+    /// Takes the accounts trie.
+    pub fn take_accounts_trie(&mut self) -> SparseTrie<A> {
+        core::mem::take(&mut self.state)
     }
 
     /// Returns `true` if account was already revealed.
