@@ -68,16 +68,17 @@ impl AuthServerConfig {
             .map_err(|err| RpcError::server_error(err, ServerKind::Auth(socket_addr)))?;
 
         let handle = server.start(module.inner.clone());
-        let mut ipc_handle: Option<jsonrpsee::server::ServerHandle> = None;
 
-        if let Some(ipc_server_config) = ipc_server_config {
+        let ipc_handle = if let Some(ipc_server_config) = ipc_server_config {
             let ipc_endpoint_str = ipc_endpoint
                 .clone()
                 .unwrap_or_else(|| constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string());
             let ipc_server = ipc_server_config.build(ipc_endpoint_str);
             let res = ipc_server.start(module.inner).await?;
-            ipc_handle = Some(res);
-        }
+            Some(res)
+        } else {
+            None
+        };
 
         Ok(AuthServerHandle { handle: Some(handle), local_addr, secret, ipc_endpoint, ipc_handle })
     }

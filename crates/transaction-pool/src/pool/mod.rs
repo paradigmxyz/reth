@@ -418,6 +418,21 @@ where
         let changed_senders = self.changed_senders(accounts.into_iter());
         let UpdateOutcome { promoted, discarded } =
             self.pool.write().update_accounts(changed_senders);
+
+        // Notify about promoted pending transactions (similar to notify_on_new_state)
+        if !promoted.is_empty() {
+            self.pending_transaction_listener.lock().retain_mut(|listener| {
+                let promoted_hashes = promoted.iter().filter_map(|tx| {
+                    if listener.kind.is_propagate_only() && !tx.propagate {
+                        None
+                    } else {
+                        Some(*tx.hash())
+                    }
+                });
+                listener.send_all(promoted_hashes)
+            });
+        }
+
         let mut listener = self.event_listener.write();
 
         for tx in &promoted {
