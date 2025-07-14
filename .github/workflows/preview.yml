@@ -39,7 +39,7 @@ jobs:
 
       - name: Build Vocs
         run: |
-          cd docs/vocs/ && vocs build
+          cd docs/vocs/ && bunx vocs build
           echo "Vocs Build Complete"
 
       - name: Generate redirects
