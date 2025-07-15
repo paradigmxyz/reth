@@ -1,0 +1,44 @@
+[package]
+name = "example-rpc-send-transaction"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+# reth
+reth-ethereum.workspace = true
+reth-node-builder.workspace = true
+reth-primitives.workspace = true
+reth-rpc-eth-api.workspace = true
+reth-chainspec.workspace = true
+reth-provider.workspace = true
+
+# alloy
+alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-consensus = { workspace = true, features = ["serde"] }
+alloy-network.workspace = true
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-rpc-client = { workspace = true, features = ["reqwest"] }
+alloy-rpc-types-eth.workspace = true
+alloy-signer.workspace = true
+alloy-signer-local.workspace = true
+alloy-transport-http = { workspace = true, features = ["reqwest"] }
+alloy-genesis.workspace = true
+alloy-eips.workspace = true
+
+# async
+tokio = { workspace = true, features = ["full"] }
+futures-util.workspace = true
+
+# others
+eyre.workspace = true
+clap = { workspace = true, features = ["derive"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+
+[[bin]]
+name = "main"
+path = "src/main.rs" 

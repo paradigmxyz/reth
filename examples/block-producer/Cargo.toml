@@ -1,0 +1,30 @@
+[package]
+name = "block-producer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+# alloy
+alloy-provider = { workspace = true, features = ["reqwest"] }
+alloy-rpc-client = { workspace = true, features = ["reqwest"] }
+alloy-transport-http = { workspace = true, features = ["reqwest"] }
+alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
+alloy-primitives.workspace = true
+alloy-rpc-types-eth.workspace = true
+
+# http client
+reqwest = { version = "0.12", features = ["json"] }
+
+# async
+tokio = { workspace = true, features = ["full"] }
+
+# serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+# misc
+eyre.workspace = true
+rand = "0.8"
+jsonwebtoken = "9.0"
+hex = "0.4" 

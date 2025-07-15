@@ -1,0 +1,20 @@
+[package]
+name = "txpool-query"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+
+[dependencies]
+# alloy
+alloy-primitives = { workspace = true, features = ["serde"] }
+alloy-provider = { workspace = true }
+alloy-consensus = { workspace = true }
+alloy-rpc-types-txpool.workspace = true
+
+# async
+tokio = { workspace = true, features = ["full"] }
+
+# misc
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+hex = "0.4"
