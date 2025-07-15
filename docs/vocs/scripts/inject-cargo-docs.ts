@@ -92,6 +92,7 @@ async function injectCargoDocs() {
     const searchMatch = htmlContent.match(/data-search-js="[^"]*\/([^"]+)"/);
     if (searchMatch && searchMatch[1]) {
       actualSearchJsFile = searchMatch[1];
+      console.log(`Found search JS file: ${actualSearchJsFile} in ${htmlFile}`);
       break;
     }
   }
