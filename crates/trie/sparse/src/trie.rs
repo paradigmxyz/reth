@@ -514,10 +514,10 @@ impl SparseTrieInterface for SerialSparseTrie {
                                         ?hash_mask,
                                         "Revealing extension node child",
                                     );
-                                    self.reveal_node_ref(
+                                    self.reveal_node(
                                         current,
-                                        &decoded,
-                                        &TrieMasks { hash_mask, tree_mask },
+                                        decoded,
+                                        TrieMasks { hash_mask, tree_mask },
                                     )?;
                                 }
                             }
@@ -682,10 +682,10 @@ impl SparseTrieInterface for SerialSparseTrie {
                                     ?hash_mask,
                                     "Revealing remaining blinded branch child"
                                 );
-                                self.reveal_node_ref(
+                                self.reveal_node(
                                     child_path,
-                                    &decoded,
-                                    &TrieMasks { hash_mask, tree_mask },
+                                    decoded,
+                                    TrieMasks { hash_mask, tree_mask },
                                 )?;
                             }
                         }
@@ -1157,7 +1157,7 @@ impl SerialSparseTrie {
             return Ok(())
         }
 
-        self.reveal_node_ref(path, &TrieNode::decode(&mut &child[..])?, &TrieMasks::none())
+        self.reveal_node(path, TrieNode::decode(&mut &child[..])?, TrieMasks::none())
     }
 
     /// Traverse the trie from the root down to the leaf at the given path,
@@ -2226,11 +2226,7 @@ mod find_leaf_tests {
 
         // 4. Explicitly reveal the leaf node for child 5
         sparse
-            .reveal_nodes(vec![RevealedSparseNode {
-                path: revealed_leaf_prefix,
-                node: TrieNode::Leaf(leaf_node_child5),
-                masks: TrieMasks::none(),
-            }])
+            .reveal_node(revealed_leaf_prefix, TrieNode::Leaf(leaf_node_child5), TrieMasks::none())
             .expect("Failed to reveal leaf node");
 
         // Assertions after we reveal child 5
