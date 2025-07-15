@@ -897,9 +897,11 @@ mod tests {
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
-        U256,
+        Bytes, U256,
     };
+    use alloy_rlp::EMPTY_STRING_CODE;
     use arbitrary::Arbitrary;
+    use assert_matches::assert_matches;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
@@ -907,6 +909,64 @@ mod tests {
         proof::{ProofNodes, ProofRetainer},
         BranchNode, LeafNode, StorageMultiProof, TrieMask,
     };
+
+    #[test]
+    fn validate_root_node_first_node_not_root() {
+        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
+        let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
+        assert_matches!(
+            sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
+            Err(SparseStateTrieErrorKind::InvalidRootNode { .. })
+        );
+    }
+
+    #[test]
+    fn validate_root_node_invalid_proof_with_empty_root() {
+        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
+        let proof = [
+            (Nibbles::default(), Bytes::from([EMPTY_STRING_CODE])),
+            (Nibbles::from_nibbles([0x1]), Bytes::new()),
+        ];
+        assert_matches!(
+            sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
+            Err(SparseStateTrieErrorKind::InvalidRootNode { .. })
+        );
+    }
+
+    #[test]
+    fn reveal_account_empty() {
+        let retainer = ProofRetainer::from_iter([Nibbles::default()]);
+        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        hash_builder.root();
+        let proofs = hash_builder.take_proof_nodes();
+        assert_eq!(proofs.len(), 1);
+
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
+        assert_eq!(sparse.state, SparseTrie::Blind(None));
+
+        sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
+        assert_eq!(sparse.state, SparseTrie::revealed_empty());
+    }
+
+    #[test]
+    fn reveal_storage_slot_empty() {
+        let retainer = ProofRetainer::from_iter([Nibbles::default()]);
+        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
+        hash_builder.root();
+        let proofs = hash_builder.take_proof_nodes();
+        assert_eq!(proofs.len(), 1);
+
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
+        assert!(sparse.storages.is_empty());
+
+        sparse
+            .reveal_storage_slot(Default::default(), Default::default(), proofs.into_inner())
+            .unwrap();
+        assert_eq!(
+            sparse.storages,
+            HashMap::from_iter([(Default::default(), SparseTrie::revealed_empty())])
+        );
+    }
 
     #[test]
     fn reveal_account_path_twice() {
