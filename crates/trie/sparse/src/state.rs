@@ -10,6 +10,7 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::proof::DecodedProofNodes;
+use core::iter::Peekable;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
@@ -846,23 +847,27 @@ fn filter_map_revealed_nodes(
 
         result.new_nodes += 1;
 
-        // If it's a branch node, increase the number of new nodes by the number of children
-        // according to the state mask. If it's an extension there can only be one extra child, so
-        // only increase by 1. Otherwise there are no children.
-        result.new_nodes += match &proof_node {
-            TrieNode::Branch(branch) => branch.state_mask.count_ones() as usize,
-            TrieNode::Extension(_) => 1,
-            _ => 0,
+        // Extract hash/tree masks based on the node type (only branch nodes have masks). At the
+        // same time increase the new_nodes counter if the node is a type which has children.
+        let masks = match &proof_node {
+            TrieNode::Branch(branch) => {
+                // If it's a branch node, increase the number of new nodes by the number of children
+                // according to the state mask.
+                result.new_nodes += branch.state_mask.count_ones() as usize;
+                TrieMasks {
+                    hash_mask: branch_node_hash_masks.get(&path).copied(),
+                    tree_mask: branch_node_tree_masks.get(&path).copied(),
+                }
+            }
+            TrieNode::Extension(_) => {
+                // There is always exactly one child of an extension node.
+                result.new_nodes += 1;
+                TrieMasks::none()
+            }
+            _ => TrieMasks::none(),
         };
 
-        let node = RevealedSparseNode {
-            path,
-            node: proof_node,
-            masks: TrieMasks {
-                hash_mask: branch_node_hash_masks.get(&path).copied(),
-                tree_mask: branch_node_tree_masks.get(&path).copied(),
-            },
-        };
+        let node = RevealedSparseNode { path, node: proof_node, masks };
 
         if is_root {
             // Perform sanity check.
