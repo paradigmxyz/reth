@@ -33,7 +33,7 @@ use reth_db_api::{
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
-use reth_node_types::{BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
+use reth_node_types::{Block, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
 use reth_primitives::{Account, Bytecode, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
@@ -279,15 +279,42 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    BlockTy<Node>: TryFromBlockResponse<N>,
 {
     type Header = HeaderTy<Node>;
 
-    fn header(&self, _block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn header(&self, block_hash: &BlockHash) -> ProviderResult<Option<Self::Header>> {
+        let block_response = self.block_on_async(async {
+            self.provider.get_block_by_hash(*block_hash).await.map_err(ProviderError::other)
+        })?;
+
+        let Some(block_response) = block_response else {
+            // If the block was not found, return None
+            return Ok(None);
+        };
+
+        // Convert the network block response to primitive block
+        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
+            .map_err(ProviderError::other)?;
+
+        Ok(Some(block.into_header()))
     }
 
-    fn header_by_number(&self, _num: u64) -> ProviderResult<Option<Self::Header>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
+        let block_response = self.block_on_async(async {
+            self.provider.get_block_by_number(num.into()).await.map_err(ProviderError::other)
+        })?;
+
+        let Some(block_response) = block_response else {
+            // If the block was not found, return None
+            return Ok(None);
+        };
+
+        // Convert the network block response to primitive block
+        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
+            .map_err(ProviderError::other)?;
+
+        Ok(Some(block.into_header()))
     }
 
     fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
