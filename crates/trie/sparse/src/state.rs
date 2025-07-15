@@ -327,7 +327,7 @@ where
             skipped_nodes: _skipped_nodes,
         } = filter_map_revealed_nodes(
             account_subtree,
-            &self.revealed_account_paths,
+            &mut self.revealed_account_paths,
             &branch_node_hash_masks,
             &branch_node_tree_masks,
         )?;
@@ -338,15 +338,6 @@ where
         }
 
         if let Some(root_node) = root_node {
-            // Perform sanity check.
-            if matches!(root_node.node, TrieNode::EmptyRoot) && !nodes.is_empty() {
-                return Err(SparseStateTrieErrorKind::InvalidRootNode {
-                    path: root_node.path,
-                    node: alloy_rlp::encode(&root_node.node).into(),
-                }
-                .into())
-            }
-
             // Reveal root node if it wasn't already.
             trace!(target: "trie::sparse", ?root_node, "Revealing root account node");
             let trie =
@@ -355,11 +346,6 @@ where
             // Reserve the capacity for new nodes ahead of time, if the trie implementation
             // supports doing so.
             trie.reserve_nodes(new_nodes);
-
-            // Reveal the remaining nodes, having marked them as revealed.
-            for node in &nodes {
-                self.revealed_account_paths.insert(node.path);
-            }
 
             trace!(target: "trie::sparse", "Revealing {} account nodes", nodes.len());
             trie.reveal_nodes(nodes)?;
@@ -406,17 +392,8 @@ where
         }
 
         if let Some(root_node) = root_node {
-            // Perform sanity check.
-            if matches!(root_node.node, TrieNode::EmptyRoot) && !nodes.is_empty() {
-                return Err(SparseStateTrieErrorKind::InvalidRootNode {
-                    path: root_node.path,
-                    node: alloy_rlp::encode(&root_node.node).into(),
-                }
-                .into())
-            }
-
             // Reveal root node if it wasn't already.
-            trace!(target: "trie::sparse", ?root_node, "Revealing root storage node");
+            trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node");
             let trie = self.storages.entry(account).or_default().reveal_root(
                 root_node.node,
                 root_node.masks,
@@ -427,12 +404,7 @@ where
             // supports doing so.
             trie.reserve_nodes(new_nodes);
 
-            // Reveal the remaining nodes, having marked them as revealed.
-            for node in &nodes {
-                revealed_nodes.insert(node.path);
-            }
-
-            trace!(target: "trie::sparse", "Revealing {} account nodes", nodes.len());
+            trace!(target: "trie::sparse", ?account, "Revealing {} storage nodes", nodes.len());
             trie.reveal_nodes(nodes)?;
         }
 
@@ -863,10 +835,10 @@ struct FilterMappedProofNodes {
 /// total, skipped, and new nodes.
 fn filter_map_revealed_nodes(
     proof_nodes: DecodedProofNodes,
-    revealed_nodes: &HashSet<Nibbles>,
+    revealed_nodes: &mut HashSet<Nibbles>,
     branch_node_hash_masks: &HashMap<Nibbles, TrieMask>,
     branch_node_tree_masks: &HashMap<Nibbles, TrieMask>,
-) -> alloy_rlp::Result<FilterMappedProofNodes> {
+) -> SparseStateTrieResult<FilterMappedProofNodes> {
     let mut result = FilterMappedProofNodes {
         root_node: None,
         nodes: Vec::with_capacity(proof_nodes.len()),
@@ -875,10 +847,15 @@ fn filter_map_revealed_nodes(
         new_nodes: 0,
     };
 
+    let proof_nodes_len = proof_nodes.len();
     for (path, proof_node) in proof_nodes.into_inner() {
         result.total_nodes += 1;
-        // If the node is already revealed, skip it.
-        if revealed_nodes.contains(&path) {
+
+        let is_root = path.is_empty();
+
+        // If the node is already revealed, skip it. We don't ever skip the root node, nor do we add
+        // it to `revealed_nodes`.
+        if !is_root && !revealed_nodes.insert(path) {
             result.skipped_nodes += 1;
             continue
         }
@@ -903,8 +880,18 @@ fn filter_map_revealed_nodes(
             },
         };
 
-        if path.is_empty() {
+        if is_root {
+            // Perform sanity check.
+            if matches!(node.node, TrieNode::EmptyRoot) && proof_nodes_len > 1 {
+                return Err(SparseStateTrieErrorKind::InvalidRootNode {
+                    path,
+                    node: alloy_rlp::encode(&node.node).into(),
+                }
+                .into())
+            }
+
             result.root_node = Some(node);
+
             continue
         }
 
@@ -1275,7 +1262,7 @@ mod tests {
 
     #[test]
     fn test_filter_map_revealed_nodes() {
-        let revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
+        let mut revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
         let leaf = TrieNode::Leaf(LeafNode::new(Nibbles::default(), alloy_rlp::encode([])));
         let leaf_encoded = alloy_rlp::encode(&leaf);
         let branch = TrieNode::Branch(BranchNode::new(
@@ -1293,7 +1280,7 @@ mod tests {
 
         let decoded = filter_map_revealed_nodes(
             proof_nodes,
-            &revealed_nodes,
+            &mut revealed_nodes,
             &branch_node_hash_masks,
             &branch_node_tree_masks,
         )
