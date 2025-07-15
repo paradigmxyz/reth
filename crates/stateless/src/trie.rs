@@ -237,7 +237,7 @@ fn calculate_state_root(
     // borrowing issues.
     let mut storage_results = Vec::with_capacity(state.storages.len());
 
-    // In `verify_execution_witness` a `DefaultBlindedProviderFactory` is used, so we use the same
+    // In `verify_execution_witness` a `DefaultTrieNodeProviderFactory` is used, so we use the same
     // again in here.
     let provider_factory = DefaultTrieNodeProviderFactory;
     let storage_provider = DefaultTrieNodeProvider;
