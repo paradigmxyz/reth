@@ -1,8 +1,12 @@
 //! `EthApiBuilder` implementation
 
-use crate::{eth::core::EthApiInner, EthApi};
+use crate::{
+    eth::core::{ComponentsWrapper, EthApiInner},
+    EthApi,
+};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
+use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_rpc_eth_api::RpcNodeCore;
 use reth_rpc_eth_types::{
@@ -30,10 +34,7 @@ type EthStateCacheType<N> = EthStateCache<
 /// directly.
 #[derive(Debug)]
 pub struct EthApiBuilder<N: RpcNodeCore<Provider: BlockReaderIdExt>> {
-    provider: N::Provider,
-    pool: N::Pool,
-    network: N::Network,
-    evm_config: N::Evm,
+    components: N,
     gas_cap: GasCap,
     max_simulate_blocks: u64,
     eth_proof_window: u64,
@@ -47,19 +48,24 @@ pub struct EthApiBuilder<N: RpcNodeCore<Provider: BlockReaderIdExt>> {
     task_spawner: Box<dyn TaskSpawner + 'static>,
 }
 
-impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
+impl<Provider, Pool, Network, Evm> EthApiBuilder<ComponentsWrapper<Provider, Pool, Network, Evm>>
+where
+    Provider: BlockReaderIdExt + Send + Sync + Clone + Unpin,
+    Pool: Send + Sync + Clone + Unpin,
+    Network: Send + Sync + Clone + Unpin,
+    Evm: ConfigureEvm,
+{
     /// Creates a new `EthApiBuilder` instance.
-    pub fn new(
-        provider: N::Provider,
-        pool: N::Pool,
-        network: N::Network,
-        evm_config: N::Evm,
-    ) -> Self {
+    pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: Evm) -> Self {
+        Self::with_components(ComponentsWrapper::new(provider, pool, network, evm_config))
+    }
+}
+
+impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
+    /// Creates a new [`EthApiBuilder`] instance with the given components.
+    pub fn with_components(components: N) -> Self {
         Self {
-            provider,
-            pool,
-            network,
-            evm_config,
+            components,
             eth_cache: None,
             gas_oracle: None,
             gas_cap: GasCap::default(),
@@ -159,9 +165,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build_inner(
-        self,
-    ) -> EthApiInner<crate::eth::core::ComponentsWrapper<N::Provider, N::Pool, N::Network, N::Evm>>
+    pub fn build_inner(self) -> EthApiInner<N>
     where
         N::Provider: StateProviderFactory
             + ChainSpecProvider
@@ -174,10 +178,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
             > + 'static,
     {
         let Self {
-            provider,
-            pool,
-            network,
-            evm_config,
+            components,
             eth_state_cache_config,
             gas_oracle_config,
             eth_cache,
@@ -191,6 +192,8 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
             task_spawner,
         } = self;
 
+        let provider = components.provider().clone();
+
         let eth_cache = eth_cache
             .unwrap_or_else(|| EthStateCache::spawn(provider.clone(), eth_state_cache_config));
         let gas_oracle = gas_oracle.unwrap_or_else(|| {
@@ -200,16 +203,13 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
         let new_canonical_blocks = provider.canonical_state_stream();
         let fhc = fee_history_cache.clone();
         let cache = eth_cache.clone();
-        let prov = provider.clone();
         task_spawner.spawn_critical(
             "cache canonical blocks for fee history task",
             Box::pin(async move {
-                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, prov, cache).await;
+                fee_history_cache_new_blocks_task(fhc, new_canonical_blocks, provider, cache).await;
             }),
         );
 
-        let components =
-            crate::eth::core::ComponentsWrapper::new(provider, pool, network, evm_config);
         EthApiInner::new(
             components,
             eth_cache,
@@ -234,9 +234,7 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApiBuilder<N> {
     ///
     /// This function panics if the blocking task pool cannot be built.
     /// This will panic if called outside the context of a Tokio runtime.
-    pub fn build(
-        self,
-    ) -> EthApi<crate::eth::core::ComponentsWrapper<N::Provider, N::Pool, N::Network, N::Evm>>
+    pub fn build(self) -> EthApi<N>
     where
         N::Provider: StateProviderFactory
             + CanonStateSubscriptions<

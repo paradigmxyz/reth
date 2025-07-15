@@ -35,8 +35,9 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::{
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
+    eth::core::ComponentsWrapper, AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder,
+    EthBundle, MinerApi, NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi,
+    ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -248,12 +249,14 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     }
 
     /// Instantiates a new [`EthApiBuilder`] from the configured components.
-    pub fn eth_api_builder(&self) -> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+    pub fn eth_api_builder(
+        &self,
+    ) -> EthApiBuilder<ComponentsWrapper<Provider, Pool, Network, EvmConfig>>
     where
-        Provider: BlockReaderIdExt + Clone,
-        Pool: Clone,
-        Network: Clone,
-        EvmConfig: Clone,
+        Provider: BlockReaderIdExt + Send + Sync + Clone + Unpin,
+        Pool: Send + Sync + Clone + Unpin,
+        Network: Send + Sync + Clone + Unpin,
+        EvmConfig: ConfigureEvm,
     {
         EthApiBuilder::new(
             self.provider.clone(),
@@ -268,7 +271,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     /// Note: This spawns all necessary tasks.
     ///
     /// See also [`EthApiBuilder`].
-    pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    pub fn bootstrap_eth_api(&self) -> EthApi<ComponentsWrapper<Provider, Pool, Network, EvmConfig>>
     where
         N: NodePrimitives,
         Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
@@ -278,9 +281,9 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
             + Clone
             + Unpin
             + 'static,
-        Pool: Clone,
-        EvmConfig: Clone,
-        Network: Clone,
+        Pool: Send + Sync + Unpin + Clone,
+        EvmConfig: ConfigureEvm<Primitives = N>,
+        Network: Send + Sync + Unpin + Clone,
     {
         self.eth_api_builder().build()
     }

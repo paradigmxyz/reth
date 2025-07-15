@@ -33,7 +33,7 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
-use reth_rpc::{eth::core::EthApiFor, ValidationApi};
+use reth_rpc::{EthApi, ValidationApi};
 use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
 use reth_rpc_builder::config::RethRpcServerConfig;
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
@@ -135,26 +135,21 @@ pub struct EthereumEthApiBuilder;
 impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
 where
     N: FullNodeComponents,
-    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    EthApi<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
 {
-    type EthApi = EthApiFor<N>;
+    type EthApi = EthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let api = reth_rpc::EthApiBuilder::new(
-            ctx.components.provider().clone(),
-            ctx.components.pool().clone(),
-            ctx.components.network().clone(),
-            ctx.components.evm_config().clone(),
-        )
-        .eth_cache(ctx.cache)
-        .task_spawner(ctx.components.task_executor().clone())
-        .gas_cap(ctx.config.rpc_gas_cap.into())
-        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
-        .eth_proof_window(ctx.config.eth_proof_window)
-        .fee_history_cache_config(ctx.config.fee_history_cache)
-        .proof_permits(ctx.config.proof_permits)
-        .gas_oracle_config(ctx.config.gas_oracle)
-        .build();
+        let api = reth_rpc::EthApiBuilder::with_components(ctx.components.clone())
+            .eth_cache(ctx.cache)
+            .task_spawner(ctx.components.task_executor().clone())
+            .gas_cap(ctx.config.rpc_gas_cap.into())
+            .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+            .eth_proof_window(ctx.config.eth_proof_window)
+            .fee_history_cache_config(ctx.config.fee_history_cache)
+            .proof_permits(ctx.config.proof_permits)
+            .gas_oracle_config(ctx.config.gas_oracle)
+            .build();
         Ok(api)
     }
 }

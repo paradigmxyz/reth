@@ -489,7 +489,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn find_signer(
         &self,
         account: &Address,
-    ) -> Result<Box<(dyn EthSigner<ProviderTx<Self::Provider>> + 'static)>, Self::Error> {
+    ) -> Result<Box<dyn EthSigner<ProviderTx<Self::Provider>> + 'static>, Self::Error> {
         self.signers()
             .read()
             .iter()

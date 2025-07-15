@@ -40,12 +40,7 @@ use reth_transaction_pool::TransactionPool;
 use std::{fmt, fmt::Formatter, marker::PhantomData, sync::Arc};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
-pub type EthApiNodeBackend<N> = EthApiInner<
-    <N as RpcNodeCore>::Provider,
-    <N as RpcNodeCore>::Pool,
-    <N as RpcNodeCore>::Network,
-    <N as RpcNodeCore>::Evm,
->;
+pub type EthApiNodeBackend<N> = EthApiInner<N>;
 
 /// A helper trait with requirements for [`RpcNodeCore`] to be used in [`OpEthApi`].
 pub trait OpNodeCore: RpcNodeCore<Provider: BlockReader> {}
@@ -406,21 +401,16 @@ where
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let Self { sequencer_url, sequencer_headers, min_suggested_priority_fee, .. } = self;
-        let eth_api = reth_rpc::EthApiBuilder::new(
-            ctx.components.provider().clone(),
-            ctx.components.pool().clone(),
-            ctx.components.network().clone(),
-            ctx.components.evm_config().clone(),
-        )
-        .eth_cache(ctx.cache)
-        .task_spawner(ctx.components.task_executor().clone())
-        .gas_cap(ctx.config.rpc_gas_cap.into())
-        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
-        .eth_proof_window(ctx.config.eth_proof_window)
-        .fee_history_cache_config(ctx.config.fee_history_cache)
-        .proof_permits(ctx.config.proof_permits)
-        .gas_oracle_config(ctx.config.gas_oracle)
-        .build_inner();
+        let eth_api = reth_rpc::EthApiBuilder::with_components(ctx.components.clone())
+            .eth_cache(ctx.cache)
+            .task_spawner(ctx.components.task_executor().clone())
+            .gas_cap(ctx.config.rpc_gas_cap.into())
+            .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+            .eth_proof_window(ctx.config.eth_proof_window)
+            .fee_history_cache_config(ctx.config.fee_history_cache)
+            .proof_permits(ctx.config.proof_permits)
+            .gas_oracle_config(ctx.config.gas_oracle)
+            .build_inner();
 
         let sequencer_client = if let Some(url) = sequencer_url {
             Some(

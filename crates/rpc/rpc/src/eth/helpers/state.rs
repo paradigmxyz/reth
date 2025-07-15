@@ -35,6 +35,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use crate::eth::core::ComponentsWrapper;
+
     use super::*;
     use alloy_consensus::Header;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
@@ -53,15 +55,19 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::collections::HashMap;
 
-    fn noop_eth_api() -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig> {
+    fn noop_eth_api() -> EthApi<ComponentsWrapper<NoopProvider, TestPool, NoopNetwork, EthEvmConfig>>
+    {
         let pool = testing_pool();
         let evm_config = EthEvmConfig::mainnet();
 
         let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
-        EthApi::new(
-            NoopProvider::default(),
-            pool,
-            NoopNetwork::default(),
+        EthApi::with_components(
+            ComponentsWrapper::new(
+                NoopProvider::default(),
+                pool,
+                NoopNetwork::default(),
+                evm_config,
+            ),
             cache.clone(),
             GasPriceOracle::new(NoopProvider::default(), Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT_30M,
@@ -69,14 +75,13 @@ mod tests {
             DEFAULT_ETH_PROOF_WINDOW,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::<Header>::new(FeeHistoryCacheConfig::default()),
-            evm_config,
             DEFAULT_PROOF_PERMITS,
         )
     }
 
     fn mock_eth_api(
         accounts: HashMap<Address, ExtendedAccount>,
-    ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig> {
+    ) -> EthApi<ComponentsWrapper<MockEthProvider, TestPool, (), EthEvmConfig>> {
         let pool = testing_pool();
         let mock_provider = MockEthProvider::default();
 
@@ -84,10 +89,8 @@ mod tests {
         mock_provider.extend_accounts(accounts);
 
         let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
-        EthApi::new(
-            mock_provider.clone(),
-            pool,
-            (),
+        EthApi::with_components(
+            ComponentsWrapper::new(mock_provider.clone(), pool, (), evm_config),
             cache.clone(),
             GasPriceOracle::new(mock_provider, Default::default(), cache),
             ETHEREUM_BLOCK_GAS_LIMIT_30M,
@@ -95,7 +98,6 @@ mod tests {
             DEFAULT_ETH_PROOF_WINDOW + 1,
             BlockingTaskPool::build().expect("failed to build tracing pool"),
             FeeHistoryCache::<Header>::new(FeeHistoryCacheConfig::default()),
-            evm_config,
             DEFAULT_PROOF_PERMITS,
         )
     }

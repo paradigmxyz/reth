@@ -9,6 +9,7 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
+use reth_evm::ConfigureEvm;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -40,7 +41,7 @@ pub struct ComponentsWrapper<Provider, Pool, Network, Evm> {
 
 impl<Provider, Pool, Network, Evm> ComponentsWrapper<Provider, Pool, Network, Evm> {
     /// Creates a new instance.
-    pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: Evm) -> Self {
+    pub const fn new(provider: Provider, pool: Pool, network: Network, evm_config: Evm) -> Self {
         Self { provider, pool, network, evm_config }
     }
 }
@@ -50,9 +51,9 @@ where
     Provider: Send + Sync + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
-    Evm: Send + Sync + Clone + Unpin,
+    Evm: ConfigureEvm,
 {
-    type Primitives = ();
+    type Primitives = Evm::Primitives;
     type Provider = Provider;
     type Pool = Pool;
     type Evm = Evm;
@@ -83,10 +84,8 @@ where
 // Type aliases to simplify complex types
 type EthSigners<N> =
     parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<<N as RpcNodeCore>::Provider>>>>>;
-type EthStateCacheType<N> = EthStateCache<
-    ProviderBlock<<N as RpcNodeCore>::Provider>,
-    ProviderReceipt<<N as RpcNodeCore>::Provider>,
->;
+type EthStateCacheType<Provider> =
+    EthStateCache<ProviderBlock<Provider>, ProviderReceipt<Provider>>;
 type PendingBlockType<N> = Mutex<
     Option<
         PendingBlock<
@@ -98,9 +97,6 @@ type PendingBlockType<N> = Mutex<
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
 pub type EthApiFor<N> = EthApi<N>;
-
-/// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
-pub type EthApiBuilderFor<N> = EthApiBuilder<N>;
 
 /// `Eth` API implementation.
 ///
@@ -157,12 +153,18 @@ impl<N: RpcNodeCore<Provider: BlockReaderIdExt>> EthApi<N> {
     /// )
     /// .build();
     /// ```
-    pub fn builder(
-        provider: N::Provider,
-        pool: N::Pool,
-        network: N::Network,
-        evm_config: N::Evm,
-    ) -> EthApiBuilder<N> {
+    pub fn builder<Provider, Pool, Network, Evm>(
+        provider: Provider,
+        pool: Pool,
+        network: Network,
+        evm_config: Evm,
+    ) -> EthApiBuilder<ComponentsWrapper<Provider, Pool, Network, Evm>>
+    where
+        Provider: BlockReaderIdExt + Send + Sync + Clone + Unpin,
+        Pool: Send + Sync + Clone + Unpin,
+        Network: Send + Sync + Clone + Unpin,
+        Evm: ConfigureEvm,
+    {
         EthApiBuilder::new(provider, pool, network, evm_config)
     }
 
@@ -282,7 +284,7 @@ pub struct EthApiInner<N: RpcNodeCore<Provider: BlockReader>> {
     /// All configured Signers
     signers: EthSigners<N>,
     /// The async cache frontend for eth related data
-    eth_cache: EthStateCacheType<N>,
+    eth_cache: EthStateCacheType<N::Provider>,
     /// The async gas oracle frontend for gas price suggestions
     gas_oracle: GasPriceOracle<N::Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
@@ -366,7 +368,7 @@ impl<N: RpcNodeCore<Provider: BlockReader>> EthApiInner<N> {
 
     /// Returns a handle to data in memory.
     #[inline]
-    pub const fn cache(&self) -> &EthStateCacheType<N> {
+    pub const fn cache(&self) -> &EthStateCacheType<N::Provider> {
         &self.eth_cache
     }
 
@@ -469,7 +471,7 @@ impl<N: RpcNodeCore<Provider: BlockReader>> EthApiInner<N> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{EthApi, EthApiBuilder};
+    use crate::{eth::core::ComponentsWrapper, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{Signature, B256, U64};
@@ -501,7 +503,7 @@ mod tests {
             + 'static,
     >(
         provider: P,
-    ) -> EthApi<P, TestPool, NoopNetwork, EthEvmConfig> {
+    ) -> EthApi<ComponentsWrapper<P, TestPool, NoopNetwork, EthEvmConfig>> {
         EthApiBuilder::new(
             provider.clone(),
             testing_pool(),
@@ -512,12 +514,17 @@ mod tests {
     }
 
     // Function to prepare the EthApi with mock data
+    #[expect(clippy::type_complexity)]
     fn prepare_eth_api(
         newest_block: u64,
         mut oldest_block: Option<B256>,
         block_count: u64,
         mock_provider: MockEthProvider,
-    ) -> (EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>, Vec<u128>, Vec<f64>) {
+    ) -> (
+        EthApi<ComponentsWrapper<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>>,
+        Vec<u128>,
+        Vec<f64>,
+    ) {
         let mut rng = generators::rng();
 
         // Build mock data
@@ -603,7 +610,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_> as EthApiServer<_, _, _, _, _>>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             U64::from(1),
             BlockNumberOrTag::Latest,
@@ -625,7 +632,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(newest_block + 1),
             newest_block.into(),
@@ -648,7 +655,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(1),
             (newest_block + 1000).into(),
@@ -671,7 +678,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(0),
             newest_block.into(),
