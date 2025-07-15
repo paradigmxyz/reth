@@ -99,7 +99,7 @@ where
 
         // Check transaction root
         if let Err(error) = block.ensure_transaction_root_valid() {
-            return Err(ConsensusError::BodyTransactionRootDiff(error.into()));
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
         }
 
         // Check empty shanghai-withdrawals
