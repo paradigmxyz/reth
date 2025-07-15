@@ -3,6 +3,9 @@
 pub mod canyon;
 pub mod isthmus;
 
+// Re-export the decode_holocene_base_fee function for compatibility
+pub use reth_optimism_chainspec::decode_holocene_base_fee;
+
 use crate::proof::calculate_receipt_root_optimism;
 use alloc::vec::Vec;
 use alloy_consensus::{BlockHeader, TxReceipt, EMPTY_OMMER_ROOT_HASH};
