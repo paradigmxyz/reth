@@ -65,6 +65,18 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         }
     }
 
+    fn reveal_node(
+        &mut self,
+        path: Nibbles,
+        node: TrieNode,
+        masks: TrieMasks,
+    ) -> SparseTrieResult<()> {
+        match self {
+            Self::Serial(trie) => trie.reveal_node(path, node, masks),
+            Self::Parallel(trie) => trie.reveal_node(path, node, masks),
+        }
+    }
+
     fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
         match self {
             Self::Serial(trie) => trie.reveal_nodes(nodes),
