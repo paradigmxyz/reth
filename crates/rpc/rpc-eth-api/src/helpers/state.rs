@@ -12,9 +12,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
-use reth_storage_api::{
-    BlockIdReader, BlockNumReader, StateProvider, StateProviderBox, StateProviderFactory,
-};
+use reth_storage_api::{BlockIdReader, BlockNumReader, StateProviderBox, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
 /// Helper methods for `eth_` methods relating to state (accounts).

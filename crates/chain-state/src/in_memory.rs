@@ -997,7 +997,7 @@ mod tests {
     use reth_primitives_traits::{Account, Bytecode};
     use reth_storage_api::{
         AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider,
-        StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
+        StateProofProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
         AccountProof, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
@@ -1037,16 +1037,6 @@ mod tests {
 
     struct MockStateProvider;
 
-    impl StateProvider for MockStateProvider {
-        fn storage(
-            &self,
-            _address: Address,
-            _storage_key: StorageKey,
-        ) -> ProviderResult<Option<StorageValue>> {
-            Ok(None)
-        }
-    }
-
     impl BytecodeReader for MockStateProvider {
         fn bytecode_by_hash(&self, _code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
             Ok(None)
@@ -1069,6 +1059,14 @@ mod tests {
 
     impl AccountReader for MockStateProvider {
         fn basic_account(&self, _address: &Address) -> ProviderResult<Option<Account>> {
+            Ok(None)
+        }
+
+        fn storage(
+            &self,
+            _address: Address,
+            _storage_key: StorageKey,
+        ) -> ProviderResult<Option<StorageValue>> {
             Ok(None)
         }
     }

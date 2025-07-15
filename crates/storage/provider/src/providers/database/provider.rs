@@ -7,7 +7,8 @@ use crate::{
     },
     to_range,
     traits::{
-        AccountExtReader, BlockSource, ChangeSetReader, ReceiptProvider, StageCheckpointWriter,
+        AccountExtReader, BlockSource, BytecodeReader, ChangeSetReader, ReceiptProvider,
+        StageCheckpointWriter,
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
@@ -26,7 +27,7 @@ use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
@@ -871,6 +872,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         Ok(self.tx.get_by_encoded_key::<tables::PlainAccountState>(address)?)
+    }
+
+    fn storage(
+        &self,
+        address: Address,
+        storage_key: StorageKey,
+    ) -> ProviderResult<Option<StorageValue>> {
+        let entry: Option<StorageValue> = self
+            .tx
+            .cursor_dup_read::<tables::PlainStorageState>()?
+            .seek_by_key_subkey(address, storage_key)?
+            .filter(|entry| entry.key == storage_key)
+            .map(|entry| entry.value)
+            .or(Some(StorageValue::ZERO));
+
+        Ok(entry)
     }
 }
 
@@ -3199,6 +3216,12 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
     fn prune_modes_ref(&self) -> &PruneModes {
         self.prune_modes_ref()
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> BytecodeReader for DatabaseProvider<TX, N> {
+    fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
+        Ok(self.tx.get_by_encoded_key::<tables::Bytecodes>(code_hash)?)
     }
 }
 
