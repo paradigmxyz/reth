@@ -348,6 +348,7 @@ where
             }
 
             // Reveal root node if it wasn't already.
+            trace!(target: "trie::sparse", ?root_node, "Revealing root account node");
             let trie =
                 self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?;
 
@@ -359,6 +360,8 @@ where
             for node in &nodes {
                 self.revealed_account_paths.insert(node.path);
             }
+
+            trace!(target: "trie::sparse", "Revealing {} account nodes", nodes.len());
             trie.reveal_nodes(nodes)?;
         }
 
@@ -413,6 +416,7 @@ where
             }
 
             // Reveal root node if it wasn't already.
+            trace!(target: "trie::sparse", ?root_node, "Revealing root storage node");
             let trie = self.storages.entry(account).or_default().reveal_root(
                 root_node.node,
                 root_node.masks,
@@ -427,6 +431,8 @@ where
             for node in &nodes {
                 revealed_nodes.insert(node.path);
             }
+
+            trace!(target: "trie::sparse", "Revealing {} account nodes", nodes.len());
             trie.reveal_nodes(nodes)?;
         }
 
@@ -736,7 +742,7 @@ where
             trace!(target: "trie::sparse", ?address, "Retrieving storage root from account leaf to update account");
             // The account was revealed, either...
             if let Some(value) = self.get_account_value(&address) {
-                // ..it exists and we should take it's current storage root or...
+                // ..it exists and we should take its current storage root or...
                 TrieAccount::decode(&mut &value[..])?.storage_root
             } else {
                 // ...the account is newly created and the storage trie is empty.
@@ -880,11 +886,13 @@ fn filter_map_revealed_nodes(
         result.new_nodes += 1;
 
         // If it's a branch node, increase the number of new nodes by the number of children
-        // according to the state mask.
-        if let TrieNode::Branch(branch) = &proof_node {
-            result.new_nodes += branch.state_mask.count_ones() as usize;
-        }
-        // TODO should we increase by 1 if it's an extension?
+        // according to the state mask. If it's an extension there can only be one extra child, so
+        // only increase by 1. Otherwise there are no children.
+        result.new_nodes += match &proof_node {
+            TrieNode::Branch(branch) => branch.state_mask.count_ones() as usize,
+            TrieNode::Extension(_) => 1,
+            _ => 0,
+        };
 
         let node = RevealedSparseNode {
             path,

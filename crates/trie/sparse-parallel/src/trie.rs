@@ -131,9 +131,8 @@ impl SparseTrieInterface for ParallelSparseTrie {
             .position(|n| !SparseSubtrieType::path_len_is_upper(n.path.len()))
             .unwrap_or(nodes.len());
 
-        let all_nodes = nodes.as_slice();
-        let upper_nodes = &all_nodes[..num_upper_nodes];
-        let lower_nodes = &all_nodes[num_upper_nodes..];
+        let upper_nodes = &nodes[..num_upper_nodes];
+        let lower_nodes = &nodes[num_upper_nodes..];
 
         // Reserve the capacity of the upper subtrie's `nodes` HashMap before iterating, so we don't
         // end up making many small capacity changes as we loop.
@@ -175,7 +174,8 @@ impl SparseTrieInterface for ParallelSparseTrie {
             let lower_subtries: Vec<_> = node_groups
                 .iter()
                 .map(|nodes| {
-                    let node = &nodes[0]; // SAFETY: chunk_by won't produce empty groups
+                    // NOTE: chunk_by won't produce empty groups
+                    let node = &nodes[0];
                     let Some(idx) = SparseSubtrieType::from_path(&node.path).lower_index() else {
                         panic!("upper subtrie node {node:?} found amongst lower nodes");
                     };
@@ -2299,6 +2299,8 @@ impl SparseSubtrieType {
 }
 
 impl Ord for SparseSubtrieType {
+    /// Orders two [`SparseSubtrieType`]s such that `Upper` is less than `Lower(_)`, and `Lower`s
+    /// are ordered by their index.
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
             (Self::Upper, Self::Upper) => Ordering::Equal,
