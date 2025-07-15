@@ -1049,7 +1049,7 @@ where
         }
     }
 
-    /// Spawns the `EthStats` service.
+    /// Spawns the [`EthStatsService`] service if configured.
     pub async fn spawn_ethstats(&self) -> eyre::Result<()> {
         let Some(url) = self.node_config().debug.ethstats.as_ref() else { return Ok(()) };
 

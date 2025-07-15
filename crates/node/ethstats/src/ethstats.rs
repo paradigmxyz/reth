@@ -362,10 +362,7 @@ where
         let body = block.body();
         let header = block.header();
 
-        let mut txs = vec![];
-        for &tx_hash in body.transaction_hashes_iter() {
-            txs.push(TxStats { hash: tx_hash })
-        }
+        let txs = body.transaction_hashes_iter().copied().map(|hash| TxStats { hash }).collect();
 
         Ok(BlockStats {
             number: U256::from(header.number()),
