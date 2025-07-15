@@ -190,6 +190,10 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
+    fn pending_and_queued_txn_count(&self) -> (usize, usize) {
+        (0, 0)
+    }
+
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction> {
         AllPoolTransactions::default()
     }

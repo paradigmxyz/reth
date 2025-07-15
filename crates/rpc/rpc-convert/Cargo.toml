@@ -20,6 +20,7 @@ reth-evm.workspace = true
 # ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types-eth = { workspace = true, features = ["serde"] }
+alloy-signer.workspace = true
 alloy-consensus.workspace = true
 alloy-network.workspace = true
 alloy-json-rpc.workspace = true

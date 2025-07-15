@@ -2,7 +2,6 @@
 
 use crate::EthApi;
 use alloy_evm::block::BlockExecutorFactory;
-use alloy_rpc_types_eth::TransactionRequest;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmFactory, TxEnvFor};
 use reth_node_api::NodePrimitives;
@@ -15,11 +14,12 @@ use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use revm::context::TxEnv;
 
-impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthCall
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
-    Self: EstimateCall
-        + LoadPendingBlock
-        + FullEthApiTypes
+    Self: EstimateCall<NetworkTypes = Rpc>
+        + LoadPendingBlock<NetworkTypes = Rpc>
+        + FullEthApiTypes<NetworkTypes = Rpc>
         + RpcNodeCoreExt<
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
@@ -29,10 +29,12 @@ where
         >,
     EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
     Provider: BlockReader,
+    Rpc: RpcTypes,
 {
 }
 
-impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> Call
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: LoadState<
             Evm: ConfigureEvm<
@@ -42,13 +44,14 @@ where
                     SignedTx = ProviderTx<Self::Provider>,
                 >,
             >,
-            RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Network = Self::NetworkTypes>,
-            NetworkTypes: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+            RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Network = Rpc>,
+            NetworkTypes = Rpc,
             Error: FromEvmError<Self::Evm>
                        + From<<Self::RpcConvert as RpcConvert>::Error>
                        + From<ProviderError>,
         > + SpawnBlocking,
     Provider: BlockReader,
+    Rpc: RpcTypes,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -61,9 +64,11 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EstimateCall for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EstimateCall
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
-    Self: Call,
+    Self: Call<NetworkTypes = Rpc>,
     Provider: BlockReader,
+    Rpc: RpcTypes,
 {
 }

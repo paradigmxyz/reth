@@ -1,5 +1,4 @@
 import { promises as fs } from 'fs';
-import { join, relative } from 'path';
 import { glob } from 'glob';
 
 const CARGO_DOCS_PATH = '../../target/doc';
@@ -86,6 +85,23 @@ async function injectCargoDocs() {
     await fs.writeFile(file, content, 'utf-8');
   }
 
+  // Find the actual search JS filename from the HTML files
+  let actualSearchJsFile = '';
+  for (const htmlFile of htmlFiles) {
+    const htmlContent = await fs.readFile(htmlFile, 'utf-8');
+    const searchMatch = htmlContent.match(/data-search-js="[^"]*\/([^"]+)"/);
+    if (searchMatch && searchMatch[1]) {
+      actualSearchJsFile = searchMatch[1];
+      console.log(`Found search JS file: ${actualSearchJsFile} in ${htmlFile}`);
+      break;
+    }
+  }
+  
+  if (!actualSearchJsFile) {
+    console.error('Could not detect search JS filename from HTML files');
+    process.exit(1);
+  }
+  
   // Also fix paths in JavaScript files
   const jsFiles = await glob(`${VOCS_DIST_PATH}/**/*.js`);
   
@@ -120,9 +136,10 @@ async function injectCargoDocs() {
       );
       
       // Fix the search-js variable to return just the filename
+      // Use the detected search filename
       content = content.replace(
         /getVar\("search-js"\)/g,
-        `"search-f7877310.js"`
+        `"${actualSearchJsFile}"`
       );
       
       // Fix the search index loading path

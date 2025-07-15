@@ -1,5 +1,7 @@
 //! Contains RPC handler implementations specific to blocks.
 
+use std::borrow::Cow;
+
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_rpc_types_eth::{BlockId, TransactionReceipt};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
@@ -17,18 +19,20 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthBlocks for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthBlocks
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: LoadBlock<
         Error = EthApiError,
-        NetworkTypes: RpcTypes<Receipt = TransactionReceipt>,
-        RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
+        NetworkTypes = Rpc,
+        RpcConvert: RpcConvert<Network = Rpc>,
         Provider: BlockReader<
             Transaction = reth_ethereum_primitives::TransactionSigned,
             Receipt = reth_ethereum_primitives::Receipt,
         >,
     >,
     Provider: BlockReader + ChainSpecProvider,
+    Rpc: RpcTypes<Receipt = TransactionReceipt>,
 {
     async fn block_receipts(
         &self,
@@ -59,7 +63,14 @@ where
                         excess_blob_gas,
                         timestamp,
                     };
-                    Ok(EthReceiptBuilder::new(tx, meta, receipt, &receipts, blob_params).build())
+                    Ok(EthReceiptBuilder::new(
+                        tx,
+                        meta,
+                        Cow::Borrowed(receipt),
+                        &receipts,
+                        blob_params,
+                    )
+                    .build())
                 })
                 .collect::<Result<Vec<_>, Self::Error>>()
                 .map(Some)
@@ -69,7 +80,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadBlock for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> LoadBlock
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: LoadPendingBlock
         + SpawnBlocking
@@ -82,5 +94,6 @@ where
         >,
     Provider: BlockReader,
     EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
+    Rpc: RpcTypes,
 {
 }

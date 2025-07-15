@@ -591,6 +591,13 @@ where
         self.pool.queued_transactions()
     }
 
+    fn pending_and_queued_txn_count(&self) -> (usize, usize) {
+        let data = self.pool.get_pool_data();
+        let pending = data.pending_transactions_count();
+        let queued = data.queued_transactions_count();
+        (pending, queued)
+    }
+
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction> {
         self.pool.all_transactions()
     }
