@@ -215,7 +215,7 @@ impl_compression_for_compact!(
     Header,
     Account,
     Log,
-    Receipt,
+    Receipt<T>,
     TxType,
     StorageEntry,
     BranchNodeCompact,
