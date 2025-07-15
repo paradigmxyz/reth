@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
