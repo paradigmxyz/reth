@@ -1,5 +1,5 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256, U256};
-use reth_chainspec::MAINNET;
+use reth_chainspec::{EthereumHardforks, MAINNET};
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
     DatabaseEnv,
@@ -162,7 +162,6 @@ impl TestStageDB {
             writer.append_header(header.header(), td, &header.hash())?;
         } else {
             tx.put::<tables::CanonicalHeaders>(header.number, header.hash())?;
-            tx.put::<tables::HeaderTerminalDifficulties>(header.number, td.into())?;
             tx.put::<tables::Headers>(header.number, header.header().clone())?;
         }
 
