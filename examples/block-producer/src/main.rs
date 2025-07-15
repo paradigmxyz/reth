@@ -193,12 +193,60 @@ async fn main() -> Result<()> {
     match payload_status.status.as_str() {
         "VALID" => {
             println!("🎉 载荷验证成功！");
-            println!("✨ 完整的区块生产流程演示完成！");
-            println!("\n📋 总结:");
+            
+            // 8. 关键步骤：调用 engine_forkchoiceUpdated 实际"出块"
+            println!("\n🔄 步骤 4: 调用 engine_forkchoiceUpdated 实际出块...");
+            
+            let new_block_hash = execution_payload.get("blockHash")
+                .and_then(|h| h.as_str())
+                .ok_or_else(|| eyre::eyre!("无法获取新区块哈希"))?;
+            
+            let new_block_hash_b256: B256 = new_block_hash.parse()?;
+            
+            // 构造新的 ForkchoiceState，将新区块设置为链头
+            let final_forkchoice_state = ForkchoiceState {
+                head_block_hash: new_block_hash_b256,      // 新区块作为头部
+                safe_block_hash: new_block_hash_b256,      // 设置为安全区块
+                finalized_block_hash: parent_hash_b256,    // 父区块作为最终确认区块
+            };
+            
+            println!("🎯 将新区块设置为链头: {}", new_block_hash);
+            
+            // 调用 forkchoiceUpdated 但不带 payload attributes (只是更新链头)
+            let final_forkchoice_result = make_rpc_call(
+                &client, 
+                &jwt, 
+                "engine_forkchoiceUpdatedV3", 
+                json!([final_forkchoice_state, serde_json::Value::Null])
+            ).await?;
+            
+            println!("✅ 最终 ForkchoiceUpdated 响应: {}", serde_json::to_string_pretty(&final_forkchoice_result)?);
+            
+            // 9. 验证区块确实被添加到链上
+            println!("\n🔍 验证新区块是否成功出块...");
+            
+            let updated_latest_block = make_rpc_call(&client, &jwt, "eth_getBlockByNumber", json!(["latest", false])).await?;
+            let updated_number = u64::from_str_radix(
+                updated_latest_block["number"].as_str().unwrap_or("0x0").trim_start_matches("0x"), 
+                16
+            )?;
+            let updated_hash = updated_latest_block["hash"].as_str().unwrap_or("unknown");
+            
+            if updated_number > current_number {
+                println!("🎉 成功出块！");
+                println!("   原区块: #{} -> 新区块: #{}", current_number, updated_number);
+                println!("   新区块哈希: {}", updated_hash);
+                println!("✨ 完整的区块生产和出块流程演示完成！");
+            } else {
+                println!("⚠️ 区块可能尚未更新到链上");
+            }
+            
+            println!("\n📋 完整流程总结:");
             println!("1. ✅ 通过 engine_forkchoiceUpdated 请求构建载荷");
             println!("2. ✅ 通过 engine_getPayload 获取构建的载荷"); 
             println!("3. ✅ 通过 engine_newPayload 验证载荷");
-            println!("\n这就是真实环境中共识客户端和执行客户端的交互方式！");
+            println!("4. ✅ 通过 engine_forkchoiceUpdated 实际出块");
+            println!("\n这就是真实环境中共识客户端和执行客户端的完整交互方式！");
         },
         "INVALID" => {
             println!("❌ 载荷无效");
