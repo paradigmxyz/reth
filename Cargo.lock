@@ -1689,15 +1689,10 @@ name = "block-producer"
 version = "0.0.0"
 dependencies = [
  "alloy-primitives",
- "alloy-provider",
- "alloy-rpc-client",
  "alloy-rpc-types-engine",
- "alloy-rpc-types-eth",
- "alloy-transport-http",
  "eyre",
  "hex",
  "jsonwebtoken",
- "rand 0.8.5",
  "reqwest",
  "serde",
  "serde_json",
