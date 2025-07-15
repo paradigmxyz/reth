@@ -11,7 +11,13 @@ pub use state::*;
 mod trie;
 pub use trie::*;
 
+mod traits;
+pub use traits::*;
+
 pub mod blinded;
+
+// Re-export `Either` because it implements `SparseTrieInterface`.
+pub use either::Either;
 
 #[cfg(feature = "metrics")]
 mod metrics;

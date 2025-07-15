@@ -240,14 +240,25 @@ impl<DB, ChainSpec: EthChainSpec> NodeBuilder<DB, ChainSpec> {
     /// Creates an _ephemeral_ preconfigured node for testing purposes.
     #[cfg(feature = "test-utils")]
     pub fn testing_node(
-        mut self,
+        self,
         task_executor: TaskExecutor,
     ) -> WithLaunchContext<
         NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec>,
     > {
-        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(
-            reth_db::test_utils::tempdir_path(),
-        );
+        let path = reth_db::test_utils::tempdir_path();
+        self.testing_node_with_datadir(task_executor, path)
+    }
+
+    /// Creates a preconfigured node for testing purposes with a specific datadir.
+    #[cfg(feature = "test-utils")]
+    pub fn testing_node_with_datadir(
+        mut self,
+        task_executor: TaskExecutor,
+        datadir: impl Into<std::path::PathBuf>,
+    ) -> WithLaunchContext<
+        NodeBuilder<Arc<reth_db::test_utils::TempDatabase<reth_db::DatabaseEnv>>, ChainSpec>,
+    > {
+        let path = reth_node_core::dirs::MaybePlatformPath::<DataDirPath>::from(datadir.into());
         self.config = self.config.with_datadir_args(reth_node_core::args::DatadirArgs {
             datadir: path.clone(),
             ..Default::default()

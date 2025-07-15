@@ -273,7 +273,7 @@ where
     }
 }
 
-/// Container type for  `EthBundle` internals
+/// Container type for `EthBundle` internals
 #[derive(Debug)]
 struct EthBundleInner<Eth> {
     /// Access to commonly used code of the `eth` namespace

@@ -12,7 +12,7 @@ use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 use reth_rpc_convert::RpcConvert;
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
@@ -23,7 +23,7 @@ pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
 /// Result type of the fetched block and its receipts.
 pub type BlockAndReceiptsResult<Eth> = Result<
     Option<(
-        SealedBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>,
+        Arc<RecoveredBlock<<<Eth as RpcNodeCore>::Provider as BlockReader>::Block>>,
         Arc<Vec<ProviderReceipt<<Eth as RpcNodeCore>::Provider>>>,
     )>,
     <Eth as EthApiTypes>::Error,
@@ -80,7 +80,7 @@ pub trait EthBlocks: LoadBlock {
                     .provider()
                     .pending_block()
                     .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body().transactions().len()))
+                    .map(|block| block.body().transaction_count()));
             }
 
             let block_hash = match self
@@ -130,24 +130,26 @@ pub trait EthBlocks: LoadBlock {
                     .pending_block_and_receipts()
                     .map_err(Self::Error::from_eth_err)?
                 {
-                    return Ok(Some((block, Arc::new(receipts))));
+                    return Ok(Some((Arc::new(block), Arc::new(receipts))));
                 }
 
                 // If no pending block from provider, build the pending block locally.
                 if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block.into_sealed_block(), Arc::new(receipts))));
+                    return Ok(Some((block, receipts)));
                 }
             }
 
             if let Some(block_hash) =
                 self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
             {
-                return self
+                if let Some((block, receipts)) = self
                     .cache()
                     .get_block_and_receipts(block_hash)
                     .await
-                    .map_err(Self::Error::from_eth_err)
-                    .map(|b| b.map(|(b, r)| (b.clone_sealed_block(), r)))
+                    .map_err(Self::Error::from_eth_err)?
+                {
+                    return Ok(Some((block, receipts)));
+                }
             }
 
             Ok(None)
@@ -243,7 +245,7 @@ pub trait LoadBlock:
 
                 // If no pending block from provider, try to get local pending block
                 return match self.local_pending_block().await? {
-                    Some((block, _)) => Ok(Some(Arc::new(block))),
+                    Some((block, _)) => Ok(Some(block)),
                     None => Ok(None),
                 };
             }

@@ -16,7 +16,7 @@ graph TB
   A[Incoming Tx] --> B[Validation] -->|insert| pool
   pool --> |if ready + blobfee too low| B4
   pool --> |if ready| B1
-  pool --> |if ready + basfee too low| B2
+  pool --> |if ready + basefee too low| B2
   pool --> |nonce gap or lack of funds| B3
   pool --> |update| pool
   B1 --> |best| production

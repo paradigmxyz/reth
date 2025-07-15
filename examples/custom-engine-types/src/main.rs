@@ -29,7 +29,6 @@ use alloy_rpc_types::{
     Withdrawal,
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
-use reth_engine_local::payload::UnsupportedLocalAttributes;
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec, ChainSpecProvider},
     node::{
@@ -75,9 +74,6 @@ pub struct CustomPayloadAttributes {
     /// A custom field
     pub custom: u64,
 }
-
-// TODO(mattsse): remove this tmp workaround
-impl UnsupportedLocalAttributes for CustomPayloadAttributes {}
 
 /// Custom error type used in payload attributes validation
 #[derive(Debug, Error)]

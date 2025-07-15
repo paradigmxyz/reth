@@ -457,6 +457,11 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
                 genesis: status.genesis,
                 config: Default::default(),
             },
+            capabilities: hello_message
+                .protocols
+                .into_iter()
+                .map(|protocol| protocol.cap)
+                .collect(),
         }
     }
 

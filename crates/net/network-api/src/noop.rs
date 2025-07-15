@@ -73,6 +73,7 @@ where
                 config: Default::default(),
                 head: Default::default(),
             },
+            capabilities: vec![],
         })
     }
 

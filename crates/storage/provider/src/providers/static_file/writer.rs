@@ -702,7 +702,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(Some(tx_number))
     }
 
-    /// Adds an instruction to prune `to_delete`transactions during commit.
+    /// Adds an instruction to prune `to_delete` transactions during commit.
     ///
     /// Note: `last_block` refers to the block the unwinds ends at.
     pub fn prune_transactions(
@@ -732,7 +732,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         self.queue_prune(to_delete, None)
     }
 
-    /// Adds an instruction to prune `to_delete` bloc_ meta rows during commit.
+    /// Adds an instruction to prune `to_delete` block meta rows during commit.
     pub fn prune_block_meta(&mut self, to_delete: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::BlockMeta);
         self.queue_prune(to_delete, None)

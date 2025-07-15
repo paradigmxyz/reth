@@ -45,11 +45,9 @@ type PrecompileLRUCache = LruMap<(Bytes, u64), PrecompileResult>;
 
 /// A cache for precompile inputs / outputs.
 ///
-/// This assumes that the precompile is a standard precompile, as in `StandardPrecompileFn`, meaning
-/// its inputs are only `(Bytes, u64)`.
-///
-/// NOTE: This does not work with "context stateful precompiles", ie `ContextStatefulPrecompile` or
-/// `ContextStatefulPrecompileMut`. They are explicitly banned.
+/// This cache works with standard precompiles that take input data and gas limit as parameters.
+/// The cache key is composed of the input bytes and gas limit, and the cached value is the
+/// precompile execution result.
 #[derive(Debug)]
 pub struct PrecompileCache {
     /// Caches for each precompile input / output.

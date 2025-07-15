@@ -5,10 +5,11 @@ use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
+    BuilderBlockValidationRequestV5,
 };
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
-    PraguePayloadFields,
+    BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
+    ExecutionPayloadSidecar, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use core::fmt;
@@ -184,7 +185,7 @@ where
         let output = executor.execute_with_state_closure(&block, |state| {
             if !self.disallow.is_empty() {
                 // Check whether the submission interacted with any blacklisted account by scanning
-                // the `State`'s cache that records everything read form database during execution.
+                // the `State`'s cache that records everything read from database during execution.
                 for account in state.cache.accounts.keys() {
                     if self.disallow.contains(account) {
                         accessed_blacklisted = Some(*account);
@@ -307,7 +308,7 @@ where
             }
         }
 
-        if balance_after >= balance_before + message.value {
+        if balance_after >= balance_before.saturating_add(message.value) {
             return Ok(())
         }
 
@@ -365,6 +366,24 @@ where
 
         Ok(versioned_hashes)
     }
+    /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
+    pub fn validate_blobs_bundle_v2(
+        &self,
+        blobs_bundle: BlobsBundleV2,
+    ) -> Result<Vec<B256>, ValidationApiError> {
+        let versioned_hashes = blobs_bundle
+            .commitments
+            .iter()
+            .map(|c| kzg_to_versioned_hash(c.as_slice()))
+            .collect::<Vec<_>>();
+
+        blobs_bundle
+            .try_into_sidecar()
+            .map_err(|_| ValidationApiError::InvalidBlobsBundle)?
+            .validate(&versioned_hashes, EnvKzgSettings::default().get())?;
+
+        Ok(versioned_hashes)
+    }
 
     /// Core logic for validating the builder submission v3
     async fn validate_builder_submission_v3(
@@ -398,6 +417,35 @@ where
                 CancunPayloadFields {
                     parent_beacon_block_root: request.parent_beacon_block_root,
                     versioned_hashes: self.validate_blobs_bundle(request.request.blobs_bundle)?,
+                },
+                PraguePayloadFields {
+                    requests: RequestsOrHash::Requests(
+                        request.request.execution_requests.to_requests(),
+                    ),
+                },
+            ),
+        })?;
+
+        self.validate_message_against_block(
+            block,
+            request.request.message,
+            request.registered_gas_limit,
+        )
+        .await
+    }
+
+    /// Core logic for validating the builder submission v5
+    async fn validate_builder_submission_v5(
+        &self,
+        request: BuilderBlockValidationRequestV5,
+    ) -> Result<(), ValidationApiError> {
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V3(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: self
+                        .validate_blobs_bundle_v2(request.request.blobs_bundle)?,
                 },
                 PraguePayloadFields {
                     requests: RequestsOrHash::Requests(
@@ -470,6 +518,24 @@ where
 
         self.task_spawner.spawn_blocking(Box::pin(async move {
             let result = Self::validate_builder_submission_v4(&this, request)
+                .await
+                .map_err(ErrorObject::from);
+            let _ = tx.send(result);
+        }));
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+    }
+
+    /// Validates a block submitted to the relay
+    async fn validate_builder_submission_v5(
+        &self,
+        request: BuilderBlockValidationRequestV5,
+    ) -> RpcResult<()> {
+        let this = self.clone();
+        let (tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = Self::validate_builder_submission_v5(&this, request)
                 .await
                 .map_err(ErrorObject::from);
             let _ = tx.send(result);

@@ -28,8 +28,9 @@ auto_impl.workspace = true
 derive_more.workspace = true
 futures.workspace = true
 eyre.workspace = true
-reqwest = { workspace = true, features = ["rustls-tls", "json"] }
+reqwest = { workspace = true, features = ["rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["time"] }
+serde_json.workspace = true
 
 ringbuffer.workspace = true

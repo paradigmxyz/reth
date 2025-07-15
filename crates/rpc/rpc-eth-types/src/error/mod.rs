@@ -187,6 +187,14 @@ impl EthApiError {
         matches!(self, Self::InvalidTransaction(RpcInvalidTransactionError::GasTooLow))
     }
 
+    /// Returns the [`RpcInvalidTransactionError`] if this is a [`EthApiError::InvalidTransaction`]
+    pub const fn as_invalid_transaction(&self) -> Option<&RpcInvalidTransactionError> {
+        match self {
+            Self::InvalidTransaction(e) => Some(e),
+            _ => None,
+        }
+    }
+
     /// Converts the given [`StateOverrideError`] into a new [`EthApiError`] instance.
     pub fn from_state_overrides_err<E>(err: StateOverrideError<E>) -> Self
     where
@@ -201,6 +209,11 @@ impl EthApiError {
         E: Into<Self>,
     {
         err.into()
+    }
+
+    /// Converts this error into the rpc error object.
+    pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+        self.into()
     }
 }
 
@@ -570,6 +583,12 @@ pub enum RpcInvalidTransactionError {
     /// EIP-7702 transaction has invalid fields set.
     #[error("EIP-7702 authorization list has invalid fields")]
     AuthorizationListInvalidFields,
+    /// Transaction priority fee is below the minimum required priority fee.
+    #[error("transaction priority fee below minimum required priority fee {minimum_priority_fee}")]
+    PriorityFeeBelowMinimum {
+        /// Minimum required priority fee.
+        minimum_priority_fee: u128,
+    },
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -580,9 +599,7 @@ impl RpcInvalidTransactionError {
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
-}
 
-impl RpcInvalidTransactionError {
     /// Returns the rpc error code for this error.
     pub const fn error_code(&self) -> i32 {
         match self {
@@ -620,6 +637,11 @@ impl RpcInvalidTransactionError {
             OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
         }
+    }
+
+    /// Converts this error into the rpc error object.
+    pub fn into_rpc_err(self) -> jsonrpsee_types::error::ErrorObject<'static> {
+        self.into()
     }
 }
 
@@ -801,6 +823,9 @@ pub enum RpcPoolError {
     /// When the transaction exceeds the block gas limit
     #[error("exceeds block gas limit")]
     ExceedsGasLimit,
+    /// When the transaction gas limit exceeds the maximum transaction gas limit
+    #[error("exceeds max transaction gas limit")]
+    MaxTxGasLimitExceeded,
     /// Thrown when a new transaction is added to the pool, but then immediately discarded to
     /// respect the tx fee exceeds the configured cap
     #[error("tx fee ({max_tx_fee_wei} wei) exceeds the configured cap ({tx_fee_cap_wei} wei)")]
@@ -854,6 +879,7 @@ impl From<RpcPoolError> for jsonrpsee_types::error::ErrorObject<'static> {
             RpcPoolError::Underpriced |
             RpcPoolError::ReplaceUnderpriced |
             RpcPoolError::ExceedsGasLimit |
+            RpcPoolError::MaxTxGasLimitExceeded |
             RpcPoolError::ExceedsFeeCap { .. } |
             RpcPoolError::NegativeValue |
             RpcPoolError::OversizedData |
@@ -890,6 +916,7 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
         match err {
             InvalidPoolTransactionError::Consensus(err) => Self::Invalid(err.into()),
             InvalidPoolTransactionError::ExceedsGasLimit(_, _) => Self::ExceedsGasLimit,
+            InvalidPoolTransactionError::MaxTxGasLimitExceeded(_, _) => Self::MaxTxGasLimitExceeded,
             InvalidPoolTransactionError::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei } => {
                 Self::ExceedsFeeCap { max_tx_fee_wei, tx_fee_cap_wei }
             }
@@ -909,6 +936,11 @@ impl From<InvalidPoolTransactionError> for RpcPoolError {
             InvalidPoolTransactionError::Eip7702(err) => Self::Eip7702(err),
             InvalidPoolTransactionError::Overdraft { cost, balance } => {
                 Self::Invalid(RpcInvalidTransactionError::InsufficientFunds { cost, balance })
+            }
+            InvalidPoolTransactionError::PriorityFeeBelowMinimum { minimum_priority_fee } => {
+                Self::Invalid(RpcInvalidTransactionError::PriorityFeeBelowMinimum {
+                    minimum_priority_fee,
+                })
             }
         }
     }

@@ -3,7 +3,6 @@
 use crate::{
     identifier::TransactionId, pool::state::SubPool, PoolTransaction, ValidPoolTransaction,
 };
-use alloy_primitives::TxHash;
 use std::sync::Arc;
 
 /// A change of the transaction's location
@@ -13,8 +12,6 @@ use std::sync::Arc;
 pub(crate) struct PoolUpdate {
     /// Internal tx id.
     pub(crate) id: TransactionId,
-    /// Hash of the transaction.
-    pub(crate) hash: TxHash,
     /// Where the transaction is currently held.
     pub(crate) current: SubPool,
     /// Where to move the transaction to.
