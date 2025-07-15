@@ -82,6 +82,22 @@ impl<B: Block> Consensus<B> for TestConsensus {
             Ok(())
         }
     }
+
+    fn validate_post_merge_fork_fields(&self, _block: &SealedBlock<B>) -> Result<(), Self::Error> {
+        if self.fail_validation() {
+            Err(ConsensusError::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn validate_transactions(&self, _block: &SealedBlock<B>) -> Result<(), Self::Error> {
+        if self.fail_validation() {
+            Err(ConsensusError::BaseFeeMissing)
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl<H> HeaderValidator<H> for TestConsensus {

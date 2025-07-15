@@ -140,7 +140,7 @@ where
     B: Block,
     ChainSpec: EthereumHardforks,
 {
-    post_merge_hardfork_fields(block, chain_spec)?;
+    validate_post_merge_fork_fields(block, chain_spec)?;
 
     // Check transaction root
     if let Err(error) = block.ensure_transaction_root_valid() {
@@ -157,7 +157,7 @@ where
 ///   information about the specific checks in [`validate_shanghai_withdrawals`].
 /// * EIP-4844 blob gas validation, if cancun is active based on the given chainspec. See more
 ///   information about the specific checks in [`validate_cancun_gas`].
-pub fn post_merge_hardfork_fields<B, ChainSpec>(
+pub fn validate_post_merge_fork_fields<B, ChainSpec>(
     block: &SealedBlock<B>,
     chain_spec: &ChainSpec,
 ) -> Result<(), ConsensusError>

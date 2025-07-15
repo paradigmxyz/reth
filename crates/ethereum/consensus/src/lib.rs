@@ -21,6 +21,7 @@ use reth_consensus_common::validation::{
     validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
     validate_against_parent_timestamp, validate_block_pre_execution, validate_body_against_header,
     validate_header_base_fee, validate_header_extra_data, validate_header_gas,
+    validate_post_merge_fork_fields,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_primitives_traits::{
@@ -127,6 +128,19 @@ where
 
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error> {
         validate_block_pre_execution(block, &self.chain_spec)
+    }
+
+    fn validate_transactions(&self, block: &SealedBlock<B>) -> Result<(), Self::Error> {
+        // Check transaction root
+        if let Err(error) = block.ensure_transaction_root_valid() {
+            return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+        }
+
+        Ok(())
+    }
+
+    fn validate_post_merge_fork_fields(&self, block: &SealedBlock<B>) -> Result<(), Self::Error> {
+        validate_post_merge_fork_fields(block, &self.chain_spec)
     }
 }
 
