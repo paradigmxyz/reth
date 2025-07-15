@@ -189,7 +189,7 @@ where
             basefee: self
                 .chain_spec()
                 .next_block_base_fee(&parent, attributes.timestamp)
-                .unwrap_or_default(),
+                .ok_or(EIP1559ParamError::NoEIP1559Params)?,
             // calculate excess gas based on parent block's blob gas usage
             blob_excess_gas_and_price,
         };
