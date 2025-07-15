@@ -133,6 +133,7 @@ members = [
     "crates/trie/common",
     "crates/trie/db",
     "crates/trie/parallel/",
+    "crates/trie/sp1-zkvm",
     "crates/trie/sparse",
     "crates/trie/sparse-parallel/",
     "crates/trie/trie",
