@@ -3610,9 +3610,11 @@ dependencies = [
 name = "example-txpool-tracing"
 version = "0.0.0"
 dependencies = [
+ "alloy-network",
  "alloy-primitives",
  "alloy-rpc-types-trace",
  "clap",
+ "eyre",
  "futures-util",
  "reth-ethereum",
 ]
