@@ -10,6 +10,7 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_evm::ConfigureEvm;
+use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_eth_api::{
     helpers::{EthSigner, SpawnBlocking},
     node::RpcNodeCoreExt,
@@ -96,7 +97,14 @@ type PendingBlockType<N> = Mutex<
 >;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
-pub type EthApiFor<N> = EthApi<N>;
+pub type EthApiFor<N> = EthApi<
+    ComponentsWrapper<
+        <N as FullNodeTypes>::Provider,
+        <N as FullNodeComponents>::Pool,
+        <N as FullNodeComponents>::Network,
+        <N as FullNodeComponents>::Evm,
+    >,
+>;
 
 /// `Eth` API implementation.
 ///
