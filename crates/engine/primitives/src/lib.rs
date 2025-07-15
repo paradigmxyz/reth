@@ -42,6 +42,27 @@ pub use invalid_block_hook::InvalidBlockHook;
 pub mod config;
 pub use config::*;
 
+/// Trait for accessing tree state during validation
+pub trait TreeStateProvider: Send + Sync {
+    /// Returns the current canonical block hash
+    fn canonical_block_hash(&self) -> alloy_primitives::B256;
+
+    /// Returns the current canonical block number  
+    fn canonical_block_number(&self) -> u64;
+}
+
+/// Context providing access to tree state during validation
+pub struct TreeCtx<'a> {
+    /// The engine API tree state
+    pub state: &'a dyn TreeStateProvider,
+}
+
+impl core::fmt::Debug for TreeCtx<'_> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("TreeCtx").finish_non_exhaustive()
+    }
+}
+
 /// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 ///
 /// This includes the execution payload types and payload attributes that are used to trigger a
@@ -125,6 +146,24 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
         &self,
         payload: Self::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
+
+    /// Validates a payload received from engine API.
+    fn validate_payload(
+        &self,
+        _payload: Self::ExecutionData,
+        _ctx: TreeCtx<'_>,
+    ) -> Result<(), NewPayloadError> {
+        Ok(())
+    }
+
+    /// Validates a block downloaded from the network.
+    fn validate_block(
+        &self,
+        _block: RecoveredBlock<Self::Block>,
+        _ctx: TreeCtx<'_>,
+    ) -> Result<(), ConsensusError> {
+        Ok(())
+    }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
     fn validate_block_post_execution_with_hashed_state(
