@@ -1,5 +1,4 @@
 import { promises as fs } from 'fs';
-import { join, relative } from 'path';
 import { glob } from 'glob';
 
 const CARGO_DOCS_PATH = '../../target/doc';
@@ -118,28 +117,9 @@ async function injectCargoDocs() {
     // Fix the search form submission issue that causes page reload
     // Instead of submitting a form, just ensure the search functionality is loaded
     if (file.includes('main-') && file.endsWith('.js')) {
-      // First, add a failsafe counter to prevent infinite reloads
-      content = content.replace(
-        /window\.searchState=\{/g,
-        'window.searchFailureCount=(window.searchFailureCount||0);window.searchState={'
-      );
-      
       content = content.replace(
         /function sendSearchForm\(\)\{document\.getElementsByClassName\("search-form"\)\[0\]\.submit\(\)\}/g,
-        `function sendSearchForm(){
-          /* Fixed: Prevent infinite reload loop */
-          window.searchFailureCount++;
-          if(window.searchFailureCount>2){
-            console.error("Search functionality unavailable after multiple attempts");
-            const search=window.searchState.outputElement();
-            if(search){
-              search.innerHTML='<div class="search-error">No Results</div>';
-              window.searchState.showResults(search);
-            }
-            return;
-          }
-          console.warn("Search script failed to load, attempt "+window.searchFailureCount);
-        }`
+        'function sendSearchForm(){/* Fixed: No form submission needed - search loads via script */}'
       );
       
       // Also fix the root path references in the search functionality
