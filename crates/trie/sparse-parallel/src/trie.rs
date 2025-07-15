@@ -723,7 +723,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 FindNextToLeafOutcome::NotFound => return Ok(LeafLookup::NonExistent),
                 FindNextToLeafOutcome::BlindedNode(hash) => {
                     // We hit a blinded node - cannot determine if leaf exists
-                    return Err(LeafLookupError::TrieNode { path: curr_path, hash });
+                    return Err(LeafLookupError::BlindedNode { path: curr_path, hash });
                 }
                 FindNextToLeafOutcome::Found => {
                     panic!("target leaf {full_path:?} found at path {curr_path:?}, even though value wasn't in values hashmap");
@@ -6154,7 +6154,7 @@ mod tests {
         let result = sparse.find_leaf(&leaf_path, None);
 
         // Should error because it hit the blinded node exactly at the leaf path
-        assert_matches!(result, Err(LeafLookupError::TrieNode { path, hash })
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
             if path == leaf_path && hash == blinded_hash
         );
     }
@@ -6182,7 +6182,7 @@ mod tests {
         let result = sparse.find_leaf(&search_path, None);
 
         // Should error because it hit the blinded node at path 0x1
-        assert_matches!(result, Err(LeafLookupError::TrieNode { path, hash })
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
             if path == path_to_blind && hash == blinded_hash
         );
     }

@@ -263,12 +263,12 @@ pub struct SparseTrieUpdates {
 /// Error type for a leaf lookup operation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LeafLookupError {
-    /// The path leads to a trie node, cannot determine if leaf exists.
+    /// The path leads to a blinded node, cannot determine if leaf exists.
     /// This means the witness is not complete.
-    TrieNode {
-        /// Path to the trie node.
+    BlindedNode {
+        /// Path to the blinded node.
         path: Nibbles,
-        /// Hash of the trie node.
+        /// Hash of the blinded node.
         hash: B256,
     },
     /// The path leads to a leaf with a different value than expected.

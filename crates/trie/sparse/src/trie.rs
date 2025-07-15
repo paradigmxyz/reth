@@ -983,7 +983,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                 }
                 Some(&SparseNode::Hash(hash)) => {
                     // We hit a blinded node - cannot determine if leaf exists
-                    return Err(LeafLookupError::TrieNode { path: current, hash });
+                    return Err(LeafLookupError::BlindedNode { path: current, hash });
                 }
                 Some(SparseNode::Leaf { key, .. }) => {
                     // We found a leaf node before reaching our target depth
@@ -1037,7 +1037,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                 }
             }
             Some(&SparseNode::Hash(hash)) => {
-                return Err(LeafLookupError::TrieNode { path: *full_path, hash });
+                return Err(LeafLookupError::BlindedNode { path: *full_path, hash });
             }
             _ => {
                 // No leaf at exactly the target path
@@ -2107,7 +2107,7 @@ mod find_leaf_tests {
         let result = sparse.find_leaf(&leaf_path, None);
 
         // Should error because it hit the blinded node exactly at the leaf path
-        assert_matches!(result, Err(LeafLookupError::TrieNode { path, hash })
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
             if path == leaf_path && hash == blinded_hash
         );
     }
@@ -2149,7 +2149,7 @@ mod find_leaf_tests {
         let result = sparse.find_leaf(&search_path, None);
 
         // Should error because it hit the blinded node at path 0x1
-        assert_matches!(result, Err(LeafLookupError::TrieNode { path, hash })
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
             if path == path_to_blind && hash == blinded_hash
         );
     }
@@ -2207,7 +2207,7 @@ mod find_leaf_tests {
 
         // 5. Assert the expected error
         // Should error because it hit the blinded node at path "1" only node at "5" was revealed
-        assert_matches!(result, Err(LeafLookupError::TrieNode { path, hash })
+        assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
             if path == path_to_blind && hash == blinded_hash
         );
     }
