@@ -3,7 +3,7 @@ use crate::{
     traits::SparseTrieInterface,
     RevealedSparseNode, SerialSparseTrie, SparseTrie, TrieMasks,
 };
-use alloc::{collections::VecDeque, vec, vec::Vec};
+use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
     map::{B256Map, HashMap, HashSet},
     Bytes, B256,
@@ -164,98 +164,6 @@ where
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie<S>) {
         self.storages.insert(address, storage_trie);
-    }
-
-    /// Reveal unknown trie paths from provided leaf path and its proof for the account.
-    ///
-    /// Panics if trie updates retention is enabled.
-    ///
-    /// NOTE: This method does not extensively validate the proof.
-    pub fn reveal_account(
-        &mut self,
-        account: B256,
-        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
-    ) -> SparseStateTrieResult<()> {
-        assert!(!self.retain_updates);
-        // TODO this method doesn't seem to be used, can we remove it?
-
-        if self.is_account_revealed(account) {
-            return Ok(());
-        }
-
-        let proof: Vec<_> = proof.into_iter().collect();
-
-        let Some(root_node) = Self::validate_root_node(proof.iter())? else { return Ok(()) };
-
-        // Reveal root node if it wasn't already.
-        let trie = self.state.reveal_root(root_node, TrieMasks::none(), self.retain_updates)?;
-
-        // Collect the remaining proof nodes to be revealed, skipping the root node and other
-        // previously revealed nodes.
-        let mut nodes_to_reveal = Vec::with_capacity(proof.len() - 1);
-        for (path, bytes) in proof {
-            if path.is_empty() || self.revealed_account_paths.contains(&path) {
-                continue
-            }
-
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            nodes_to_reveal.push(RevealedSparseNode { path, node, masks: TrieMasks::none() });
-
-            // Track the revealed path.
-            self.revealed_account_paths.insert(path);
-        }
-
-        Ok(trie.reveal_nodes(nodes_to_reveal)?)
-    }
-
-    /// Reveal unknown trie paths from provided leaf path and its proof for the storage slot.
-    ///
-    /// Panics if trie updates retention is enabled.
-    ///
-    /// NOTE: This method does not extensively validate the proof.
-    pub fn reveal_storage_slot(
-        &mut self,
-        account: B256,
-        slot: B256,
-        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
-    ) -> SparseStateTrieResult<()> {
-        assert!(!self.retain_updates);
-        // TODO this method doesn't seem to be used, can we remove it?
-
-        if self.is_storage_slot_revealed(account, slot) {
-            return Ok(());
-        }
-
-        let proof: Vec<_> = proof.into_iter().collect();
-
-        let Some(root_node) = Self::validate_root_node(proof.iter())? else { return Ok(()) };
-
-        // Reveal root node if it wasn't already.
-        let trie = self.storages.entry(account).or_default().reveal_root(
-            root_node,
-            TrieMasks::none(),
-            self.retain_updates,
-        )?;
-
-        let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
-
-        // Collect the remaining proof nodes to be revealed, skipping the root node and other
-        // previously revealed nodes.
-        let mut nodes_to_reveal = Vec::with_capacity(proof.len() - 1);
-        for (path, bytes) in proof {
-            // If the node is already revealed, skip it.
-            if path.is_empty() || revealed_nodes.contains(&path) {
-                continue
-            }
-
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            nodes_to_reveal.push(RevealedSparseNode { path, node, masks: TrieMasks::none() });
-
-            // Track the revealed path.
-            revealed_nodes.insert(path);
-        }
-
-        Ok(trie.reveal_nodes(nodes_to_reveal)?)
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -485,11 +393,7 @@ where
                         storage_trie_entry
                             .as_revealed_mut()
                             .ok_or(SparseTrieErrorKind::Blind)?
-                            .reveal_nodes(vec![RevealedSparseNode {
-                                path,
-                                node: trie_node,
-                                masks: TrieMasks::none(),
-                            }])?;
+                            .reveal_node(path, trie_node, TrieMasks::none())?;
                     }
 
                     // Track the revealed path.
@@ -503,12 +407,10 @@ where
                     self.state.reveal_root(trie_node, TrieMasks::none(), self.retain_updates)?;
                 } else {
                     // Reveal non-root state trie node.
-                    self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?.reveal_nodes(
-                        vec![RevealedSparseNode {
-                            path,
-                            node: trie_node,
-                            masks: TrieMasks::none(),
-                        }],
+                    self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?.reveal_node(
+                        path,
+                        trie_node,
+                        TrieMasks::none(),
                     )?;
                 }
 
@@ -518,28 +420,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Validates the root node of the proof and returns it if it exists and is valid.
-    fn validate_root_node<'a>(
-        mut proof: impl Iterator<Item = &'a (Nibbles, Bytes)>,
-    ) -> SparseStateTrieResult<Option<TrieNode>> {
-        // Find root node.
-        let Some((path, node)) = proof.find(|(path, _)| path.is_empty()) else { return Ok(None) };
-
-        let has_more_nodes = proof.next().is_some();
-
-        // Decode root node and perform sanity check.
-        let root_node = TrieNode::decode(&mut &node[..])?;
-        if matches!(root_node, TrieNode::EmptyRoot) && has_more_nodes {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode {
-                path: *path,
-                node: node.clone(),
-            }
-            .into())
-        }
-
-        Ok(Some(root_node))
     }
 
     /// Wipe the storage trie at the provided address.
@@ -918,41 +798,6 @@ mod tests {
         proof::{ProofNodes, ProofRetainer},
         BranchNode, LeafNode, StorageMultiProof, TrieMask,
     };
-
-    #[test]
-    fn reveal_account_empty() {
-        let retainer = ProofRetainer::from_iter([Nibbles::default()]);
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        hash_builder.root();
-        let proofs = hash_builder.take_proof_nodes();
-        assert_eq!(proofs.len(), 1);
-
-        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        assert_eq!(sparse.state, SparseTrie::Blind(None));
-
-        sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
-        assert_eq!(sparse.state, SparseTrie::revealed_empty());
-    }
-
-    #[test]
-    fn reveal_storage_slot_empty() {
-        let retainer = ProofRetainer::from_iter([Nibbles::default()]);
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        hash_builder.root();
-        let proofs = hash_builder.take_proof_nodes();
-        assert_eq!(proofs.len(), 1);
-
-        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        assert!(sparse.storages.is_empty());
-
-        sparse
-            .reveal_storage_slot(Default::default(), Default::default(), proofs.into_inner())
-            .unwrap();
-        assert_eq!(
-            sparse.storages,
-            HashMap::from_iter([(Default::default(), SparseTrie::revealed_empty())])
-        );
-    }
 
     #[test]
     fn reveal_account_path_twice() {

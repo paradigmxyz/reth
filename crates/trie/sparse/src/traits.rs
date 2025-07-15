@@ -63,6 +63,20 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// * `additional` - The number of additional trie nodes to reserve capacity for.
     fn reserve_nodes(&mut self, _additional: usize) {}
 
+    /// The single-node version of `reveal_nodes`.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if successful, or an error if the node was not revealed.
+    fn reveal_node(
+        &mut self,
+        path: Nibbles,
+        node: TrieNode,
+        masks: TrieMasks,
+    ) -> SparseTrieResult<()> {
+        self.reveal_nodes(vec![RevealedSparseNode { path, node, masks }])
+    }
+
     /// Reveals one or more trie nodes if they have not been revealed before.
     ///
     /// This function decodes trie nodes and inserts them into the trie structure. It handles
