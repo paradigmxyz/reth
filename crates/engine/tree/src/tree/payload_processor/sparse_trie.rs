@@ -9,8 +9,8 @@ use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory},
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
+    provider::{TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseStateTrie, SparseTrie, SparseTrieInterface,
 };
 use std::{
@@ -22,9 +22,9 @@ use tracing::{debug, trace, trace_span};
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
 where
-    BPF: BlindedProviderFactory + Send + Sync,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
 {
     /// Executor used to spawn subtasks.
     #[expect(unused)] // TODO use this for spawning trie tasks
@@ -36,15 +36,15 @@ where
     /// It's kept as a field on the struct to prevent blocking on de-allocation in [`Self::run`].
     pub(super) trie: SparseStateTrie<A, S>,
     pub(super) metrics: MultiProofTaskMetrics,
-    /// Blinded node provider factory.
+    /// Trie node provider factory.
     blinded_provider_factory: BPF,
 }
 
 impl<BPF, A, S> SparseTrieTask<BPF, A, S>
 where
-    BPF: BlindedProviderFactory + Send + Sync + Clone,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync + Clone,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     A: SparseTrieInterface + Send + Sync + Default,
     S: SparseTrieInterface + Send + Sync + Default,
 {
@@ -191,9 +191,9 @@ pub(crate) fn update_sparse_trie<BPF, A, S>(
     blinded_provider_factory: &BPF,
 ) -> SparseStateTrieResult<Duration>
 where
-    BPF: BlindedProviderFactory + Send + Sync,
-    BPF::AccountNodeProvider: BlindedProvider + Send + Sync,
-    BPF::StorageNodeProvider: BlindedProvider + Send + Sync,
+    BPF: TrieNodeProviderFactory + Send + Sync,
+    BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+    BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     A: SparseTrieInterface + Send + Sync + Default,
     S: SparseTrieInterface + Send + Sync + Default,
 {

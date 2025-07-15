@@ -12,7 +12,7 @@ use reth_trie_common::{
     BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieNode, CHILD_INDEX_RANGE,
 };
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, RevealedNode},
+    provider::{RevealedNode, TrieNodeProvider},
     LeafLookup, LeafLookupError, RevealedSparseNode, RlpNodeStackItem, SparseNode, SparseNodeType,
     SparseTrieInterface, SparseTrieUpdates, TrieMasks,
 };
@@ -229,7 +229,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         }
     }
 
-    fn update_leaf<P: BlindedProvider>(
+    fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
@@ -275,7 +275,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                         let subtrie = self.subtrie_for_path_mut(&reveal_path);
                         if subtrie.nodes.get(&reveal_path).expect("node must exist").is_hash() {
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.blinded_node(&reveal_path)?
+                                provider.trie_node(&reveal_path)?
                             {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(
@@ -376,7 +376,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         Ok(())
     }
 
-    fn remove_leaf<P: BlindedProvider>(
+    fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
         provider: P,
@@ -558,7 +558,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                                 "Retrieving remaining blinded branch child",
                             );
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.blinded_node(&remaining_child_path)?
+                                provider.trie_node(&remaining_child_path)?
                             {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(
@@ -1437,7 +1437,7 @@ impl SparseSubtrie {
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
-        provider: impl BlindedProvider,
+        provider: impl TrieNodeProvider,
         retain_updates: bool,
     ) -> SparseTrieResult<()> {
         debug_assert!(full_path.starts_with(&self.path));
@@ -1458,7 +1458,7 @@ impl SparseSubtrie {
                     if let Some(reveal_path) = reveal_path {
                         if self.nodes.get(&reveal_path).expect("node must exist").is_hash() {
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.blinded_node(&reveal_path)?
+                                provider.trie_node(&reveal_path)?
                             {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(
@@ -2429,7 +2429,7 @@ mod tests {
     };
     use reth_trie_db::DatabaseTrieCursorFactory;
     use reth_trie_sparse::{
-        blinded::{BlindedProvider, DefaultBlindedProvider, RevealedNode},
+        provider::{DefaultTrieNodeProvider, RevealedNode, TrieNodeProvider},
         LeafLookup, LeafLookupError, RevealedSparseNode, SerialSparseTrie, SparseNode,
         SparseTrieInterface, SparseTrieUpdates, TrieMasks,
     };
@@ -2444,17 +2444,17 @@ mod tests {
         nibbles
     }
 
-    /// Mock blinded provider for testing that allows pre-setting nodes at specific paths.
+    /// Mock trie node provider for testing that allows pre-setting nodes at specific paths.
     ///
-    /// This provider can be used in tests to simulate blinded nodes that need to be revealed
+    /// This provider can be used in tests to simulate trie nodes that need to be revealed
     /// during trie operations, particularly when collapsing branch nodes during leaf removal.
     #[derive(Debug, Clone)]
-    struct MockBlindedProvider {
+    struct MockTrieNodeProvider {
         /// Mapping from path to revealed node data
         nodes: HashMap<Nibbles, RevealedNode, DefaultHashBuilder>,
     }
 
-    impl MockBlindedProvider {
+    impl MockTrieNodeProvider {
         /// Creates a new empty mock provider
         fn new() -> Self {
             Self { nodes: HashMap::with_hasher(RandomState::default()) }
@@ -2466,8 +2466,8 @@ mod tests {
         }
     }
 
-    impl BlindedProvider for MockBlindedProvider {
-        fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+    impl TrieNodeProvider for MockTrieNodeProvider {
+        fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
             Ok(self.nodes.get(path).cloned())
         }
     }
@@ -2553,7 +2553,7 @@ mod tests {
             leaves: impl IntoIterator<Item = (Nibbles, Vec<u8>)>,
         ) {
             for (path, value) in leaves {
-                trie.update_leaf(path, value, DefaultBlindedProvider).unwrap();
+                trie.update_leaf(path, value, DefaultTrieNodeProvider).unwrap();
             }
         }
 
@@ -3427,7 +3427,7 @@ mod tests {
             .into_iter(),
         );
 
-        let provider = MockBlindedProvider::new();
+        let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full path of 0x537
         let leaf_full_path = Nibbles::from_nibbles([0x5, 0x3, 0x7]);
@@ -3487,7 +3487,7 @@ mod tests {
                 .insert(Nibbles::default(), BranchNodeCompact::new(0b11, 0, 0, vec![], None));
         }
 
-        let provider = MockBlindedProvider::new();
+        let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full path of 0x012
         let leaf_full_path = Nibbles::from_nibbles([0x0, 0x1, 0x2]);
@@ -3546,7 +3546,7 @@ mod tests {
             .into_iter(),
         );
 
-        let provider = MockBlindedProvider::new();
+        let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full path of 0x5012
         let leaf_full_path = Nibbles::from_nibbles([0x5, 0x0, 0x1, 0x2]);
@@ -3606,7 +3606,7 @@ mod tests {
             .into_iter(),
         );
 
-        let provider = MockBlindedProvider::new();
+        let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full path of 0x2034
         let leaf_full_path = Nibbles::from_nibbles([0x2, 0x0, 0x3, 0x4]);
@@ -3685,7 +3685,7 @@ mod tests {
             .into_iter(),
         );
 
-        let provider = MockBlindedProvider::new();
+        let provider = MockTrieNodeProvider::new();
 
         // Verify initial state - the lower subtrie's path should be 0x123
         let lower_subtrie_root_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
@@ -3743,7 +3743,7 @@ mod tests {
         );
 
         // Create a mock provider that will reveal the blinded leaf
-        let mut provider = MockBlindedProvider::new();
+        let mut provider = MockTrieNodeProvider::new();
         let revealed_leaf = create_leaf_node([0x3, 0x4], 42);
         let mut encoded = Vec::new();
         revealed_leaf.encode(&mut encoded);
@@ -3784,7 +3784,7 @@ mod tests {
             SparseNode::new_leaf(Nibbles::from_nibbles([0x1, 0x2, 0x3])),
         )));
 
-        let provider = MockBlindedProvider::new();
+        let provider = MockTrieNodeProvider::new();
 
         // Remove the leaf with a full key of 0x123
         let leaf_full_path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
@@ -3873,7 +3873,7 @@ mod tests {
             .into_iter(),
         );
 
-        let provider = MockBlindedProvider::new();
+        let provider = MockTrieNodeProvider::new();
 
         // Remove a leaf which does not exist; this should have no effect.
         trie.remove_leaf(&Nibbles::from_nibbles([0x0, 0x1, 0x2, 0x3, 0x4, 0xF]), &provider)
@@ -4102,7 +4102,7 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
@@ -4217,7 +4217,7 @@ mod tests {
     #[test]
     fn sparse_trie_remove_leaf() {
         let ctx = ParallelSparseTrieTestContext;
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -4485,7 +4485,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::from_root(
             branch.clone(),
             TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
@@ -4534,7 +4534,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::from_root(
             branch.clone(),
             TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
@@ -4578,7 +4578,7 @@ mod tests {
         fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
             {
                 let mut state = BTreeMap::default();
-                let default_provider = DefaultBlindedProvider;
+                let default_provider = DefaultTrieNodeProvider;
                 let provider_factory = create_test_provider_factory();
                 let mut sparse = ParallelSparseTrie::default().with_updates(true);
 
@@ -4721,7 +4721,7 @@ mod tests {
         const KEY_NIBBLES_LEN: usize = 3;
 
         fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
-            let default_provider = DefaultBlindedProvider;
+            let default_provider = DefaultTrieNodeProvider;
             let mut serial = SerialSparseTrie::default().with_updates(true);
             let mut parallel = ParallelSparseTrie::default().with_updates(true);
 
@@ -4817,7 +4817,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_two_leaves_at_lower_roots() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut trie = ParallelSparseTrie::default().with_updates(true);
         let key_50 = Nibbles::unpack(hex!(
             "0x5000000000000000000000000000000000000000000000000000000000000000"
@@ -4876,7 +4876,7 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -4992,7 +4992,7 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -5101,7 +5101,7 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -5185,7 +5185,7 @@ mod tests {
 
         // First add leaf 0x1345 - this should create a leaf in upper trie at 0x
         let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x3, 0x4, 0x5], 1);
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify upper trie has a leaf at the root with key 1345
         ctx.assert_upper_subtrie(&trie)
@@ -5194,7 +5194,7 @@ mod tests {
 
         // Add leaf 0x1234 - this should go first in the upper subtrie
         let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 2);
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Upper trie should now have a branch at 0x1
         ctx.assert_upper_subtrie(&trie)
@@ -5204,7 +5204,7 @@ mod tests {
 
         // Add leaf 0x1245 - this should cause a branch and create the 0x12 subtrie
         let (leaf3_path, value3) = ctx.create_test_leaf([0x1, 0x2, 0x4, 0x5], 3);
-        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf3_path, value3.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify lower subtrie at 0x12 exists with correct structure
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
@@ -5216,7 +5216,7 @@ mod tests {
 
         // Add leaf 0x1334 - this should create another lower subtrie
         let (leaf4_path, value4) = ctx.create_test_leaf([0x1, 0x3, 0x3, 0x4], 4);
-        trie.update_leaf(leaf4_path, value4.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf4_path, value4.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify lower subtrie at 0x13 exists with correct values
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x3]))
@@ -5260,7 +5260,7 @@ mod tests {
         // First insert a leaf that ends exactly at the boundary (2 nibbles)
         let (first_leaf_path, first_value) = ctx.create_test_leaf([0x1, 0x2, 0x2, 0x4], 1);
 
-        trie.update_leaf(first_leaf_path, first_value.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(first_leaf_path, first_value.clone(), DefaultTrieNodeProvider).unwrap();
 
         // In an empty trie, the first leaf becomes the root, regardless of path length
         ctx.assert_upper_subtrie(&trie)
@@ -5270,7 +5270,7 @@ mod tests {
         // Now insert another leaf that shares the same 2-nibble prefix
         let (second_leaf_path, second_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 2);
 
-        trie.update_leaf(second_leaf_path, second_value.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(second_leaf_path, second_value.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Now both leaves should be in a lower subtrie at index [0x1, 0x2]
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
@@ -5333,7 +5333,7 @@ mod tests {
         let updated_path = Nibbles::from_nibbles([0x1, 0x2, 0x3, 0x4]);
         let (_, updated_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4], 100);
 
-        trie.update_leaf(updated_path, updated_value.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(updated_path, updated_value.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify the subtrie structure is maintained and value is updated
         // The branch structure should remain the same and all values should be present
@@ -5347,7 +5347,7 @@ mod tests {
         // Add a new leaf that extends an existing branch
         let (new_leaf_path, new_leaf_value) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x6], 200);
 
-        trie.update_leaf(new_leaf_path, new_leaf_value.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(new_leaf_path, new_leaf_value.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify the branch at [0x1, 0x2, 0x3] now has an additional child
         ctx.assert_subtrie(&trie, Nibbles::from_nibbles([0x1, 0x2]))
@@ -5690,7 +5690,7 @@ mod tests {
         //         └── 0xAB2: Hash
 
         // Create a mock provider that will provide the hash node
-        let mut provider = MockBlindedProvider::new();
+        let mut provider = MockTrieNodeProvider::new();
 
         // Create revealed branch which will get revealed and add it to the mock provider
         let child_hashes = [
@@ -5751,8 +5751,8 @@ mod tests {
         let (leaf1_path, value1) = ctx.create_test_leaf([0xA, 0xB, 0xC, 0xD, 0xE, 0xF], 1);
         let (leaf2_path, value2) = ctx.create_test_leaf([0xA, 0xB, 0xD, 0xE, 0xF, 0x0], 2);
 
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify upper trie structure
         ctx.assert_upper_subtrie(&trie)
@@ -5808,9 +5808,9 @@ mod tests {
         let (leaf2_path, value2) = ctx.create_test_leaf([0x2, 0x3, 0x4, 0x5], 2);
         let (leaf3_path, value3) = ctx.create_test_leaf([0x2, 0x3, 0x5, 0x6], 3);
 
-        trie.update_leaf(leaf1_path, value1, DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2, DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf3_path, value3, DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf1_path, value1, DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2, DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf3_path, value3, DefaultTrieNodeProvider).unwrap();
 
         // Verify initial structure has branch at root
         ctx.assert_upper_subtrie(&trie).has_branch(&Nibbles::default(), &[0x1, 0x2]);
@@ -5824,9 +5824,9 @@ mod tests {
         // Clear and add new leaves
         let mut trie =
             ParallelSparseTrie::from_root(TrieNode::EmptyRoot, TrieMasks::none(), true).unwrap();
-        trie.update_leaf(new_leaf1_path, new_value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(new_leaf2_path, new_value2.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(new_leaf3_path, new_value3.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(new_leaf1_path, new_value1.clone(), DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(new_leaf2_path, new_value2.clone(), DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(new_leaf3_path, new_value3.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify new structure has extension
         ctx.assert_upper_subtrie(&trie)
@@ -5871,9 +5871,9 @@ mod tests {
         let (leaf2_path, value2) = ctx.create_test_leaf([0x2, 0x3, 0x4, 0x5], 2);
         let (leaf3_path, value3) = ctx.create_test_leaf([0x2, 0x3, 0x5, 0x6], 3);
 
-        trie.update_leaf(leaf1_path, value1, DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf1_path, value1, DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf3_path, value3.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify upper trie structure
         ctx.assert_upper_subtrie(&trie)
@@ -5932,7 +5932,7 @@ mod tests {
 
         // Step 1: Add first leaf - initially stored as leaf in upper trie
         let (leaf1_path, value1) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4, 0x5], 1);
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify leaf node in upper trie (optimized single-leaf case)
         ctx.assert_upper_subtrie(&trie)
@@ -5941,7 +5941,7 @@ mod tests {
 
         // Step 2: Add leaf at 0x12346 - creates branch at 0x1234
         let (leaf2_path, value2) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x4, 0x6], 2);
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify extension now goes to 0x1234
         ctx.assert_upper_subtrie(&trie)
@@ -5959,7 +5959,7 @@ mod tests {
 
         // Step 3: Add leaf at 0x1235 - creates branch at 0x123
         let (leaf3_path, value3) = ctx.create_test_leaf([0x1, 0x2, 0x3, 0x5], 3);
-        trie.update_leaf(leaf3_path, value3.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf3_path, value3.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify extension now goes to 0x123
         ctx.assert_upper_subtrie(&trie)
@@ -5978,7 +5978,7 @@ mod tests {
 
         // Step 4: Add leaf at 0x124 - creates branch at 0x12 (subtrie root)
         let (leaf4_path, value4) = ctx.create_test_leaf([0x1, 0x2, 0x4], 4);
-        trie.update_leaf(leaf4_path, value4.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf4_path, value4.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Verify extension now goes to 0x12
         ctx.assert_upper_subtrie(&trie)
@@ -6024,8 +6024,8 @@ mod tests {
         let (leaf1_path, value1) = ctx.create_test_leaf(&path1_nibbles, 1);
         let (leaf2_path, value2) = ctx.create_test_leaf(&path2_nibbles, 2);
 
-        trie.update_leaf(leaf1_path, value1.clone(), DefaultBlindedProvider).unwrap();
-        trie.update_leaf(leaf2_path, value2.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf1_path, value1.clone(), DefaultTrieNodeProvider).unwrap();
+        trie.update_leaf(leaf2_path, value2.clone(), DefaultTrieNodeProvider).unwrap();
 
         // The common prefix of 63 F's will create a very long extension
         let extension_key = vec![0xF; 63];
@@ -6153,7 +6153,7 @@ mod tests {
             218, 223, 145, 158, 225, 240, 227, 203, 155, 98, 211, 244, 176, 44,
         ];
 
-        trie.update_leaf(leaf_full_path, leaf_new_value.clone(), DefaultBlindedProvider).unwrap();
+        trie.update_leaf(leaf_full_path, leaf_new_value.clone(), DefaultTrieNodeProvider).unwrap();
 
         // Sanity checks before calculating the root
         assert_eq!(
@@ -6171,7 +6171,7 @@ mod tests {
     #[test]
     fn find_leaf_existing_leaf() {
         // Create a simple trie with one leaf
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
@@ -6190,7 +6190,7 @@ mod tests {
     #[test]
     fn find_leaf_value_mismatch() {
         // Create a simple trie with one leaf
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
@@ -6228,7 +6228,7 @@ mod tests {
 
     #[test]
     fn find_leaf_exists_no_value_check() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         sparse.update_leaf(path, encode_account_value(0), &provider).unwrap();
@@ -6239,7 +6239,7 @@ mod tests {
 
     #[test]
     fn find_leaf_exists_with_value_check_ok() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let value = encode_account_value(0);
@@ -6251,7 +6251,7 @@ mod tests {
 
     #[test]
     fn find_leaf_exclusion_branch_divergence() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]); // Belongs to same branch
@@ -6266,7 +6266,7 @@ mod tests {
 
     #[test]
     fn find_leaf_exclusion_extension_divergence() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         // This will create an extension node at root with key 0x12
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
@@ -6281,7 +6281,7 @@ mod tests {
 
     #[test]
     fn find_leaf_exclusion_leaf_divergence() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let existing_leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
@@ -6294,7 +6294,7 @@ mod tests {
 
     #[test]
     fn find_leaf_exclusion_path_ends_at_branch() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = ParallelSparseTrie::default();
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]);
