@@ -42,12 +42,29 @@ pub use invalid_block_hook::InvalidBlockHook;
 pub mod config;
 pub use config::*;
 
+/// Outcome of validating a payload
+#[derive(Debug)]
+pub enum PayloadValidationOutcome<Block: reth_primitives_traits::Block> {
+    /// Payload is valid and produced a block
+    Valid {
+        /// The block created from the payload
+        block: RecoveredBlock<Block>,
+    },
+    /// Payload is invalid but block construction succeeded
+    Invalid {
+        /// The block created from the payload
+        block: RecoveredBlock<Block>,
+        /// The validation error
+        error: NewPayloadError,
+    },
+}
+
 /// Trait for accessing tree state during validation
 pub trait TreeStateProvider: Send + Sync {
     /// Returns the current canonical block hash
     fn canonical_block_hash(&self) -> alloy_primitives::B256;
 
-    /// Returns the current canonical block number  
+    /// Returns the current canonical block number
     fn canonical_block_number(&self) -> u64;
 }
 
@@ -150,18 +167,23 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     /// Validates a payload received from engine API.
     fn validate_payload(
         &self,
-        _payload: Self::ExecutionData,
+        payload: Self::ExecutionData,
         _ctx: TreeCtx<'_>,
-    ) -> Result<(), NewPayloadError> {
-        Ok(())
+    ) -> Result<PayloadValidationOutcome<Self::Block>, NewPayloadError> {
+        // Default implementation: try to convert using existing method
+        match self.ensure_well_formed_payload(payload) {
+            Ok(block) => Ok(PayloadValidationOutcome::Valid { block }),
+            Err(error) => Err(error),
+        }
     }
 
     /// Validates a block downloaded from the network.
     fn validate_block(
         &self,
-        _block: RecoveredBlock<Self::Block>,
+        _block: &RecoveredBlock<Self::Block>,
         _ctx: TreeCtx<'_>,
     ) -> Result<(), ConsensusError> {
+        // Default implementation: accept all blocks
         Ok(())
     }
 
