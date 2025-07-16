@@ -479,7 +479,7 @@ mod tests {
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState, TrieInput};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
-    use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
+    use revm_state::{AccountInfo, AccountStatus, CodeSize, EvmState, EvmStorageSlot};
     use std::sync::Arc;
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {
@@ -515,7 +515,7 @@ mod tests {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
-                        code_size: None,
+                        code_size: CodeSize::Known(0),
                     },
                     storage,
                     status: AccountStatus::Touched,

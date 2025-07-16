@@ -556,7 +556,7 @@ mod tests {
     use reth_ethereum_primitives::EthPrimitives;
     use revm::{
         database::{CacheDB, EmptyDB},
-        state::AccountInfo,
+        state::{AccountInfo, CodeSize},
     };
 
     #[derive(Clone, Debug, Default)]
@@ -626,7 +626,7 @@ mod tests {
             nonce,
             code_hash: KECCAK_EMPTY,
             code: None,
-            code_size: None,
+            code_size: CodeSize::Known(0),
         };
         state.insert_account(addr, account_info);
         state
@@ -668,7 +668,7 @@ mod tests {
             nonce: 1,
             code_hash: KECCAK_EMPTY,
             code: None,
-            code_size: None,
+            code_size: CodeSize::Known(0),
         };
         state.insert_account(addr2, account2);
 
@@ -695,7 +695,7 @@ mod tests {
             nonce: 1,
             code_hash: KECCAK_EMPTY,
             code: None,
-            code_size: None,
+            code_size: CodeSize::Known(0),
         };
         state.insert_account(addr2, account2);
 
