@@ -227,7 +227,7 @@ where
 
             let (tx, rx) = std::sync::mpsc::channel();
 
-            // Process all storage trie revealings in paralle, having first removed the
+            // Process all storage trie revealings in parallel, having first removed the
             // `reveal_nodes` tracking and `SparseTrie`s for each account from their HashMaps. These
             // will be returned after processing.
             storages
