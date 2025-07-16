@@ -191,7 +191,7 @@ impl<T: TransactionOrdering> TxPool<T> {
 
     /// Returns all senders in the pool
     pub(crate) fn unique_senders(&self) -> HashSet<Address> {
-        self.all_transactions.txs.values().map(|tx| tx.transaction.sender()).collect()
+        self.all_transactions.txs.values().flat_map(|tx| tx.values()).map(|tx| tx.transaction.sender()).collect()
     }
 
     /// Returns stats about the size of pool.
@@ -235,7 +235,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 for tx in removed {
                     let to = {
                         let tx =
-                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                            self.all_transactions.txs.get_mut(&tx.id().sender).and_then(|sender_txs| sender_txs.get_mut(&tx.id())).expect("tx exists in set");
 
                         // the blob fee is too high now, unset the blob fee cap block flag
                         tx.state.remove(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
@@ -252,7 +252,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 for tx in removed {
                     let to = {
                         let tx =
-                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                            self.all_transactions.txs.get_mut(&tx.id().sender).and_then(|sender_txs| sender_txs.get_mut(&tx.id())).expect("tx exists in set");
                         tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
                         tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                         tx.subpool = tx.state.into();
@@ -282,7 +282,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 for tx in removed {
                     let to = {
                         let tx =
-                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                            self.all_transactions.txs.get_mut(&tx.id().sender).and_then(|sender_txs| sender_txs.get_mut(&tx.id())).expect("tx exists in set");
                         tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
                         tx.subpool = tx.state.into();
                         tx.subpool
@@ -299,7 +299,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 for tx in removed {
                     let to = {
                         let tx =
-                            self.all_transactions.txs.get_mut(tx.id()).expect("tx exists in set");
+                            self.all_transactions.txs.get_mut(&tx.id().sender).and_then(|sender_txs| sender_txs.get_mut(&tx.id())).expect("tx exists in set");
                         tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                         tx.subpool = tx.state.into();
                         tx.subpool
@@ -790,8 +790,8 @@ impl<T: TransactionOrdering> TxPool<T> {
             return Ok(())
         }
 
+        // Transaction replacement is supported
         if txs_by_sender.any(|id| id == &transaction.transaction_id) {
-            // Transaction replacement is supported
             return Ok(())
         }
 
@@ -1228,7 +1228,7 @@ pub(crate) struct AllTransactions<T: PoolTransaction> {
     /// _All_ transactions identified by their hash.
     by_hash: HashMap<TxHash, Arc<ValidPoolTransaction<T>>>,
     /// _All_ transaction in the pool sorted by their sender and nonce pair.
-    txs: BTreeMap<TransactionId, PoolInternalTransaction<T>>,
+    txs: FxHashMap<SenderId, BTreeMap<TransactionId, PoolInternalTransaction<T>>>,
     /// Tracks the number of transactions by sender that are currently in the pool.
     tx_counter: FxHashMap<SenderId, usize>,
     /// The current block number the pool keeps track of.
@@ -1280,7 +1280,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Returns the internal transaction with additional metadata
     pub(crate) fn get(&self, id: &TransactionId) -> Option<&PoolInternalTransaction<T>> {
-        self.txs.get(id)
+        self.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(id))
     }
 
     /// Increments the transaction counter for the sender
@@ -1356,7 +1356,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // pre-allocate a few updates
         let mut updates = Vec::with_capacity(64);
 
-        let mut iter = self.txs.iter_mut().peekable();
+        let mut iter = self.txs.iter_mut().flat_map(|(_, txs)| txs.iter_mut()).peekable();
 
         // Loop over all individual senders and update all affected transactions.
         // One sender may have up to `max_account_slots` transactions here, which means, worst case
@@ -1523,7 +1523,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         sender: SenderId,
     ) -> impl Iterator<Item = (&TransactionId, &PoolInternalTransaction<T>)> + '_ {
         self.txs
-            .range((sender.start_bound(), Unbounded))
+            .get(&sender)
+            .map(|sender_txs| sender_txs.iter())
+            .into_iter()
+            .flatten()
             .take_while(move |(other, _)| sender == other.sender)
     }
 
@@ -1536,7 +1539,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         sender: SenderId,
     ) -> impl Iterator<Item = (&TransactionId, &mut PoolInternalTransaction<T>)> + '_ {
         self.txs
-            .range_mut((sender.start_bound(), Unbounded))
+            .get_mut(&sender)
+            .map(|sender_txs| sender_txs.iter_mut())
+            .into_iter()
+            .flatten()
             .take_while(move |(other, _)| sender == other.sender)
     }
 
@@ -1547,7 +1553,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &'a self,
         id: &'b TransactionId,
     ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
-        self.txs.range((Excluded(id), Unbounded)).take_while(|(other, _)| id.sender == other.sender)
+        self.txs.get(&id.sender)
+            .map(|sender_txs| sender_txs.range((Excluded(id), Unbounded)))
+            .into_iter()
+            .flatten()
     }
 
     /// Returns all transactions that _follow_ after the given id but have the same sender.
@@ -1558,7 +1567,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &'a self,
         id: &'b TransactionId,
     ) -> impl Iterator<Item = (&'a TransactionId, &'a PoolInternalTransaction<T>)> + 'a {
-        self.txs.range(id..).take_while(|(other, _)| id.sender == other.sender)
+        self.txs.get(&id.sender)
+            .map(|sender_txs| sender_txs.range(id..))
+            .into_iter()
+            .flatten()
     }
 
     /// Returns all mutable transactions that _follow_ after the given id but have the same sender.
@@ -1569,7 +1581,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &'a mut self,
         id: &'b TransactionId,
     ) -> impl Iterator<Item = (&'a TransactionId, &'a mut PoolInternalTransaction<T>)> + 'a {
-        self.txs.range_mut(id..).take_while(|(other, _)| id.sender == other.sender)
+        self.txs.get_mut(&id.sender)
+            .map(|sender_txs| sender_txs.range_mut(id..))
+            .into_iter()
+            .flatten()
     }
 
     /// Removes a transaction from the set using its hash.
@@ -1578,7 +1593,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         tx_hash: &B256,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
         let tx = self.by_hash.remove(tx_hash)?;
-        let internal = self.txs.remove(&tx.transaction_id)?;
+        let internal = self.txs.get_mut(&tx.transaction_id.sender).and_then(|sender_txs| sender_txs.remove(&tx.transaction_id))?;
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
@@ -1638,7 +1653,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &mut self,
         id: &TransactionId,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
-        let internal = self.txs.remove(id)?;
+        let internal = self.txs.get_mut(&id.sender).and_then(|sender_txs| sender_txs.remove(id))?;
 
         // decrement the counter for the sender.
         self.tx_decr(internal.transaction.sender_id());
@@ -1735,7 +1750,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         ancestor: Option<TransactionId>,
     ) -> Result<ValidPoolTransaction<T>, InsertErr<T>> {
         if let Some(ancestor) = ancestor {
-            let Some(ancestor_tx) = self.txs.get(&ancestor) else {
+            let Some(ancestor_tx) = self.txs.get(&ancestor.sender).and_then(|sender_txs| sender_txs.get(&ancestor)) else {
                 // ancestor tx is missing, so we can't insert the new blob
                 self.metrics.blob_transactions_nonce_gaps.increment(1);
                 return Err(InsertErr::BlobTxHasNonceGap { transaction: Arc::new(new_blob_tx) })
@@ -1883,9 +1898,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
             state,
             cumulative_cost,
         };
-
+        
         // try to insert the transaction
-        match self.txs.entry(*transaction.id()) {
+        match self.txs.entry(transaction.sender_id()).or_default().entry(*transaction.id()) {
             Entry::Vacant(entry) => {
                 // Insert the transaction in both maps
                 self.by_hash.insert(*pool_tx.transaction.hash(), pool_tx.transaction.clone());
@@ -2186,7 +2201,7 @@ mod tests {
         assert!(state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(move_to, SubPool::Pending);
 
-        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let inserted = pool.txs.get(&valid_tx.transaction_id.sender).and_then(|sender_txs| sender_txs.get(&valid_tx.transaction_id)).unwrap();
         assert_eq!(inserted.subpool, SubPool::Pending);
     }
 
@@ -2207,7 +2222,7 @@ mod tests {
         assert!(state.contains(TxState::NO_NONCE_GAPS));
         assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
 
-        let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let _ = pool.txs.get(&valid_tx.transaction_id.sender).and_then(|sender_txs| sender_txs.get(&valid_tx.transaction_id)).unwrap();
     }
 
     #[test]
@@ -2228,7 +2243,7 @@ mod tests {
         assert!(state.contains(TxState::NO_NONCE_GAPS));
         assert!(!state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
 
-        let _ = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let _ = pool.txs.get(&valid_tx.transaction_id.sender).and_then(|sender_txs| sender_txs.get(&valid_tx.transaction_id)).unwrap();
         pool.remove_transaction(&valid_tx.transaction_id);
 
         pool.pending_fees.blob_fee = tx.max_fee_per_blob_gas().unwrap();
@@ -2260,7 +2275,7 @@ mod tests {
         assert_eq!(pool.pending_pool.len(), 1);
 
         // check tx state and derived subpool
-        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        let internal_tx = pool.all_transactions.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(&id)).unwrap();
         assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(internal_tx.subpool, SubPool::Pending);
 
@@ -2269,7 +2284,7 @@ mod tests {
         pool.set_block_info(block_info);
 
         // check that the tx is promoted
-        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        let internal_tx = pool.all_transactions.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(&id)).unwrap();
         assert!(!internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(internal_tx.subpool, SubPool::Blob);
 
@@ -2300,7 +2315,7 @@ mod tests {
         assert_eq!(pool.blob_pool.len(), 1);
 
         // check tx state and derived subpool
-        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        let internal_tx = pool.all_transactions.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(&id)).unwrap();
         assert!(!internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(internal_tx.subpool, SubPool::Blob);
 
@@ -2309,7 +2324,7 @@ mod tests {
         pool.set_block_info(block_info);
 
         // check that the tx is promoted
-        let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+        let internal_tx = pool.all_transactions.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(&id)).unwrap();
         assert!(internal_tx.state.contains(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK));
         assert_eq!(internal_tx.subpool, SubPool::Pending);
 
@@ -2502,7 +2517,7 @@ mod tests {
             promotion_test.assert_single_tx_starting_subpool(&pool);
 
             // check tx state and derived subpool, it should not move into the blob pool
-            let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+            let internal_tx = pool.all_transactions.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(&id)).unwrap();
             assert_eq!(
                 internal_tx.subpool, promotion_test.subpool,
                 "Subpools do not match at start of test: {promotion_test:?}"
@@ -2514,7 +2529,7 @@ mod tests {
             pool.set_block_info(block_info);
 
             // check tx state and derived subpool, it should not move into the blob pool
-            let internal_tx = pool.all_transactions.txs.get(&id).unwrap();
+            let internal_tx = pool.all_transactions.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(&id)).unwrap();
             assert_eq!(
                 internal_tx.subpool, promotion_test.new_subpool,
                 "Subpools do not match at end of test: {promotion_test:?}"
@@ -2541,7 +2556,7 @@ mod tests {
         assert!(state.contains(TxState::ENOUGH_BALANCE));
         assert_eq!(move_to, SubPool::Pending);
 
-        let inserted = pool.txs.get(&valid_tx.transaction_id).unwrap();
+        let inserted = pool.txs.get(&valid_tx.transaction_id.sender).and_then(|sender_txs| sender_txs.get(&valid_tx.transaction_id)).unwrap();
         assert_eq!(inserted.subpool, SubPool::Pending);
     }
 
@@ -2566,7 +2581,7 @@ mod tests {
         assert_eq!(pool.len(), 1);
         assert!(pool.contains(valid_tx.hash()));
         let expected_state = TxState::ENOUGH_FEE_CAP_BLOCK | TxState::NO_NONCE_GAPS;
-        let inserted = pool.get(valid_tx.id()).unwrap();
+        let inserted = pool.txs.get(&valid_tx.transaction_id.sender).and_then(|sender_txs| sender_txs.get(&valid_tx.transaction_id)).unwrap();
         assert!(inserted.state.intersects(expected_state));
 
         // insert the same tx again
@@ -2586,7 +2601,7 @@ mod tests {
 
         assert!(pool.contains(valid_tx.hash()));
         assert_eq!(pool.len(), 2);
-        let inserted = pool.get(valid_tx.id()).unwrap();
+        let inserted = pool.txs.get(&valid_tx.transaction_id.sender).and_then(|sender_txs| sender_txs.get(&valid_tx.transaction_id)).unwrap();
         assert!(inserted.state.intersects(expected_state));
     }
 
@@ -2942,7 +2957,7 @@ mod tests {
         assert!(pool.pending_pool.is_empty());
         assert_eq!(pool.basefee_pool.len(), 1);
 
-        assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
+        assert_eq!(pool.all_transactions.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(&id)).unwrap().subpool, SubPool::BaseFee)
     }
 
     #[test]
@@ -2965,7 +2980,7 @@ mod tests {
         assert!(pool.pending_pool.is_empty());
         assert_eq!(pool.basefee_pool.len(), 1);
 
-        assert_eq!(pool.all_transactions.txs.get(&id).unwrap().subpool, SubPool::BaseFee)
+        assert_eq!(pool.all_transactions.txs.get(&id.sender).and_then(|sender_txs| sender_txs.get(&id)).unwrap().subpool, SubPool::BaseFee)
     }
 
     #[test]
