@@ -15,7 +15,7 @@ use tracing::info;
 /// Reads the header RLP from a file and returns the Header.
 pub(crate) fn read_header_from_file<H>(path: PathBuf) -> Result<H, eyre::Error>
 where
-    H: BlockHeader + Decodable
+    H: BlockHeader + Decodable,
 {
     let mut file = File::open(path)?;
     let mut buf = Vec::new();
