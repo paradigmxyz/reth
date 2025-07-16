@@ -98,7 +98,7 @@ impl<'a, DB: Database, I: Inspector<EthEvmContext<&'a mut State<DB>>>> BlockExec
         self,
     ) -> Result<(Self::Evm, BlockExecutionResult<Self::Receipt>), BlockExecutionError> {
         let Self { result, mut evm, .. } = self;
-        let ExecutionOutcome { bundle, receipts, requests, first_block: _ } = result;
+        let ExecutionOutcome { bundle, receipts, requests, .. } = result;
         let result = BlockExecutionResult {
             receipts: receipts.into_iter().flatten().collect(),
             requests: requests.into_iter().fold(Requests::default(), |mut reqs, req| {

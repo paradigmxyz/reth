@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-mod events;
-pub use crate::events::{Events, PayloadEvents};
+pub mod events;
+pub use events::{Events, PayloadEvents};
 
 pub use reth_payload_primitives::PayloadBuilderError;

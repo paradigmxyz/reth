@@ -428,6 +428,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
 
     /// Notify the manager that the peer sent a bad message
     fn on_bad_message(&self) {
+        // Additional logging to diagnose frequent BadMessage penalties on BSC
+        debug!(target: "net::session", remote_peer_id=?self.remote_peer_id, "on_bad_message invoked – reputation will be lowered");
+
         let Some(sender) = self.to_session_manager.inner().get_ref() else { return };
         let _ = sender.try_send(ActiveSessionMessage::BadMessage { peer_id: self.remote_peer_id });
     }

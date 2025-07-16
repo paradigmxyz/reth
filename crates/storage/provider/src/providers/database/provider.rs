@@ -1896,6 +1896,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
+        // --- Parlia snapshot flush (BNB Smart Chain) ---
+        if !execution_outcome.snapshots.is_empty() {
+            let mut snap_cursor = self.tx.cursor_write::<tables::ParliaSnapshots>()?;
+            for (block_num, bytes) in &execution_outcome.snapshots {
+                snap_cursor.upsert(*block_num, &reth_db_api::models::ParliaSnapshotBlob(bytes.clone()))?;
+            }
+        }
+
         Ok(())
     }
 

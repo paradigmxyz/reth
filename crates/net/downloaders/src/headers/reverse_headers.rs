@@ -392,6 +392,7 @@ where
                 headers.sort_unstable_by_key(|h| Reverse(h.number()));
 
                 if headers.is_empty() {
+                    debug!(target: "downloaders::headers", "Received empty sync target response");
                     return Err(HeadersResponseError {
                         request,
                         peer_id: Some(peer_id),
@@ -405,6 +406,7 @@ where
 
                 match sync_target {
                     SyncTargetBlock::Hash(hash) | SyncTargetBlock::HashAndNumber { hash, .. } => {
+                        debug!(target: "downloaders::headers", expected=%hash, got=%target.hash(), "Validating sync target hash");
                         if target.hash() != hash {
                             return Err(HeadersResponseError {
                                 request,
@@ -417,6 +419,7 @@ where
                         }
                     }
                     SyncTargetBlock::Number(number) => {
+                        debug!(target: "downloaders::headers", expected=%number, got=%target.number(), "Validating sync target number");
                         if target.number() != number {
                             return Err(HeadersResponseError {
                                 request,
@@ -447,6 +450,7 @@ where
                 Ok(())
             }
             Err(err) => {
+                debug!(target: "downloaders::headers", %err, ?request, "Failed to get sync target");
                 Err(HeadersResponseError { request, peer_id: None, error: err.into() }.into())
             }
         }
@@ -470,6 +474,7 @@ where
                 trace!(target: "downloaders::headers", len=%headers.len(), "Received headers response");
 
                 if headers.is_empty() {
+                    debug!(target: "downloaders::headers", ?request, ?peer_id, "Received empty headers response");
                     return Err(HeadersResponseError {
                         request,
                         peer_id: Some(peer_id),
@@ -559,6 +564,7 @@ where
         self.metrics.increment_errors(&error);
 
         // Re-submit the request
+        debug!(target: "downloaders::headers", ?request, ?peer_id, %error, "Re-submitting failed request");
         self.submit_request(request, Priority::High);
     }
 
@@ -819,6 +825,7 @@ where
                                 Some(this.request_fut(error.request, Priority::High));
                         }
                         Err(ReverseHeadersDownloaderError::Downloader(error)) => {
+                            debug!(target: "downloaders::headers", %error, "Headers downloader error");
                             this.clear();
                             return Poll::Ready(Some(Err(error)))
                         }
@@ -857,6 +864,7 @@ where
                         this.on_headers_error(error);
                     }
                     Err(ReverseHeadersDownloaderError::Downloader(error)) => {
+                        debug!(target: "downloaders::headers", %error, "Headers downloader error");
                         this.clear();
                         return Poll::Ready(Some(Err(error)))
                     }

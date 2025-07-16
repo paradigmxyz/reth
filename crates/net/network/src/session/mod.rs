@@ -137,6 +137,13 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         extra_protocols: RlpxSubProtocols,
         handshake: Arc<dyn EthRlpxHandshake>,
     ) -> Self {
+        debug!(target: "net::session", 
+            fork_id=?fork_filter.current(),
+            status_fork_id=?status.forkid,
+            status_chain=?status.chain,
+            "creating session manager with fork filter"
+        );
+        
         let (pending_sessions_tx, pending_sessions_rx) = mpsc::channel(config.session_event_buffer);
         let (active_session_tx, active_session_rx) = mpsc::channel(config.session_event_buffer);
         let active_session_tx = PollSender::new(active_session_tx);
@@ -182,7 +189,14 @@ impl<N: NetworkPrimitives> SessionManager<N> {
     /// Check whether the provided [`ForkId`] is compatible based on the validation rules in
     /// `EIP-2124`.
     pub fn is_valid_fork_id(&self, fork_id: ForkId) -> bool {
-        self.fork_filter.validate(fork_id).is_ok()
+        let result = self.fork_filter.validate(fork_id);
+        debug!(target: "net::session", 
+            ?fork_id, 
+            our_fork_id=?self.fork_filter.current(),
+            validation_result=?result,
+            "fork ID validation check"
+        );
+        result.is_ok()
     }
 
     /// Returns the next unique [`SessionId`].

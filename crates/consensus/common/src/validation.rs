@@ -10,6 +10,7 @@ use reth_primitives_traits::{
     constants::MAXIMUM_GAS_LIMIT_BLOCK, Block, BlockBody, BlockHeader, GotExpected, SealedBlock,
     SealedHeader,
 };
+use tracing::debug;
 
 /// Gas used needs to be less than gas limit. Gas used is going to be checked after execution.
 #[inline]
@@ -303,7 +304,7 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
     header: &H,
     parent: &H,
 ) -> Result<(), ConsensusError> {
-    if header.timestamp() <= parent.timestamp() {
+    if header.timestamp() < parent.timestamp() {
         return Err(ConsensusError::TimestampIsInPast {
             parent_timestamp: parent.timestamp(),
             timestamp: header.timestamp(),
@@ -338,6 +339,13 @@ pub fn validate_against_parent_4844<H: BlockHeader>(
     let expected_excess_blob_gas =
         blob_params.next_block_excess_blob_gas(parent_excess_blob_gas, parent_blob_gas_used);
     if expected_excess_blob_gas != excess_blob_gas {
+        tracing::debug!(
+            target: "downloaders::headers",
+            parent_excess_blob_gas = parent_excess_blob_gas,
+            parent_blob_gas_used = parent_blob_gas_used,
+            expected_excess_blob_gas = expected_excess_blob_gas,
+            "Invalid excess blob gas"
+        );
         return Err(ConsensusError::ExcessBlobGasDiff {
             diff: GotExpected { got: excess_blob_gas, expected: expected_excess_blob_gas },
             parent_excess_blob_gas,
