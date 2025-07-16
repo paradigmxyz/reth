@@ -297,7 +297,7 @@ RPC:
 
           [default: 8551]
 
-      --authrpc.jwtsecret <PATH>
+      --authrpc.jwt-secret <PATH>
           Path to a JWT secret to use for the authenticated engine-API RPC server.
 
           This will enforce JWT authentication for all requests coming from the consensus layer.
@@ -320,7 +320,7 @@ RPC:
       --rpc.jwtsecret <HEX>
           Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and `--ws.api`.
 
-          This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwtsecret`.
+          This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwt-secret`.
 
       --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
           Set the maximum RPC request payload size for both HTTP and WS in megabytes
