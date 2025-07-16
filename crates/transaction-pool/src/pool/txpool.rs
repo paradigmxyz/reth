@@ -243,7 +243,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                             .all_transactions
                             .txs
                             .get_mut(&tx.id().sender)
-                            .and_then(|sender_txs| sender_txs.get_mut(&tx.id()))
+                            .and_then(|sender_txs| sender_txs.get_mut(tx.id()))
                             .expect("tx exists in set");
 
                         // the blob fee is too high now, unset the blob fee cap block flag
@@ -264,7 +264,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                             .all_transactions
                             .txs
                             .get_mut(&tx.id().sender)
-                            .and_then(|sender_txs| sender_txs.get_mut(&tx.id()))
+                            .and_then(|sender_txs| sender_txs.get_mut(tx.id()))
                             .expect("tx exists in set");
                         tx.state.insert(TxState::ENOUGH_BLOB_FEE_CAP_BLOCK);
                         tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
@@ -298,7 +298,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                             .all_transactions
                             .txs
                             .get_mut(&tx.id().sender)
-                            .and_then(|sender_txs| sender_txs.get_mut(&tx.id()))
+                            .and_then(|sender_txs| sender_txs.get_mut(tx.id()))
                             .expect("tx exists in set");
                         tx.state.remove(TxState::ENOUGH_FEE_CAP_BLOCK);
                         tx.subpool = tx.state.into();
@@ -319,7 +319,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                             .all_transactions
                             .txs
                             .get_mut(&tx.id().sender)
-                            .and_then(|sender_txs| sender_txs.get_mut(&tx.id()))
+                            .and_then(|sender_txs| sender_txs.get_mut(tx.id()))
                             .expect("tx exists in set");
                         tx.state.insert(TxState::ENOUGH_FEE_CAP_BLOCK);
                         tx.subpool = tx.state.into();
@@ -1559,12 +1559,7 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &mut self,
         sender: SenderId,
     ) -> impl Iterator<Item = (&TransactionId, &mut PoolInternalTransaction<T>)> + '_ {
-        self.txs
-            .get_mut(&sender)
-            .map(|sender_txs| sender_txs.iter_mut())
-            .into_iter()
-            .flatten()
-            .take_while(move |(other, _)| sender == other.sender)
+        self.txs.get_mut(&sender).map(|sender_txs| sender_txs.iter_mut()).into_iter().flatten()
     }
 
     /// Returns all transactions that _follow_ after the given id and have the same sender.
@@ -1613,10 +1608,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
         tx_hash: &B256,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
         let tx = self.by_hash.remove(tx_hash)?;
-        let internal = self
-            .txs
-            .get_mut(&tx.transaction_id.sender)
-            .and_then(|sender_txs| sender_txs.remove(&tx.transaction_id))?;
+        let internal =
+            if let hash_map::Entry::Occupied(mut sender_entry) = self.txs.entry(tx.sender_id()) {
+                let internal_opt = sender_entry.get_mut().remove(&tx.transaction_id);
+                if sender_entry.get().is_empty() {
+                    sender_entry.remove();
+                }
+                internal_opt
+            } else {
+                None
+            }?;
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
@@ -1631,7 +1632,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &mut self,
         tx_id: &TransactionId,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
-        let internal = self.txs.remove(tx_id)?;
+        let internal =
+            if let hash_map::Entry::Occupied(mut sender_entry) = self.txs.entry(tx_id.sender) {
+                let internal_opt = sender_entry.get_mut().remove(tx_id);
+                if sender_entry.get().is_empty() {
+                    sender_entry.remove();
+                }
+                internal_opt
+            } else {
+                None
+            }?;
         let tx = self.by_hash.remove(internal.transaction.hash())?;
         self.remove_auths(&internal);
         // decrement the counter for the sender.
@@ -1676,8 +1686,16 @@ impl<T: PoolTransaction> AllTransactions<T> {
         &mut self,
         id: &TransactionId,
     ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
-        let internal = self.txs.get_mut(&id.sender).and_then(|sender_txs| sender_txs.remove(id))?;
-
+        let internal =
+            if let hash_map::Entry::Occupied(mut sender_entry) = self.txs.entry(id.sender) {
+                let internal_opt = sender_entry.get_mut().remove(id);
+                if sender_entry.get().is_empty() {
+                    sender_entry.remove();
+                }
+                internal_opt
+            } else {
+                None
+            }?;
         // decrement the counter for the sender.
         self.tx_decr(internal.transaction.sender_id());
 
@@ -2042,19 +2060,26 @@ impl<T: PoolTransaction> AllTransactions<T> {
 
     /// Number of transactions in the entire pool
     pub(crate) fn len(&self) -> usize {
-        self.txs.len()
+        self.by_hash.len()
     }
 
     /// Whether the pool is empty
     pub(crate) fn is_empty(&self) -> bool {
-        self.txs.is_empty()
+        self.by_hash.is_empty()
     }
 
     /// Asserts that the bijection between `by_hash` and `txs` is valid.
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
-        assert_eq!(self.by_hash.len(), self.txs.len(), "by_hash.len() != txs.len()");
-        assert!(self.auths.len() <= self.txs.len(), "auths > txs.len()");
+        assert_eq!(
+            self.by_hash.len(),
+            self.txs.values().map(|v| v.len()).sum::<usize>(),
+            "by_hash.len() != txs.len()"
+        );
+        assert!(
+            self.auths.len() <= self.txs.values().map(|v| v.len()).sum::<usize>(),
+            "auths > txs.len()"
+        );
     }
 }
 
