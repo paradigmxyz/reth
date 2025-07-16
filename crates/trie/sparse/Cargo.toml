@@ -55,6 +55,7 @@ rand_08.workspace = true
 [features]
 default = ["std", "metrics"]
 std = [
+    "dep:rayon",
     "alloy-primitives/std",
     "alloy-rlp/std",
     "alloy-trie/std",
