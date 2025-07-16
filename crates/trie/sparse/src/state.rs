@@ -340,7 +340,7 @@ where
             // supports doing so.
             trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", "Revealing {} account nodes", nodes.len());
+            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes");
             trie.reveal_nodes(nodes)?;
         }
 
@@ -397,7 +397,7 @@ where
             // supports doing so.
             trie.reserve_nodes(new_nodes);
 
-            trace!(target: "trie::sparse", ?account, "Revealing {} storage nodes", nodes.len());
+            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes");
             trie.reveal_nodes(nodes)?;
         }
 
