@@ -52,6 +52,9 @@ pub struct ParallelSparseTrie {
     /// Reusable buffer pool used for collecting [`SparseTrieUpdatesAction`]s during hash
     /// computations.
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
+    /// Metrics for the parallel sparse trie.
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::ParallelSparseTrieMetrics,
 }
 
 impl Default for ParallelSparseTrie {
@@ -67,6 +70,8 @@ impl Default for ParallelSparseTrie {
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
             update_actions_buffers: Vec::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
         }
     }
 }
@@ -586,6 +591,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // Take changed subtries according to the prefix set
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let (subtries, unchanged_prefix_set) = self.take_changed_lower_subtries(&mut prefix_set);
+
+        // update metrics
+        #[cfg(feature = "metrics")]
+        self.update_hash_metrics(subtries.len());
 
         // Update the prefix set with the keys that didn't have matching subtries
         self.prefix_set = unchanged_prefix_set;
@@ -1229,6 +1238,12 @@ impl ParallelSparseTrie {
         }
         nodes.extend(self.upper_subtrie.nodes.iter());
         nodes
+    }
+
+    /// Updates metrics for the [`ParallelSparseTrie`]
+    #[cfg(feature = "metrics")]
+    fn update_hash_metrics(&self, subtries: usize) {
+        self.metrics.subtries_updated.record(subtries as f64)
     }
 }
 

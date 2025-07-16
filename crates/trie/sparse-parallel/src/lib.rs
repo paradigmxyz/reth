@@ -9,3 +9,6 @@ pub use trie::*;
 
 mod lower;
 use lower::*;
+
+#[cfg(feature = "metrics")]
+mod metrics;
