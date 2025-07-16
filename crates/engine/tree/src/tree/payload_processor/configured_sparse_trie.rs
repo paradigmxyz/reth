@@ -4,7 +4,7 @@ use alloy_primitives::B256;
 use reth_trie::{Nibbles, TrieNode};
 use reth_trie_sparse::{
     errors::SparseTrieResult, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
-    SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+    RevealedSparseNode, SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
 };
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::borrow::Cow;
@@ -74,6 +74,13 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         match self {
             Self::Serial(trie) => trie.reveal_node(path, node, masks),
             Self::Parallel(trie) => trie.reveal_node(path, node, masks),
+        }
+    }
+
+    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+        match self {
+            Self::Serial(trie) => trie.reveal_nodes(nodes),
+            Self::Parallel(trie) => trie.reveal_nodes(nodes),
         }
     }
 
