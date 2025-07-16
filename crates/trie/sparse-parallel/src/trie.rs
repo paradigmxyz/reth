@@ -89,7 +89,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         self = self.with_updates(retain_updates);
 
-        self.reveal_upper_node(Nibbles::default(), &root, &masks)?;
+        self.reveal_upper_node(Nibbles::default(), &root, masks)?;
         Ok(self)
     }
 
@@ -138,7 +138,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
         // end up making many small capacity changes as we loop.
         self.upper_subtrie.nodes.reserve(upper_nodes.len());
         for node in upper_nodes {
-            self.reveal_upper_node(node.path, &node.node, &node.masks)?;
+            self.reveal_upper_node(node.path, &node.node, node.masks)?;
         }
 
         #[cfg(not(feature = "std"))]
@@ -176,9 +176,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 .map(|nodes| {
                     // NOTE: chunk_by won't produce empty groups
                     let node = &nodes[0];
-                    let Some(idx) = SparseSubtrieType::from_path(&node.path).lower_index() else {
-                        panic!("upper subtrie node {node:?} found amongst lower nodes");
-                    };
+                    let idx =
+                        SparseSubtrieType::from_path(&node.path).lower_index().unwrap_or_else(
+                            || panic!("upper subtrie node {node:?} found amongst lower nodes"),
+                        );
                     // due to the nodes being sorted secondarily on their path, and chunk_by keeping
                     // the first element of each group, the `path` here will necessarily be the
                     // shortest path being revealed for each subtrie. Therefore we can reveal the
@@ -202,7 +203,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
                     for node in nodes {
                         // Reveal each node in the subtrie, returning early on any errors
-                        let res = subtrie.reveal_node(node.path, &node.node, &node.masks);
+                        let res = subtrie.reveal_node(node.path, &node.node, node.masks);
                         if res.is_err() {
                             return (subtrie_idx, subtrie, res)
                         }
@@ -289,7 +290,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                                 subtrie.reveal_node(
                                     reveal_path,
                                     &decoded,
-                                    &TrieMasks { hash_mask, tree_mask },
+                                    TrieMasks { hash_mask, tree_mask },
                                 )?;
                             } else {
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
@@ -572,7 +573,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                                 remaining_child_subtrie.reveal_node(
                                     remaining_child_path,
                                     &decoded,
-                                    &TrieMasks { hash_mask, tree_mask },
+                                    TrieMasks { hash_mask, tree_mask },
                                 )?;
                                 remaining_child_subtrie.nodes.get(&remaining_child_path).unwrap()
                             } else {
@@ -1327,7 +1328,7 @@ impl ParallelSparseTrie {
         &mut self,
         path: Nibbles,
         node: &TrieNode,
-        masks: &TrieMasks,
+        masks: TrieMasks,
     ) -> SparseTrieResult<()> {
         // If there is no subtrie for the path it means the path is UPPER_TRIE_MAX_DEPTH or less
         // nibbles, and so belongs to the upper trie.
@@ -1472,7 +1473,7 @@ impl SparseSubtrie {
                                 self.reveal_node(
                                     reveal_path,
                                     &decoded,
-                                    &TrieMasks { hash_mask, tree_mask },
+                                    TrieMasks { hash_mask, tree_mask },
                                 )?;
                             } else {
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
@@ -1626,7 +1627,7 @@ impl SparseSubtrie {
         &mut self,
         path: Nibbles,
         node: &TrieNode,
-        masks: &TrieMasks,
+        masks: TrieMasks,
     ) -> SparseTrieResult<()> {
         debug_assert!(path.starts_with(&self.path));
 
@@ -1808,7 +1809,7 @@ impl SparseSubtrie {
             return Ok(())
         }
 
-        self.reveal_node(path, &TrieNode::decode(&mut &child[..])?, &TrieMasks::none())
+        self.reveal_node(path, &TrieNode::decode(&mut &child[..])?, TrieMasks::none())
     }
 
     /// Recalculates and updates the RLP hashes for the changed nodes in this subtrie.
@@ -3317,12 +3318,12 @@ mod tests {
         );
 
         // Reveal nodes
-        subtrie.reveal_node(branch_2_path, &branch_2, &TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_1_path, &leaf_1, &TrieMasks::none()).unwrap();
-        subtrie.reveal_node(extension_path, &extension, &TrieMasks::none()).unwrap();
-        subtrie.reveal_node(branch_1_path, &branch_1, &TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_2_path, &leaf_2, &TrieMasks::none()).unwrap();
-        subtrie.reveal_node(leaf_3_path, &leaf_3, &TrieMasks::none()).unwrap();
+        subtrie.reveal_node(branch_2_path, &branch_2, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_1_path, &leaf_1, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(extension_path, &extension, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(branch_1_path, &branch_1, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_2_path, &leaf_2, TrieMasks::none()).unwrap();
+        subtrie.reveal_node(leaf_3_path, &leaf_3, TrieMasks::none()).unwrap();
 
         // Run hash builder for two leaf nodes
         let (_, _, proof_nodes, _, _) = run_hash_builder(

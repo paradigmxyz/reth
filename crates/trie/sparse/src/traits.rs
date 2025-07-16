@@ -233,7 +233,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
 ///
 /// These masks are essential for efficient trie traversal and serialization, as they
 /// determine how nodes should be encoded and stored on disk.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct TrieMasks {
     /// Branch node hash mask, if any.
     ///
