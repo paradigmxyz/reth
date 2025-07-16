@@ -100,6 +100,7 @@ where
 mod tests {
     use super::*;
     use crate::U256;
+    use alloy_consensus::Header;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
 
     #[test]
