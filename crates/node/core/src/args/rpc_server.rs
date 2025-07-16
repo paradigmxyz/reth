@@ -130,7 +130,7 @@ pub struct RpcServerArgs {
     /// `--ws.api`.
     ///
     /// This is __not__ used for the authenticated engine-API RPC server, see
-    /// `--authrpc.jwtsecret`.
+    /// `--authrpc.jwt-secret`.
     #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false)]
     pub rpc_jwtsecret: Option<JwtSecret>,
 
