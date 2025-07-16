@@ -256,35 +256,35 @@ where
     F::AccountNodeProvider: TrieNodeProvider,
     F::StorageNodeProvider: TrieNodeProvider,
 {
-    type AccountNodeProvider = WitnessBlindedProvider<F::AccountNodeProvider>;
-    type StorageNodeProvider = WitnessBlindedProvider<F::StorageNodeProvider>;
+    type AccountNodeProvider = WitnessTrieNodeProvider<F::AccountNodeProvider>;
+    type StorageNodeProvider = WitnessTrieNodeProvider<F::StorageNodeProvider>;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         let provider = self.provider_factory.account_node_provider();
-        WitnessBlindedProvider::new(provider, self.tx.clone())
+        WitnessTrieNodeProvider::new(provider, self.tx.clone())
     }
 
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
         let provider = self.provider_factory.storage_node_provider(account);
-        WitnessBlindedProvider::new(provider, self.tx.clone())
+        WitnessTrieNodeProvider::new(provider, self.tx.clone())
     }
 }
 
 #[derive(Debug)]
-struct WitnessBlindedProvider<P> {
+struct WitnessTrieNodeProvider<P> {
     /// Proof-based blinded.
     provider: P,
     /// Sender for forwarding fetched blinded node.
     tx: mpsc::Sender<Bytes>,
 }
 
-impl<P> WitnessBlindedProvider<P> {
+impl<P> WitnessTrieNodeProvider<P> {
     const fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
         Self { provider, tx }
     }
 }
 
-impl<P: TrieNodeProvider> TrieNodeProvider for WitnessBlindedProvider<P> {
+impl<P: TrieNodeProvider> TrieNodeProvider for WitnessTrieNodeProvider<P> {
     fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         let maybe_node = self.provider.trie_node(path)?;
         if let Some(node) = &maybe_node {

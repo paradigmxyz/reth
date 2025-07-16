@@ -140,6 +140,31 @@ where
     B: Block,
     ChainSpec: EthereumHardforks,
 {
+    post_merge_hardfork_fields(block, chain_spec)?;
+
+    // Check transaction root
+    if let Err(error) = block.ensure_transaction_root_valid() {
+        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
+    }
+
+    Ok(())
+}
+
+/// Validates the ommers hash and other fork-specific fields.
+///
+/// These fork-specific validations are:
+/// * EIP-4895 withdrawals validation, if shanghai is active based on the given chainspec. See more
+///   information about the specific checks in [`validate_shanghai_withdrawals`].
+/// * EIP-4844 blob gas validation, if cancun is active based on the given chainspec. See more
+///   information about the specific checks in [`validate_cancun_gas`].
+pub fn post_merge_hardfork_fields<B, ChainSpec>(
+    block: &SealedBlock<B>,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError>
+where
+    B: Block,
+    ChainSpec: EthereumHardforks,
+{
     // Check ommers hash
     let ommers_hash = block.body().calculate_ommers_root();
     if Some(block.ommers_hash()) != ommers_hash {
@@ -150,11 +175,6 @@ where
             }
             .into(),
         ))
-    }
-
-    // Check transaction root
-    if let Err(error) = block.ensure_transaction_root_valid() {
-        return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
 
     // EIP-4895: Beacon chain push withdrawals as operations
