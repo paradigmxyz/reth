@@ -89,7 +89,7 @@ use tracing::{debug, error, trace, warn};
 ///     subgraph Swarm
 ///         direction TB
 ///         B1[(Session Manager)]
-///         B2[(Connection Lister)]
+///         B2[(Connection Listener)]
 ///         B3[(Network State)]
 ///     end
 ///  end
