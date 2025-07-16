@@ -169,7 +169,7 @@ mod tests {
         database::State,
         database_interface::EmptyDB,
         inspector::NoOpInspector,
-        state::{Account, AccountInfo, AccountStatus, EvmStorage, EvmStorageSlot},
+        state::{Account, AccountInfo, AccountStatus, CodeSize, EvmStorage, EvmStorageSlot},
         Context, MainBuilder, MainContext,
     };
     use std::sync::mpsc;
@@ -286,7 +286,7 @@ mod tests {
                         nonce: 10,
                         code_hash: B256::random(),
                         code: Default::default(),
-                        code_size: None,
+                        code_size: CodeSize::Known(0),
                     },
                     storage,
                     status: AccountStatus::default(),

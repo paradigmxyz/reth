@@ -556,6 +556,7 @@ mod tests {
     use super::*;
     use alloy_consensus::TxType;
     use alloy_primitives::{bytes, Address, LogData, B256};
+    use revm::state::CodeSize;
 
     #[test]
     fn test_initialisation() {
@@ -929,14 +930,14 @@ mod tests {
             balance: U256::from(100),
             code_hash: B256::ZERO,
             code: None,
-            code_size: None,
+            code_size: CodeSize::Known(0),
         };
         let account_info2 = AccountInfo {
             nonce: 2,
             balance: U256::from(200),
             code_hash: B256::ZERO,
             code: None,
-            code_size: None,
+            code_size: CodeSize::Known(0),
         };
 
         // Set up the bundle state with these accounts

@@ -5,7 +5,11 @@ use crate::trie::StatelessTrie;
 use alloc::{collections::btree_map::BTreeMap, format};
 use alloy_primitives::{map::B256Map, Address, B256, U256};
 use reth_errors::ProviderError;
-use reth_revm::{bytecode::Bytecode, state::AccountInfo, Database};
+use reth_revm::{
+    bytecode::Bytecode,
+    state::{AccountInfo, CodeSize},
+    Database,
+};
 
 /// An EVM database implementation backed by witness data.
 ///
@@ -82,7 +86,7 @@ where
                 nonce: account.nonce,
                 code_hash: account.code_hash,
                 code: None,
-                code_size: None,
+                code_size: CodeSize::Known(0),
             })
         })
     }

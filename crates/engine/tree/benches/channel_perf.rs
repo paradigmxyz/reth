@@ -7,7 +7,9 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 use proptest::test_runner::TestRunner;
 use rand::Rng;
 use revm_primitives::{Address, HashMap};
-use revm_state::{Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot};
+use revm_state::{
+    Account, AccountInfo, AccountStatus, CodeSize, EvmState, EvmStorage, EvmStorageSlot,
+};
 use std::{hint::black_box, thread};
 
 /// Creates a mock state with the specified number of accounts for benchmarking
@@ -26,7 +28,7 @@ fn create_bench_state(num_accounts: usize) -> EvmState {
                 nonce: 10,
                 code_hash: B256::from_slice(&rng.random::<[u8; 32]>()),
                 code: Default::default(),
-                code_size: None,
+                code_size: CodeSize::Known(0),
             },
             storage,
             status: AccountStatus::empty(),

@@ -53,6 +53,7 @@ use reth_storage_api::{
     ReceiptProviderIdExt, StatsReader,
 };
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
+use revm::state::CodeSize;
 use std::{
     collections::BTreeMap,
     future::Future,
@@ -1732,7 +1733,7 @@ where
                     } else {
                         Some(revm::bytecode::Bytecode::new_raw(account_info.code))
                     },
-                    code_size: None,
+                    code_size: CodeSize::Known(0),
                 }))
             }
         })

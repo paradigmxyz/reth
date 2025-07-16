@@ -582,7 +582,7 @@ mod tests {
     use crate::KeccakKeyHasher;
     use alloy_primitives::Bytes;
     use revm_database::{states::StorageSlot, StorageWithOriginalValues};
-    use revm_state::{AccountInfo, Bytecode};
+    use revm_state::{AccountInfo, Bytecode, CodeSize};
 
     #[test]
     fn hashed_state_wiped_extension() {
@@ -669,7 +669,7 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            code_size: None,
+            code_size: CodeSize::Known(0),
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -714,7 +714,7 @@ mod tests {
             nonce: 1,
             code_hash: B256::random(),
             code: None,
-            code_size: None,
+            code_size: CodeSize::Known(0),
         };
 
         // Create hashed accounts with addresses.

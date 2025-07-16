@@ -27,10 +27,7 @@ impl reth_codecs::Compact for AccountBeforeTx {
         // for now put full bytes and later compress it.
         buf.put_slice(self.address.as_slice());
 
-        let mut acc_len = 0;
-        if let Some(account) = self.info {
-            acc_len = account.to_compact(buf);
-        }
+        let acc_len = if let Some(account) = self.info { account.to_compact(buf) } else { 0 };
         acc_len + 20
     }
 
