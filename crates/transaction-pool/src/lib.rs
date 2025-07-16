@@ -281,8 +281,9 @@ pub use crate::{
     error::PoolResult,
     ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
     pool::{
-        blob_tx_priority, fee_delta, state::SubPool, AllTransactionsEvents, FullTransactionEvent,
-        NewTransactionEvent, TransactionEvent, TransactionEvents, TransactionListenerKind,
+        blob_tx_priority, fee_delta, state::SubPool, AddedTransactionOutcome,
+        AllTransactionsEvents, FullTransactionEvent, NewTransactionEvent, TransactionEvent,
+        TransactionEvents, TransactionListenerKind,
     },
     traits::*,
     validate::{
@@ -486,7 +487,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TxHash> {
+    ) -> PoolResult<AddedTransactionOutcome> {
         let (_, tx) = self.validate(origin, transaction).await;
         let mut results = self.pool.add_transactions(origin, std::iter::once(tx));
         results.pop().expect("result length is the same as the input")
@@ -496,7 +497,7 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         if transactions.is_empty() {
             return Vec::new()
         }
