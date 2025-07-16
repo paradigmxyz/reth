@@ -8,7 +8,7 @@ use reth_optimism_primitives::DepositReceipt;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
     try_into_op_tx_info, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcConvert, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes, TxInfoMapper,
+    RpcNodeCoreExt, TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_storage_api::{
@@ -16,10 +16,7 @@ use reth_storage_api::{
     TransactionsProvider,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
-use std::{
-    fmt::{Debug, Formatter},
-    marker::PhantomData,
-};
+use std::fmt::{Debug, Formatter};
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
@@ -97,34 +94,32 @@ where
 ///
 /// For deposits, receipt is fetched to extract `deposit_nonce` and `deposit_receipt_version`.
 /// Otherwise, it works like regular Ethereum implementation, i.e. uses [`TransactionInfo`].
-pub struct OpTxInfoMapper<Provider, Rpc: RpcTypes> {
+pub struct OpTxInfoMapper<Provider> {
     provider: Provider,
-    _pd: PhantomData<Rpc>,
 }
 
-impl<Provider: Clone, Rpc: RpcTypes> Clone for OpTxInfoMapper<Provider, Rpc> {
+impl<Provider: Clone> Clone for OpTxInfoMapper<Provider> {
     fn clone(&self) -> Self {
-        Self { provider: self.provider.clone(), _pd: PhantomData }
+        Self { provider: self.provider.clone() }
     }
 }
 
-impl<Provider, Rpc: RpcTypes> Debug for OpTxInfoMapper<Provider, Rpc> {
+impl<Provider> Debug for OpTxInfoMapper<Provider> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpTxInfoMapper").finish()
     }
 }
 
-impl<Provider, Rpc: RpcTypes> OpTxInfoMapper<Provider, Rpc> {
+impl<Provider> OpTxInfoMapper<Provider> {
     /// Creates [`OpTxInfoMapper`] that uses [`ReceiptProvider`] borrowed from given `eth_api`.
     pub const fn new(provider: Provider) -> Self {
-        Self { provider, _pd: PhantomData }
+        Self { provider }
     }
 }
 
-impl<Provider, Rpc> TxInfoMapper<&OpTxEnvelope> for OpTxInfoMapper<Provider, Rpc>
+impl<Provider> TxInfoMapper<&OpTxEnvelope> for OpTxInfoMapper<Provider>
 where
     Provider: ReceiptProvider<Receipt: DepositReceipt>,
-    Rpc: RpcTypes,
 {
     type Out = OpTransactionInfo;
     type Err = ProviderError;

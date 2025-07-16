@@ -350,7 +350,7 @@ pub type OpRpcConvert<N, NetworkT> = RpcConverter<
     NetworkT,
     <N as FullNodeComponents>::Evm,
     OpReceiptConverter<<N as FullNodeTypes>::Provider>,
-    OpTxInfoMapper<<N as FullNodeTypes>::Provider, NetworkT>,
+    OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
 >;
 
 /// Builds [`OpEthApi`] for Optimism.
