@@ -290,7 +290,7 @@ pub use crate::{
         TransactionValidator, ValidPoolTransaction,
     },
 };
-use crate::{identifier::TransactionId, pool::PoolInner};
+use crate::{error::PoolError, identifier::TransactionId, pool::PoolInner};
 use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
@@ -408,6 +408,50 @@ where
     /// Returns the configured blob store.
     pub fn blob_store(&self) -> &S {
         self.pool.blob_store()
+    }
+
+    /// Adds a consensus transaction to the pool.
+    ///
+    /// This is a convenience method that handles the conversion from consensus format
+    /// to pool format and submits with Local origin (trusted).
+    ///
+    /// # Arguments
+    ///
+    /// * `consensus_tx` - A recovered transaction in consensus format
+    ///
+    /// # Returns
+    ///
+    /// Returns the transaction hash on success, or a `PoolError` on failure.
+    /// Common failures include:
+    /// - Conversion errors (e.g., blob transactions without sidecars)
+    /// - Validation errors (nonce, balance, gas limit, etc.)
+    /// - Pool errors (duplicate transactions, pool full, etc.)
+    pub async fn add_consensus_transaction(
+        &self,
+        consensus_tx: Recovered<
+            <<V as TransactionValidator>::Transaction as PoolTransaction>::Consensus,
+        >,
+    ) -> PoolResult<TxHash>
+    where
+        V: TransactionValidator,
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+        T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+        S: BlobStore,
+    {
+        // Convert consensus transaction to pool transaction
+        let pool_transaction = match V::Transaction::try_from_consensus(consensus_tx) {
+            Ok(tx) => tx,
+            Err(err) => {
+                // Return a descriptive error for conversion failures
+                return Err(PoolError::other(
+                    TxHash::default(), // We don't have the hash yet
+                    format!("Failed to convert consensus transaction to pool format: {}", err),
+                ));
+            }
+        };
+
+        // Submit the transaction with Local origin (trusted)
+        self.add_transaction(TransactionOrigin::Local, pool_transaction).await
     }
 }
 
