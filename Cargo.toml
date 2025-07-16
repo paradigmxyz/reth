@@ -750,16 +750,16 @@ alloy-evm = { git = "https://github.com/alloy-rs/evm", branch = "fusaka/devnet2"
 # jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 
-revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-database = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-state = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-handler = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-context = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
-op-revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/contract_size_limit" }
+revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-database = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-state = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-handler = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-context = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+revm-precompile = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }
+op-revm = { git = "https://github.com/bluealloy/revm", branch = "rakita/eip7907" }

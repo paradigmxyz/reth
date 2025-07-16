@@ -4,7 +4,7 @@ use alloy_primitives::{keccak256, Bytes, B256, U256};
 use alloy_trie::TrieAccount;
 use derive_more::Deref;
 use revm_bytecode::{Bytecode as RevmBytecode, BytecodeDecodeError};
-use revm_state::AccountInfo;
+use revm_state::{AccountInfo, CodeSize};
 
 #[cfg(any(test, feature = "reth-codec"))]
 /// Identifiers used in [`Compact`](reth_codecs::Compact) encoding of [`Bytecode`].
@@ -231,7 +231,7 @@ impl From<Account> for AccountInfo {
             nonce: reth_acc.nonce,
             code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
             code: None,
-            code_size: None,
+            code_size: CodeSize::Known(0),
         }
     }
 }
