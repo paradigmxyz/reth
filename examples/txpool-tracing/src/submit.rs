@@ -45,9 +45,16 @@ where
     // Sign the transaction
     let transaction: TransactionSigned =
         NetworkWallet::<Ethereum>::sign_request(wallet, request).await?.into();
+    // Get the transaction hash before submitting
+    let tx_hash = *transaction.hash();
 
-    // Recover the transaction and prepare the pool
-    let (tx_hash, pool_transaction) = prepare_pool_transaction::<FC>(transaction)?;
+    // Recover the transaction
+    let transaction = transaction.try_into_recovered()?;
+
+    // Convert to pool transaction type
+    let pool_transaction =
+        <FC::Pool as TransactionPool>::Transaction::try_from_consensus(transaction)
+            .map_err(|e| eyre::eyre!("Failed to convert to pool transaction: {e}"))?;
 
     // Submit the transaction to the pool and get event stream
     let mut tx_events = node
@@ -108,35 +115,19 @@ where
     // Sign the transaction
     let transaction: TransactionSigned =
         NetworkWallet::<Ethereum>::sign_request(wallet, request).await?.into();
+    // Recover the transaction
+    let transaction = transaction.try_into_recovered()?;
 
-    // Recover the transaction and prepare the pool
-    let (tx_hash, pool_transaction) = prepare_pool_transaction::<FC>(transaction)?;
+    // Get the transaction hash
+    let tx_hash = *transaction.hash();
+
+    // Convert to pool transaction type
+    let pool_transaction =
+        <FC::Pool as TransactionPool>::Transaction::try_from_consensus(transaction)
+            .map_err(|e| eyre::eyre!("Failed to convert to pool transaction: {e}"))?;
 
     // Submit the transaction to the pool
     node.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
 
     Ok(tx_hash)
-}
-
-/// Helper function to convert a signed transaction to pool transaction
-///
-/// It is needed before submitting to the pool.
-fn prepare_pool_transaction<FC>(
-    transaction: TransactionSigned,
-) -> eyre::Result<(TxHash, <FC::Pool as TransactionPool>::Transaction)>
-where
-    FC: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
-{
-    // Get the transaction hash
-    let tx_hash = *transaction.hash();
-
-    // Recover the tx
-    let recovered_tx = transaction.try_into_recovered()?;
-
-    // Convert to pool transaction type
-    let pool_transaction =
-        <FC::Pool as TransactionPool>::Transaction::try_from_consensus(recovered_tx)
-            .map_err(|e| eyre::eyre!("Failed to convert to pool transaction: {e}"))?;
-
-    Ok((tx_hash, pool_transaction))
 }
