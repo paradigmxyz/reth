@@ -59,25 +59,11 @@ pub enum PayloadValidationOutcome<Block: reth_primitives_traits::Block> {
     },
 }
 
-/// Trait for accessing tree state during validation
-pub trait TreeStateProvider: Send + Sync {
-    /// Returns the current canonical block hash
-    fn canonical_block_hash(&self) -> alloy_primitives::B256;
-
-    /// Returns the current canonical block number
-    fn canonical_block_number(&self) -> u64;
-}
-
 /// Context providing access to tree state during validation
-pub struct TreeCtx<'a> {
+#[derive(Debug)]
+pub struct TreeCtx<'a, State> {
     /// The engine API tree state
-    pub state: &'a dyn TreeStateProvider,
-}
-
-impl core::fmt::Debug for TreeCtx<'_> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("TreeCtx").finish_non_exhaustive()
-    }
+    pub state: &'a State,
 }
 
 /// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
@@ -144,7 +130,7 @@ pub trait EngineTypes:
 
 /// Type that validates an [`ExecutionPayload`].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PayloadValidator: Send + Sync + Unpin + 'static {
+pub trait PayloadValidator<State = ()>: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
 
@@ -168,7 +154,7 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     fn validate_payload(
         &self,
         payload: Self::ExecutionData,
-        _ctx: TreeCtx<'_>,
+        _ctx: TreeCtx<'_, State>,
     ) -> Result<PayloadValidationOutcome<Self::Block>, NewPayloadError> {
         // Default implementation: try to convert using existing method
         match self.ensure_well_formed_payload(payload) {
@@ -181,7 +167,7 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     fn validate_block(
         &self,
         _block: &RecoveredBlock<Self::Block>,
-        _ctx: TreeCtx<'_>,
+        _ctx: TreeCtx<'_, State>,
     ) -> Result<(), ConsensusError> {
         // Default implementation: accept all blocks
         Ok(())
