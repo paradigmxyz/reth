@@ -196,12 +196,92 @@ where
             branch_node_tree_masks,
         )?;
 
-        // then reveal storage proof nodes for each storage trie
-        for (account, storage_subtree) in storages {
-            self.reveal_decoded_storage_multiproof(account, storage_subtree)?;
+        #[cfg(not(feature = "std"))]
+        // If nostd then serially reveal storage proof nodes for each storage trie
+        {
+            for (account, storage_subtree) in storages {
+                self.reveal_decoded_storage_multiproof(account, storage_subtree)?;
+            }
+
+            Ok(())
         }
 
-        Ok(())
+        #[cfg(feature = "std")]
+        // If std then reveal storage proofs in parallel
+        {
+            use rayon::iter::{ParallelBridge, ParallelIterator};
+
+            struct ParallelRevealInput<S> {
+                account: B256,
+                storage_subtree: DecodedStorageMultiProof,
+                revealed_nodes: HashSet<Nibbles>,
+                trie: SparseTrie<S>,
+            }
+
+            struct ParallelRevealOutput<S> {
+                account: B256,
+                revealed_nodes: HashSet<Nibbles>,
+                trie: SparseTrie<S>,
+                result: SparseStateTrieResult<ProofNodesMetricValues>,
+            }
+
+            let (tx, rx) = std::sync::mpsc::channel();
+
+            // Process all storage trie revealings in paralle, having first removed the
+            // `reveal_nodes` tracking and `SparseTrie`s for each account from their HashMaps. These
+            // will be returned after processing.
+            storages
+                .into_iter()
+                .map(|(account, storage_subtree)| {
+                    let revealed_nodes =
+                        self.revealed_storage_paths.remove(&account).unwrap_or_default();
+                    let trie = self.storages.remove(&account).unwrap_or_default();
+                    ParallelRevealInput { account, storage_subtree, revealed_nodes, trie }
+                })
+                .par_bridge()
+                .map(
+                    |ParallelRevealInput {
+                         account,
+                         storage_subtree,
+                         mut revealed_nodes,
+                         mut trie,
+                     }| {
+                        let result = Self::reveal_decoded_storage_multiproof_inner(
+                            account,
+                            storage_subtree,
+                            &mut revealed_nodes,
+                            &mut trie,
+                            self.retain_updates,
+                        );
+
+                        ParallelRevealOutput { account, revealed_nodes, trie, result }
+                    },
+                )
+                .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
+
+            drop(tx);
+
+            // Return `revealed_nodes` and `SparseTrie` for each account, incrementing metrics and
+            // returning the last error seen if any.
+            let mut any_err = Ok(());
+            for ParallelRevealOutput { account, revealed_nodes, trie, result } in rx {
+                self.revealed_storage_paths.insert(account, revealed_nodes);
+                self.storages.insert(account, trie);
+                if let Ok(_metric_values) = result {
+                    #[cfg(feature = "metrics")]
+                    {
+                        self.metrics
+                            .increment_total_storage_nodes(_metric_values.total_nodes as u64);
+                        self.metrics
+                            .increment_skipped_storage_nodes(_metric_values.skipped_nodes as u64);
+                    }
+                } else {
+                    any_err = result.map(|_| ());
+                }
+            }
+
+            any_err
+        }
     }
 
     /// Reveals an account multiproof.
@@ -227,22 +307,17 @@ where
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let FilterMappedProofNodes {
-            root_node,
-            nodes,
-            new_nodes,
-            total_nodes: _total_nodes,
-            skipped_nodes: _skipped_nodes,
-        } = filter_map_revealed_nodes(
-            account_subtree,
-            &mut self.revealed_account_paths,
-            &branch_node_hash_masks,
-            &branch_node_tree_masks,
-        )?;
+        let FilterMappedProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
+            filter_map_revealed_nodes(
+                account_subtree,
+                &mut self.revealed_account_paths,
+                &branch_node_hash_masks,
+                &branch_node_tree_masks,
+            )?;
         #[cfg(feature = "metrics")]
         {
-            self.metrics.increment_total_account_nodes(_total_nodes as u64);
-            self.metrics.increment_skipped_account_nodes(_skipped_nodes as u64);
+            self.metrics.increment_total_account_nodes(_metric_values.total_nodes as u64);
+            self.metrics.increment_skipped_account_nodes(_metric_values.skipped_nodes as u64);
         }
 
         if let Some(root_node) = root_node {
@@ -280,33 +355,45 @@ where
         storage_subtree: DecodedStorageMultiProof,
     ) -> SparseStateTrieResult<()> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
-
-        let FilterMappedProofNodes {
-            root_node,
-            nodes,
-            new_nodes,
-            total_nodes: _total_nodes,
-            skipped_nodes: _skipped_nodes,
-        } = filter_map_revealed_nodes(
-            storage_subtree.subtree,
+        let trie = self.storages.entry(account).or_default();
+        let _metric_values = Self::reveal_decoded_storage_multiproof_inner(
+            account,
+            storage_subtree,
             revealed_nodes,
-            &storage_subtree.branch_node_hash_masks,
-            &storage_subtree.branch_node_tree_masks,
+            trie,
+            self.retain_updates,
         )?;
+
         #[cfg(feature = "metrics")]
         {
-            self.metrics.increment_total_storage_nodes(_total_nodes as u64);
-            self.metrics.increment_skipped_storage_nodes(_skipped_nodes as u64);
+            self.metrics.increment_total_storage_nodes(_metric_values.total_nodes as u64);
+            self.metrics.increment_skipped_storage_nodes(_metric_values.skipped_nodes as u64);
         }
+
+        Ok(())
+    }
+
+    /// Reveals a decoded storage multiproof for the given address. This is internal static function
+    /// is designed to handle a variety of associated public functions.
+    fn reveal_decoded_storage_multiproof_inner(
+        account: B256,
+        storage_subtree: DecodedStorageMultiProof,
+        revealed_nodes: &mut HashSet<Nibbles>,
+        trie: &mut SparseTrie<S>,
+        retain_updates: bool,
+    ) -> SparseStateTrieResult<ProofNodesMetricValues> {
+        let FilterMappedProofNodes { root_node, nodes, new_nodes, metric_values } =
+            filter_map_revealed_nodes(
+                storage_subtree.subtree,
+                revealed_nodes,
+                &storage_subtree.branch_node_hash_masks,
+                &storage_subtree.branch_node_tree_masks,
+            )?;
 
         if let Some(root_node) = root_node {
             // Reveal root node if it wasn't already.
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node");
-            let trie = self.storages.entry(account).or_default().reveal_root(
-                root_node.node,
-                root_node.masks,
-                self.retain_updates,
-            )?;
+            let trie = trie.reveal_root(root_node.node, root_node.masks, retain_updates)?;
 
             // Reserve the capacity for new nodes ahead of time, if the trie implementation
             // supports doing so.
@@ -316,7 +403,7 @@ where
             trie.reveal_nodes(nodes)?;
         }
 
-        Ok(())
+        Ok(metric_values)
     }
 
     /// Reveal state witness with the given state root.
@@ -694,6 +781,14 @@ where
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Default)]
+struct ProofNodesMetricValues {
+    /// Number of nodes in the proof.
+    total_nodes: usize,
+    /// Number of nodes that were skipped because they were already revealed.
+    skipped_nodes: usize,
+}
+
 /// Result of [`filter_map_revealed_nodes`].
 #[derive(Debug, PartialEq, Eq)]
 struct FilterMappedProofNodes {
@@ -701,13 +796,11 @@ struct FilterMappedProofNodes {
     root_node: Option<RevealedSparseNode>,
     /// Filtered, decoded and unsorted proof nodes. Root node is removed.
     nodes: Vec<RevealedSparseNode>,
-    /// Number of nodes in the proof.
-    total_nodes: usize,
-    /// Number of nodes that were skipped because they were already revealed.
-    skipped_nodes: usize,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
+    /// Values which are being returned so they can be incremented into metrics.
+    metric_values: ProofNodesMetricValues,
 }
 
 /// Filters the decoded nodes that are already revealed, maps them to `RevealedSparseNodes`,
@@ -722,21 +815,20 @@ fn filter_map_revealed_nodes(
     let mut result = FilterMappedProofNodes {
         root_node: None,
         nodes: Vec::with_capacity(proof_nodes.len()),
-        total_nodes: 0,
-        skipped_nodes: 0,
         new_nodes: 0,
+        metric_values: Default::default(),
     };
 
     let proof_nodes_len = proof_nodes.len();
     for (path, proof_node) in proof_nodes.into_inner() {
-        result.total_nodes += 1;
+        result.metric_values.total_nodes += 1;
 
         let is_root = path.is_empty();
 
         // If the node is already revealed, skip it. We don't ever skip the root node, nor do we add
         // it to `revealed_nodes`.
         if !is_root && !revealed_nodes.insert(path) {
-            result.skipped_nodes += 1;
+            result.metric_values.skipped_nodes += 1;
             continue
         }
 
@@ -1148,12 +1240,15 @@ mod tests {
                     node: leaf,
                     masks: TrieMasks::none(),
                 }],
-                // Branch, leaf, leaf
-                total_nodes: 3,
-                // Revealed leaf node with path 0x1
-                skipped_nodes: 1,
                 // Branch, two of its children, one leaf
-                new_nodes: 4
+                new_nodes: 4,
+                // Metric values
+                metric_values: ProofNodesMetricValues {
+                    // Branch, leaf, leaf
+                    total_nodes: 3,
+                    // Revealed leaf node with path 0x1
+                    skipped_nodes: 1,
+                },
             }
         );
     }
