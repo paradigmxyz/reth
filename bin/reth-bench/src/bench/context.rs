@@ -61,7 +61,7 @@ impl BenchContext {
         let auth_jwt = bench_args
             .auth_jwtsecret
             .clone()
-            .ok_or_else(|| eyre::eyre!("--jwtsecret must be provided for authenticated RPC"))?;
+            .ok_or_else(|| eyre::eyre!("--jwt-secret must be provided for authenticated RPC"))?;
 
         // fetch jwt from file
         //
