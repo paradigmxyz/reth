@@ -184,7 +184,6 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     where
         N: CliNodeTypes<Primitives: NodePrimitives, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
-        // Custom headers must be convertible from standard Ethereum headers
         <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader: From<Header>,
     {
         // Add network name if available to the logs dir
