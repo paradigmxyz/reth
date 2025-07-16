@@ -1,17 +1,13 @@
 //! Loads and formats OP transaction RPC response.
 
-use crate::{
-    eth::{OpEthApiInner, OpNodeCore},
-    OpEthApi, OpEthApiError, SequencerClient,
-};
+use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTxEnvelope};
-use reth_node_api::FullNodeComponents;
 use reth_optimism_primitives::DepositReceipt;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
-    try_into_op_tx_info, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore,
+    try_into_op_tx_info, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcConvert, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes, TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
@@ -22,15 +18,15 @@ use reth_storage_api::{
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::{
     fmt::{Debug, Formatter},
-    sync::Arc,
+    marker::PhantomData,
 };
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt>
-        + EthApiTypes<Error = OpEthApiError, NetworkTypes = Rpc>,
+        + EthApiTypes<Error = OpEthApiError, NetworkTypes = Rpc::Network>,
     N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
-    Rpc: RpcTypes,
+    Rpc: RpcConvert,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.eth_api.signers()
@@ -77,18 +73,19 @@ where
     }
 }
 
-impl<N> LoadTransaction for OpEthApi<N>
+impl<N, Rpc> LoadTransaction for OpEthApi<N, Rpc>
 where
     Self: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt,
     N: OpNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
     Self::Pool: TransactionPool,
+    Rpc: RpcConvert,
 {
 }
 
 impl<N, Rpc> OpEthApi<N, Rpc>
 where
     N: OpNodeCore,
-    Rpc: RpcTypes,
+    Rpc: RpcConvert,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
@@ -100,31 +97,33 @@ where
 ///
 /// For deposits, receipt is fetched to extract `deposit_nonce` and `deposit_receipt_version`.
 /// Otherwise, it works like regular Ethereum implementation, i.e. uses [`TransactionInfo`].
-pub struct OpTxInfoMapper<N: OpNodeCore, Rpc: RpcTypes>(Arc<OpEthApiInner<N, Rpc>>);
+pub struct OpTxInfoMapper<Provider, Rpc: RpcTypes> {
+    provider: Provider,
+    _pd: PhantomData<Rpc>,
+}
 
-impl<N: OpNodeCore, Rpc: RpcTypes> Clone for OpTxInfoMapper<N, Rpc> {
+impl<Provider: Clone, Rpc: RpcTypes> Clone for OpTxInfoMapper<Provider, Rpc> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self { provider: self.provider.clone(), _pd: PhantomData }
     }
 }
 
-impl<N: OpNodeCore, Rpc: RpcTypes> Debug for OpTxInfoMapper<N, Rpc> {
+impl<Provider, Rpc: RpcTypes> Debug for OpTxInfoMapper<Provider, Rpc> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OpTxInfoMapper").finish()
     }
 }
 
-impl<N: OpNodeCore, Rpc: RpcTypes> OpTxInfoMapper<N, Rpc> {
+impl<Provider, Rpc: RpcTypes> OpTxInfoMapper<Provider, Rpc> {
     /// Creates [`OpTxInfoMapper`] that uses [`ReceiptProvider`] borrowed from given `eth_api`.
-    pub const fn new(eth_api: Arc<OpEthApiInner<N, Rpc>>) -> Self {
-        Self(eth_api)
+    pub const fn new(provider: Provider) -> Self {
+        Self { provider, _pd: PhantomData }
     }
 }
 
-impl<N, Rpc> TxInfoMapper<&OpTxEnvelope> for OpTxInfoMapper<N, Rpc>
+impl<Provider, Rpc> TxInfoMapper<&OpTxEnvelope> for OpTxInfoMapper<Provider, Rpc>
 where
-    N: FullNodeComponents,
-    N::Provider: ReceiptProvider<Receipt: DepositReceipt>,
+    Provider: ReceiptProvider<Receipt: DepositReceipt>,
     Rpc: RpcTypes,
 {
     type Out = OpTransactionInfo;
@@ -135,6 +134,6 @@ where
         tx: &OpTxEnvelope,
         tx_info: TransactionInfo,
     ) -> Result<Self::Out, ProviderError> {
-        try_into_op_tx_info(self.0.eth_api.provider(), tx, tx_info)
+        try_into_op_tx_info(&self.provider, tx, tx_info)
     }
 }

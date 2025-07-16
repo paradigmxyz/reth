@@ -1,4 +1,3 @@
-use alloy_network::Ethereum;
 use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
 use reth_chainspec::MAINNET;
 use reth_consensus::noop::NoopConsensus;
@@ -118,15 +117,9 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
 }
 
 /// Returns an [`RpcModuleBuilder`] with testing components.
-pub fn test_rpc_builder() -> RpcModuleBuilder<
-    EthPrimitives,
-    NoopProvider,
-    TestPool,
-    NoopNetwork,
-    EthEvmConfig,
-    NoopConsensus,
-    Ethereum,
-> {
+pub fn test_rpc_builder(
+) -> RpcModuleBuilder<EthPrimitives, NoopProvider, TestPool, NoopNetwork, EthEvmConfig, NoopConsensus>
+{
     RpcModuleBuilder::default()
         .with_provider(NoopProvider::default())
         .with_pool(TestPoolBuilder::default().into())

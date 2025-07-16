@@ -1,7 +1,7 @@
 //! Contains RPC handler implementations specific to state.
 
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_rpc_convert::RpcTypes;
+use reth_rpc_convert::RpcConvert;
 use reth_storage_api::{BlockReader, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 
@@ -17,7 +17,7 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> EthState
 where
     Self: LoadState + SpawnBlocking,
     Provider: BlockReader,
-    Rpc: RpcTypes,
+    Rpc: RpcConvert,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
@@ -32,25 +32,28 @@ where
                           + StateProviderFactory
                           + ChainSpecProvider<ChainSpec: EthereumHardforks>,
             Pool: TransactionPool,
-        > + EthApiTypes<NetworkTypes = Rpc>,
+        > + EthApiTypes<NetworkTypes = Rpc::Network>,
     Provider: BlockReader,
-    Rpc: RpcTypes,
+    Rpc: RpcConvert,
 {
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::eth::helpers::types::EthRpcConverter;
+
     use super::*;
     use alloy_consensus::Header;
     use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
-    use alloy_network::Ethereum;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
+    use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::helpers::EthState;
     use reth_rpc_eth_types::{
-        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
+        receipt::EthReceiptConverter, EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig,
+        GasPriceOracle,
     };
     use reth_rpc_server_types::constants::{
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -59,13 +62,17 @@ mod tests {
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::collections::HashMap;
 
-    fn noop_eth_api() -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig, Ethereum> {
+    fn noop_eth_api(
+    ) -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig, EthRpcConverter<ChainSpec>> {
+        let provider = NoopProvider::default();
         let pool = testing_pool();
         let evm_config = EthEvmConfig::mainnet();
 
         let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
+        let rpc_converter =
+            EthRpcConverter::new(EthReceiptConverter::new(provider.chain_spec()), ());
         EthApi::new(
-            NoopProvider::default(),
+            provider,
             pool,
             NoopNetwork::default(),
             cache.clone(),
@@ -77,12 +84,13 @@ mod tests {
             FeeHistoryCache::<Header>::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
+            rpc_converter,
         )
     }
 
     fn mock_eth_api(
         accounts: HashMap<Address, ExtendedAccount>,
-    ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig, Ethereum> {
+    ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig, EthRpcConverter<ChainSpec>> {
         let pool = testing_pool();
         let mock_provider = MockEthProvider::default();
 
@@ -90,6 +98,8 @@ mod tests {
         mock_provider.extend_accounts(accounts);
 
         let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
+        let rpc_converter =
+            EthRpcConverter::new(EthReceiptConverter::new(mock_provider.chain_spec()), ());
         EthApi::new(
             mock_provider.clone(),
             pool,
@@ -103,6 +113,7 @@ mod tests {
             FeeHistoryCache::<Header>::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
+            rpc_converter,
         )
     }
 

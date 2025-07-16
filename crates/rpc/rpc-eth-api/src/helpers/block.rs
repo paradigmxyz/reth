@@ -5,6 +5,7 @@ use crate::{
     node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
     RpcReceipt,
 };
+use alloy_consensus::TxReceipt;
 use alloy_eips::BlockId;
 use alloy_primitives::{Sealable, U256};
 use alloy_rlp::Encodable;
@@ -12,11 +13,13 @@ use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
 use futures::Future;
 use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
-use reth_rpc_convert::RpcConvert;
+use reth_primitives_traits::{
+    AlloyBlockHeader, NodePrimitives, RecoveredBlock, SignedTransaction, TransactionMeta,
+};
+use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 /// Result type of the fetched block receipts.
 pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
@@ -31,7 +34,9 @@ pub type BlockAndReceiptsResult<Eth> = Result<
 
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthBlocks: LoadBlock {
+pub trait EthBlocks:
+    LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primitives, Error = Self::Error>>
+{
     /// Returns the block header for the given block id.
     #[expect(clippy::type_complexity)]
     fn rpc_block_header(
@@ -109,7 +114,54 @@ pub trait EthBlocks: LoadBlock {
         block_id: BlockId,
     ) -> impl Future<Output = BlockReceiptsResult<Self::NetworkTypes, Self::Error>> + Send
     where
-        Self: LoadReceipt;
+        Self: LoadReceipt,
+    {
+        async move {
+            if let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? {
+                let block_number = block.number();
+                let base_fee = block.base_fee_per_gas();
+                let block_hash = block.hash();
+                let excess_blob_gas = block.excess_blob_gas();
+                let timestamp = block.timestamp();
+                let mut gas_used = 0;
+                let mut next_log_index = 0;
+
+                let inputs = block
+                    .transactions_recovered()
+                    .zip(receipts.iter())
+                    .enumerate()
+                    .map(|(idx, (tx, receipt))| {
+                        let meta = TransactionMeta {
+                            tx_hash: *tx.tx_hash(),
+                            index: idx as u64,
+                            block_hash,
+                            block_number,
+                            base_fee,
+                            excess_blob_gas,
+                            timestamp,
+                        };
+
+                        let input = ConvertReceiptInput {
+                            receipt: Cow::Borrowed(receipt),
+                            tx,
+                            gas_used,
+                            next_log_index,
+                            meta,
+                        };
+
+                        gas_used = receipt.cumulative_gas_used();
+                        next_log_index = receipt.logs().len();
+
+                        input
+                    })
+                    .collect::<Vec<_>>();
+
+                return self.tx_resp_builder().convert_receipts(inputs).map(Some)
+            }
+
+            Ok(None)
+        }
+    }
 
     /// Helper method that loads a block and all its receipts.
     fn load_block_and_receipts(
