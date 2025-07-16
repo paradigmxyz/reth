@@ -167,90 +167,6 @@ where
         self.storages.insert(address, storage_trie);
     }
 
-    /// Reveal unknown trie paths from provided leaf path and its proof for the account.
-    ///
-    /// Panics if trie updates retention is enabled.
-    ///
-    /// NOTE: This method does not extensively validate the proof.
-    pub fn reveal_account(
-        &mut self,
-        account: B256,
-        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
-    ) -> SparseStateTrieResult<()> {
-        assert!(!self.retain_updates);
-
-        if self.is_account_revealed(account) {
-            return Ok(());
-        }
-
-        let mut proof = proof.into_iter().peekable();
-
-        let Some(root_node) = self.validate_root_node(&mut proof)? else { return Ok(()) };
-
-        // Reveal root node if it wasn't already.
-        let trie = self.state.reveal_root(root_node, TrieMasks::none(), self.retain_updates)?;
-
-        // Reveal the remaining proof nodes.
-        for (path, bytes) in proof {
-            if self.revealed_account_paths.contains(&path) {
-                continue
-            }
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(path, node, TrieMasks::none())?;
-
-            // Track the revealed path.
-            self.revealed_account_paths.insert(path);
-        }
-
-        Ok(())
-    }
-
-    /// Reveal unknown trie paths from provided leaf path and its proof for the storage slot.
-    ///
-    /// Panics if trie updates retention is enabled.
-    ///
-    /// NOTE: This method does not extensively validate the proof.
-    pub fn reveal_storage_slot(
-        &mut self,
-        account: B256,
-        slot: B256,
-        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
-    ) -> SparseStateTrieResult<()> {
-        assert!(!self.retain_updates);
-
-        if self.is_storage_slot_revealed(account, slot) {
-            return Ok(());
-        }
-
-        let mut proof = proof.into_iter().peekable();
-
-        let Some(root_node) = self.validate_root_node(&mut proof)? else { return Ok(()) };
-
-        // Reveal root node if it wasn't already.
-        let trie = self.storages.entry(account).or_default().reveal_root(
-            root_node,
-            TrieMasks::none(),
-            self.retain_updates,
-        )?;
-
-        let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
-
-        // Reveal the remaining proof nodes.
-        for (path, bytes) in proof {
-            // If the node is already revealed, skip it.
-            if revealed_nodes.contains(&path) {
-                continue
-            }
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(path, node, TrieMasks::none())?;
-
-            // Track the revealed path.
-            revealed_nodes.insert(path);
-        }
-
-        Ok(())
-    }
-
     /// Reveal unknown trie paths from multiproof.
     /// NOTE: This method does not extensively validate the proof.
     pub fn reveal_multiproof(&mut self, multiproof: MultiProof) -> SparseStateTrieResult<()> {
@@ -533,26 +449,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Validates the root node of the proof and returns it if it exists and is valid.
-    fn validate_root_node<I: Iterator<Item = (Nibbles, Bytes)>>(
-        &self,
-        proof: &mut Peekable<I>,
-    ) -> SparseStateTrieResult<Option<TrieNode>> {
-        // Validate root node.
-        let Some((path, node)) = proof.next() else { return Ok(None) };
-        if !path.is_empty() {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
-        }
-
-        // Decode root node and perform sanity check.
-        let root_node = TrieNode::decode(&mut &node[..])?;
-        if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
-        }
-
-        Ok(Some(root_node))
     }
 
     /// Validates the decoded root node of the proof and returns it if it exists and is valid.
@@ -909,11 +805,9 @@ mod tests {
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
-        Bytes, U256,
+        U256,
     };
-    use alloy_rlp::EMPTY_STRING_CODE;
     use arbitrary::Arbitrary;
-    use assert_matches::assert_matches;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
@@ -921,64 +815,6 @@ mod tests {
         proof::{ProofNodes, ProofRetainer},
         BranchNode, LeafNode, StorageMultiProof, TrieMask,
     };
-
-    #[test]
-    fn validate_root_node_first_node_not_root() {
-        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
-        assert_matches!(
-            sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
-            Err(SparseStateTrieErrorKind::InvalidRootNode { .. })
-        );
-    }
-
-    #[test]
-    fn validate_root_node_invalid_proof_with_empty_root() {
-        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        let proof = [
-            (Nibbles::default(), Bytes::from([EMPTY_STRING_CODE])),
-            (Nibbles::from_nibbles([0x1]), Bytes::new()),
-        ];
-        assert_matches!(
-            sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
-            Err(SparseStateTrieErrorKind::InvalidRootNode { .. })
-        );
-    }
-
-    #[test]
-    fn reveal_account_empty() {
-        let retainer = ProofRetainer::from_iter([Nibbles::default()]);
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        hash_builder.root();
-        let proofs = hash_builder.take_proof_nodes();
-        assert_eq!(proofs.len(), 1);
-
-        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        assert_eq!(sparse.state, SparseTrie::Blind(None));
-
-        sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
-        assert_eq!(sparse.state, SparseTrie::revealed_empty());
-    }
-
-    #[test]
-    fn reveal_storage_slot_empty() {
-        let retainer = ProofRetainer::from_iter([Nibbles::default()]);
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        hash_builder.root();
-        let proofs = hash_builder.take_proof_nodes();
-        assert_eq!(proofs.len(), 1);
-
-        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        assert!(sparse.storages.is_empty());
-
-        sparse
-            .reveal_storage_slot(Default::default(), Default::default(), proofs.into_inner())
-            .unwrap();
-        assert_eq!(
-            sparse.storages,
-            HashMap::from_iter([(Default::default(), SparseTrie::revealed_empty())])
-        );
-    }
 
     #[test]
     fn reveal_account_path_twice() {
