@@ -71,6 +71,12 @@ const BLOOM_ADJUSTMENT_MIN_BLOCKS: u64 = 100;
 /// The maximum number of headers we read at once when handling a range filter.
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
+/// Threshold for enabling parallel processing in range mode
+const PARALLEL_PROCESSING_THRESHOLD: u64 = 1000;
+
+/// Default concurrency for parallel processing
+const DEFAULT_PARALLEL_CONCURRENCY: usize = 4;
+
 /// `Eth` filter RPC implementation.
 ///
 /// This type handles `eth_` rpc requests related to filters (`eth_getLogs`).
@@ -1047,6 +1053,20 @@ impl<
             range_headers.push(next_header);
         }
 
+        // Check if we should use parallel processing for large ranges
+        let remaining_headers = self.iter.len() + range_headers.len();
+        if remaining_headers >= PARALLEL_PROCESSING_THRESHOLD as usize {
+            self.process_large_range(range_headers).await
+        } else {
+            self.process_small_range(range_headers).await
+        }
+    }
+
+    /// Process small range headers
+    async fn process_small_range(
+        &mut self,
+        range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    ) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         // Process each header individually to avoid queuing for all receipts
         for header in range_headers {
             // First check if already cached to avoid unnecessary provider calls
@@ -1073,6 +1093,84 @@ impl<
                     recovered_block: maybe_block,
                     header,
                 });
+            }
+        }
+
+        Ok(self.next.pop_front())
+    }
+
+    /// Process large range headers
+    async fn process_large_range(
+        &mut self,
+        range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    ) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
+        // Split headers into chunks
+        let chunk_size = std::cmp::max(range_headers.len() / DEFAULT_PARALLEL_CONCURRENCY, 1);
+        let mut header_chunks = Vec::new();
+        for chunk_start in (0..range_headers.len()).step_by(chunk_size) {
+            let chunk_end = std::cmp::min(chunk_start + chunk_size, range_headers.len());
+            header_chunks.push(range_headers[chunk_start..chunk_end].to_vec());
+        }
+
+        // Process chunks in parallel
+        let mut tasks = Vec::new();
+        for (chunk_idx, chunk_headers) in header_chunks.into_iter().enumerate() {
+            let filter_inner = self.filter_inner.clone();
+            let task = async move {
+                let mut chunk_results = Vec::new();
+
+                for header in chunk_headers {
+                    // First check if already cached to avoid unnecessary provider calls
+                    let (maybe_block, maybe_receipts) = filter_inner
+                        .eth_cache()
+                        .maybe_cached_block_and_receipts(header.hash())
+                        .await?;
+
+                    let receipts = match maybe_receipts {
+                        Some(receipts) => receipts,
+                        None => {
+                            // Not cached - fetch directly from provider without queuing
+                            match filter_inner.provider().receipts_by_block(header.hash().into())? {
+                                Some(receipts) => Arc::new(receipts),
+                                None => continue, // No receipts found
+                            }
+                        }
+                    };
+
+                    if !receipts.is_empty() {
+                        chunk_results.push(ReceiptBlockResult {
+                            receipts,
+                            recovered_block: maybe_block,
+                            header,
+                        });
+                    }
+                }
+
+                Ok::<(usize, Vec<ReceiptBlockResult<Eth::Provider>>), EthFilterError>((
+                    chunk_idx,
+                    chunk_results,
+                ))
+            };
+            tasks.push(task);
+        }
+
+        let results = futures::future::join_all(tasks).await;
+
+        // Process results and maintain order
+        let mut ordered_results: Vec<Vec<ReceiptBlockResult<Eth::Provider>>> =
+            (0..results.len()).map(|_| Vec::new()).collect();
+        for result in results {
+            match result {
+                Ok((chunk_idx, chunk_results)) => {
+                    ordered_results[chunk_idx] = chunk_results;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        for chunk_results in ordered_results {
+            for result in chunk_results {
+                self.next.push_back(result);
             }
         }
 
