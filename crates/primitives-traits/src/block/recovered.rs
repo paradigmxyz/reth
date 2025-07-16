@@ -815,7 +815,6 @@ pub(super) mod serde_bincode_compat {
             bound = "serde_bincode_compat::SealedBlock<'a, T>: Serialize + serde::de::DeserializeOwned"
         )]
         block: serde_bincode_compat::SealedBlock<'a, T>,
-        #[expect(clippy::owned_cow)]
         senders: Cow<'a, Vec<Address>>,
     }
 

@@ -436,7 +436,6 @@ pub(super) mod serde_bincode_compat {
         bundle: Cow<'a, BundleState>,
         receipts: Vec<Vec<T::BincodeRepr<'a>>>,
         first_block: BlockNumber,
-        #[expect(clippy::owned_cow)]
         requests: Cow<'a, Vec<Requests>>,
     }
 
