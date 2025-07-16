@@ -3,13 +3,13 @@
 
 use std::sync::Arc;
 
-use crate::EthApiBuilder;
+use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
-use reth_chainspec::ChainSpecProvider;
+use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
@@ -22,8 +22,8 @@ use reth_rpc_eth_types::{
     GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{
-    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderHeader,
-    ProviderReceipt,
+    noop::NoopProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock,
+    ProviderHeader, ProviderReceipt,
 };
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -33,7 +33,7 @@ use tokio::sync::{broadcast, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
-/// Helper type alias for [`EthRpcConverter`] with components from the given [`FullNodeComponents`].
+/// Helper type alias for [`RpcConverter`] with components from the given [`FullNodeComponents`].
 pub type EthRpcConverterFor<N> = RpcConverter<
     Ethereum,
     <N as FullNodeComponents>::Evm,
@@ -90,11 +90,7 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthApi<Provider, Pool, Network, EvmConfig, Rpc>
-where
-    Provider: BlockReaderIdExt + ChainSpecProvider,
-    Rpc: RpcConvert,
-{
+impl EthApi<NoopProvider, (), (), (), EthRpcConverter<ChainSpec>> {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
     ///
     /// Creating an [`EthApi`] requires a few mandatory components:
@@ -113,7 +109,7 @@ where
     /// use reth_provider::noop::NoopProvider;
     /// use reth_rpc::EthApi;
     /// use reth_transaction_pool::noop::NoopTransactionPool;
-    /// let eth_api = EthApi::<_, _, _, _, _>::builder(
+    /// let eth_api = EthApi::builder(
     ///     NoopProvider::default(),
     ///     NoopTransactionPool::default(),
     ///     NoopNetwork::default(),
@@ -122,7 +118,7 @@ where
     /// .build();
     /// ```
     #[expect(clippy::type_complexity)]
-    pub fn builder(
+    pub fn builder<Provider, Pool, Network, EvmConfig>(
         provider: Provider,
         pool: Pool,
         network: Network,
@@ -133,10 +129,19 @@ where
         Network,
         EvmConfig,
         RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>,
-    > {
+    >
+    where
+        Provider: ChainSpecProvider + BlockReaderIdExt,
+    {
         EthApiBuilder::new(provider, pool, network, evm_config)
     }
+}
 
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+where
+    Provider: BlockReaderIdExt + ChainSpecProvider,
+    Rpc: RpcConvert,
+{
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
     pub fn new(

@@ -144,7 +144,7 @@ pub trait EthBlocks:
                         let input = ConvertReceiptInput {
                             receipt: Cow::Borrowed(receipt),
                             tx,
-                            gas_used,
+                            gas_used: receipt.cumulative_gas_used() - gas_used,
                             next_log_index,
                             meta,
                         };

@@ -61,12 +61,12 @@ pub trait LoadReceipt:
             Ok(self
                 .tx_resp_builder()
                 .convert_receipts(vec![ConvertReceiptInput {
-                    receipt: Cow::Owned(receipt),
                     tx: tx
                         .try_into_recovered_unchecked()
                         .map_err(Self::Error::from_eth_err)?
                         .as_recovered_ref(),
-                    gas_used,
+                    gas_used: receipt.cumulative_gas_used() - gas_used,
+                    receipt: Cow::Owned(receipt),
                     next_log_index,
                     meta,
                 }])?
