@@ -1,6 +1,7 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+    LeafLookup, LeafLookupError, RevealedSparseNode, SparseTrieInterface, SparseTrieUpdates,
+    TrieMasks,
 };
 use alloc::{
     borrow::Cow,
@@ -412,7 +413,6 @@ impl SparseTrieInterface for SerialSparseTrie {
     fn reserve_nodes(&mut self, additional: usize) {
         self.nodes.reserve(additional);
     }
-
     fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -523,7 +523,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                     SparseNode::Hash(hash) => {
                         let mut full = *entry.key();
                         full.extend(&leaf.key);
-                        self.values.insert(full, leaf.value);
+                        self.values.insert(full, leaf.value.clone());
                         entry.insert(SparseNode::Leaf {
                             key: leaf.key,
                             // Memoize the hash of a previously blinded node in a new leaf
@@ -548,11 +548,19 @@ impl SparseTrieInterface for SerialSparseTrie {
                     let mut full = *entry.key();
                     full.extend(&leaf.key);
                     entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.values.insert(full, leaf.value);
+                    self.values.insert(full, leaf.value.clone());
                 }
             },
         }
 
+        Ok(())
+    }
+
+    fn reveal_nodes(&mut self, mut nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+        nodes.sort_unstable_by_key(|node| node.path);
+        for node in nodes {
+            self.reveal_node(node.path, node.node, node.masks)?;
+        }
         Ok(())
     }
 

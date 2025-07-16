@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::{borrow::Cow, vec, vec::Vec};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
@@ -63,17 +63,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// * `additional` - The number of additional trie nodes to reserve capacity for.
     fn reserve_nodes(&mut self, _additional: usize) {}
 
-    /// Reveals a trie node if it has not been revealed before.
-    ///
-    /// This function decodes a trie node and inserts it into the trie structure.
-    /// It handles different node types (leaf, extension, branch) by appropriately
-    /// adding them to the trie and recursively revealing their children.
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The path where the node should be revealed
-    /// * `node` - The trie node to reveal
-    /// * `masks` - Trie masks for branch nodes
+    /// The single-node version of `reveal_nodes`.
     ///
     /// # Returns
     ///
@@ -83,7 +73,25 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
         path: Nibbles,
         node: TrieNode,
         masks: TrieMasks,
-    ) -> SparseTrieResult<()>;
+    ) -> SparseTrieResult<()> {
+        self.reveal_nodes(vec![RevealedSparseNode { path, node, masks }])
+    }
+
+    /// Reveals one or more trie nodes if they have not been revealed before.
+    ///
+    /// This function decodes trie nodes and inserts them into the trie structure. It handles
+    /// different node types (leaf, extension, branch) by appropriately adding them to the trie and
+    /// recursively revealing their children.
+    ///
+    /// # Arguments
+    ///
+    /// * `nodes` - The nodes to be revealed, each having a path and optional set of branch node
+    ///   masks. The nodes will be unsorted.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if successful, or an error if any of the nodes was not revealed.
+    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()>;
 
     /// Updates the value of a leaf node at the specified path.
     ///
@@ -225,7 +233,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
 ///
 /// These masks are essential for efficient trie traversal and serialization, as they
 /// determine how nodes should be encoded and stored on disk.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct TrieMasks {
     /// Branch node hash mask, if any.
     ///
@@ -290,4 +298,15 @@ pub enum LeafLookup {
     Exists,
     /// Leaf does not exist (exclusion proof found).
     NonExistent,
+}
+
+/// Carries all information needed by a sparse trie to reveal a particular node.
+#[derive(Debug, PartialEq, Eq)]
+pub struct RevealedSparseNode {
+    /// Path of the node.
+    pub path: Nibbles,
+    /// The node itself.
+    pub node: TrieNode,
+    /// Tree and hash masks for the node, if known.
+    pub masks: TrieMasks,
 }
