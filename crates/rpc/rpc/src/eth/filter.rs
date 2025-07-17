@@ -1120,27 +1120,18 @@ impl<
                 let mut chunk_results = Vec::new();
 
                 for header in chunk_headers {
-                    // First check if already cached to avoid unnecessary provider calls
-                    let (maybe_block, maybe_receipts) = filter_inner
-                        .eth_cache()
-                        .maybe_cached_block_and_receipts(header.hash())
-                        .await?;
-
-                    let receipts = match maybe_receipts {
-                        Some(receipts) => receipts,
-                        None => {
-                            // Not cached - fetch directly from provider without queuing
-                            match filter_inner.provider().receipts_by_block(header.hash().into())? {
-                                Some(receipts) => Arc::new(receipts),
-                                None => continue, // No receipts found
-                            }
-                        }
-                    };
+                    // Fetch directly from provider - RangeMode is used for older blocks unlikely to
+                    // be cached
+                    let receipts =
+                        match filter_inner.provider().receipts_by_block(header.hash().into())? {
+                            Some(receipts) => Arc::new(receipts),
+                            None => continue, // No receipts found
+                        };
 
                     if !receipts.is_empty() {
                         chunk_results.push(ReceiptBlockResult {
                             receipts,
-                            recovered_block: maybe_block,
+                            recovered_block: None,
                             header,
                         });
                     }
