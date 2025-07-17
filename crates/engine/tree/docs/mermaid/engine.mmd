@@ -1,26 +1,71 @@
 flowchart TD
-    subgraph EngineTask[Engine]
-        Block
-            -->|Execute transactions sequentially| Execute[Execute transaction]
-            --> CollectStateUpdates[Collect all accounts and storage slots that were modified]
+    subgraph Engine[Engine]
+        Block[Block from newPayload]
+        --> CheckConditions{Prefix sets empty?<br/>State root enabled?}
+        CheckConditions -->|Yes| FullSpawn[payload_processor.spawn()]
+        CheckConditions -->|No| CacheOnlySpawn[payload_processor.spawn_cache_exclusive()]
+        
+        FullSpawn --> ParallelExecution[Execute block in parallel with background tasks]
+        CacheOnlySpawn --> ParallelExecution
+        
+        ParallelExecution --> StopPrewarming[handle.stop_prewarming_execution()]
+        StopPrewarming --> TryBackgroundRoot[Try handle.state_root()]
+        TryBackgroundRoot --> ValidateRoot{State root matches<br/>block header?}
+        ValidateRoot -->|Yes| Success[Validation successful]
+        ValidateRoot -->|No| FallbackSync[Fallback to synchronous<br/>state root computation]
+        FallbackSync --> Success
     end
 
-    subgraph TransactionThread[Prewarming thread]
-        Prewarm[Execute transaction on top of previous block]
-            --> CollectPrefetchTargets[Collect all accounts and storage slots that were modified]
+    subgraph PayloadProcessor[Payload Processor]
+        ConditionalSpawn{Spawn mode?}
+        ConditionalSpawn -->|Full| SpawnPrewarm[Spawn Prewarming Task]
+        ConditionalSpawn -->|Cache-only| SpawnPrewarmOnly[Spawn Prewarming Task only]
+        
+        SpawnPrewarm --> SpawnMultiProof[Spawn MultiProof Task]
+        SpawnMultiProof --> SpawnSparseTrie[Spawn Sparse Trie Task]
+        SpawnSparseTrie --> ReturnHandle[Return PayloadHandle]
+        SpawnPrewarmOnly --> ReturnHandle
     end
 
-    subgraph StateRootTask[State Root Task thread]
-        StateRootMessage::PrefetchProofs
-        StateRootMessage::StateUpdate
-        StateRootMessage::FinishedStateUpdates
-        StateRootMessage::RootCalculated
+    subgraph BackgroundTasks[Background Tasks - Run in Parallel]
+        subgraph PrewarmTask[Prewarming Task]
+            PrewarmExecute[Execute transactions in parallel]
+            --> ExtractTargets[Extract proof targets]
+            --> SendPrefetch[Send MultiProofMessage::PrefetchProofs]
+        end
+
+        subgraph MultiProofTask[MultiProof Task]
+            ReceivePrefetch[Receive PrefetchProofs]
+            ReceiveStateUpdate[Receive StateUpdate from sequential execution]
+            --> DeduplicateTargets[Deduplicate proof targets]
+            --> GenerateProofs[Generate MPT proofs]
+            --> SequenceProofs[Sequence completed proofs]
+            --> SendSparseUpdate[Send SparseTrieUpdate]
+        end
+
+        subgraph SparseTrieTask[Sparse Trie Task]
+            ReceiveUpdates[Receive SparseTrieUpdate]
+            --> RevealProofs[Reveal multiproof in trie]
+            --> ApplyUpdates[Apply state updates]
+            --> CalculateRoot[Calculate state root]
+            --> ReturnOutcome[Return StateRootComputeOutcome]
+        end
+    end
+
+    subgraph SequentialExecution[Sequential Block Execution]
+        ExecuteBlock[Execute block sequentially]
+        --> StateHook[handle.state_hook() sends<br/>state updates to background tasks]
+        --> BlockComplete[Block execution complete]
     end
 
     newPayloadRequest[engine_newPayload request] --> Block
-    Block -->|Start prewarming each transaction in a separate thread| Prewarm
-    CollectPrefetchTargets --> StateRootMessage::PrefetchProofs
-    CollectStateUpdates --> StateRootMessage::StateUpdate
-    Execute -->|All transactions finished executing| StateRootMessage::FinishedStateUpdates
-    StateRootMessage::RootCalculated
-        --> newPayloadResponse[engine_newPayload response]
+    FullSpawn --> ConditionalSpawn
+    CacheOnlySpawn --> ConditionalSpawn
+    ParallelExecution --> BackgroundTasks
+    ParallelExecution --> SequentialExecution
+    
+    SendPrefetch --> ReceivePrefetch
+    StateHook --> ReceiveStateUpdate
+    SendSparseUpdate --> ReceiveUpdates
+    ReturnOutcome --> TryBackgroundRoot
+    Success --> newPayloadResponse[engine_newPayload response]

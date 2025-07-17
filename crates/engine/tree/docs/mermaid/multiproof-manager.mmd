@@ -1,26 +1,48 @@
 flowchart TD
-    subgraph MultiProofManager
-        ParallelProof@{ shape: processes, label: "Start thread with ParallelProof::spawn" }
-        PendingProofRequests[List of pending proof requests]
-
-        subgraph MultiProofManagerCompletion[on_calculation_complete]
-            HasPendingProofs{{Has pending multiproof requests?}}
-        end
-
-        subgraph MultiProofManagerSpawn[spawn_or_queue]
-            ProofTargetsCondition{{Proof targets not empty?}}
-                -->|Not empty, MultiProofTargets| MultiProofManagerLimitReached{{Max in-flight proofs limit reached?}}
-        end
+    subgraph MultiProofTask[MultiProof Task]
+        MessageProcessor[Message Processing Loop]
+        --> ProcessMessage{{Message Type?}}
+        
+        ProcessMessage -->|PrefetchProofs| HandlePrefetch[Handle prefetch proof targets]
+        ProcessMessage -->|StateUpdate| HandleStateUpdate[Handle state update with proof targets]
+        ProcessMessage -->|FinishedStateUpdates| HandleFinished[Handle finished signal]
+        
+        HandlePrefetch --> DeduplicateTargets[Deduplicate against fetched targets]
+        HandleStateUpdate --> DeduplicateTargets
+        
+        DeduplicateTargets --> ChunkTargets[Chunk targets (size: 10)]
+        --> CheckConcurrency{{Max concurrency reached?}}
+        CheckConcurrency -->|Yes| QueueRequest[Queue proof request]
+        CheckConcurrency -->|No| SpawnProofTask[Spawn proof calculation task]
+        
+        QueueRequest --> PendingQueue[Pending Proof Requests]
+        SpawnProofTask --> ProofCalculation[Calculate multiproof using ParallelProof]
+        
+        ProofCalculation --> ProofComplete[Proof calculation complete]
+        --> UpdateSequencer[Add to ProofSequencer]
+        --> CheckSequence{{Has consecutive sequence?}}
+        CheckSequence -->|Yes| SendSparseUpdate[Send SparseTrieUpdate to Sparse Trie Task]
+        CheckSequence -->|No| WaitForSequence[Wait for sequence completion]
+        
+        ProofComplete --> CheckPending{{Has pending requests?}}
+        CheckPending -->|Yes| ProcessPending[Process next pending request]
+        ProcessPending --> SpawnProofTask
+        
+        HandleFinished --> FinalizeSequence[Finalize remaining sequences]
+        --> TaskComplete[Complete task - channel closes implicitly]
     end
 
-    subgraph StateRootTask[StateRootTask]
-        StateRootMessage::EmptyProof
-        StateRootMessage::ProofCalculated
+    subgraph ExternalSources[External Sources]
+        PrewarmTask[Prewarming Task]
+        SequentialExecution[Sequential Execution]
     end
 
-    MultiProofManagerLimitReached -->|Yes, push to pending requests| PendingProofRequests
-    MultiProofManagerLimitReached -->|No| ParallelProof
-    HasPendingProofs <--> PendingProofRequests
-    HasPendingProofs -->|Yes| ParallelProof
-    ParallelProof --> StateRootMessage::ProofCalculated
-    ProofTargetsCondition -->|Empty| StateRootMessage::EmptyProof
+    subgraph SparseTrieTask[Sparse Trie Task]
+        SparseTrieUpdate[SparseTrieUpdate Channel]
+    end
+
+    PrewarmTask -->|MultiProofMessage::PrefetchProofs| ProcessMessage
+    SequentialExecution -->|MultiProofMessage::StateUpdate| ProcessMessage
+    SequentialExecution -->|MultiProofMessage::FinishedStateUpdates| ProcessMessage
+    SendSparseUpdate --> SparseTrieUpdate
+    TaskComplete --> SparseTrieUpdate

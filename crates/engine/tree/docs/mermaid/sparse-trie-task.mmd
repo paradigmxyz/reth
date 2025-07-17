@@ -1,21 +1,49 @@
 flowchart TD
-    subgraph SparseTrieTask[run_sparse_trie]
-        SparseTrieUpdate([SparseTrieUpdate channel])
-        SparseTrieUpdate --> SparseTrieUpdateAccumulate[Accumulate updates until the channel is empty]
-        SparseTrieUpdateAccumulate
-            --> SparseTrieReveal[Reveal multiproof in Sparse Trie]
-            --> SparseTrieStateUpdate[Update Sparse Trie with new state]
-            --> SparseTrieStorageRoots[Calculate sparse storage trie roots]
-            --> SparseTrieUpdateBelowLevel[Calculate sparse trie hashes below certain level]
-        SparseTrieUpdateBelowLevel --> SparseTrieUpdateClosed{{Is SparseTrieUpdate channel closed?}}
-        SparseTrieUpdateClosed -->|Yes| SparseTrieRoot[Calculate sparse trie root]
-        SparseTrieUpdateClosed -->|No| SparseTrieUpdate
+    subgraph SparseTrieTask[Sparse Trie Task]
+        ReceiveUpdate[Receive SparseTrieUpdate message]
+        --> BatchAccumulate[Accumulate updates until channel is empty]
+        --> ProcessBatch[Process accumulated batch]
+        
+        ProcessBatch --> RevealMultiproof[Reveal multiproof in sparse trie]
+        --> UpdateStorageParallel[Update storage tries in parallel]
+        --> UpdateAccountsTrie[Update accounts trie]
+        --> CalculateSubtreeHashes[Calculate subtree hashes below certain level]
+        
+        CalculateSubtreeHashes --> CheckChannelClosed{{Is channel closed?}}
+        CheckChannelClosed -->|No| ReceiveUpdate
+        CheckChannelClosed -->|Yes| CalculateFullRoot[Calculate complete state root]
+        --> PrepareTrieUpdates[Prepare trie updates for persistence]
+        --> ReturnOutcome[Return StateRootComputeOutcome]
     end
 
-    subgraph StateRootTask
-        Incoming[Incoming SparseTrieUpdate messages]
-        StateRootMessage::RootCalculated
+    subgraph UpdateDetails[Update Processing Details]
+        RevealMultiproof --> RevealNodes[Add multiproof nodes to sparse trie]
+        UpdateStorageParallel --> ParallelStorageUpdate[Process storage updates by account in parallel]
+        UpdateAccountsTrie --> ModifyAccounts[Update balances, nonces, code hashes, storage roots]
+        CalculateSubtreeHashes --> HashLowerLevels[Calculate keccak hashes for nodes below threshold]
     end
 
-    Incoming --> SparseTrieUpdate
-    SparseTrieRoot --> StateRootMessage::RootCalculated
+    subgraph TrieVariants[Trie Implementation]
+        SerialTrie[Serial Sparse Trie]
+        ParallelTrie[Parallel Sparse Trie]
+        ConfiguredTrie[ConfiguredSparseTrie enum selects implementation]
+    end
+
+    subgraph MultiProofTask[MultiProof Task]
+        SendUpdate[Send SparseTrieUpdate]
+        CloseChannel[Close channel when finished]
+    end
+
+    subgraph PayloadProcessor[Payload Processor]
+        AwaitResult[Await StateRootComputeOutcome]
+        ExtractStateRoot[Extract state root from outcome]
+        ValidateResult[Validate against block header]
+    end
+
+    SendUpdate --> ReceiveUpdate
+    CloseChannel --> CheckChannelClosed
+    ReturnOutcome --> AwaitResult
+    ExtractStateRoot --> ValidateResult
+    
+    ConfiguredTrie -.-> SerialTrie
+    ConfiguredTrie -.-> ParallelTrie

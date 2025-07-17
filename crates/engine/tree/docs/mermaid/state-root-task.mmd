@@ -1,44 +1,58 @@
 flowchart TD
-    subgraph StateRootTaskMessages[State Root Task messages]
-        StateRootMessage::StateUpdate
-        StateRootMessage::PrefetchProofs
-        StateRootMessage::EmptyProof
-        StateRootMessage::ProofCalculated
-        StateRootMessage::FinishedStateUpdates
+    subgraph PrewarmTask[Prewarming Task]
+        TransactionQueue[Transaction Queue]
+        --> ChunkTransactions[Chunk transactions for parallel execution]
+        --> SpawnWorkers[Spawn concurrent workers (max 64)]
+        --> ExecuteTransaction[Execute transaction optimistically]
+        --> ExtractProofTargets[Extract proof targets from execution]
+        --> SendToMultiProof[Send MultiProofMessage::PrefetchProofs]
+        --> CheckTermination{{Early termination signal?}}
+        CheckTermination -->|No| TransactionQueue
+        CheckTermination -->|Yes| SaveCache[Save execution state to cache]
     end
 
-    subgraph StateRootTask[State Root Task thread]
-        DeduplicateProofTargets[Deduplicate proof targets according to the list of already fetched proofs]
-        GenerateProofTargets[Generate proof targets from state update]
-            --> DeduplicateProofTargets
-
-        NewProof[New proof calculated]
-            -->|Add new proof| ProofSequencer
-            --> EndCondition1
-        ProofSequencer --> ProofSequencerCondition{{Has sequential proofs?}}
-
-        EndCondition1{{All updates processed?}}
-            --> EndCondition2{{All pending proofs requested?}}
-            --> EndCondition3{{All proofs finished processing?}}
+    subgraph MultiProofTask[MultiProof Task]
+        ReceivePrefetch[Receive PrefetchProofs]
+        ReceiveStateUpdate[Receive StateUpdate]
+        ReceiveFinished[Receive FinishedStateUpdates]
+        
+        DeduplicateTargets[Deduplicate proof targets]
+        GenerateProofs[Generate MPT proofs in parallel]
+        SequenceProofs[Sequence completed proofs]
+        SendSparseUpdate[Send SparseTrieUpdate]
+        
+        ReceivePrefetch --> DeduplicateTargets
+        ReceiveStateUpdate --> DeduplicateTargets
+        DeduplicateTargets --> GenerateProofs
+        GenerateProofs --> SequenceProofs
+        SequenceProofs --> SendSparseUpdate
+        ReceiveFinished --> SequenceProofs
     end
 
-    subgraph SparseTrieTask[Sparse Trie thread]
-        SparseTrieUpdate([SparseTrieUpdate channel])
+    subgraph SparseTrieTask[Sparse Trie Task]
+        ReceiveUpdates[Receive SparseTrieUpdate]
+        --> BatchAccumulate[Batch accumulate updates]
+        --> RevealProofs[Reveal multiproof in sparse trie]
+        --> ParallelStorage[Update storage tries in parallel]
+        --> UpdateAccounts[Update accounts trie]
+        --> CalculateHashes[Calculate incremental hashes]
+        --> CheckComplete{{Channel closed?}}
+        CheckComplete -->|No| ReceiveUpdates
+        CheckComplete -->|Yes| FinalRoot[Calculate final state root]
+        --> ReturnOutcome[Return StateRootComputeOutcome]
     end
 
-    subgraph MultiProofManager[MultiProofManager]
-        MultiProofCompletion[on_calculation_complete]
-        MultiProofSpawn[spawn_or_queue]
+    subgraph SequentialExecution[Sequential Execution]
+        ExecuteSeq[Execute transactions sequentially]
+        --> CollectStateUpdates[Collect state updates]
+        --> SendStateUpdate[Send MultiProofMessage::StateUpdate]
+        --> CheckFinished{{All transactions done?}}
+        CheckFinished -->|No| ExecuteSeq
+        CheckFinished -->|Yes| SendFinished[Send FinishedStateUpdates]
     end
 
-    StateRootMessage::PrefetchProofs --> DeduplicateProofTargets
-    StateRootMessage::StateUpdate --> GenerateProofTargets
-
-    DeduplicateProofTargets -----> MultiProofSpawn
-
-    StateRootMessage::EmptyProof --> NewProof
-    StateRootMessage::ProofCalculated --> NewProof
-    NewProof ---> MultiProofCompletion
-    ProofSequencerCondition -->|Yes, send multiproof and state update| SparseTrieUpdate
-    StateRootMessage::FinishedStateUpdates --> EndCondition1
-    EndCondition3 -->|Close SparseTrieUpdate channel| SparseTrieUpdate
+    SendToMultiProof --> ReceivePrefetch
+    SendStateUpdate --> ReceiveStateUpdate
+    SendFinished --> ReceiveFinished
+    SendSparseUpdate --> ReceiveUpdates
+    ReturnOutcome --> PayloadHandle[PayloadHandle receives state root]
