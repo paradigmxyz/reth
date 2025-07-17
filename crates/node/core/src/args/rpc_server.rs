@@ -227,7 +227,7 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.pending-block", default_value = "full", value_name = "KIND")]
     pub rpc_pending_block: PendingBlockKind,
 
-    /// Forwarder configuration.
+    /// Endpoint to forward transactions to.
     #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
     pub rpc_forwarder: Option<String>,
 
