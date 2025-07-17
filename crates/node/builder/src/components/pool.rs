@@ -126,7 +126,7 @@ impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, V> {
     }
 }
 
-impl<'a, Node: FullNodeTypes, V> TxPoolBuilder<'a, Node, TransactionValidationTaskExecutor<V>>
+impl<Node: FullNodeTypes, V> TxPoolBuilder<'_, Node, TransactionValidationTaskExecutor<V>>
 where
     V: TransactionValidator + Clone + 'static,
     V::Transaction:

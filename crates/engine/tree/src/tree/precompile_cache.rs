@@ -91,7 +91,7 @@ impl<S: PartialEq> PartialEq<CacheKey<S>> for CacheKeyRef<'_, S> {
     }
 }
 
-impl<'a, S: Hash> Hash for CacheKeyRef<'a, S> {
+impl<S: Hash> Hash for CacheKeyRef<'_, S> {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0 .0.hash(state);
         self.0 .1.hash(state);

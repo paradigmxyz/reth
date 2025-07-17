@@ -198,7 +198,7 @@ where
     era: &'a Era,
 }
 
-impl<'a, Era: EraMeta + ?Sized, R: Read, BH, BB> Display for ProcessIter<'a, Era, R, BH, BB>
+impl<Era: EraMeta + ?Sized, R: Read, BH, BB> Display for ProcessIter<'_, Era, R, BH, BB>
 where
     BH: FullBlockHeader + Value,
     BB: FullBlockBody<OmmerHeader = BH>,
@@ -208,7 +208,7 @@ where
     }
 }
 
-impl<'a, Era, R, BH, BB> Iterator for ProcessIter<'a, Era, R, BH, BB>
+impl<Era, R, BH, BB> Iterator for ProcessIter<'_, Era, R, BH, BB>
 where
     R: Read + Seek,
     Era: EraMeta + ?Sized,
