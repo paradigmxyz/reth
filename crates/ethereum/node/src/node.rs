@@ -171,6 +171,7 @@ where
         .fee_history_cache_config(ctx.config.fee_history_cache)
         .proof_permits(ctx.config.proof_permits)
         .gas_oracle_config(ctx.config.gas_oracle)
+        .raw_tx_forwarder(ctx.config.raw_tx_forwarder)
         .build();
         Ok(api)
     }
