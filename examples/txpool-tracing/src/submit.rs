@@ -51,16 +51,11 @@ where
     // Recover the transaction
     let transaction = transaction.try_into_recovered()?;
 
-    // Convert to pool transaction type
-    let pool_transaction =
-        <FC::Pool as TransactionPool>::Transaction::try_from_consensus(transaction)
-            .map_err(|e| eyre::eyre!("Failed to convert to pool transaction: {e}"))?;
-
-    // Submit the transaction to the pool and get event stream
     let mut tx_events = node
         .pool()
-        .add_transaction_and_subscribe(TransactionOrigin::Local, pool_transaction)
-        .await?;
+        .add_consensus_transaction_and_subscribe(transaction, TransactionOrigin::Local)
+        .await
+        .map_err(|e| eyre::eyre!("Pool error: {e}"))?;
 
     // Wait for the transaction to be added to the pool
     while let Some(event) = tx_events.next().await {
@@ -118,16 +113,9 @@ where
     // Recover the transaction
     let transaction = transaction.try_into_recovered()?;
 
-    // Get the transaction hash
-    let tx_hash = *transaction.hash();
-
-    // Convert to pool transaction type
-    let pool_transaction =
-        <FC::Pool as TransactionPool>::Transaction::try_from_consensus(transaction)
-            .map_err(|e| eyre::eyre!("Failed to convert to pool transaction: {e}"))?;
-
     // Submit the transaction to the pool
-    node.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
-
-    Ok(tx_hash)
+    node.pool()
+        .add_consensus_transaction(transaction, TransactionOrigin::Local)
+        .await
+        .map_err(|e| eyre::eyre!("Pool error: {e}"))
 }
