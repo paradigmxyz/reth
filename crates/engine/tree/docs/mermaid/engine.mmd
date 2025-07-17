@@ -1,18 +1,18 @@
 flowchart TD
     subgraph Engine[Engine]
         Block[Block from newPayload]
-        --> CheckConditions{Prefix sets empty?<br/>State root enabled?}
-        CheckConditions -->|Yes| FullSpawn[payload_processor.spawn()]
-        CheckConditions -->|No| CacheOnlySpawn[payload_processor.spawn_cache_exclusive()]
+        --> CheckConditions{Prefix sets empty? State root enabled?}
+        CheckConditions -->|Yes| FullSpawn[payload_processor.spawn]
+        CheckConditions -->|No| CacheOnlySpawn[payload_processor.spawn_cache_exclusive]
         
         FullSpawn --> ParallelExecution[Execute block in parallel with background tasks]
         CacheOnlySpawn --> ParallelExecution
         
-        ParallelExecution --> StopPrewarming[handle.stop_prewarming_execution()]
-        StopPrewarming --> TryBackgroundRoot[Try handle.state_root()]
-        TryBackgroundRoot --> ValidateRoot{State root matches<br/>block header?}
+        ParallelExecution --> StopPrewarming[handle.stop_prewarming_execution]
+        StopPrewarming --> TryBackgroundRoot[Try handle.state_root]
+        TryBackgroundRoot --> ValidateRoot{State root matches block header?}
         ValidateRoot -->|Yes| Success[Validation successful]
-        ValidateRoot -->|No| FallbackSync[Fallback to synchronous<br/>state root computation]
+        ValidateRoot -->|No| FallbackSync[Fallback to synchronous state root computation]
         FallbackSync --> Success
     end
 
@@ -54,7 +54,7 @@ flowchart TD
 
     subgraph SequentialExecution[Sequential Block Execution]
         ExecuteBlock[Execute block sequentially]
-        --> StateHook[handle.state_hook() sends<br/>state updates to background tasks]
+        --> StateHook[handle.state_hook sends state updates to background tasks]
         --> BlockComplete[Block execution complete]
     end
 
