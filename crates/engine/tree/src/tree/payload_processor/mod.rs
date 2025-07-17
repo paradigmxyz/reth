@@ -397,7 +397,7 @@ where
 
     /// Helper method that handles sparse trie task spawning.
     ///
-    /// If we have a stored trie, we will re-use it for spawning. If we do not have a stored trie,
+    /// If we have a stored trie, we will reuse it for spawning. If we do not have a stored trie,
     /// we will create a new trie based on the configured trie type (parallel or serial).
     fn spawn_sparse_trie_task<BPF>(
         &self,
