@@ -61,7 +61,6 @@ std = [
     "alloy-primitives/std",
     "reth-static-file-types/std",
 ]
-rpc-types = ["reth-ethereum-primitives/rpc-types"]
 reth-codec = [
     "std",
     "reth-primitives-traits/reth-codec",

@@ -16,6 +16,7 @@ workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api = { workspace = true, optional = true }
 reth-evm.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-primitives.workspace = true
@@ -28,6 +29,7 @@ alloy-json-rpc.workspace = true
 # optimism
 op-alloy-consensus = { workspace = true, optional = true }
 op-alloy-rpc-types = { workspace = true, optional = true }
+op-alloy-network = { workspace = true, optional = true }
 reth-optimism-primitives = { workspace = true, optional = true }
 op-revm = { workspace = true, optional = true }
 
@@ -41,16 +43,14 @@ jsonrpsee-types.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-reth-ethereum-primitives = { workspace = true, features = ["rpc-types"] }
-op-alloy-network.workspace = true
 
 [features]
 default = []
 op = [
     "dep:op-alloy-consensus",
     "dep:op-alloy-rpc-types",
+    "dep:op-alloy-network",
     "dep:reth-optimism-primitives",
-    "reth-optimism-primitives/rpc-types",
     "dep:reth-storage-api",
     "dep:op-revm",
     "reth-evm/op",

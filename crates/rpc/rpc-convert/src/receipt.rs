@@ -18,14 +18,24 @@ pub trait TryFromReceiptResponse<N: Network> {
         Self: Sized;
 }
 
-impl<N: Network, T> TryFromReceiptResponse<N> for T
-where
-    N::ReceiptResponse: Into<T>,
-{
+impl TryFromReceiptResponse<alloy_network::Ethereum> for reth_ethereum_primitives::Receipt {
     type Error = Infallible;
 
-    fn from_receipt_response(receipt_response: N::ReceiptResponse) -> Result<Self, Self::Error> {
-        Ok(receipt_response.into())
+    fn from_receipt_response(
+        receipt_response: alloy_rpc_types_eth::TransactionReceipt,
+    ) -> Result<Self, Self::Error> {
+        Ok(receipt_response.into_inner().into())
+    }
+}
+
+#[cfg(feature = "op")]
+impl TryFromReceiptResponse<op_alloy_network::Optimism> for reth_optimism_primitives::OpReceipt {
+    type Error = Infallible;
+
+    fn from_receipt_response(
+        receipt_response: op_alloy_rpc_types::OpTransactionReceipt,
+    ) -> Result<Self, Self::Error> {
+        Ok(receipt_response.inner.inner.into())
     }
 }
 

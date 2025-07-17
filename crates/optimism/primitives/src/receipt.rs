@@ -443,13 +443,6 @@ where
     }
 }
 
-#[cfg(feature = "rpc-types")]
-impl From<op_alloy_rpc_types::OpTransactionReceipt> for OpReceipt {
-    fn from(receipt: op_alloy_rpc_types::OpTransactionReceipt) -> Self {
-        receipt.inner.inner.into()
-    }
-}
-
 #[cfg(feature = "reth-codec")]
 mod compact {
     use super::*;
