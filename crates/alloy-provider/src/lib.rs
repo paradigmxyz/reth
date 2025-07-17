@@ -301,12 +301,12 @@ where
     }
 
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
-        let Some(header) = self.sealed_header(num)? else {
+        let Some(sealed_header) = self.sealed_header(num)? else {
             // If the block was not found, return None
             return Ok(None);
         };
 
-        Ok(Some(header.into_header()))
+        Ok(Some(sealed_header.into_header()))
     }
 
     fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
