@@ -20,8 +20,8 @@ use reth_evm::{
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadAttributesBuilder,
-    PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
+    PayloadAttributesBuilder, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -43,7 +43,7 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
-use reth_rpc_eth_api::RpcConvert;
+use reth_rpc_eth_api::{helpers::pending_block::BuildPendingEnv, RpcConvert};
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -144,7 +144,7 @@ impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
 where
     N: FullNodeComponents<
         Types: NodeTypes<ChainSpec: EthereumHardforks, Primitives = EthPrimitives>,
-        Evm: ConfigureEvm<NextBlockEnvCtx: From<NextBlockEnvAttributes>>,
+        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
     >,
     EthRpcConverterFor<N>: RpcConvert<
         Primitives = PrimitivesTy<N::Types>,

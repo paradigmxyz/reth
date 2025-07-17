@@ -10,10 +10,16 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_evm::ConfigureEvm;
+use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, SpawnBlocking},
+    helpers::{
+        pending_block::{BasicPendingEnvBuilder, PendingEnvBuilder},
+        spec::SignersForRpc,
+        SpawnBlocking,
+    },
     node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
@@ -73,7 +79,7 @@ pub type EthApiBuilderFor<N> = EthApiBuilder<
 /// While this type requires various unrestricted generic components, trait bounds are enforced when
 /// additional traits are implemented for this type.
 #[derive(Deref)]
-pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig, Rpc: RpcConvert> {
+pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig: ConfigureEvm, Rpc: RpcConvert> {
     /// All nested fields bundled together.
     #[deref]
     pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>>,
@@ -83,6 +89,7 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> Clone
     for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     fn clone(&self) -> Self {
@@ -90,7 +97,7 @@ where
     }
 }
 
-impl EthApi<NoopProvider, (), (), (), EthRpcConverter<ChainSpec>> {
+impl EthApi<NoopProvider, (), (), EthEvmConfig, EthRpcConverter<ChainSpec>> {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
     ///
     /// Creating an [`EthApi`] requires a few mandatory components:
@@ -140,7 +147,9 @@ impl EthApi<NoopProvider, (), (), (), EthRpcConverter<ChainSpec>> {
 impl<Provider, Pool, Network, EvmConfig, Rpc> EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReaderIdExt + ChainSpecProvider,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
+    BasicPendingEnvBuilder: PendingEnvBuilder<EvmConfig>,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
@@ -174,6 +183,7 @@ where
             TokioTaskExecutor::default().boxed(),
             proof_permits,
             rpc_converter,
+            BasicPendingEnvBuilder::default(),
         );
 
         Self { inner: Arc::new(inner) }
@@ -185,6 +195,7 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiTypes
 where
     Self: Send + Sync,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     type Error = EthApiError;
@@ -202,7 +213,7 @@ where
     Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
-    EvmConfig: Send + Sync + Clone + Unpin,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     type Primitives = Provider::Primitives;
@@ -239,7 +250,7 @@ where
     Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
     Pool: Send + Sync + Clone + Unpin,
     Network: Send + Sync + Clone,
-    EvmConfig: Send + Sync + Clone + Unpin,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     #[inline]
@@ -252,6 +263,7 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> std::fmt::Debug
     for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -264,6 +276,7 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> SpawnBlocking
 where
     Self: EthApiTypes<NetworkTypes = Rpc::Network> + Clone + Send + Sync + 'static,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     #[inline]
@@ -284,7 +297,13 @@ where
 
 /// Container type `EthApi`
 #[expect(missing_debug_implementations)]
-pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig, Rpc: RpcConvert> {
+pub struct EthApiInner<
+    Provider: BlockReader,
+    Pool,
+    Network,
+    EvmConfig: ConfigureEvm,
+    Rpc: RpcConvert,
+> {
     /// The transaction pool.
     pool: Pool,
     /// The provider that can interact with the chain.
@@ -324,11 +343,15 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig, Rpc: Rpc
 
     /// Converter for RPC types.
     tx_resp_builder: Rpc,
+
+    /// Builder for pending block environment.
+    next_env_builder: Box<dyn PendingEnvBuilder<EvmConfig>>,
 }
 
 impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReaderIdExt,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
@@ -348,6 +371,7 @@ where
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
         tx_resp_builder: Rpc,
+        next_env: impl PendingEnvBuilder<EvmConfig>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -381,6 +405,7 @@ where
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
             raw_tx_sender,
             tx_resp_builder,
+            next_env_builder: Box::new(next_env),
         }
     }
 }
@@ -388,6 +413,7 @@ where
 impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     /// Returns a handle to data on disk.
@@ -414,6 +440,13 @@ where
         &self,
     ) -> &Mutex<Option<PendingBlock<Provider::Block, Provider::Receipt>>> {
         &self.pending_block
+    }
+
+    /// Returns a type that knows how to build a [`ConfigureEvm::NextBlockEnvCtx`] for a pending
+    /// block.
+    #[inline]
+    pub const fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<EvmConfig> {
+        &*self.next_env_builder
     }
 
     /// Returns a handle to the task spawner.

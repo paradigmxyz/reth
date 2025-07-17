@@ -3,6 +3,7 @@
 use crate::EthApi;
 use alloy_consensus::crypto::RecoveryError;
 use reth_chainspec::ChainSpecProvider;
+use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{helpers::LoadReceipt, EthApiTypes, RpcNodeCoreExt};
@@ -26,6 +27,7 @@ where
             Error: From<RecoveryError>,
         >,
     Provider: BlockReader + ChainSpecProvider,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
 }

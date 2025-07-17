@@ -9244,6 +9244,7 @@ dependencies = [
  "reth-optimism-primitives",
  "reth-primitives-traits",
  "reth-revm",
+ "reth-rpc-eth-api",
  "revm",
  "thiserror 2.0.12",
 ]
