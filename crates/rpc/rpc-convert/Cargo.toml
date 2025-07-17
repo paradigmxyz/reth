@@ -42,8 +42,6 @@ jsonrpsee-types.workspace = true
 # error
 thiserror.workspace = true
 
-[dev-dependencies]
-
 [features]
 default = []
 op = [
