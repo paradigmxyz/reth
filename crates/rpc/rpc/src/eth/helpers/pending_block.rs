@@ -1,14 +1,12 @@
 //! Support for building a pending block with transactions from local view of mempool.
 
 use crate::EthApi;
-use alloy_consensus::BlockHeader;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_evm::{ConfigureEvm, NextBlockEnvAttributes};
+use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_primitives_traits::SealedHeader;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{LoadPendingBlock, SpawnBlocking},
+    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
     types::RpcTypes,
     FromEvmError, RpcNodeCore,
 };
@@ -18,7 +16,6 @@ use reth_storage_api::{
     StateProviderFactory,
 };
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm_primitives::B256;
 
 impl<Provider, Pool, Network, EvmConfig, Rpc> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
@@ -34,10 +31,7 @@ where
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
             >,
-            Evm: ConfigureEvm<
-                Primitives = <Self as RpcNodeCore>::Primitives,
-                NextBlockEnvCtx: From<NextBlockEnvAttributes>,
-            >,
+            Evm = EvmConfig,
             Primitives: NodePrimitives<
                 BlockHeader = ProviderHeader<Self::Provider>,
                 SignedTx = ProviderTx<Self::Provider>,
@@ -46,6 +40,7 @@ where
             >,
         >,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm<Primitives = Self::Primitives>,
     Rpc: RpcConvert<
         Network: RpcTypes<Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>>,
     >,
@@ -59,18 +54,8 @@ where
         self.inner.pending_block()
     }
 
-    fn next_env_attributes(
-        &self,
-        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as reth_evm::ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
-        Ok(NextBlockEnvAttributes {
-            timestamp: parent.timestamp().saturating_add(12),
-            suggested_fee_recipient: parent.beneficiary(),
-            prev_randao: B256::random(),
-            gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
-            withdrawals: parent.withdrawals_root().map(|_| Default::default()),
-        }
-        .into())
+    #[inline]
+    fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
+        self.inner.pending_env_builder()
     }
 }

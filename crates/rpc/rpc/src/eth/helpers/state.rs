@@ -1,6 +1,7 @@
 //! Contains RPC handler implementations specific to state.
 
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_evm::ConfigureEvm;
 use reth_rpc_convert::RpcConvert;
 use reth_storage_api::{BlockReader, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
@@ -17,6 +18,7 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> EthState
 where
     Self: LoadState + SpawnBlocking,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     fn max_proof_window(&self) -> u64 {
@@ -34,6 +36,7 @@ where
             Pool: TransactionPool,
         > + EthApiTypes<NetworkTypes = Rpc::Network>,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
 }

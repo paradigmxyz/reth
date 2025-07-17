@@ -2,6 +2,7 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
+use reth_evm::ConfigureEvm;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
@@ -16,6 +17,7 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> EthTransactions
 where
     Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<NetworkTypes = Rpc::Network>,
     Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     #[inline]
@@ -53,6 +55,7 @@ where
         + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>
         + EthApiTypes<NetworkTypes = Rpc::Network>,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
 }

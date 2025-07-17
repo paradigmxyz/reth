@@ -48,6 +48,7 @@ where
                        + From<ProviderError>,
         > + SpawnBlocking,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     #[inline]
@@ -66,6 +67,7 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> EstimateCall
 where
     Self: Call<NetworkTypes = Rpc::Network>,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
 }
