@@ -388,6 +388,30 @@ impl InMemorySize for OpReceipt {
     }
 }
 
+impl From<op_alloy_consensus::OpReceiptEnvelope> for OpReceipt {
+    fn from(envelope: op_alloy_consensus::OpReceiptEnvelope) -> Self {
+        match envelope {
+            op_alloy_consensus::OpReceiptEnvelope::Legacy(receipt) => Self::Legacy(receipt.receipt),
+            op_alloy_consensus::OpReceiptEnvelope::Eip2930(receipt) => {
+                Self::Eip2930(receipt.receipt)
+            }
+            op_alloy_consensus::OpReceiptEnvelope::Eip1559(receipt) => {
+                Self::Eip1559(receipt.receipt)
+            }
+            op_alloy_consensus::OpReceiptEnvelope::Eip7702(receipt) => {
+                Self::Eip7702(receipt.receipt)
+            }
+            op_alloy_consensus::OpReceiptEnvelope::Deposit(receipt) => {
+                Self::Deposit(OpDepositReceipt {
+                    deposit_nonce: receipt.receipt.deposit_nonce,
+                    deposit_receipt_version: receipt.receipt.deposit_receipt_version,
+                    inner: receipt.receipt.inner,
+                })
+            }
+        }
+    }
+}
+
 /// Trait for deposit receipt.
 pub trait DepositReceipt: reth_primitives_traits::Receipt {
     /// Converts a `Receipt` into a mutable Optimism deposit receipt.
@@ -409,36 +433,6 @@ impl DepositReceipt for OpReceipt {
         match self {
             Self::Deposit(receipt) => Some(receipt),
             _ => None,
-        }
-    }
-}
-
-impl<T> From<op_alloy_consensus::OpReceiptEnvelope<T>> for OpReceipt
-where
-    T: Into<Log>,
-{
-    fn from(envelope: op_alloy_consensus::OpReceiptEnvelope<T>) -> Self {
-        match envelope {
-            op_alloy_consensus::OpReceiptEnvelope::Legacy(receipt) => {
-                Self::Legacy(receipt.receipt.map_logs(Into::into))
-            }
-            op_alloy_consensus::OpReceiptEnvelope::Eip2930(receipt) => {
-                Self::Eip2930(receipt.receipt.map_logs(Into::into))
-            }
-            op_alloy_consensus::OpReceiptEnvelope::Eip1559(receipt) => {
-                Self::Eip1559(receipt.receipt.map_logs(Into::into))
-            }
-            op_alloy_consensus::OpReceiptEnvelope::Eip7702(receipt) => {
-                Self::Eip7702(receipt.receipt.map_logs(Into::into))
-            }
-            op_alloy_consensus::OpReceiptEnvelope::Deposit(receipt_with_bloom) => {
-                let deposit_receipt = receipt_with_bloom.receipt;
-                Self::Deposit(OpDepositReceipt {
-                    inner: deposit_receipt.inner.map_logs(Into::into),
-                    deposit_nonce: deposit_receipt.deposit_nonce,
-                    deposit_receipt_version: deposit_receipt.deposit_receipt_version,
-                })
-            }
         }
     }
 }

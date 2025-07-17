@@ -35,7 +35,7 @@ impl TryFromReceiptResponse<op_alloy_network::Optimism> for reth_optimism_primit
     fn from_receipt_response(
         receipt_response: op_alloy_rpc_types::OpTransactionReceipt,
     ) -> Result<Self, Self::Error> {
-        Ok(receipt_response.inner.inner.into())
+        Ok(receipt_response.inner.inner.map_logs(Into::into).into())
     }
 }
 
