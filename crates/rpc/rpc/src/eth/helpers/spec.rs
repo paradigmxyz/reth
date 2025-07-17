@@ -1,5 +1,6 @@
 use alloy_primitives::U256;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
@@ -20,6 +21,7 @@ where
         Network: NetworkInfo,
     >,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
     type Transaction = ProviderTx<Provider>;

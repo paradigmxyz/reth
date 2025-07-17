@@ -25,6 +25,7 @@ where
         Error: FromEvmError<Self::Evm>,
     >,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
 }

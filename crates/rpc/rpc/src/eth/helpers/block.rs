@@ -6,7 +6,7 @@ use reth_primitives_traits::NodePrimitives;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, SpawnBlocking},
-    RpcNodeCore, RpcNodeCoreExt,
+    RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::{BlockReader, ProviderTx};
@@ -27,6 +27,7 @@ where
         >,
     >,
     Provider: BlockReader + ChainSpecProvider,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
 }
@@ -44,7 +45,7 @@ where
             Evm = EvmConfig,
         >,
     Provider: BlockReader,
-    EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
+    EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
 {
 }

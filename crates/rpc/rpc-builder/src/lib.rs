@@ -41,7 +41,10 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
+    helpers::{
+        pending_block::{BasicPendingEnvBuilder, PendingEnvBuilder},
+        Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt,
+    },
     EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcConvert, RpcConverter, RpcHeader,
     RpcReceipt, RpcTransaction, RpcTxReq,
 };
@@ -301,6 +304,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         EvmConfig: ConfigureEvm,
         Network: Clone,
         RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>: RpcConvert,
+        BasicPendingEnvBuilder: PendingEnvBuilder<EvmConfig>,
     {
         self.eth_api_builder().build()
     }
