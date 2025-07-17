@@ -272,6 +272,7 @@ where
         Ok(res?)
     }
 
+    /// Returns whether the engine accepts execution requests hash.
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
     }
@@ -758,6 +759,7 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
+    /// Metered version of `get_blobs_v1`.
     pub fn get_blobs_v1_metered(
         &self,
         versioned_hashes: Vec<B256>,
@@ -792,6 +794,7 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
+    /// Metered version of `get_blobs_v2`.
     pub fn get_blobs_v2_metered(
         &self,
         versioned_hashes: Vec<B256>,
