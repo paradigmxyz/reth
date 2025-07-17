@@ -17,6 +17,8 @@ export const redirects: Record<string, string> = {
   '/run/pruning': '/run/faq/pruning',
   '/run/ports': '/run/faq/ports',
   '/run/troubleshooting': '/run/faq/troubleshooting',
+  // SDK
+  '/sdk/overview': '/sdk',
   // Exex
   '/developers/exex': '/exex/overview',
   '/developers/exex/how-it-works': '/exex/how-it-works',
