@@ -174,7 +174,7 @@ mod test {
             "--http.api",
             "admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots",
             "--rollup.sequencer-http",
-            "https://mainnet-sequencer.base.org",
+            "https://mainnet.base.org",
             "--rpc-max-tracing-requests",
             "1000000",
             "--rpc.gascap",
