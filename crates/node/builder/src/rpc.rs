@@ -735,11 +735,11 @@ where
     }
 
     /// Common setup for RPC server initialization
-    async fn setup_rpc_components<'a, F>(
+    async fn setup_rpc_components<F>(
         self,
-        ctx: AddOnsContext<'a, N>,
+        ctx: AddOnsContext<'_, N>,
         ext: F,
-    ) -> eyre::Result<RpcSetupContext<'a, N, EthB::EthApi>>
+    ) -> eyre::Result<RpcSetupContext<'_, N, EthB::EthApi>>
     where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {

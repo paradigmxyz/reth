@@ -207,7 +207,6 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>, Ext: clap::Args + fmt::Debug> Cl
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-#[expect(clippy::large_enum_variant)]
 pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Start the node
     #[command(name = "node")]

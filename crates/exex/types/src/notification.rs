@@ -98,7 +98,6 @@ pub(super) mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     #[expect(missing_docs)]
     #[serde(bound = "")]
-    #[expect(clippy::large_enum_variant)]
     pub enum ExExNotification<'a, N>
     where
         N: NodePrimitives,

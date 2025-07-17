@@ -243,7 +243,7 @@ pub struct CheckAccessListRequest<'a> {
     metrics: SupervisorMetrics,
 }
 
-impl<'a> CheckAccessListRequest<'a> {
+impl CheckAccessListRequest<'_> {
     /// Configures the timeout to use for the request if any.
     pub const fn with_timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;

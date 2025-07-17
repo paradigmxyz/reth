@@ -184,7 +184,7 @@ impl BytecodeReader for StateProviderTraitObjWrapper<'_> {
 /// <https://github.com/rust-lang/rust/issues/100013>
 pub struct StateCacheDbRefMutWrapper<'a, 'b>(pub &'b mut StateCacheDb<'a>);
 
-impl<'a, 'b> core::fmt::Debug for StateCacheDbRefMutWrapper<'a, 'b> {
+impl core::fmt::Debug for StateCacheDbRefMutWrapper<'_, '_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("StateCacheDbRefMutWrapper").finish_non_exhaustive()
     }
