@@ -349,6 +349,7 @@ impl From<Receipt<TxType>> for alloy_consensus::ReceiptEnvelope<Log> {
     }
 }
 
+#[cfg(feature = "rpc-types")]
 impl From<alloy_rpc_types_eth::TransactionReceipt> for Receipt<TxType> {
     fn from(receipt: alloy_rpc_types_eth::TransactionReceipt) -> Self {
         receipt.into_inner().into()

@@ -41,7 +41,7 @@ jsonrpsee-types.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-reth-ethereum-primitives.workspace = true
+reth-ethereum-primitives = { workspace = true, features = ["rpc-types"] }
 op-alloy-network.workspace = true
 
 [features]
@@ -50,6 +50,7 @@ op = [
     "dep:op-alloy-consensus",
     "dep:op-alloy-rpc-types",
     "dep:reth-optimism-primitives",
+    "reth-optimism-primitives/rpc-types",
     "dep:reth-storage-api",
     "dep:op-revm",
     "reth-evm/op",
