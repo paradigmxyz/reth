@@ -24,9 +24,9 @@ impl<Provider, Pool, Network, EvmConfig, Rpc> LoadPendingBlock
     for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: SpawnBlocking<
-            NetworkTypes = Rpc,
+            NetworkTypes = Rpc::Network,
             Error: FromEvmError<Self::Evm>,
-            RpcConvert: RpcConvert<Network = Rpc>,
+            RpcConvert: RpcConvert<Network = Rpc::Network>,
         > + RpcNodeCore<
             Provider: BlockReaderIdExt<Receipt = Provider::Receipt, Block = Provider::Block>
                           + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
@@ -46,7 +46,9 @@ where
             >,
         >,
     Provider: BlockReader,
-    Rpc: RpcTypes<Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>>,
+    Rpc: RpcConvert<
+        Network: RpcTypes<Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>>,
+    >,
 {
     #[inline]
     fn pending_block(
