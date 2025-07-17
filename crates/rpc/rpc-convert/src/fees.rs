@@ -48,7 +48,7 @@ impl CallFees {
         max_fee_per_blob_gas: Option<U256>,
         block_blob_fee: Option<U256>,
     ) -> Result<Self, CallFeesError> {
-        /// Get the effective gas price of a transaction as specfified in EIP-1559 with relevant
+        /// Get the effective gas price of a transaction as specified in EIP-1559 with relevant
         /// checks.
         fn get_effective_gas_price(
             max_fee_per_gas: Option<U256>,
