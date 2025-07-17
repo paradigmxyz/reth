@@ -70,7 +70,8 @@ where
         // let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
         let mut headers_cursor = provider
             .tx_ref()
-            .cursor_write::<tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>>()?;
+            .cursor_write::<tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>>(
+            )?;
 
         let mut header_tds_cursor =
             provider.tx_ref().cursor_write::<tables::HeaderTerminalDifficulties>()?;
@@ -117,11 +118,15 @@ type Walker<'a, Provider, T> =
 struct HeaderTablesIter<'a, Provider>
 where
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Value>>
-    + DBProvider<Tx: DbTxMut>,
+        + DBProvider<Tx: DbTxMut>,
 {
     provider: &'a Provider,
     limiter: &'a mut PruneLimiter,
-    headers_walker: Walker<'a, Provider,  tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>>,
+    headers_walker: Walker<
+        'a,
+        Provider,
+        tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>,
+    >,
     header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
     canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
 }
@@ -134,12 +139,16 @@ struct HeaderTablesIterItem {
 impl<'a, Provider> HeaderTablesIter<'a, Provider>
 where
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Value>>
-    + DBProvider<Tx: DbTxMut>,
+        + DBProvider<Tx: DbTxMut>,
 {
     const fn new(
         provider: &'a Provider,
         limiter: &'a mut PruneLimiter,
-        headers_walker: Walker<'a, Provider, tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>>,
+        headers_walker: Walker<
+            'a,
+            Provider,
+            tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>,
+        >,
         header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
         canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
     ) -> Self {
@@ -150,7 +159,7 @@ where
 impl<Provider> Iterator for HeaderTablesIter<'_, Provider>
 where
     Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Value>>
-    + DBProvider<Tx: DbTxMut>,
+        + DBProvider<Tx: DbTxMut>,
 {
     type Item = Result<HeaderTablesIterItem, PrunerError>;
     fn next(&mut self) -> Option<Self::Item> {
