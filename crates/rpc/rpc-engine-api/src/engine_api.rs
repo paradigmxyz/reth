@@ -147,7 +147,7 @@ where
     }
 
     /// Metered version of `new_payload_v1`.
-    async fn new_payload_v1_metered(
+    pub async fn new_payload_v1_metered(
         &self,
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
@@ -270,6 +270,10 @@ where
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
+    }
+
+    pub fn accept_execution_requests_hash(&self) -> bool {
+        self.inner.accept_execution_requests_hash
     }
 }
 
@@ -754,7 +758,7 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
-    fn get_blobs_v1_metered(
+    pub fn get_blobs_v1_metered(
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
@@ -788,7 +792,7 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
-    fn get_blobs_v2_metered(
+    pub fn get_blobs_v2_metered(
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {
