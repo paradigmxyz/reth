@@ -177,7 +177,6 @@ pub struct ExecuteOutput<R> {
 /// let block = assembler.assemble_block(input)?;
 /// ```
 #[derive(derive_more::Debug)]
-#[non_exhaustive]
 pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     /// Configuration of EVM used when executing the block.
     ///
