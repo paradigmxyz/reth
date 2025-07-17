@@ -1364,6 +1364,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // pre-allocate a few updates
         let mut updates = Vec::with_capacity(64);
 
+        let mut iter = self
+            .txs
+            .iter_mut()
+            .flat_map(|(sender, txs)| {
+                txs.iter_mut().map(move |(nonce, tx)| (TransactionId::new(*sender, *nonce), tx))
+            })
+            .peekable();
+
         // Loop over all individual senders and update all affected transactions.
         // One sender may have up to `max_account_slots` transactions here, which means, worst case
         // `max_accounts_slots` need to be updated, for example if the first transaction is blocked
@@ -1371,113 +1379,122 @@ impl<T: PoolTransaction> AllTransactions<T> {
         // However, we don't have to necessarily check every transaction of a sender. If no updates
         // are possible (nonce gap) then we can skip to the next sender.
 
-        // The loop will process the first transaction of all senders, update its
+        // The `unique_sender` loop will process the first transaction of all senders, update its
         // state and internally update all consecutive transactions
-        for (sender_id, sender_txs) in &mut self.txs {
-            let mut tx_iter = sender_txs.iter_mut().peekable();
-            if let Some(info) = changed_accounts.get(sender_id) {
-                // discard all transactions with a nonce lower than the current state nonce
-                while let Some((nonce, tx)) = tx_iter.peek() {
-                    if **nonce < info.state_nonce {
-                        updates.push(PoolUpdate {
-                            id: TransactionId::new(*sender_id, **nonce),
-                            current: tx.subpool,
-                            destination: Destination::Discard,
-                        });
-                        tx_iter.next();
-                    } else {
-                        break;
-                    }
-                }
-            }
-            // Get the first transaction for this sender
-            if let Some((nonce, tx)) = tx_iter.next() {
-                let id = TransactionId::new(*sender_id, *nonce);
-
-                // track the balance if the sender was changed in the block
-                // check if this is a changed account
-                let changed_balance = if let Some(info) = changed_accounts.get(sender_id) {
-                    let ancestor = TransactionId::ancestor(id.nonce, info.state_nonce, id.sender);
-                    // If there's no ancestor then this is the next transaction.
-                    if ancestor.is_none() {
-                        tx.state.insert(TxState::NO_NONCE_GAPS);
-                        tx.state.insert(TxState::NO_PARKED_ANCESTORS);
-                        tx.cumulative_cost = U256::ZERO;
-                        if tx.transaction.cost() > &info.balance {
-                            // sender lacks sufficient funds to pay for this transaction
-                            tx.state.remove(TxState::ENOUGH_BALANCE);
-                        } else {
-                            tx.state.insert(TxState::ENOUGH_BALANCE);
+        'transactions: while let Some((id, tx)) = iter.next() {
+            macro_rules! next_sender {
+                ($iter:ident) => {
+                    'this: while let Some((peek, _)) = iter.peek() {
+                        if peek.sender != id.sender {
+                            break 'this
                         }
+                        iter.next();
                     }
-
-                    Some(&info.balance)
-                } else {
-                    None
                 };
+            }
 
-                // If there's a nonce gap, we can shortcircuit, because there's nothing to update
-                // yet.
-                if tx.state.has_nonce_gap() {
-                    continue; // skip to next sender
+            // track the balance if the sender was changed in the block
+            // check if this is a changed account
+            let changed_balance = if let Some(info) = changed_accounts.get(&id.sender) {
+                // discard all transactions with a nonce lower than the current state nonce
+                if id.nonce < info.state_nonce {
+                    updates.push(PoolUpdate {
+                        id: *tx.transaction.id(),
+                        current: tx.subpool,
+                        destination: Destination::Discard,
+                    });
+                    continue 'transactions
                 }
 
-                // Since this is the first transaction of the sender, it has no parked ancestors
-                tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                let ancestor = TransactionId::ancestor(id.nonce, info.state_nonce, id.sender);
+                // If there's no ancestor then this is the next transaction.
+                if ancestor.is_none() {
+                    tx.state.insert(TxState::NO_NONCE_GAPS);
+                    tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                    tx.cumulative_cost = U256::ZERO;
+                    if tx.transaction.cost() > &info.balance {
+                        // sender lacks sufficient funds to pay for this transaction
+                        tx.state.remove(TxState::ENOUGH_BALANCE);
+                    } else {
+                        tx.state.insert(TxState::ENOUGH_BALANCE);
+                    }
+                }
 
-                // Update the first transaction of this sender.
+                Some(&info.balance)
+            } else {
+                None
+            };
+
+            // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
+            if tx.state.has_nonce_gap() {
+                next_sender!(iter);
+                continue 'transactions
+            }
+
+            // Since this is the first transaction of the sender, it has no parked ancestors
+            tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+
+            // Update the first transaction of this sender.
+            Self::update_tx_base_fee(self.pending_fees.base_fee, tx);
+            // Track if the transaction's sub-pool changed.
+            Self::record_subpool_update(&mut updates, tx);
+
+            // Track blocking transactions.
+            let mut has_parked_ancestor = !tx.state.is_pending();
+
+            let mut cumulative_cost = tx.next_cumulative_cost();
+
+            // the next expected nonce after this transaction: nonce + 1
+            let mut next_nonce_in_line = tx.transaction.nonce().saturating_add(1);
+
+            // Update all consecutive transaction of this sender
+            while let Some((peek, tx)) = iter.peek_mut() {
+                if peek.sender != id.sender {
+                    // Found the next sender we need to check
+                    continue 'transactions
+                }
+
+                if tx.transaction.nonce() == next_nonce_in_line {
+                    // no longer nonce gapped
+                    tx.state.insert(TxState::NO_NONCE_GAPS);
+                } else {
+                    // can short circuit if there's still a nonce gap
+                    next_sender!(iter);
+                    continue 'transactions
+                }
+
+                // update for next iteration of this sender's loop
+                next_nonce_in_line = next_nonce_in_line.saturating_add(1);
+
+                // update cumulative cost
+                tx.cumulative_cost = cumulative_cost;
+                // Update for next transaction
+                cumulative_cost = tx.next_cumulative_cost();
+
+                // If the account changed in the block, check the balance.
+                if let Some(changed_balance) = changed_balance {
+                    if &cumulative_cost > changed_balance {
+                        // sender lacks sufficient funds to pay for this transaction
+                        tx.state.remove(TxState::ENOUGH_BALANCE);
+                    } else {
+                        tx.state.insert(TxState::ENOUGH_BALANCE);
+                    }
+                }
+
+                // Update ancestor condition.
+                if has_parked_ancestor {
+                    tx.state.remove(TxState::NO_PARKED_ANCESTORS);
+                } else {
+                    tx.state.insert(TxState::NO_PARKED_ANCESTORS);
+                }
+                has_parked_ancestor = !tx.state.is_pending();
+
+                // Update and record sub-pool changes.
                 Self::update_tx_base_fee(self.pending_fees.base_fee, tx);
-                // Track if the transaction's sub-pool changed.
                 Self::record_subpool_update(&mut updates, tx);
 
-                // Track blocking transactions.
-                let mut has_parked_ancestor = !tx.state.is_pending();
-
-                let mut cumulative_cost = tx.next_cumulative_cost();
-
-                // the next expected nonce after this transaction: nonce + 1
-                let mut next_nonce_in_line = tx.transaction.nonce().saturating_add(1);
-
-                // Update all consecutive transaction of this sender
-                for (peek_nonce, tx) in tx_iter {
-                    if *peek_nonce == next_nonce_in_line {
-                        // no longer nonce gapped
-                        tx.state.insert(TxState::NO_NONCE_GAPS);
-                    } else {
-                        // can short circuit if there's still a nonce gap
-                        break;
-                    }
-
-                    // update for next iteration of this sender's loop
-                    next_nonce_in_line = next_nonce_in_line.saturating_add(1);
-
-                    // update cumulative cost
-                    tx.cumulative_cost = cumulative_cost;
-                    // Update for next transaction
-                    cumulative_cost = tx.next_cumulative_cost();
-
-                    // If the account changed in the block, check the balance.
-                    if let Some(changed_balance) = changed_balance {
-                        if &cumulative_cost > changed_balance {
-                            // sender lacks sufficient funds to pay for this transaction
-                            tx.state.remove(TxState::ENOUGH_BALANCE);
-                        } else {
-                            tx.state.insert(TxState::ENOUGH_BALANCE);
-                        }
-                    }
-
-                    // Update ancestor condition.
-                    if has_parked_ancestor {
-                        tx.state.remove(TxState::NO_PARKED_ANCESTORS);
-                    } else {
-                        tx.state.insert(TxState::NO_PARKED_ANCESTORS);
-                    }
-                    has_parked_ancestor = !tx.state.is_pending();
-
-                    // Update and record sub-pool changes.
-                    Self::update_tx_base_fee(self.pending_fees.base_fee, tx);
-                    Self::record_subpool_update(&mut updates, tx);
-                }
+                // Advance iterator
+                iter.next();
             }
         }
 
