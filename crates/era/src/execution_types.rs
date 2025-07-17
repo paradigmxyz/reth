@@ -89,17 +89,18 @@ impl<T: Encodable> SnappyRlpCodec<T> {
     }
 }
 
+/// Extension trait for generic decoding from compressed data
+pub trait DecodeCompressed {
+    /// Decompress and decode the data into the given type
+    fn decode<T: Decodable>(&self) -> Result<T, E2sError>;
+}
+
+
 /// Compressed block header using `snappyFramed(rlp(header))`
 #[derive(Debug, Clone)]
 pub struct CompressedHeader {
     /// The compressed data
     pub data: Vec<u8>,
-}
-
-/// Extension trait for generic decoding from compressed data
-pub trait DecodeCompressed {
-    /// Decompress and decode the data into the given type
-    fn decode<T: Decodable>(&self) -> Result<T, E2sError>;
 }
 
 impl CompressedHeader {

@@ -38,6 +38,7 @@ impl Era1Group {
     ) -> Self {
         Self { blocks, accumulator, block_index, other_entries: Vec::new() }
     }
+
     /// Add another entry to this group
     pub fn add_entry(&mut self, entry: Entry) {
         self.other_entries.push(entry);
