@@ -24,7 +24,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
-use alloy_provider::{network::Network, Provider};
+use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::BlockId;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
@@ -940,9 +940,22 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn bytecode_by_hash(&self, _code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
-        // Cannot fetch bytecode by hash via RPC
-        Err(ProviderError::UnsupportedProvider)
+    fn bytecode_by_hash(&self, code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
+        self.block_on_async(async {
+            // The method `debug_codeByHash` is currently only available on a Reth node
+            let code = self
+                .provider
+                .debug_code_by_hash(*code_hash, None)
+                .await
+                .map_err(ProviderError::other)?;
+
+            let Some(code) = code else {
+                // If the code was not found, return None
+                return Ok(None);
+            };
+
+            Ok(Some(Bytecode::new_raw(code)))
+        })
     }
 }
 
