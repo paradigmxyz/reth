@@ -3,6 +3,7 @@
 pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
+use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
@@ -15,11 +16,12 @@ use reth_ethereum_engine_primitives::{
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
+    TxEnvFor,
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, NodeAddOns, NodePrimitives, PayloadAttributesBuilder,
-    PrimitivesTy, TxTy,
+    AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
+    PayloadAttributesBuilder, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -35,10 +37,13 @@ use reth_node_builder::{
     PayloadTypes,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
-use reth_rpc::{eth::core::EthApiFor, ValidationApi};
-use reth_rpc_api::{eth::FullEthApiServer, servers::BlockSubmissionValidationApiServer};
+use reth_rpc::{
+    eth::core::{EthApiFor, EthRpcConverterFor},
+    ValidationApi,
+};
+use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
-use reth_rpc_eth_api::helpers::AddDevSigners;
+use reth_rpc_eth_api::{helpers::pending_block::BuildPendingEnv, RpcConvert};
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -137,8 +142,17 @@ pub struct EthereumEthApiBuilder;
 
 impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
 where
-    N: FullNodeComponents,
-    EthApiFor<N>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
+    N: FullNodeComponents<
+        Types: NodeTypes<ChainSpec: EthereumHardforks, Primitives = EthPrimitives>,
+        Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
+    >,
+    EthRpcConverterFor<N>: RpcConvert<
+        Primitives = PrimitivesTy<N::Types>,
+        TxEnv = TxEnvFor<N::Evm>,
+        Error = EthApiError,
+        Network = Ethereum,
+    >,
+    EthApiError: FromEvmError<N::Evm>,
 {
     type EthApi = EthApiFor<N>;
 

@@ -24,7 +24,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
-use alloy_provider::{network::Network, Provider};
+use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::BlockId;
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
@@ -301,20 +301,12 @@ where
     }
 
     fn header_by_number(&self, num: u64) -> ProviderResult<Option<Self::Header>> {
-        let block_response = self.block_on_async(async {
-            self.provider.get_block_by_number(num.into()).await.map_err(ProviderError::other)
-        })?;
-
-        let Some(block_response) = block_response else {
+        let Some(sealed_header) = self.sealed_header(num)? else {
             // If the block was not found, return None
             return Ok(None);
         };
 
-        // Convert the network block response to primitive block
-        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
-            .map_err(ProviderError::other)?;
-
-        Ok(Some(block.into_header()))
+        Ok(Some(sealed_header.into_header()))
     }
 
     fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
@@ -334,9 +326,23 @@ where
 
     fn sealed_header(
         &self,
-        _number: BlockNumber,
+        number: BlockNumber,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        Err(ProviderError::UnsupportedProvider)
+        let block_response = self.block_on_async(async {
+            self.provider.get_block_by_number(number.into()).await.map_err(ProviderError::other)
+        })?;
+
+        let Some(block_response) = block_response else {
+            // If the block was not found, return None
+            return Ok(None);
+        };
+        let block_hash = block_response.header().hash();
+
+        // Convert the network block response to primitive block
+        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
+            .map_err(ProviderError::other)?;
+
+        Ok(Some(SealedHeader::new(block.into_header(), block_hash)))
     }
 
     fn sealed_headers_while(
@@ -952,9 +958,22 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn bytecode_by_hash(&self, _code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
-        // Cannot fetch bytecode by hash via RPC
-        Err(ProviderError::UnsupportedProvider)
+    fn bytecode_by_hash(&self, code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
+        self.block_on_async(async {
+            // The method `debug_codeByHash` is currently only available on a Reth node
+            let code = self
+                .provider
+                .debug_code_by_hash(*code_hash, None)
+                .await
+                .map_err(ProviderError::other)?;
+
+            let Some(code) = code else {
+                // If the code was not found, return None
+                return Ok(None);
+            };
+
+            Ok(Some(Bytecode::new_raw(code)))
+        })
     }
 }
 
