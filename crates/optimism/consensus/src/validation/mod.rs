@@ -178,8 +178,7 @@ mod tests {
     use alloy_consensus::Header;
     use alloy_primitives::{b256, hex, Bytes, U256};
     use op_alloy_consensus::OpTxEnvelope;
-    use reth_chainspec::{BaseFeeParams, EthChainSpec};
-    use reth_chainspec::{ChainSpec, ForkCondition, Hardfork};
+    use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec, ForkCondition, Hardfork};
     use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
     use reth_optimism_forks::{OpHardfork, BASE_SEPOLIA_HARDFORKS};
     use std::sync::Arc;

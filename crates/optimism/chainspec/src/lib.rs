@@ -230,8 +230,6 @@ impl OpChainSpec {
     }
 }
 
-
-
 impl EthChainSpec for OpChainSpec {
     type Header = Header;
 
