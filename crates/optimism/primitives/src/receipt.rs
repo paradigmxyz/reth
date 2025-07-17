@@ -413,6 +413,42 @@ impl DepositReceipt for OpReceipt {
     }
 }
 
+impl<T> From<op_alloy_consensus::OpReceiptEnvelope<T>> for OpReceipt
+where
+    T: Into<Log>,
+{
+    fn from(envelope: op_alloy_consensus::OpReceiptEnvelope<T>) -> Self {
+        match envelope {
+            op_alloy_consensus::OpReceiptEnvelope::Legacy(receipt) => {
+                Self::Legacy(receipt.receipt.map_logs(Into::into))
+            }
+            op_alloy_consensus::OpReceiptEnvelope::Eip2930(receipt) => {
+                Self::Eip2930(receipt.receipt.map_logs(Into::into))
+            }
+            op_alloy_consensus::OpReceiptEnvelope::Eip1559(receipt) => {
+                Self::Eip1559(receipt.receipt.map_logs(Into::into))
+            }
+            op_alloy_consensus::OpReceiptEnvelope::Eip7702(receipt) => {
+                Self::Eip7702(receipt.receipt.map_logs(Into::into))
+            }
+            op_alloy_consensus::OpReceiptEnvelope::Deposit(receipt_with_bloom) => {
+                let deposit_receipt = receipt_with_bloom.receipt;
+                Self::Deposit(OpDepositReceipt {
+                    inner: deposit_receipt.inner.map_logs(Into::into),
+                    deposit_nonce: deposit_receipt.deposit_nonce,
+                    deposit_receipt_version: deposit_receipt.deposit_receipt_version,
+                })
+            }
+        }
+    }
+}
+
+impl From<op_alloy_rpc_types::OpTransactionReceipt> for OpReceipt {
+    fn from(receipt: op_alloy_rpc_types::OpTransactionReceipt) -> Self {
+        receipt.inner.inner.into()
+    }
+}
+
 #[cfg(feature = "reth-codec")]
 mod compact {
     use super::*;

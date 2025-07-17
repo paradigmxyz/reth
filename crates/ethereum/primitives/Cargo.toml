@@ -22,6 +22,7 @@ alloy-eips = { workspace = true, features = ["k256"] }
 alloy-primitives.workspace = true
 alloy-consensus = { workspace = true, features = ["serde"] }
 alloy-rlp.workspace = true
+alloy-rpc-types-eth.workspace = true
 
 # misc
 arbitrary = { workspace = true, optional = true, features = ["derive"] }
@@ -51,6 +52,7 @@ test-utils = [
 std = [
     "alloy-consensus/std",
     "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
     "alloy-rlp/std",
     "reth-primitives-traits/std",
     "reth-zstd-compressors?/std",
@@ -71,6 +73,7 @@ arbitrary = [
     "alloy-consensus/arbitrary",
     "alloy-consensus/k256",
     "alloy-primitives/arbitrary",
+    "alloy-rpc-types-eth/arbitrary",
     "reth-codecs?/arbitrary",
     "reth-primitives-traits/arbitrary",
     "alloy-eips/arbitrary",
@@ -79,6 +82,7 @@ serde-bincode-compat = [
     "dep:serde_with",
     "alloy-consensus/serde-bincode-compat",
     "alloy-eips/serde-bincode-compat",
+    "alloy-rpc-types-eth/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
 ]
 serde = [
@@ -86,6 +90,7 @@ serde = [
     "alloy-consensus/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
+    "alloy-rpc-types-eth/serde",
     "reth-codecs?/serde",
     "reth-primitives-traits/serde",
     "rand/serde",

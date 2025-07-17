@@ -25,6 +25,7 @@ alloy-rlp.workspace = true
 
 # op
 op-alloy-consensus.workspace = true
+op-alloy-rpc-types.workspace = true
 
 # codec
 bytes = { workspace = true, optional = true }
@@ -61,6 +62,7 @@ std = [
     "alloy-rlp/std",
     "reth-zstd-compressors?/std",
     "op-alloy-consensus/std",
+    "op-alloy-rpc-types/std",
     "serde_json/std",
     "serde_with?/std",
     "alloy-eips/std",
@@ -84,6 +86,7 @@ serde = [
     "bytes?/serde",
     "reth-codecs?/serde",
     "op-alloy-consensus/serde",
+    "op-alloy-rpc-types/serde",
     "alloy-eips/serde",
     "rand/serde",
     "rand_08/serde",
@@ -103,6 +106,7 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-codecs?/arbitrary",
     "op-alloy-consensus/arbitrary",
+    "op-alloy-rpc-types/arbitrary",
     "alloy-consensus/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-eips/arbitrary",

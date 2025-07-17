@@ -349,6 +349,12 @@ impl From<Receipt<TxType>> for alloy_consensus::ReceiptEnvelope<Log> {
     }
 }
 
+impl From<alloy_rpc_types_eth::TransactionReceipt> for Receipt<TxType> {
+    fn from(receipt: alloy_rpc_types_eth::TransactionReceipt) -> Self {
+        receipt.into_inner().into()
+    }
+}
+
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};

@@ -44,7 +44,7 @@ use reth_provider::{
     TransactionVariant, TransactionsProvider,
 };
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
-use reth_rpc_convert::TryFromBlockResponse;
+use reth_rpc_convert::{TryFromBlockResponse, TryFromReceiptResponse};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
@@ -372,6 +372,7 @@ where
     N: Network,
     Node: NodeTypes,
     BlockTy<Node>: TryFromBlockResponse<N>,
+    ReceiptTy<Node>: TryFromReceiptResponse<N>,
 {
     type Block = BlockTy<Node>;
 
@@ -451,6 +452,7 @@ where
     N: Network,
     Node: NodeTypes,
     BlockTy<Node>: TryFromBlockResponse<N>,
+    ReceiptTy<Node>: TryFromReceiptResponse<N>,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
@@ -476,6 +478,7 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    ReceiptTy<Node>: TryFromReceiptResponse<N>,
 {
     type Receipt = ReceiptTy<Node>;
 
@@ -483,8 +486,22 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
-    fn receipt_by_hash(&self, _hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
+        let receipt_response = self.block_on_async(async {
+            self.provider.get_transaction_receipt(hash).await.map_err(ProviderError::other)
+        })?;
+
+        let Some(receipt_response) = receipt_response else {
+            // If the receipt was not found, return None
+            return Ok(None);
+        };
+
+        // Convert the network receipt response to primitive receipt
+        let receipt =
+            <ReceiptTy<Node> as TryFromReceiptResponse<N>>::from_receipt_response(receipt_response)
+                .map_err(ProviderError::other)?;
+
+        Ok(Some(receipt))
     }
 
     fn receipts_by_block(
@@ -514,6 +531,7 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    ReceiptTy<Node>: TryFromReceiptResponse<N>,
 {
 }
 

@@ -12,11 +12,13 @@
 
 pub mod block;
 mod fees;
+pub mod receipt;
 mod rpc;
 pub mod transaction;
 
 pub use block::TryFromBlockResponse;
 pub use fees::{CallFees, CallFeesError};
+pub use receipt::TryFromReceiptResponse;
 pub use rpc::*;
 pub use transaction::{
     EthTxEnvError, IntoRpcTx, RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx,

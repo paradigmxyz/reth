@@ -40,6 +40,10 @@ jsonrpsee-types.workspace = true
 # error
 thiserror.workspace = true
 
+[dev-dependencies]
+reth-ethereum-primitives.workspace = true
+op-alloy-network.workspace = true
+
 [features]
 default = []
 op = [
