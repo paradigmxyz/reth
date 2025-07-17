@@ -13,7 +13,7 @@ export default defineConfig({
   topNav: [
     { text: 'Run', link: '/run/ethereum' },
     { text: 'SDK', link: '/sdk/overview' },
-    { 
+    {
       element: React.createElement('a', { href: '/docs', target: '_self' }, 'Rustdocs')
     },
     { text: 'GitHub', link: 'https://github.com/paradigmxyz/reth' },
@@ -68,6 +68,6 @@ export default defineConfig({
     }
   },
   editLink: {
-    pattern: "https://github.com/paradigmxyz/reth/edit/main/book/vocs/docs/pages/:path",
+    pattern: "https://github.com/paradigmxyz/reth/edit/main/docs/vocs/docs/pages/:path",
   }
 })
