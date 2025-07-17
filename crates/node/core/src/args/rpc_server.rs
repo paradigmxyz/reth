@@ -213,7 +213,7 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
     pub rpc_proof_permits: usize,
 
-    /// Forwarder configuration.
+    /// Endpoint to forward transactions to.
     #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
     pub rpc_forwarder: Option<String>,
 
