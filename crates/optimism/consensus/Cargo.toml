@@ -75,4 +75,5 @@ std = [
     "tracing/std",
     "thiserror/std",
     "reth-execution-types/std",
+    "op-alloy-consensus/std",
 ]
