@@ -32,6 +32,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ethereum/hive
+          ref: 1e662fbbe3e44915a042da872793ed5786df8fb2
           path: hivetests
 
       - uses: actions/setup-go@v5
