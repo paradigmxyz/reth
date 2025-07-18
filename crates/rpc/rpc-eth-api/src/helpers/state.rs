@@ -8,7 +8,6 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{Account, AccountInfo, EIP1186AccountProofResponse};
 use alloy_serde::JsonStorageKey;
 use futures::Future;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_rpc_eth_types::{EthApiError, PendingBlockEnv, RpcInvalidTransactionError};
@@ -192,14 +191,7 @@ pub trait EthState: LoadState + SpawnBlocking {
 /// Loads state from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` state RPC methods.
-pub trait LoadState:
-    EthApiTypes
-    + RpcNodeCoreExt<
-        Provider: StateProviderFactory
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>,
-        Pool: TransactionPool,
-    >
-{
+pub trait LoadState: EthApiTypes + RpcNodeCoreExt {
     /// Returns the state at the given block number
     fn state_at_hash(&self, block_hash: B256) -> Result<StateProviderBox, Self::Error> {
         self.provider().history_by_block_hash(block_hash).map_err(Self::Error::from_eth_err)

@@ -41,7 +41,7 @@ pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
 }
 
 /// A type that knows how to convert primitive receipts to RPC representations.
-pub trait ReceiptConverter<N: NodePrimitives>: Debug {
+pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     /// RPC representation.
     type RpcReceipt;
 
@@ -57,7 +57,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug {
 }
 
 /// A type that knows how to convert a consensus header into an RPC header.
-pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone {
+pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
     /// Converts a consensus header into an RPC header.
     fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc;
 }
@@ -93,7 +93,7 @@ impl<T: Sealable> FromConsensusHeader<T> for alloy_rpc_types_eth::Header<T> {
 /// A generic implementation [`RpcConverter`] should be preferred over a manual implementation. As
 /// long as its trait bound requirements are met, the implementation is created automatically and
 /// can be used in RPC method handlers for all the conversions.
-pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
+pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
@@ -469,7 +469,7 @@ impl<N, E, Evm, Receipt, Header, Map> RpcConvert for RpcConverter<E, Evm, Receip
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
     TxTy<N>: IntoRpcTx<E::TransactionResponse> + Clone + Debug,
     RpcTxReq<E>: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Receipt: ReceiptConverter<
@@ -496,7 +496,8 @@ where
         + Debug
         + Unpin
         + Send
-        + Sync,
+        + Sync
+        + 'static,
 {
     type Primitives = N;
     type Network = E;

@@ -11,7 +11,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, ReceiptTy,
+    NodeAddOns, NodeTypes, PayloadTypes, PrimitivesTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -953,7 +953,7 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     /// Eth API configuration
     pub config: EthConfig,
     /// Cache for eth state
-    pub cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
+    pub cache: EthStateCache<PrimitivesTy<N::Types>>,
 }
 
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].

@@ -13,7 +13,7 @@ use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
 use reth_rpc_eth_api::{
     EngineEthFilter, EthApiTypes, EthFilterApiServer, FullEthApiTypes, QueryLimits, RpcConvert,
-    RpcNodeCore, RpcNodeCoreExt, RpcTransaction,
+    RpcNodeCoreExt, RpcTransaction,
 };
 use reth_rpc_eth_types::{
     logs_utils::{self, append_matching_block_logs, ProviderOrBlock},
@@ -22,7 +22,7 @@ use reth_rpc_eth_types::{
 use reth_rpc_server_types::{result::rpc_error_with_code, ToRpcResult};
 use reth_storage_api::{
     BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, HeaderProvider, ProviderBlock,
-    ProviderReceipt, ReceiptProvider, TransactionsProvider,
+    ProviderReceipt, ReceiptProvider,
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
@@ -304,13 +304,7 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes
-        + RpcNodeCoreExt<
-            Provider: BlockIdReader,
-            Primitives: NodePrimitives<
-                SignedTx = <<Eth as RpcNodeCore>::Provider as TransactionsProvider>::Transaction,
-            >,
-        > + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -437,9 +431,7 @@ where
     }
 
     /// Access the underlying [`EthStateCache`].
-    fn eth_cache(
-        &self,
-    ) -> &EthStateCache<ProviderBlock<Eth::Provider>, ProviderReceipt<Eth::Provider>> {
+    fn eth_cache(&self) -> &EthStateCache<Eth::Primitives> {
         self.eth_api.cache()
     }
 
@@ -1093,6 +1085,7 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
     use reth_rpc_convert::RpcConverter;
+    use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
     use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators;
@@ -1122,13 +1115,11 @@ mod tests {
     }
 
     // Helper function to create a test EthApi instance
+    #[expect(clippy::type_complexity)]
     fn build_test_eth_api(
         provider: MockEthProvider,
     ) -> EthApi<
-        MockEthProvider,
-        TestPool,
-        NoopNetwork,
-        EthEvmConfig,
+        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
         RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
     > {
         EthApiBuilder::new(

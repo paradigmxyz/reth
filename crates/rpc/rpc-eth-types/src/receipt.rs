@@ -102,7 +102,7 @@ impl<ChainSpec> EthReceiptConverter<ChainSpec> {
 impl<N, ChainSpec> ReceiptConverter<N> for EthReceiptConverter<ChainSpec>
 where
     N: NodePrimitives<Receipt = Receipt>,
-    ChainSpec: EthChainSpec,
+    ChainSpec: EthChainSpec + 'static,
 {
     type Error = EthApiError;
     type RpcReceipt = TransactionReceipt;
