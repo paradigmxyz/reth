@@ -304,13 +304,7 @@ where
 #[async_trait]
 impl<Eth> EthFilterApiServer<RpcTransaction<Eth::NetworkTypes>> for EthFilter<Eth>
 where
-    Eth: FullEthApiTypes
-        + RpcNodeCoreExt<
-            Provider: BlockIdReader,
-            Primitives: NodePrimitives<
-                SignedTx = <<Eth as RpcNodeCore>::Provider as TransactionsProvider>::Transaction,
-            >,
-        > + 'static,
+    Eth: FullEthApiTypes + RpcNodeCoreExt + 'static,
 {
     /// Handler for `eth_newFilter`
     async fn new_filter(&self, filter: Filter) -> RpcResult<FilterId> {
@@ -437,9 +431,7 @@ where
     }
 
     /// Access the underlying [`EthStateCache`].
-    fn eth_cache(
-        &self,
-    ) -> &EthStateCache<ProviderBlock<Eth::Provider>, ProviderReceipt<Eth::Provider>> {
+    fn eth_cache(&self) -> &EthStateCache<Eth::Primitives> {
         self.eth_api.cache()
     }
 
