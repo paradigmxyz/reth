@@ -7,7 +7,6 @@ use crate::{
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
 };
-use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
 use alloy_network::Network;
 use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
