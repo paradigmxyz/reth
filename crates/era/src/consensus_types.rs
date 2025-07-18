@@ -1,9 +1,12 @@
 //! Consensus types for Era post-merge history files
 
-use std::io::{Read, Write};
-use ssz::Decode;
-use crate::{e2s_types::{E2sError, Entry}, DecodeCompressedSsz};
+use crate::{
+    e2s_types::{E2sError, Entry},
+    DecodeCompressedSsz,
+};
 use snap::{read::FrameDecoder, write::FrameEncoder};
+use ssz::Decode;
+use std::io::{Read, Write};
 
 /// `CompressedSignedBeaconBlock` record type: [0x01, 0x00]
 pub const COMPRESSED_SIGNED_BEACON_BLOCK: [u8; 2] = [0x01, 0x00];
@@ -157,7 +160,6 @@ impl CompressedBeaconState {
         self.decompress()
     }
 }
-
 
 impl DecodeCompressedSsz for CompressedBeaconState {
     fn decode<T: Decode>(&self) -> Result<T, E2sError> {
