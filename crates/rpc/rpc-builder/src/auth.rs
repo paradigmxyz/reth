@@ -25,7 +25,7 @@ pub use reth_ipc::server::Builder as IpcServerBuilder;
 
 /// Server configuration for the auth server.
 #[derive(Debug)]
-pub struct AuthServerConfig<Middleware = Identity> {
+pub struct AuthServerConfig<RpcMiddleware = Identity> {
     /// Where the server should listen.
     pub(crate) socket_addr: SocketAddr,
     /// The secret for the auth layer of the server.
@@ -37,26 +37,40 @@ pub struct AuthServerConfig<Middleware = Identity> {
     /// IPC endpoint
     pub(crate) ipc_endpoint: Option<String>,
     /// Configurable RPC middleware
-    pub(crate) rpc_middleware: Middleware,
+    pub(crate) rpc_middleware: RpcMiddleware,
 }
 
 // === impl AuthServerConfig ===
 
-impl<Middleware> AuthServerConfig<Middleware> {
+impl AuthServerConfig {
     /// Convenience function to create a new `AuthServerConfig`.
     pub const fn builder(secret: JwtSecret) -> AuthServerConfigBuilder {
         AuthServerConfigBuilder::new(secret)
     }
-
+}
+impl<RpcMiddleware> AuthServerConfig<RpcMiddleware> {
     /// Returns the address the server will listen on.
     pub const fn address(&self) -> SocketAddr {
         self.socket_addr
     }
 
+    /// Configures the rpc middleware.
+    pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> AuthServerConfig<T> {
+        let Self { socket_addr, secret, server_config, ipc_server_config, ipc_endpoint, .. } = self;
+        AuthServerConfig {
+            socket_addr,
+            secret,
+            server_config,
+            ipc_server_config,
+            ipc_endpoint,
+            rpc_middleware,
+        }
+    }
+
     /// Convenience function to start a server in one step.
     pub async fn start(self, module: AuthRpcModule) -> Result<AuthServerHandle, RpcError>
     where
-        Middleware: RethRpcMiddleware,
+        RpcMiddleware: RethRpcMiddleware,
     {
         let Self {
             socket_addr,
