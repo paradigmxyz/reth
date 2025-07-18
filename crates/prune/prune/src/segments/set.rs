@@ -47,8 +47,9 @@ impl<Provider> SegmentSet<Provider> {
 
 impl<Provider> SegmentSet<Provider>
 where
-    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
-        + DBProvider<Tx: DbTxMut>
+    Provider: StaticFileProviderFactory<
+            Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        > + DBProvider<Tx: DbTxMut>
         + PruneCheckpointWriter
         + BlockReader<Transaction: Encodable2718>,
 {

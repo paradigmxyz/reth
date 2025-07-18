@@ -12,7 +12,7 @@ export default defineConfig({
   basePath,
   topNav: [
     { text: 'Run', link: '/run/ethereum' },
-    { text: 'SDK', link: '/sdk/overview' },
+    { text: 'SDK', link: '/sdk' },
     { 
       element: React.createElement('a', { href: '/docs', target: '_self' }, 'Rustdocs')
     },

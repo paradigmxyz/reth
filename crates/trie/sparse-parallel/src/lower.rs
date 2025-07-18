@@ -5,7 +5,7 @@ use reth_trie_common::Nibbles;
 ///
 /// When a [`crate::ParallelSparseTrie`] is initialized/cleared then its `LowerSparseSubtrie`s are
 /// all blinded, meaning they have no nodes. A blinded `LowerSparseSubtrie` may hold onto a cleared
-/// [`SparseSubtrie`] in order to re-use allocations.
+/// [`SparseSubtrie`] in order to reuse allocations.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum LowerSparseSubtrie {
     Blind(Option<Box<SparseSubtrie>>),
@@ -78,6 +78,14 @@ impl LowerSparseSubtrie {
                 Self::Blind(Some(subtrie))
             }
         }
+    }
+
+    /// Takes ownership of the underlying [`SparseSubtrie`] if revealed, putting this
+    /// `LowerSparseSubtrie` will be put into the blinded state.
+    ///
+    /// Otherwise returns None.
+    pub(crate) fn take_revealed(&mut self) -> Option<Box<SparseSubtrie>> {
+        self.take_revealed_if(|_| true)
     }
 
     /// Takes ownership of the underlying [`SparseSubtrie`] if revealed and the predicate returns

@@ -559,7 +559,7 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
         self.block.header_mut()
     }
 
-    /// Returns a mutable reference to the header.
+    /// Returns a mutable reference to the body.
     pub const fn block_mut(&mut self) -> &mut B::Body {
         self.block.body_mut()
     }

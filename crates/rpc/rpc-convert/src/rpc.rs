@@ -35,6 +35,9 @@ where
 /// Adapter for network specific transaction response.
 pub type RpcTransaction<T> = <T as RpcTypes>::TransactionResponse;
 
+/// Adapter for network specific receipt response.
+pub type RpcReceipt<T> = <T as RpcTypes>::Receipt;
+
 /// Adapter for network specific transaction request.
 pub type RpcTxReq<T> = <T as RpcTypes>::TransactionRequest;
 
