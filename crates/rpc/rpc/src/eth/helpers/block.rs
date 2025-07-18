@@ -5,7 +5,7 @@ use reth_evm::ConfigureEvm;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{EthBlocks, LoadBlock, LoadPendingBlock, SpawnBlocking},
-    RpcNodeCore, RpcNodeCoreExt,
+    FromEvmError, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::BlockReader;
@@ -15,6 +15,7 @@ use crate::EthApi;
 impl<N, Rpc> EthBlocks for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives>,
 {
 }

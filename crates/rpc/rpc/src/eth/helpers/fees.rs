@@ -3,35 +3,28 @@
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_rpc_convert::RpcConvert;
-use reth_rpc_eth_api::helpers::{EthFees, LoadBlock, LoadFee};
+use reth_rpc_eth_api::{
+    helpers::{EthFees, LoadBlock, LoadFee},
+    RpcNodeCore,
+};
 use reth_rpc_eth_types::{FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderHeader, StateProviderFactory};
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthFees
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthFees for EthApi<N, Rpc>
 where
-    Self: LoadFee<
-        Provider: ChainSpecProvider<
-            ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>,
-        >,
-    >,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> LoadFee
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> LoadFee for EthApi<N, Rpc>
 where
-    Self: LoadBlock<Provider = Provider>,
-    Provider: BlockReaderIdExt
-        + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-        + StateProviderFactory,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {

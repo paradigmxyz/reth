@@ -8,36 +8,25 @@ use reth_transaction_pool::TransactionPool;
 
 use reth_rpc_eth_api::{
     helpers::{EthState, LoadState, SpawnBlocking},
-    EthApiTypes, RpcNodeCoreExt,
+    EthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthState
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthState for EthApi<N, Rpc>
 where
-    Self: LoadState + SpawnBlocking,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> LoadState
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> LoadState for EthApi<N, Rpc>
 where
-    Self: RpcNodeCoreExt<
-            Provider: BlockReader
-                          + StateProviderFactory
-                          + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-            Pool: TransactionPool,
-        > + EthApiTypes<NetworkTypes = Rpc::Network>,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
 }
 
