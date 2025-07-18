@@ -456,7 +456,7 @@ where
 
     /// Returns the inner `Network`
     #[inline]
-    pub const fn network(&self) -> &N::Network {
+    pub fn network(&self) -> &N::Network {
         self.components.network()
     }
 

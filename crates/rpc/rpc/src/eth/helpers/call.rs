@@ -8,34 +8,22 @@ use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEvmError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
+use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::BlockReader;
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthCall
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthCall for EthApi<N, Rpc>
 where
-    Self: EstimateCall<NetworkTypes = Rpc::Network>
-        + LoadPendingBlock<NetworkTypes = Rpc::Network>
-        + FullEthApiTypes<NetworkTypes = Rpc::Network>
-        + RpcNodeCoreExt<Evm = EvmConfig>,
-    EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
-    Provider: BlockReader,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> Call
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> Call for EthApi<N, Rpc>
 where
-    Self: LoadState<
-            RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Network = Rpc::Network>,
-            NetworkTypes = Rpc::Network,
-            Error: FromEvmError<Self::Evm>
-                       + From<<Self::RpcConvert as RpcConvert>::Error>
-                       + From<ProviderError>,
-        > + SpawnBlocking,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -48,12 +36,10 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EstimateCall
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EstimateCall for EthApi<N, Rpc>
 where
-    Self: Call<NetworkTypes = Rpc::Network>,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
 }

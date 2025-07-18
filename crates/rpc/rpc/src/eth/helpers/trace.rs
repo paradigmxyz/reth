@@ -10,12 +10,10 @@ use reth_storage_api::BlockReader;
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> Trace
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> Trace for EthApi<N, Rpc>
 where
-    Self: LoadState<Error: FromEvmError<Self::Evm>>,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    RpcConvert: RpcConvert<Primitives = N::Primitives>,
 {
 }

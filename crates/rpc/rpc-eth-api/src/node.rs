@@ -1,6 +1,6 @@
 //! Helper trait for interfacing with [`FullNodeComponents`].
 
-use reth_chainspec::ChainSpecProvider;
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, NodePrimitives, PrimitivesTy};
 use reth_primitives_traits::{BlockTy, HeaderTy, ReceiptTy, TxTy};
@@ -19,7 +19,7 @@ use reth_transaction_pool::{PoolTransaction, TransactionPool};
 /// where the full trait bounds of the components are not necessary.
 ///
 /// Every type that is a [`FullNodeComponents`] also implements this trait.
-pub trait RpcNodeCore: Clone + Send + Sync {
+pub trait RpcNodeCore: Clone + Send + Sync + Unpin + 'static {
     /// Blockchain data primitives.
     type Primitives: NodePrimitives;
     /// The provider type used to interact with the node.
@@ -29,7 +29,7 @@ pub trait RpcNodeCore: Clone + Send + Sync {
             Header = HeaderTy<Self::Primitives>,
             Transaction = TxTy<Self::Primitives>,
         > + NodePrimitivesProvider<Primitives = Self::Primitives>
-        + ChainSpecProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + Send
         + Sync
@@ -56,7 +56,7 @@ pub trait RpcNodeCore: Clone + Send + Sync {
 
 impl<T> RpcNodeCore for T
 where
-    T: FullNodeComponents,
+    T: FullNodeComponents<Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>>,
 {
     type Primitives = PrimitivesTy<T::Types>;
     type Provider = T::Provider;
