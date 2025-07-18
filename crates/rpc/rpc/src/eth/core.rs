@@ -10,27 +10,25 @@ use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
-use reth_evm::ConfigureEvm;
 use reth_evm_ethereum::EthEvmConfig;
+use reth_network_api::noop::NoopNetwork;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, spec::SignersForRpc, SpawnBlocking},
-    node::RpcNodeCoreExt,
+    node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
     receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasCap,
     GasPriceOracle, PendingBlock,
 };
-use reth_storage_api::{
-    noop::NoopProvider, BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock,
-    ProviderHeader, ProviderReceipt,
-};
+use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
 };
+use reth_transaction_pool::noop::NoopTransactionPool;
 use tokio::sync::{broadcast, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
@@ -43,22 +41,10 @@ pub type EthRpcConverterFor<N> = RpcConverter<
 >;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
-pub type EthApiFor<N> = EthApi<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Network,
-    <N as FullNodeComponents>::Evm,
-    EthRpcConverterFor<N>,
->;
+pub type EthApiFor<N> = EthApi<N, EthRpcConverterFor<N>>;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
-pub type EthApiBuilderFor<N> = EthApiBuilder<
-    <N as FullNodeTypes>::Provider,
-    <N as FullNodeComponents>::Pool,
-    <N as FullNodeComponents>::Network,
-    <N as FullNodeComponents>::Evm,
-    EthRpcConverterFor<N>,
->;
+pub type EthApiBuilderFor<N> = EthApiBuilder<N, EthRpcConverterFor<N>>;
 
 /// `Eth` API implementation.
 ///
@@ -91,7 +77,12 @@ where
     }
 }
 
-impl EthApi<NoopProvider, (), (), EthEvmConfig, EthRpcConverter<ChainSpec>> {
+impl
+    EthApi<
+        RpcNodeCoreAdapter<NoopProvider, NoopTransactionPool, NoopNetwork, EthEvmConfig>,
+        EthRpcConverter<ChainSpec>,
+    >
+{
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
     ///
     /// Creating an [`EthApi`] requires a few mandatory components:
@@ -119,20 +110,18 @@ impl EthApi<NoopProvider, (), (), EthEvmConfig, EthRpcConverter<ChainSpec>> {
     /// .build();
     /// ```
     #[expect(clippy::type_complexity)]
-    pub fn builder<Provider, Pool, Network, EvmConfig>(
+    pub fn builder<Provider, Pool, Network, EvmConfig, ChainSpec>(
         provider: Provider,
         pool: Pool,
         network: Network,
         evm_config: EvmConfig,
     ) -> EthApiBuilder<
-        Provider,
-        Pool,
-        Network,
-        EvmConfig,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
     >
     where
-        Provider: ChainSpecProvider + BlockReaderIdExt,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
+            RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
     {
         EthApiBuilder::new(provider, pool, network, evm_config)
     }
@@ -487,10 +476,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{EthApi, EthApiBuilder};
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
-    use alloy_network::Ethereum;
     use alloy_primitives::{Signature, B256, U64};
     use alloy_rpc_types::FeeHistory;
     use jsonrpsee_types::error::INVALID_PARAMS_CODE;
@@ -500,20 +488,18 @@ mod tests {
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
-    use reth_provider::test_utils::{MockEthProvider, NoopProvider};
-    use reth_rpc_convert::RpcConverter;
-    use reth_rpc_eth_api::EthApiServer;
-    use reth_rpc_eth_types::receipt::EthReceiptConverter;
+    use reth_provider::{
+        test_utils::{MockEthProvider, NoopProvider},
+        StageCheckpointReader,
+    };
+    use reth_rpc_eth_api::{node::RpcNodeCoreAdapter, EthApiServer};
     use reth_storage_api::{BlockReader, BlockReaderIdExt, StateProviderFactory};
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
 
     type FakeEthApi<P = MockEthProvider> = EthApi<
-        P,
-        TestPool,
-        NoopNetwork,
-        EthEvmConfig,
-        RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcNodeCoreAdapter<P, TestPool, NoopNetwork, EthEvmConfig>,
+        EthRpcConverter<ChainSpec>,
     >;
 
     fn build_test_eth_api<
@@ -521,10 +507,12 @@ mod tests {
                 Block = reth_ethereum_primitives::Block,
                 Receipt = reth_ethereum_primitives::Receipt,
                 Header = alloy_consensus::Header,
+                Transaction = reth_ethereum_primitives::TransactionSigned,
             > + BlockReader
             + ChainSpecProvider<ChainSpec = ChainSpec>
             + StateProviderFactory
             + CanonStateSubscriptions<Primitives = reth_ethereum_primitives::EthPrimitives>
+            + StageCheckpointReader
             + Unpin
             + Clone
             + 'static,
@@ -632,7 +620,7 @@ mod tests {
     /// Invalid block range
     #[tokio::test]
     async fn test_fee_history_empty() {
-        let response = <EthApi<_, _, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _>>::fee_history(
             &build_test_eth_api(NoopProvider::default()),
             U64::from(1),
             BlockNumberOrTag::Latest,
@@ -654,7 +642,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(newest_block + 1),
             newest_block.into(),
@@ -677,7 +665,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(1),
             (newest_block + 1000).into(),
@@ -700,7 +688,7 @@ mod tests {
         let (eth_api, _, _) =
             prepare_eth_api(newest_block, oldest_block, block_count, MockEthProvider::default());
 
-        let response = <EthApi<_, _, _, _, _> as EthApiServer<_, _, _, _, _>>::fee_history(
+        let response = <EthApi<_, _> as EthApiServer<_, _, _, _, _>>::fee_history(
             &eth_api,
             U64::from(0),
             newest_block.into(),

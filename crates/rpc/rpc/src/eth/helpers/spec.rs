@@ -1,30 +1,19 @@
 use alloy_primitives::U256;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_evm::ConfigureEvm;
-use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForApi, EthApiSpec},
     RpcNodeCore,
 };
-use reth_storage_api::{BlockNumReader, BlockReader, ProviderTx, StageCheckpointReader};
+use reth_storage_api::ProviderTx;
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiSpec
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthApiSpec for EthApi<N, Rpc>
 where
-    Self: RpcNodeCore<
-        Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>
-                      + BlockNumReader
-                      + StageCheckpointReader,
-        Network: NetworkInfo,
-    >,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
-    type Transaction = ProviderTx<Provider>;
+    type Transaction = ProviderTx<N::Provider>;
     type Rpc = Rpc::Network;
 
     fn starting_block(&self) -> U256 {

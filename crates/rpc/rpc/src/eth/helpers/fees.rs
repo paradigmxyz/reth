@@ -1,14 +1,12 @@
 //! Contains RPC handler implementations for fee history.
 
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_evm::ConfigureEvm;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthFees, LoadBlock, LoadFee},
-    RpcNodeCore,
+    helpers::{EthFees, LoadFee},
+    FromEvmError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{FeeHistoryCache, GasPriceOracle};
-use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderHeader, StateProviderFactory};
+use reth_rpc_eth_types::{EthApiError, FeeHistoryCache, GasPriceOracle};
+use reth_storage_api::ProviderHeader;
 
 use crate::EthApi;
 
@@ -16,7 +14,7 @@ impl<N, Rpc> EthFees for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
     EthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
 }
 
@@ -24,7 +22,7 @@ impl<N, Rpc> LoadFee for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
     EthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
     #[inline]
     fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
@@ -32,7 +30,7 @@ where
     }
 
     #[inline]
-    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         self.inner.fee_history_cache()
     }
 }
