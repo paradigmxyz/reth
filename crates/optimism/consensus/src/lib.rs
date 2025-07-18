@@ -29,6 +29,7 @@ use reth_primitives_traits::{
     Block, BlockBody, BlockHeader, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
     SealedHeader,
 };
+
 mod proof;
 pub use proof::calculate_receipt_root_no_memo_optimism;
 
