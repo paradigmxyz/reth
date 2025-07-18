@@ -27,7 +27,7 @@ reth-db-api.workspace = true
 reth-rpc-convert.workspace = true
 
 # alloy
-alloy-provider.workspace = true
+alloy-provider = { workspace = true, features = ["debug-api"] }
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true

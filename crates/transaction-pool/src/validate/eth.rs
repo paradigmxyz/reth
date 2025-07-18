@@ -493,8 +493,7 @@ where
                 ))
             }
 
-            let blob_count =
-                transaction.blob_versioned_hashes().map(|b| b.len() as u64).unwrap_or(0);
+            let blob_count = transaction.blob_count().unwrap_or(0);
             if blob_count == 0 {
                 // no blobs
                 return Err(TransactionValidationOutcome::Invalid(

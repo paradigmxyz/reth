@@ -20,6 +20,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use alloy_network::Ethereum;
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
@@ -40,11 +41,14 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
-    RpcTxReq,
+    helpers::{
+        pending_block::{BasicPendingEnvBuilder, PendingEnvBuilder},
+        Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt,
+    },
+    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcConvert, RpcConverter, RpcHeader,
+    RpcReceipt, RpcTransaction, RpcTxReq,
 };
-use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
+use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
     AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider, ProviderBlock,
@@ -248,9 +252,18 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     }
 
     /// Instantiates a new [`EthApiBuilder`] from the configured components.
-    pub fn eth_api_builder(&self) -> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+    #[expect(clippy::type_complexity)]
+    pub fn eth_api_builder(
+        &self,
+    ) -> EthApiBuilder<
+        Provider,
+        Pool,
+        Network,
+        EvmConfig,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>,
+    >
     where
-        Provider: BlockReaderIdExt + Clone,
+        Provider: BlockReaderIdExt + ChainSpecProvider + Clone,
         Pool: Clone,
         Network: Clone,
         EvmConfig: Clone,
@@ -268,7 +281,16 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     /// Note: This spawns all necessary tasks.
     ///
     /// See also [`EthApiBuilder`].
-    pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    #[expect(clippy::type_complexity)]
+    pub fn bootstrap_eth_api(
+        &self,
+    ) -> EthApi<
+        Provider,
+        Pool,
+        Network,
+        EvmConfig,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>,
+    >
     where
         N: NodePrimitives,
         Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
@@ -279,8 +301,10 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
             + Unpin
             + 'static,
         Pool: Clone,
-        EvmConfig: Clone,
+        EvmConfig: ConfigureEvm,
         Network: Clone,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>: RpcConvert,
+        BasicPendingEnvBuilder: PendingEnvBuilder<EvmConfig>,
     {
         self.eth_api_builder().build()
     }

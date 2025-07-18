@@ -250,7 +250,7 @@ impl std::fmt::Debug for ReplayTransactionStream<'_> {
     }
 }
 
-impl<T: TraceApiClient + Sync> TraceApiExt for T {
+impl<T: TraceApiClient<TransactionRequest> + Sync> TraceApiExt for T {
     type Provider = T;
 
     fn trace_block_buffered<I, B>(&self, params: I, n: usize) -> TraceBlockStream<'_>

@@ -1084,13 +1084,16 @@ impl<
 mod tests {
     use super::*;
     use crate::{eth::EthApi, EthApiBuilder};
+    use alloy_network::Ethereum;
     use alloy_primitives::FixedBytes;
     use rand::Rng;
-    use reth_chainspec::ChainSpecProvider;
+    use reth_chainspec::{ChainSpec, ChainSpecProvider};
     use reth_ethereum_primitives::TxType;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
+    use reth_rpc_convert::RpcConverter;
+    use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -1121,7 +1124,13 @@ mod tests {
     // Helper function to create a test EthApi instance
     fn build_test_eth_api(
         provider: MockEthProvider,
-    ) -> EthApi<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig> {
+    ) -> EthApi<
+        MockEthProvider,
+        TestPool,
+        NoopNetwork,
+        EthEvmConfig,
+        RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
+    > {
         EthApiBuilder::new(
             provider.clone(),
             testing_pool(),

@@ -292,6 +292,7 @@ mod implementations {
     }
 
     #[derive(Default)]
+    #[allow(dead_code)]
     pub struct VecBinarySearchWithLastFoundPrefixSet {
         keys: Vec<Nibbles>,
         last_found_idx: usize,

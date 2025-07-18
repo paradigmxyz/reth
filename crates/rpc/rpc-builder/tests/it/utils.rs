@@ -1,11 +1,10 @@
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
-
 use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
 use reth_chainspec::MAINNET;
 use reth_consensus::noop::NoopConsensus;
 use reth_engine_primitives::BeaconConsensusEngineHandle;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::EthPrimitives;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;

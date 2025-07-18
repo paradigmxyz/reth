@@ -179,7 +179,8 @@ where
     {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
-            return self.apply_with_import::<N>(env, &rlp_path).await;
+            // Note: this future is quite large so we box it
+            return Box::pin(self.apply_with_import::<N>(env, &rlp_path)).await;
         }
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
