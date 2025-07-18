@@ -1,6 +1,7 @@
 use crate::{
-    blinded::{BlindedProvider, RevealedNode},
-    LeafLookup, LeafLookupError, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+    provider::{RevealedNode, TrieNodeProvider},
+    LeafLookup, LeafLookupError, RevealedSparseNode, SparseTrieInterface, SparseTrieUpdates,
+    TrieMasks,
 };
 use alloc::{
     borrow::Cow,
@@ -66,28 +67,12 @@ impl<T: Default> Default for SparseTrie<T> {
 }
 
 impl<T: SparseTrieInterface + Default> SparseTrie<T> {
-    /// Creates a new blind sparse trie.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SerialSparseTrie, SparseTrie};
-    ///
-    /// let trie = SparseTrie::<SerialSparseTrie>::blind();
-    /// assert!(trie.is_blind());
-    /// let trie = SparseTrie::<SerialSparseTrie>::default();
-    /// assert!(trie.is_blind());
-    /// ```
-    pub const fn blind() -> Self {
-        Self::Blind(None)
-    }
-
     /// Creates a new revealed but empty sparse trie with `SparseNode::Empty` as root node.
     ///
     /// # Examples
     ///
     /// ```
-    /// use reth_trie_sparse::{blinded::DefaultBlindedProvider, SerialSparseTrie, SparseTrie};
+    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
     ///
     /// let trie = SparseTrie::<SerialSparseTrie>::revealed_empty();
     /// assert!(!trie.is_blind());
@@ -128,10 +113,33 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
 
         Ok(self.as_revealed_mut().unwrap())
     }
+}
+
+impl<T: SparseTrieInterface> SparseTrie<T> {
+    /// Creates a new blind sparse trie.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use reth_trie_sparse::{provider::DefaultTrieNodeProvider, SerialSparseTrie, SparseTrie};
+    ///
+    /// let trie = SparseTrie::<SerialSparseTrie>::blind();
+    /// assert!(trie.is_blind());
+    /// let trie = SparseTrie::<SerialSparseTrie>::default();
+    /// assert!(trie.is_blind());
+    /// ```
+    pub const fn blind() -> Self {
+        Self::Blind(None)
+    }
 
     /// Returns `true` if the sparse trie has no revealed nodes.
     pub const fn is_blind(&self) -> bool {
         matches!(self, Self::Blind(_))
+    }
+
+    /// Returns `true` if the sparse trie is revealed.
+    pub const fn is_revealed(&self) -> bool {
+        matches!(self, Self::Revealed(_))
     }
 
     /// Returns an immutable reference to the underlying revealed sparse trie.
@@ -219,7 +227,7 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
         &mut self,
         path: Nibbles,
         value: Vec<u8>,
-        provider: impl BlindedProvider,
+        provider: impl TrieNodeProvider,
     ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.update_leaf(path, value, provider)?;
@@ -234,7 +242,7 @@ impl<T: SparseTrieInterface + Default> SparseTrie<T> {
     pub fn remove_leaf(
         &mut self,
         path: &Nibbles,
-        provider: impl BlindedProvider,
+        provider: impl TrieNodeProvider,
     ) -> SparseTrieResult<()> {
         let revealed = self.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?;
         revealed.remove_leaf(path, provider)?;
@@ -405,7 +413,6 @@ impl SparseTrieInterface for SerialSparseTrie {
     fn reserve_nodes(&mut self, additional: usize) {
         self.nodes.reserve(additional);
     }
-
     fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -516,7 +523,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                     SparseNode::Hash(hash) => {
                         let mut full = *entry.key();
                         full.extend(&leaf.key);
-                        self.values.insert(full, leaf.value);
+                        self.values.insert(full, leaf.value.clone());
                         entry.insert(SparseNode::Leaf {
                             key: leaf.key,
                             // Memoize the hash of a previously blinded node in a new leaf
@@ -541,7 +548,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                     let mut full = *entry.key();
                     full.extend(&leaf.key);
                     entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.values.insert(full, leaf.value);
+                    self.values.insert(full, leaf.value.clone());
                 }
             },
         }
@@ -549,7 +556,15 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    fn update_leaf<P: BlindedProvider>(
+    fn reveal_nodes(&mut self, mut nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+        nodes.sort_unstable_by_key(|node| node.path);
+        for node in nodes {
+            self.reveal_node(node.path, node.node, node.masks)?;
+        }
+        Ok(())
+    }
+
+    fn update_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: Nibbles,
         value: Vec<u8>,
@@ -622,7 +637,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
                                 if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                    provider.blinded_node(&current)?
+                                    provider.trie_node(&current)?
                                 {
                                     let decoded = TrieNode::decode(&mut &node[..])?;
                                     trace!(
@@ -680,7 +695,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    fn remove_leaf<P: BlindedProvider>(
+    fn remove_leaf<P: TrieNodeProvider>(
         &mut self,
         full_path: &Nibbles,
         provider: P,
@@ -790,7 +805,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                                provider.blinded_node(&child_path)?
+                                provider.trie_node(&child_path)?
                             {
                                 let decoded = TrieNode::decode(&mut &node[..])?;
                                 trace!(
@@ -1905,7 +1920,7 @@ impl SparseTrieUpdates {
 #[cfg(test)]
 mod find_leaf_tests {
     use super::*;
-    use crate::blinded::DefaultBlindedProvider;
+    use crate::provider::DefaultTrieNodeProvider;
     use alloy_primitives::map::foldhash::fast::RandomState;
     // Assuming this exists
     use alloy_rlp::Encodable;
@@ -1928,7 +1943,7 @@ mod find_leaf_tests {
     #[test]
     fn find_leaf_existing_leaf() {
         // Create a simple trie with one leaf
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
@@ -1947,7 +1962,7 @@ mod find_leaf_tests {
     #[test]
     fn find_leaf_value_mismatch() {
         // Create a simple trie with one leaf
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles([0x1, 0x2, 0x3]);
         let value = b"test_value".to_vec();
@@ -1985,7 +2000,7 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exists_no_value_check() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         sparse.update_leaf(path, VALUE_A(), &provider).unwrap();
@@ -1996,7 +2011,7 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exists_with_value_check_ok() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let value = VALUE_A();
@@ -2008,7 +2023,7 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_branch_divergence() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]); // Belongs to same branch
@@ -2023,7 +2038,7 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_extension_divergence() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         // This will create an extension node at root with key 0x12
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
@@ -2038,7 +2053,7 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_leaf_divergence() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let existing_leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4, 0x5, 0x6]);
@@ -2051,7 +2066,7 @@ mod find_leaf_tests {
 
     #[test]
     fn find_leaf_exclusion_path_ends_at_branch() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let path1 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Creates branch at 0x12
         let path2 = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x5, 0x6]);
@@ -2065,7 +2080,7 @@ mod find_leaf_tests {
     }
 
     #[test]
-    fn find_leaf_error_blinded_node_at_leaf_path() {
+    fn find_leaf_error_trie_node_at_leaf_path() {
         // Scenario: The node *at* the leaf path is blinded.
         let blinded_hash = B256::repeat_byte(0xBB);
         let leaf_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
@@ -2106,7 +2121,7 @@ mod find_leaf_tests {
     }
 
     #[test]
-    fn find_leaf_error_blinded_node() {
+    fn find_leaf_error_trie_node() {
         let blinded_hash = B256::repeat_byte(0xAA);
         let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]);
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]);
@@ -2148,7 +2163,7 @@ mod find_leaf_tests {
     }
 
     #[test]
-    fn find_leaf_error_blinded_node_via_reveal() {
+    fn find_leaf_error_trie_node_via_reveal() {
         let blinded_hash = B256::repeat_byte(0xAA);
         let path_to_blind = Nibbles::from_nibbles_unchecked([0x1]); // Path of the blinded node itself
         let search_path = Nibbles::from_nibbles_unchecked([0x1, 0x2, 0x3, 0x4]); // Path we will search for
@@ -2209,7 +2224,7 @@ mod find_leaf_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blinded::DefaultBlindedProvider;
+    use crate::provider::DefaultTrieNodeProvider;
     use alloy_primitives::{map::B256Set, U256};
     use alloy_rlp::Encodable;
     use assert_matches::assert_matches;
@@ -2391,7 +2406,7 @@ mod tests {
                 [key],
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         sparse.update_leaf(key, value_encoded(), &provider).unwrap();
         let sparse_root = sparse.root();
@@ -2422,7 +2437,7 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
@@ -2453,7 +2468,7 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
@@ -2492,7 +2507,7 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, value_encoded(), &provider).unwrap();
@@ -2532,7 +2547,7 @@ mod tests {
                 paths.clone(),
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
         for path in &paths {
             sparse.update_leaf(*path, old_value_encoded.clone(), &provider).unwrap();
@@ -2567,7 +2582,7 @@ mod tests {
     fn sparse_trie_remove_leaf() {
         reth_tracing::init_test_tracing();
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -2821,7 +2836,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::from_root(
             branch.clone(),
             TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
@@ -2866,7 +2881,7 @@ mod tests {
             TrieMask::new(0b11),
         ));
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::from_root(
             branch.clone(),
             TrieMasks { hash_mask: Some(TrieMask::new(0b01)), tree_mask: None },
@@ -2906,7 +2921,7 @@ mod tests {
         fn test(updates: Vec<(BTreeMap<Nibbles, Account>, BTreeSet<Nibbles>)>) {
             {
                 let mut state = BTreeMap::default();
-                let default_provider = DefaultBlindedProvider;
+                let default_provider = DefaultTrieNodeProvider;
                 let provider_factory = create_test_provider_factory();
                 let mut sparse = SerialSparseTrie::default().with_updates(true);
 
@@ -3067,7 +3082,7 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -3177,7 +3192,7 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -3280,7 +3295,7 @@ mod tests {
                 [Nibbles::default()],
             );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::from_root(
             TrieNode::decode(&mut &hash_builder_proof_nodes.nodes_sorted()[0].1[..]).unwrap(),
             TrieMasks {
@@ -3335,7 +3350,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_get_changed_nodes_at_depth() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -3450,7 +3465,7 @@ mod tests {
             [Nibbles::default()],
         );
 
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         sparse.update_leaf(key1(), value_encoded(), &provider).unwrap();
         sparse.update_leaf(key2(), value_encoded(), &provider).unwrap();
@@ -3463,7 +3478,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_wipe() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default().with_updates(true);
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
@@ -3513,7 +3528,7 @@ mod tests {
     fn sparse_trie_clear() {
         // tests that if we fill a sparse trie with some nodes and then clear it, it has the same
         // contents as an empty sparse trie
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();
         sparse
@@ -3537,7 +3552,7 @@ mod tests {
 
     #[test]
     fn sparse_trie_display() {
-        let provider = DefaultBlindedProvider;
+        let provider = DefaultTrieNodeProvider;
         let mut sparse = SerialSparseTrie::default();
 
         let value = alloy_rlp::encode_fixed_size(&U256::ZERO).to_vec();

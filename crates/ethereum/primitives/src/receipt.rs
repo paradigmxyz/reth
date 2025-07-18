@@ -1,30 +1,55 @@
+use core::fmt::Debug;
+
 use alloc::vec::Vec;
 use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
 use alloy_eips::{
-    eip2718::{Eip2718Result, Encodable2718, IsTyped2718},
+    eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
     Decodable2718,
 };
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
 
+/// Helper trait alias with requirements for transaction type generic to be used within [`Receipt`].
+pub trait TxTy:
+    Debug
+    + Copy
+    + Eq
+    + Send
+    + Sync
+    + InMemorySize
+    + Typed2718
+    + TryFrom<u8, Error = Eip2718Error>
+    + Decodable
+    + 'static
+{
+}
+impl<T> TxTy for T where
+    T: Debug
+        + Copy
+        + Eq
+        + Send
+        + Sync
+        + InMemorySize
+        + Typed2718
+        + TryFrom<u8, Error = Eip2718Error>
+        + Decodable
+        + 'static
+{
+}
+
 /// Typed ethereum transaction receipt.
 /// Receipt containing result of transaction execution.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[cfg_attr(feature = "reth-codec", derive(reth_codecs::CompactZstd))]
 #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
-#[cfg_attr(feature = "reth-codec", reth_zstd(
-    compressor = reth_zstd_compressors::RECEIPT_COMPRESSOR,
-    decompressor = reth_zstd_compressors::RECEIPT_DECOMPRESSOR
-))]
-pub struct Receipt {
+pub struct Receipt<T = TxType> {
     /// Receipt type.
-    pub tx_type: TxType,
+    pub tx_type: T,
     /// If transaction is executed successfully.
     ///
     /// This is the `statusCode`
@@ -35,7 +60,7 @@ pub struct Receipt {
     pub logs: Vec<Log>,
 }
 
-impl Receipt {
+impl<T: TxTy> Receipt<T> {
     /// Returns length of RLP-encoded receipt fields with the given [`Bloom`] without an RLP header.
     pub fn rlp_encoded_fields_length(&self, bloom: &Bloom) -> usize {
         self.success.length() +
@@ -61,7 +86,7 @@ impl Receipt {
     /// network header.
     pub fn rlp_decode_inner(
         buf: &mut &[u8],
-        tx_type: TxType,
+        tx_type: T,
     ) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
         let header = Header::decode(buf)?;
         if !header.list {
@@ -112,10 +137,7 @@ impl Receipt {
 
     /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
     /// network header.
-    pub fn rlp_decode_inner_without_bloom(
-        buf: &mut &[u8],
-        tx_type: TxType,
-    ) -> alloy_rlp::Result<Self> {
+    pub fn rlp_decode_inner_without_bloom(buf: &mut &[u8], tx_type: T) -> alloy_rlp::Result<Self> {
         let header = Header::decode(buf)?;
         if !header.list {
             return Err(alloy_rlp::Error::UnexpectedString);
@@ -134,21 +156,21 @@ impl Receipt {
     }
 }
 
-impl Eip2718EncodableReceipt for Receipt {
+impl<T: TxTy> Eip2718EncodableReceipt for Receipt<T> {
     fn eip2718_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
         !self.tx_type.is_legacy() as usize + self.rlp_header_inner(bloom).length_with_payload()
     }
 
     fn eip2718_encode_with_bloom(&self, bloom: &Bloom, out: &mut dyn BufMut) {
         if !self.tx_type.is_legacy() {
-            out.put_u8(self.tx_type as u8);
+            out.put_u8(self.tx_type.ty());
         }
         self.rlp_header_inner(bloom).encode(out);
         self.rlp_encode_fields(bloom, out);
     }
 }
 
-impl RlpEncodableReceipt for Receipt {
+impl<T: TxTy> RlpEncodableReceipt for Receipt<T> {
     fn rlp_encoded_length_with_bloom(&self, bloom: &Bloom) -> usize {
         let mut len = self.eip2718_encoded_length_with_bloom(bloom);
         if !self.tx_type.is_legacy() {
@@ -171,21 +193,21 @@ impl RlpEncodableReceipt for Receipt {
     }
 }
 
-impl RlpDecodableReceipt for Receipt {
+impl<T: TxTy> RlpDecodableReceipt for Receipt<T> {
     fn rlp_decode_with_bloom(buf: &mut &[u8]) -> alloy_rlp::Result<ReceiptWithBloom<Self>> {
         let header_buf = &mut &**buf;
         let header = Header::decode(header_buf)?;
 
         // Legacy receipt, reuse initial buffer without advancing
         if header.list {
-            return Self::rlp_decode_inner(buf, TxType::Legacy)
+            return Self::rlp_decode_inner(buf, T::try_from(0)?)
         }
 
         // Otherwise, advance the buffer and try decoding type flag followed by receipt
         *buf = *header_buf;
 
         let remaining = buf.len();
-        let tx_type = TxType::decode(buf)?;
+        let tx_type = T::decode(buf)?;
         let this = Self::rlp_decode_inner(buf, tx_type)?;
 
         if buf.len() + header.payload_length != remaining {
@@ -196,7 +218,7 @@ impl RlpDecodableReceipt for Receipt {
     }
 }
 
-impl Encodable2718 for Receipt {
+impl<T: TxTy> Encodable2718 for Receipt<T> {
     fn encode_2718_len(&self) -> usize {
         (!self.tx_type.is_legacy() as usize) +
             self.rlp_header_inner_without_bloom().length_with_payload()
@@ -205,24 +227,24 @@ impl Encodable2718 for Receipt {
     // encode the header
     fn encode_2718(&self, out: &mut dyn BufMut) {
         if !self.tx_type.is_legacy() {
-            out.put_u8(self.tx_type as u8);
+            out.put_u8(self.tx_type.ty());
         }
         self.rlp_header_inner_without_bloom().encode(out);
         self.rlp_encode_fields_without_bloom(out);
     }
 }
 
-impl Decodable2718 for Receipt {
+impl<T: TxTy> Decodable2718 for Receipt<T> {
     fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, TxType::try_from(ty)?)?)
+        Ok(Self::rlp_decode_inner_without_bloom(buf, T::try_from(ty)?)?)
     }
 
     fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, TxType::Legacy)?)
+        Ok(Self::rlp_decode_inner_without_bloom(buf, T::try_from(0)?)?)
     }
 }
 
-impl Encodable for Receipt {
+impl<T: TxTy> Encodable for Receipt<T> {
     fn encode(&self, out: &mut dyn BufMut) {
         self.network_encode(out);
     }
@@ -232,13 +254,13 @@ impl Encodable for Receipt {
     }
 }
 
-impl Decodable for Receipt {
+impl<T: TxTy> Decodable for Receipt<T> {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         Ok(Self::network_decode(buf)?)
     }
 }
 
-impl TxReceipt for Receipt {
+impl<T: TxTy> TxReceipt for Receipt<T> {
     type Log = Log;
 
     fn status_or_post_state(&self) -> Eip658Value {
@@ -260,21 +282,25 @@ impl TxReceipt for Receipt {
     fn logs(&self) -> &[Log] {
         &self.logs
     }
-}
 
-impl Typed2718 for Receipt {
-    fn ty(&self) -> u8 {
-        self.tx_type as u8
+    fn into_logs(self) -> Vec<Log> {
+        self.logs
     }
 }
 
-impl IsTyped2718 for Receipt {
+impl<T: TxTy> Typed2718 for Receipt<T> {
+    fn ty(&self) -> u8 {
+        self.tx_type.ty()
+    }
+}
+
+impl<T: TxTy> IsTyped2718 for Receipt<T> {
     fn is_type(type_id: u8) -> bool {
         <TxType as IsTyped2718>::is_type(type_id)
     }
 }
 
-impl InMemorySize for Receipt {
+impl<T: TxTy> InMemorySize for Receipt<T> {
     fn size(&self) -> usize {
         self.tx_type.size() +
             core::mem::size_of::<bool>() +
@@ -283,7 +309,7 @@ impl InMemorySize for Receipt {
     }
 }
 
-impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt
+impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt<TxType>
 where
     T: Into<Log>,
 {
@@ -299,8 +325,8 @@ where
     }
 }
 
-impl From<Receipt> for alloy_consensus::Receipt<Log> {
-    fn from(value: Receipt) -> Self {
+impl<T> From<Receipt<T>> for alloy_consensus::Receipt<Log> {
+    fn from(value: Receipt<T>) -> Self {
         Self {
             status: value.success.into(),
             cumulative_gas_used: value.cumulative_gas_used,
@@ -309,8 +335,8 @@ impl From<Receipt> for alloy_consensus::Receipt<Log> {
     }
 }
 
-impl From<Receipt> for alloy_consensus::ReceiptEnvelope<Log> {
-    fn from(value: Receipt) -> Self {
+impl From<Receipt<TxType>> for alloy_consensus::ReceiptEnvelope<Log> {
+    fn from(value: Receipt<TxType>) -> Self {
         let tx_type = value.tx_type;
         let receipt = value.into_with_bloom().map_receipt(Into::into);
         match tx_type {
@@ -327,7 +353,9 @@ impl From<Receipt> for alloy_consensus::ReceiptEnvelope<Log> {
 pub(super) mod serde_bincode_compat {
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::TxType;
+    use alloy_eips::eip2718::Eip2718Error;
     use alloy_primitives::{Log, U8};
+    use core::fmt::Debug;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -335,6 +363,7 @@ pub(super) mod serde_bincode_compat {
     ///
     /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
     /// ```rust
+    /// use alloy_consensus::TxType;
     /// use reth_ethereum_primitives::{serde_bincode_compat, Receipt};
     /// use serde::{de::DeserializeOwned, Deserialize, Serialize};
     /// use serde_with::serde_as;
@@ -343,14 +372,15 @@ pub(super) mod serde_bincode_compat {
     /// #[derive(Serialize, Deserialize)]
     /// struct Data {
     ///     #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
-    ///     receipt: Receipt,
+    ///     receipt: Receipt<TxType>,
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
-    pub struct Receipt<'a> {
+    #[serde(bound(deserialize = "T: TryFrom<u8, Error = Eip2718Error>"))]
+    pub struct Receipt<'a, T = TxType> {
         /// Receipt type.
         #[serde(deserialize_with = "deserde_txtype")]
-        pub tx_type: TxType,
+        pub tx_type: T,
         /// If transaction is executed successfully.
         ///
         /// This is the `statusCode`
@@ -362,16 +392,16 @@ pub(super) mod serde_bincode_compat {
     }
 
     /// Ensures that txtype is deserialized symmetrically as U8
-    fn deserde_txtype<'de, D>(deserializer: D) -> Result<TxType, D::Error>
+    fn deserde_txtype<'de, D, T>(deserializer: D) -> Result<T, D::Error>
     where
         D: Deserializer<'de>,
+        T: TryFrom<u8, Error = Eip2718Error>,
     {
-        let value = U8::deserialize(deserializer)?;
-        value.to::<u8>().try_into().map_err(serde::de::Error::custom)
+        U8::deserialize(deserializer)?.to::<u8>().try_into().map_err(serde::de::Error::custom)
     }
 
-    impl<'a> From<&'a super::Receipt> for Receipt<'a> {
-        fn from(value: &'a super::Receipt) -> Self {
+    impl<'a, T: Copy> From<&'a super::Receipt<T>> for Receipt<'a, T> {
+        fn from(value: &'a super::Receipt<T>) -> Self {
             Self {
                 tx_type: value.tx_type,
                 success: value.success,
@@ -381,8 +411,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'a> From<Receipt<'a>> for super::Receipt {
-        fn from(value: Receipt<'a>) -> Self {
+    impl<'a, T> From<Receipt<'a, T>> for super::Receipt<T> {
+        fn from(value: Receipt<'a, T>) -> Self {
             Self {
                 tx_type: value.tx_type,
                 success: value.success,
@@ -392,8 +422,8 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl SerializeAs<super::Receipt> for Receipt<'_> {
-        fn serialize_as<S>(source: &super::Receipt, serializer: S) -> Result<S::Ok, S::Error>
+    impl<T: Copy + Serialize> SerializeAs<super::Receipt<T>> for Receipt<'_, T> {
+        fn serialize_as<S>(source: &super::Receipt<T>, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
@@ -401,17 +431,22 @@ pub(super) mod serde_bincode_compat {
         }
     }
 
-    impl<'de> DeserializeAs<'de, super::Receipt> for Receipt<'de> {
-        fn deserialize_as<D>(deserializer: D) -> Result<super::Receipt, D::Error>
+    impl<'de, T: TryFrom<u8, Error = Eip2718Error>> DeserializeAs<'de, super::Receipt<T>>
+        for Receipt<'de, T>
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::Receipt<T>, D::Error>
         where
             D: Deserializer<'de>,
         {
-            Receipt::<'_>::deserialize(deserializer).map(Into::into)
+            Receipt::<'_, T>::deserialize(deserializer).map(Into::into)
         }
     }
 
-    impl reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::Receipt {
-        type BincodeRepr<'a> = Receipt<'a>;
+    impl<T> reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat for super::Receipt<T>
+    where
+        T: Copy + Serialize + TryFrom<u8, Error = Eip2718Error> + Debug + 'static,
+    {
+        type BincodeRepr<'a> = Receipt<'a, T>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             self.into()
@@ -425,6 +460,7 @@ pub(super) mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use crate::{receipt::serde_bincode_compat, Receipt};
+        use alloy_consensus::TxType;
         use arbitrary::Arbitrary;
         use rand::Rng;
         use serde_with::serde_as;
@@ -435,8 +471,8 @@ pub(super) mod serde_bincode_compat {
             #[derive(Debug, PartialEq, Eq)]
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
             struct Data {
-                #[serde_as(as = "serde_bincode_compat::Receipt<'_>")]
-                receipt: Receipt,
+                #[serde_as(as = "serde_bincode_compat::Receipt<'_, TxType>")]
+                receipt: Receipt<TxType>,
             }
 
             let mut bytes = [0u8; 1024];
@@ -450,6 +486,124 @@ pub(super) mod serde_bincode_compat {
         }
     }
 }
+
+#[cfg(feature = "reth-codec")]
+mod compact {
+    use super::*;
+    use reth_codecs::{
+        Compact,
+        __private::{modular_bitfield::prelude::*, Buf},
+    };
+
+    impl Receipt {
+        #[doc = "Used bytes by [`ReceiptFlags`]"]
+        pub const fn bitflag_encoded_bytes() -> usize {
+            1u8 as usize
+        }
+        #[doc = "Unused bits for new fields by [`ReceiptFlags`]"]
+        pub const fn bitflag_unused_bits() -> usize {
+            0u8 as usize
+        }
+    }
+
+    #[allow(non_snake_case, unused_parens)]
+    mod flags {
+        use super::*;
+
+        #[doc = "Fieldset that facilitates compacting the parent type. Used bytes: 1 | Unused bits: 0"]
+        #[bitfield]
+        #[derive(Clone, Copy, Debug, Default)]
+        pub struct ReceiptFlags {
+            pub tx_type_len: B2,
+            pub success_len: B1,
+            pub cumulative_gas_used_len: B4,
+            pub __zstd: B1,
+        }
+
+        impl ReceiptFlags {
+            #[doc = r" Deserializes this fieldset and returns it, alongside the original slice in an advanced position."]
+            pub fn from(mut buf: &[u8]) -> (Self, &[u8]) {
+                (Self::from_bytes([buf.get_u8()]), buf)
+            }
+        }
+    }
+
+    pub use flags::ReceiptFlags;
+
+    impl<T: Compact> Compact for Receipt<T> {
+        fn to_compact<B>(&self, buf: &mut B) -> usize
+        where
+            B: reth_codecs::__private::bytes::BufMut + AsMut<[u8]>,
+        {
+            let mut flags = ReceiptFlags::default();
+            let mut total_length = 0;
+            let mut buffer = reth_codecs::__private::bytes::BytesMut::new();
+
+            let tx_type_len = self.tx_type.to_compact(&mut buffer);
+            flags.set_tx_type_len(tx_type_len as u8);
+            let success_len = self.success.to_compact(&mut buffer);
+            flags.set_success_len(success_len as u8);
+            let cumulative_gas_used_len = self.cumulative_gas_used.to_compact(&mut buffer);
+            flags.set_cumulative_gas_used_len(cumulative_gas_used_len as u8);
+            self.logs.to_compact(&mut buffer);
+
+            let zstd = buffer.len() > 7;
+            if zstd {
+                flags.set___zstd(1);
+            }
+
+            let flags = flags.into_bytes();
+            total_length += flags.len() + buffer.len();
+            buf.put_slice(&flags);
+            if zstd {
+                reth_zstd_compressors::RECEIPT_COMPRESSOR.with(|compressor| {
+                    let compressed =
+                        compressor.borrow_mut().compress(&buffer).expect("Failed to compress.");
+                    buf.put(compressed.as_slice());
+                });
+            } else {
+                buf.put(buffer);
+            }
+            total_length
+        }
+
+        fn from_compact(buf: &[u8], _len: usize) -> (Self, &[u8]) {
+            let (flags, mut buf) = ReceiptFlags::from(buf);
+            if flags.__zstd() != 0 {
+                reth_zstd_compressors::RECEIPT_DECOMPRESSOR.with(|decompressor| {
+                    let decompressor = &mut decompressor.borrow_mut();
+                    let decompressed = decompressor.decompress(buf);
+                    let original_buf = buf;
+                    let mut buf: &[u8] = decompressed;
+                    let (tx_type, new_buf) = T::from_compact(buf, flags.tx_type_len() as usize);
+                    buf = new_buf;
+                    let (success, new_buf) = bool::from_compact(buf, flags.success_len() as usize);
+                    buf = new_buf;
+                    let (cumulative_gas_used, new_buf) =
+                        u64::from_compact(buf, flags.cumulative_gas_used_len() as usize);
+                    buf = new_buf;
+                    let (logs, _) = Vec::from_compact(buf, buf.len());
+                    (Self { tx_type, success, cumulative_gas_used, logs }, original_buf)
+                })
+            } else {
+                let (tx_type, new_buf) = T::from_compact(buf, flags.tx_type_len() as usize);
+                buf = new_buf;
+                let (success, new_buf) = bool::from_compact(buf, flags.success_len() as usize);
+                buf = new_buf;
+                let (cumulative_gas_used, new_buf) =
+                    u64::from_compact(buf, flags.cumulative_gas_used_len() as usize);
+                buf = new_buf;
+                let (logs, new_buf) = Vec::from_compact(buf, buf.len());
+                buf = new_buf;
+                let obj = Self { tx_type, success, cumulative_gas_used, logs };
+                (obj, buf)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "reth-codec")]
+pub use compact::*;
 
 #[cfg(test)]
 mod tests {
@@ -472,7 +626,7 @@ mod tests {
 
     #[test]
     fn test_decode_receipt() {
-        reth_codecs::test_utils::test_decode::<Receipt>(&hex!(
+        reth_codecs::test_utils::test_decode::<Receipt<TxType>>(&hex!(
             "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
         ));
     }
@@ -564,7 +718,7 @@ mod tests {
 
         let mut data = vec![];
         receipt.to_compact(&mut data);
-        let (decoded, _) = Receipt::from_compact(&data[..], data.len());
+        let (decoded, _) = Receipt::<TxType>::from_compact(&data[..], data.len());
         assert_eq!(decoded, receipt);
     }
 

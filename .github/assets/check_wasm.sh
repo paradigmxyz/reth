@@ -48,6 +48,7 @@ exclude_crates=(
   reth-rpc-api
   reth-rpc-api-testing-util
   reth-rpc-builder
+  reth-rpc-convert
   reth-rpc-e2e-tests
   reth-rpc-engine-api
   reth-rpc-eth-api
@@ -77,6 +78,7 @@ exclude_crates=(
   reth-era-downloader # tokio
   reth-era-utils # tokio
   reth-tracing-otlp
+  reth-node-ethstats
 )
 
 # Array to hold the results

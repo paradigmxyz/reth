@@ -1,25 +1,23 @@
 //! Contains RPC handler implementations specific to endpoints that call/execute within evm.
 
 use crate::EthApi;
-use alloy_evm::block::BlockExecutorFactory;
-use alloy_rpc_types_eth::TransactionRequest;
 use reth_errors::ProviderError;
-use reth_evm::{ConfigureEvm, EvmFactory, TxEnvFor};
+use reth_evm::{ConfigureEvm, TxEnvFor};
 use reth_node_api::NodePrimitives;
-use reth_rpc_convert::{RpcConvert, RpcTypes};
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{estimate::EstimateCall, Call, EthCall, LoadPendingBlock, LoadState, SpawnBlocking},
     FromEvmError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use revm::context::TxEnv;
 
-impl<Provider, Pool, Network, EvmConfig> EthCall for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EthCall
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
-    Self: EstimateCall
-        + LoadPendingBlock
-        + FullEthApiTypes
+    Self: EstimateCall<NetworkTypes = Rpc::Network>
+        + LoadPendingBlock<NetworkTypes = Rpc::Network>
+        + FullEthApiTypes<NetworkTypes = Rpc::Network>
         + RpcNodeCoreExt<
             Pool: TransactionPool<
                 Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>,
@@ -29,26 +27,29 @@ where
         >,
     EvmConfig: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
     Provider: BlockReader,
+    Rpc: RpcConvert,
 {
 }
 
-impl<Provider, Pool, Network, EvmConfig> Call for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> Call
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
     Self: LoadState<
             Evm: ConfigureEvm<
-                BlockExecutorFactory: BlockExecutorFactory<EvmFactory: EvmFactory<Tx = TxEnv>>,
                 Primitives: NodePrimitives<
                     BlockHeader = ProviderHeader<Self::Provider>,
                     SignedTx = ProviderTx<Self::Provider>,
                 >,
             >,
-            RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Network = Self::NetworkTypes>,
-            NetworkTypes: RpcTypes<TransactionRequest: From<TransactionRequest>>,
+            RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>, Network = Rpc::Network>,
+            NetworkTypes = Rpc::Network,
             Error: FromEvmError<Self::Evm>
                        + From<<Self::RpcConvert as RpcConvert>::Error>
                        + From<ProviderError>,
         > + SpawnBlocking,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
+    Rpc: RpcConvert,
 {
     #[inline]
     fn call_gas_limit(&self) -> u64 {
@@ -61,9 +62,12 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> EstimateCall for EthApi<Provider, Pool, Network, EvmConfig>
+impl<Provider, Pool, Network, EvmConfig, Rpc> EstimateCall
+    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
 where
-    Self: Call,
+    Self: Call<NetworkTypes = Rpc::Network>,
     Provider: BlockReader,
+    EvmConfig: ConfigureEvm,
+    Rpc: RpcConvert,
 {
 }

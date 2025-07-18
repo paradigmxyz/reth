@@ -2,9 +2,10 @@
 
 use crate::{
     fees::{CallFees, CallFeesError},
-    RpcTransaction, RpcTxReq, RpcTypes,
+    RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
 };
 use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
+use alloy_network::Network;
 use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
     request::{TransactionInputError, TransactionRequest},
@@ -15,10 +16,41 @@ use reth_evm::{
     revm::context_interface::{either::Either, Block},
     ConfigureEvm, TxEnvFor,
 };
-use reth_primitives_traits::{NodePrimitives, TxTy};
+use reth_primitives_traits::{NodePrimitives, TransactionMeta, TxTy};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
+use std::{borrow::Cow, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
+
+/// Input for [`RpcConvert::convert_receipts`].
+#[derive(Debug, Clone)]
+pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
+    /// Primitive receipt.
+    pub receipt: Cow<'a, N::Receipt>,
+    /// Transaction the receipt corresponds to.
+    pub tx: Recovered<&'a N::SignedTx>,
+    /// Gas used by the transaction.
+    pub gas_used: u64,
+    /// Number of logs emitted before this transaction.
+    pub next_log_index: usize,
+    /// Metadata for the transaction.
+    pub meta: TransactionMeta,
+}
+
+/// A type that knows how to convert primitive receipts to RPC representations.
+pub trait ReceiptConverter<N: NodePrimitives>: Debug {
+    /// RPC representation.
+    type RpcReceipt;
+
+    /// Error that may occur during conversion.
+    type Error;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from the same block.
+    fn convert_receipts(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, N>>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error>;
+}
 
 /// Responsible for the conversions from and into RPC requests and responses.
 ///
@@ -78,6 +110,13 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error>;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from the same block.
+    fn convert_receipts(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
 }
 
 /// Converts `self` into `T`. The opposite of [`FromConsensusTx`].
@@ -323,70 +362,66 @@ pub struct TransactionConversionError(String);
 ///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
 ///   object.
 #[derive(Debug)]
-pub struct RpcConverter<E, Evm, Err, Map = ()> {
-    phantom: PhantomData<(E, Evm, Err)>,
+pub struct RpcConverter<E, Evm, Receipt, Map = ()> {
+    phantom: PhantomData<(E, Evm)>,
+    receipt_converter: Receipt,
     mapper: Map,
 }
 
-impl<E, Evm, Err> RpcConverter<E, Evm, Err, ()> {
-    /// Creates a new [`RpcConverter`] with the default mapper.
-    pub const fn new() -> Self {
-        Self::with_mapper(())
+impl<E, Evm, Receipt, Map> RpcConverter<E, Evm, Receipt, Map> {
+    /// Creates a new [`RpcConverter`] with `receipt_converter` and `mapper`.
+    pub const fn new(receipt_converter: Receipt, mapper: Map) -> Self {
+        Self { phantom: PhantomData, receipt_converter, mapper }
     }
 }
 
-impl<E, Evm, Err, Map> RpcConverter<E, Evm, Err, Map> {
-    /// Creates a new [`RpcConverter`] with `mapper`.
-    pub const fn with_mapper(mapper: Map) -> Self {
-        Self { phantom: PhantomData, mapper }
-    }
-
-    /// Converts the generic types.
-    pub fn convert<E2, Evm2, Err2>(self) -> RpcConverter<E2, Evm2, Err2, Map> {
-        RpcConverter::with_mapper(self.mapper)
-    }
-
-    /// Swaps the inner `mapper`.
-    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<E, Evm, Err, Map2> {
-        RpcConverter::with_mapper(mapper)
-    }
-
-    /// Converts the generic types and swaps the inner `mapper`.
-    pub fn convert_map<E2, Evm2, Err2, Map2>(
-        self,
-        mapper: Map2,
-    ) -> RpcConverter<E2, Evm2, Err2, Map2> {
-        self.convert().map(mapper)
-    }
-}
-
-impl<E, Evm, Err, Map: Clone> Clone for RpcConverter<E, Evm, Err, Map> {
-    fn clone(&self) -> Self {
-        Self::with_mapper(self.mapper.clone())
-    }
-}
-
-impl<E, Evm, Err> Default for RpcConverter<E, Evm, Err> {
+impl<E, Evm, Receipt, Map> Default for RpcConverter<E, Evm, Receipt, Map>
+where
+    Receipt: Default,
+    Map: Default,
+{
     fn default() -> Self {
-        Self::new()
+        Self {
+            phantom: PhantomData,
+            receipt_converter: Default::default(),
+            mapper: Default::default(),
+        }
     }
 }
 
-impl<N, E, Evm, Err, Map> RpcConvert for RpcConverter<E, Evm, Err, Map>
+impl<E, Evm, Receipt: Clone, Map: Clone> Clone for RpcConverter<E, Evm, Receipt, Map> {
+    fn clone(&self) -> Self {
+        Self {
+            phantom: PhantomData,
+            receipt_converter: self.receipt_converter.clone(),
+            mapper: self.mapper.clone(),
+        }
+    }
+}
+
+impl<N, E, Evm, Receipt, Map> RpcConvert for RpcConverter<E, Evm, Receipt, Map>
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
     Evm: ConfigureEvm<Primitives = N>,
     TxTy<N>: IntoRpcTx<E::TransactionResponse> + Clone + Debug,
     RpcTxReq<E>: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
-    Err: From<TransactionConversionError>
-        + From<<RpcTxReq<E> as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
-        + for<'a> From<<Map as TxInfoMapper<&'a TxTy<N>>>::Err>
-        + Error
-        + Unpin
+    Receipt: ReceiptConverter<
+            N,
+            RpcReceipt = RpcReceipt<E>,
+            Error: From<TransactionConversionError>
+                       + From<<RpcTxReq<E> as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
+                       + for<'a> From<<Map as TxInfoMapper<&'a TxTy<N>>>::Err>
+                       + Error
+                       + Unpin
+                       + Sync
+                       + Send
+                       + Into<jsonrpsee_types::ErrorObject<'static>>,
+        > + Send
         + Sync
-        + Send
-        + Into<jsonrpsee_types::ErrorObject<'static>>,
+        + Unpin
+        + Clone
+        + Debug,
     Map: for<'a> TxInfoMapper<
             &'a TxTy<N>,
             Out = <TxTy<N> as IntoRpcTx<E::TransactionResponse>>::TxInfo,
@@ -399,7 +434,7 @@ where
     type Primitives = N;
     type Network = E;
     type TxEnv = TxEnvFor<Evm>;
-    type Error = Err;
+    type Error = Receipt::Error;
 
     fn fill(
         &self,
@@ -423,6 +458,13 @@ where
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error> {
         Ok(request.try_into_tx_env(cfg_env, block_env)?)
+    }
+
+    fn convert_receipts(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.receipt_converter.convert_receipts(receipts)
     }
 }
 
@@ -500,5 +542,110 @@ pub mod op {
                 deposit: Default::default(),
             })
         }
+    }
+}
+
+/// Trait for converting network transaction responses to primitive transaction types.
+pub trait TryFromTransactionResponse<N: Network> {
+    /// The error type returned if the conversion fails.
+    type Error: core::error::Error + Send + Sync + Unpin;
+
+    /// Converts a network transaction response to a primitive transaction type.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(Self)` on successful conversion, or `Err(Self::Error)` if the conversion fails.
+    fn from_transaction_response(
+        transaction_response: N::TransactionResponse,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized;
+}
+
+impl TryFromTransactionResponse<alloy_network::Ethereum>
+    for reth_ethereum_primitives::TransactionSigned
+{
+    type Error = Infallible;
+
+    fn from_transaction_response(transaction_response: Transaction) -> Result<Self, Self::Error> {
+        Ok(transaction_response.into_inner().into())
+    }
+}
+
+#[cfg(feature = "op")]
+impl TryFromTransactionResponse<op_alloy_network::Optimism>
+    for reth_optimism_primitives::OpTransactionSigned
+{
+    type Error = Infallible;
+
+    fn from_transaction_response(
+        transaction_response: op_alloy_rpc_types::Transaction,
+    ) -> Result<Self, Self::Error> {
+        Ok(transaction_response.inner.into_inner())
+    }
+}
+
+#[cfg(test)]
+mod transaction_response_tests {
+    use super::*;
+    use alloy_consensus::{transaction::Recovered, EthereumTxEnvelope, Signed, TxLegacy};
+    use alloy_network::Ethereum;
+    use alloy_primitives::{Address, Signature, B256, U256};
+    use alloy_rpc_types_eth::Transaction;
+
+    #[test]
+    fn test_ethereum_transaction_conversion() {
+        let signed_tx = Signed::new_unchecked(
+            TxLegacy::default(),
+            Signature::new(U256::ONE, U256::ONE, false),
+            B256::ZERO,
+        );
+        let envelope = EthereumTxEnvelope::Legacy(signed_tx);
+
+        let tx_response = Transaction {
+            inner: Recovered::new_unchecked(envelope, Address::ZERO),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            effective_gas_price: None,
+        };
+
+        let result = <reth_ethereum_primitives::TransactionSigned as TryFromTransactionResponse<
+            Ethereum,
+        >>::from_transaction_response(tx_response);
+        assert!(result.is_ok());
+    }
+
+    #[cfg(feature = "op")]
+    #[test]
+    fn test_optimism_transaction_conversion() {
+        use op_alloy_consensus::OpTxEnvelope;
+        use op_alloy_network::Optimism;
+        use reth_optimism_primitives::OpTransactionSigned;
+
+        let signed_tx = Signed::new_unchecked(
+            TxLegacy::default(),
+            Signature::new(U256::ONE, U256::ONE, false),
+            B256::ZERO,
+        );
+        let envelope = OpTxEnvelope::Legacy(signed_tx);
+
+        let inner_tx = Transaction {
+            inner: Recovered::new_unchecked(envelope, Address::ZERO),
+            block_hash: None,
+            block_number: None,
+            transaction_index: None,
+            effective_gas_price: None,
+        };
+
+        let tx_response = op_alloy_rpc_types::Transaction {
+            inner: inner_tx,
+            deposit_nonce: None,
+            deposit_receipt_version: None,
+        };
+
+        let result = <OpTransactionSigned as TryFromTransactionResponse<Optimism>>::from_transaction_response(tx_response);
+
+        assert!(result.is_ok());
     }
 }

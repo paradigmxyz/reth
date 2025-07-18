@@ -1,8 +1,9 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
+use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{transaction::TransactionRequest, Block, Bundle, StateContext};
+use alloy_rpc_types_eth::{Block, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -12,7 +13,7 @@ use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
-pub trait DebugApi {
+pub trait DebugApi<TxReq: RpcObject> {
     /// Returns an RLP-encoded header.
     #[method(name = "getRawHeader")]
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes>;
@@ -105,7 +106,7 @@ pub trait DebugApi {
     #[method(name = "traceCall")]
     async fn debug_trace_call(
         &self,
-        request: TransactionRequest,
+        request: TxReq,
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace>;
@@ -128,7 +129,7 @@ pub trait DebugApi {
     #[method(name = "traceCallMany")]
     async fn debug_trace_call_many(
         &self,
-        bundles: Vec<Bundle>,
+        bundles: Vec<Bundle<TxReq>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>>;
