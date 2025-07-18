@@ -7,7 +7,7 @@ use reth_chainspec::ChainSpecProvider;
 use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
 use reth_rpc_convert::{RpcConvert, RpcConverter};
-use reth_rpc_eth_api::helpers::pending_block::{BasicPendingEnvBuilder, PendingEnvBuilder};
+use reth_rpc_eth_api::helpers::pending_block::PendingEnvBuilder;
 use reth_rpc_eth_types::{
     fee_history::fee_history_cache_new_blocks_task, receipt::EthReceiptConverter, EthStateCache,
     EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
@@ -25,7 +25,7 @@ use std::sync::Arc;
 /// This builder type contains all settings to create an [`EthApiInner`] or an [`EthApi`] instance
 /// directly.
 #[derive(Debug)]
-pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc, NextEnv = BasicPendingEnvBuilder>
+pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc, NextEnv = ()>
 where
     Provider: BlockReaderIdExt,
 {
@@ -82,7 +82,7 @@ where
             task_spawner: TokioTaskExecutor::default().boxed(),
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
-            next_env: BasicPendingEnvBuilder::default(),
+            next_env: Default::default(),
         }
     }
 }

@@ -15,11 +15,7 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_node_api::{FullNodeComponents, FullNodeTypes};
 use reth_rpc_convert::{RpcConvert, RpcConverter};
 use reth_rpc_eth_api::{
-    helpers::{
-        pending_block::{BasicPendingEnvBuilder, PendingEnvBuilder},
-        spec::SignersForRpc,
-        SpawnBlocking,
-    },
+    helpers::{pending_block::PendingEnvBuilder, spec::SignersForRpc, SpawnBlocking},
     node::RpcNodeCoreExt,
     EthApiTypes, RpcNodeCore,
 };
@@ -149,7 +145,7 @@ where
     Provider: BlockReaderIdExt + ChainSpecProvider,
     EvmConfig: ConfigureEvm,
     Rpc: RpcConvert,
-    BasicPendingEnvBuilder: PendingEnvBuilder<EvmConfig>,
+    (): PendingEnvBuilder<EvmConfig>,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
@@ -183,7 +179,7 @@ where
             TokioTaskExecutor::default().boxed(),
             proof_permits,
             rpc_converter,
-            BasicPendingEnvBuilder::default(),
+            (),
         );
 
         Self { inner: Arc::new(inner) }

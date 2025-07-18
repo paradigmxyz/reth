@@ -361,13 +361,7 @@ pub trait BuildPendingEnv<Header> {
     fn build_pending_env(parent: &SealedHeader<Header>) -> Self;
 }
 
-/// Basic implementation of [`PendingEnvBuilder`] that assumes that the
-/// [`ConfigureEvm::NextBlockEnvCtx`] type implements [`BuildPendingEnv`] trait.
-#[derive(Debug, Default, Clone, Copy)]
-#[non_exhaustive]
-pub struct BasicPendingEnvBuilder;
-
-impl<Evm> PendingEnvBuilder<Evm> for BasicPendingEnvBuilder
+impl<Evm> PendingEnvBuilder<Evm> for ()
 where
     Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<Evm::Primitives>>>,
 {
