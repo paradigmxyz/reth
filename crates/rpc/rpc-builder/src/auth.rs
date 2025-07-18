@@ -119,13 +119,13 @@ impl<RpcMiddleware> AuthServerConfig<RpcMiddleware> {
 
 /// Builder type for configuring an `AuthServerConfig`.
 #[derive(Debug)]
-pub struct AuthServerConfigBuilder<Middleware = Identity> {
+pub struct AuthServerConfigBuilder<RpcMiddleware = Identity> {
     socket_addr: Option<SocketAddr>,
     secret: JwtSecret,
     server_config: Option<ServerConfigBuilder>,
     ipc_server_config: Option<IpcServerBuilder<Identity, Identity>>,
     ipc_endpoint: Option<String>,
-    rpc_middleware: Option<Middleware>,
+    rpc_middleware: RpcMiddleware,
 }
 
 // === impl AuthServerConfigBuilder ===
@@ -139,7 +139,22 @@ impl AuthServerConfigBuilder {
             server_config: None,
             ipc_server_config: None,
             ipc_endpoint: None,
-            rpc_middleware: None,
+            rpc_middleware: Identity::new(),
+        }
+    }
+}
+
+impl<RpcMiddleware> AuthServerConfigBuilder<RpcMiddleware> {
+    /// Configures the rpc middleware.
+    pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> AuthServerConfigBuilder<T> {
+        let Self { socket_addr, secret, server_config, ipc_server_config, ipc_endpoint, .. } = self;
+        AuthServerConfigBuilder {
+            socket_addr,
+            secret,
+            server_config,
+            ipc_server_config,
+            ipc_endpoint,
+            rpc_middleware,
         }
     }
 
@@ -185,7 +200,7 @@ impl AuthServerConfigBuilder {
     }
 
     /// Build the `AuthServerConfig`.
-    pub fn build(self) -> AuthServerConfig {
+    pub fn build(self) -> AuthServerConfig<RpcMiddleware> {
         AuthServerConfig {
             socket_addr: self.socket_addr.unwrap_or_else(|| {
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), constants::DEFAULT_AUTH_PORT)
@@ -217,7 +232,7 @@ impl AuthServerConfigBuilder {
                     .set_id_provider(EthSubscriptionIdProvider::default())
             }),
             ipc_endpoint: self.ipc_endpoint,
-            rpc_middleware: self.rpc_middleware.unwrap_or_default(),
+            rpc_middleware: self.rpc_middleware,
         }
     }
 }
