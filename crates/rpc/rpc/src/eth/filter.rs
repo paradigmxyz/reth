@@ -1114,9 +1114,9 @@ impl<
 
         // Process chunks in parallel
         let mut tasks = Vec::new();
-        for (chunk_idx, chunk_headers) in header_chunks.into_iter().enumerate() {
+        for chunk_headers in header_chunks {
             let filter_inner = self.filter_inner.clone();
-            let task = async move {
+            let task = tokio::task::spawn_blocking(move || {
                 let mut chunk_results = Vec::new();
 
                 for header in chunk_headers {
@@ -1137,31 +1137,23 @@ impl<
                     }
                 }
 
-                Ok::<(usize, Vec<ReceiptBlockResult<Eth::Provider>>), EthFilterError>((
-                    chunk_idx,
-                    chunk_results,
-                ))
-            };
+                Ok::<Vec<ReceiptBlockResult<Eth::Provider>>, EthFilterError>(chunk_results)
+            });
             tasks.push(task);
         }
 
         let results = futures::future::join_all(tasks).await;
-
-        // Process results and maintain order
-        let mut ordered_results: Vec<Vec<ReceiptBlockResult<Eth::Provider>>> =
-            (0..results.len()).map(|_| Vec::new()).collect();
         for result in results {
             match result {
-                Ok((chunk_idx, chunk_results)) => {
-                    ordered_results[chunk_idx] = chunk_results;
+                Ok(Ok(chunk_results)) => {
+                    for result in chunk_results {
+                        self.next.push_back(result);
+                    }
                 }
-                Err(e) => return Err(e),
-            }
-        }
-
-        for chunk_results in ordered_results {
-            for result in chunk_results {
-                self.next.push_back(result);
+                Ok(Err(e)) => return Err(e),
+                Err(_join_err) => {
+                    return Err(EthFilterError::InternalError);
+                }
             }
         }
 
