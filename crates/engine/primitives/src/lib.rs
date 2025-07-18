@@ -12,12 +12,14 @@
 extern crate alloc;
 
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumHash;
+use reth_chain_state::CanonicalInMemoryState;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -41,6 +43,117 @@ pub use invalid_block_hook::InvalidBlockHook;
 
 pub mod config;
 pub use config::*;
+
+/// Outcome of validating a payload
+#[derive(Debug)]
+pub enum PayloadValidationOutcome<Block: reth_primitives_traits::Block> {
+    /// Payload is valid and produced a block
+    Valid {
+        /// The block created from the payload
+        block: RecoveredBlock<Block>,
+        /// The trie updates from state root computation
+        trie_updates: reth_trie::updates::TrieUpdates,
+        /// Whether the block is a fork
+        is_fork: bool,
+    },
+    /// Payload is invalid but block construction succeeded
+    Invalid {
+        /// The block created from the payload
+        block: RecoveredBlock<Block>,
+        /// The validation error
+        error: NewPayloadError,
+    },
+}
+
+/// Information about the current persistence state for validation context
+#[derive(Debug, Clone, Copy)]
+pub struct PersistenceInfo {
+    /// The last persisted block
+    pub last_persisted_block: BlockNumHash,
+    /// The current persistence action, if any
+    pub current_action: Option<PersistenceAction>,
+}
+
+impl PersistenceInfo {
+    /// Creates a new persistence info with no current action
+    pub const fn new(last_persisted_block: BlockNumHash) -> Self {
+        Self { last_persisted_block, current_action: None }
+    }
+
+    /// Creates persistence info with a saving blocks action
+    pub const fn with_saving_blocks(
+        last_persisted_block: BlockNumHash,
+        highest: BlockNumHash,
+    ) -> Self {
+        Self {
+            last_persisted_block,
+            current_action: Some(PersistenceAction::SavingBlocks { highest }),
+        }
+    }
+
+    /// Creates persistence info with a removing blocks action
+    pub const fn with_removing_blocks(
+        last_persisted_block: BlockNumHash,
+        new_tip_num: u64,
+    ) -> Self {
+        Self {
+            last_persisted_block,
+            current_action: Some(PersistenceAction::RemovingBlocks { new_tip_num }),
+        }
+    }
+}
+
+/// The type of persistence action currently in progress
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistenceAction {
+    /// Saving blocks to disk
+    SavingBlocks {
+        /// The highest block being saved
+        highest: BlockNumHash,
+    },
+    /// Removing blocks from disk
+    RemovingBlocks {
+        /// The new tip after removal
+        new_tip_num: u64,
+    },
+}
+
+/// Context providing access to tree state during validation
+#[derive(Debug)]
+pub struct TreeCtx<'a, State, N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
+    /// The engine API tree state
+    state: &'a State,
+    /// Information about the current persistence state
+    persistence_info: PersistenceInfo,
+    /// Reference to the canonical in-memory state
+    canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
+}
+
+impl<'a, State, N: NodePrimitives> TreeCtx<'a, State, N> {
+    /// Creates a new tree context
+    pub const fn new(
+        state: &'a State,
+        persistence_info: PersistenceInfo,
+        canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
+    ) -> Self {
+        Self { state, persistence_info, canonical_in_memory_state }
+    }
+
+    /// Returns a reference to the engine API tree state
+    pub const fn state(&self) -> &'a State {
+        self.state
+    }
+
+    /// Returns a reference to the persistence info
+    pub const fn persistence_info(&self) -> &PersistenceInfo {
+        &self.persistence_info
+    }
+
+    /// Returns a reference to the canonical in-memory state
+    pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
+        self.canonical_in_memory_state
+    }
+}
 
 /// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 ///
