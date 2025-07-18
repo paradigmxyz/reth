@@ -283,6 +283,8 @@ where
     }
 
     /// Returns a reference to the configured node.
+    ///
+    /// This gives access to the node's components.
     pub const fn node(&self) -> &Node {
         &self.node
     }
