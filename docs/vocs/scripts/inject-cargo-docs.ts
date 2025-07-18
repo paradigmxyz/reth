@@ -40,6 +40,14 @@ async function injectCargoDocs() {
   for (const file of htmlFiles) {
     let content = await fs.readFile(file, 'utf-8');
     
+    // Extract the current crate name from the file path
+    const pathParts = file.split('/');
+    const fileName = pathParts[pathParts.length - 1];
+    const crateNameFromPath = pathParts[pathParts.length - 2]; // Get the parent directory name
+    
+    // Check if this is the root index.html (crate listing page)
+    const isRootIndex = crateNameFromPath === 'docs' && fileName === 'index.html';
+    
     // Fix static file references
     content = content
       // CSS and JS in static.files
@@ -55,8 +63,34 @@ async function injectCargoDocs() {
       // Fix crate navigation links
       .replace(/href="\.\/([^/]+)\/index\.html"/g, `href="${BASE_PATH}/$1/index.html"`)
       .replace(/href="\.\.\/([^/]+)\/index\.html"/g, `href="${BASE_PATH}/$1/index.html"`)
-      // Fix simple crate links (without ./ or ../)
-      .replace(/href="([^/:"]+)\/index\.html"/g, `href="${BASE_PATH}/$1/index.html"`)
+      // Fix module links within the same crate (relative paths without ./ or ../)
+      // These need to include the current crate name in the path
+      .replace(/href="([^/:"\.](?:[^/:"]*)?)\/index\.html"/g, (match, moduleName) => {
+        // Skip if it's already an absolute path or contains a protocol
+        if (moduleName.startsWith('/') || moduleName.includes('://')) {
+          return match;
+        }
+        // For the root index page, these are crate links, not module links
+        if (isRootIndex) {
+          return `href="${BASE_PATH}/${moduleName}/index.html"`;
+        }
+        // For module links, prepend the current crate name
+        return `href="${BASE_PATH}/${crateNameFromPath}/${moduleName}/index.html"`;
+      })
+      
+      // Also fix other relative links (structs, enums, traits) that don't have index.html
+      .replace(/href="([^/:"\.#][^/:"#]*\.html)"/g, (match, pageName) => {
+        // Skip if it's already an absolute path or contains a protocol
+        if (pageName.startsWith('/') || pageName.includes('://')) {
+          return match;
+        }
+        // Skip for root index page as it shouldn't have such links
+        if (isRootIndex) {
+          return match;
+        }
+        // For other doc pages, prepend the current crate name
+        return `href="${BASE_PATH}/${crateNameFromPath}/${pageName}"`;
+      })
       
       // Fix root index.html links
       .replace(/href="\.\/index\.html"/g, `href="${BASE_PATH}/index.html"`)
