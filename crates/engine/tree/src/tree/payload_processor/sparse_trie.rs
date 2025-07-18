@@ -112,7 +112,7 @@ where
     /// # Returns
     ///
     /// - State root computation outcome.
-    /// - Accounts trie that needs to be cleared and re-used to avoid reallocations.
+    /// - Accounts trie that needs to be cleared and reused to avoid reallocations.
     pub(super) fn run(
         &mut self,
     ) -> (Result<StateRootComputeOutcome, ParallelStateRootError>, SparseTrie<A>) {

@@ -59,7 +59,7 @@ where
             >,
         > + EthApiTypes<
             RpcConvert: RpcConvert<
-                Primitives = <Self as RpcNodeCore>::Primitives,
+                Primitives = Self::Primitives,
                 Network = Self::NetworkTypes,
                 Error = RpcError<Self>,
             >,

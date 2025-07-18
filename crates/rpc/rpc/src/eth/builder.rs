@@ -1,27 +1,31 @@
 //! `EthApiBuilder` implementation
 
 use crate::{eth::core::EthApiInner, EthApi};
+use alloy_network::Ethereum;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
+use reth_evm::ConfigureEvm;
 use reth_node_api::NodePrimitives;
-use reth_rpc_convert::RpcTypes;
+use reth_rpc_convert::{RpcConvert, RpcConverter};
+use reth_rpc_eth_api::helpers::pending_block::{BasicPendingEnvBuilder, PendingEnvBuilder};
 use reth_rpc_eth_types::{
-    fee_history::fee_history_cache_new_blocks_task, EthStateCache, EthStateCacheConfig,
-    FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
+    fee_history::fee_history_cache_new_blocks_task, receipt::EthReceiptConverter, EthStateCache,
+    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
+    GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
-use std::{marker::PhantomData, sync::Arc};
+use std::sync::Arc;
 
 /// A helper to build the `EthApi` handler instance.
 ///
 /// This builder type contains all settings to create an [`EthApiInner`] or an [`EthApi`] instance
 /// directly.
 #[derive(Debug)]
-pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc>
+pub struct EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc, NextEnv = BasicPendingEnvBuilder>
 where
     Provider: BlockReaderIdExt,
 {
@@ -29,7 +33,7 @@ where
     pool: Pool,
     network: Network,
     evm_config: EvmConfig,
-    rpc: PhantomData<Rpc>,
+    rpc_converter: Rpc,
     gas_cap: GasCap,
     max_simulate_blocks: u64,
     eth_proof_window: u64,
@@ -41,24 +45,32 @@ where
     gas_oracle: Option<GasPriceOracle<Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
+    next_env: NextEnv,
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc>
+impl<Provider, Pool, Network, EvmConfig>
+    EthApiBuilder<
+        Provider,
+        Pool,
+        Network,
+        EvmConfig,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>,
+    >
 where
-    Provider: BlockReaderIdExt,
-    Rpc: RpcTypes,
+    Provider: BlockReaderIdExt + ChainSpecProvider,
 {
     /// Creates a new `EthApiBuilder` instance.
     pub fn new(provider: Provider, pool: Pool, network: Network, evm_config: EvmConfig) -> Self
     where
         Provider: BlockReaderIdExt,
     {
+        let rpc_converter = RpcConverter::new(EthReceiptConverter::new(provider.chain_spec()), ());
         Self {
             provider,
             pool,
             network,
             evm_config,
-            rpc: PhantomData,
+            rpc_converter,
             eth_cache: None,
             gas_oracle: None,
             gas_cap: GasCap::default(),
@@ -70,13 +82,110 @@ where
             task_spawner: TokioTaskExecutor::default().boxed(),
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
+            next_env: BasicPendingEnvBuilder::default(),
         }
     }
+}
 
+impl<Provider, Pool, Network, EvmConfig, Rpc, NextEnv>
+    EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc, NextEnv>
+where
+    Provider: BlockReaderIdExt + ChainSpecProvider,
+{
     /// Configures the task spawner used to spawn additional tasks.
     pub fn task_spawner(mut self, spawner: impl TaskSpawner + 'static) -> Self {
         self.task_spawner = Box::new(spawner);
         self
+    }
+
+    /// Changes the configured converter.
+    pub fn with_rpc_converter<RpcNew>(
+        self,
+        rpc_converter: RpcNew,
+    ) -> EthApiBuilder<Provider, Pool, Network, EvmConfig, RpcNew, NextEnv> {
+        let Self {
+            provider,
+            pool,
+            network,
+            evm_config,
+            rpc_converter: _,
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            gas_oracle_config,
+            next_env,
+        } = self;
+        EthApiBuilder {
+            provider,
+            pool,
+            network,
+            evm_config,
+            rpc_converter,
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            gas_oracle_config,
+            next_env,
+        }
+    }
+
+    /// Changes the configured pending environment builder.
+    pub fn with_pending_env_builder<NextEnvNew>(
+        self,
+        next_env: NextEnvNew,
+    ) -> EthApiBuilder<Provider, Pool, Network, EvmConfig, Rpc, NextEnvNew> {
+        let Self {
+            provider,
+            pool,
+            network,
+            evm_config,
+            rpc_converter,
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            gas_oracle_config,
+            next_env: _,
+        } = self;
+        EthApiBuilder {
+            provider,
+            pool,
+            network,
+            evm_config,
+            rpc_converter,
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            gas_oracle_config,
+            next_env,
+        }
     }
 
     /// Sets `eth_cache` config for the cache that will be used if no [`EthStateCache`] is
@@ -172,13 +281,16 @@ where
             > + Clone
             + Unpin
             + 'static,
+        EvmConfig: ConfigureEvm,
+        Rpc: RpcConvert,
+        NextEnv: PendingEnvBuilder<EvmConfig>,
     {
         let Self {
             provider,
             pool,
             network,
-            rpc: _,
             evm_config,
+            rpc_converter,
             eth_state_cache_config,
             gas_oracle_config,
             eth_cache,
@@ -190,6 +302,7 @@ where
             fee_history_cache_config,
             proof_permits,
             task_spawner,
+            next_env,
         } = self;
 
         let eth_cache = eth_cache
@@ -225,6 +338,8 @@ where
             evm_config,
             task_spawner,
             proof_permits,
+            rpc_converter,
+            next_env,
         )
     }
 
@@ -250,7 +365,10 @@ where
             + Clone
             + Unpin
             + 'static,
+        Rpc: RpcConvert,
+        EvmConfig: ConfigureEvm,
+        NextEnv: PendingEnvBuilder<EvmConfig>,
     {
-        EthApi { inner: Arc::new(self.build_inner()), tx_resp_builder: Default::default() }
+        EthApi { inner: Arc::new(self.build_inner()) }
     }
 }

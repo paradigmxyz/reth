@@ -61,6 +61,15 @@ pub struct EngineApi<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpe
     inner: Arc<EngineApiInner<Provider, PayloadT, Pool, Validator, ChainSpec>>,
 }
 
+impl<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSpec>
+    EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
+{
+    /// Returns the configured chainspec.
+    pub fn chain_spec(&self) -> &Arc<ChainSpec> {
+        &self.inner.chain_spec
+    }
+}
+
 impl<Provider, PayloadT, Pool, Validator, ChainSpec>
     EngineApi<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
@@ -147,7 +156,7 @@ where
     }
 
     /// Metered version of `new_payload_v1`.
-    async fn new_payload_v1_metered(
+    pub async fn new_payload_v1_metered(
         &self,
         payload: PayloadT::ExecutionData,
     ) -> EngineApiResult<PayloadStatus> {
@@ -270,6 +279,11 @@ where
         self.inner.metrics.latency.new_payload_v4.record(elapsed);
         self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
+    }
+
+    /// Returns whether the engine accepts execution requests hash.
+    pub fn accept_execution_requests_hash(&self) -> bool {
+        self.inner.accept_execution_requests_hash
     }
 }
 
@@ -754,7 +768,8 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
-    fn get_blobs_v1_metered(
+    /// Metered version of `get_blobs_v1`.
+    pub fn get_blobs_v1_metered(
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Vec<Option<BlobAndProofV1>>> {
@@ -788,7 +803,8 @@ where
             .map_err(|err| EngineApiError::Internal(Box::new(err)))
     }
 
-    fn get_blobs_v2_metered(
+    /// Metered version of `get_blobs_v2`.
+    pub fn get_blobs_v2_metered(
         &self,
         versioned_hashes: Vec<B256>,
     ) -> EngineApiResult<Option<Vec<BlobAndProofV2>>> {

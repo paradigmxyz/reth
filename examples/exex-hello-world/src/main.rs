@@ -11,8 +11,8 @@ use futures::TryStreamExt;
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
     node::{api::FullNodeComponents, EthereumNode},
-    rpc::eth::EthApiFor,
 };
+use reth_op::rpc::api::eth::helpers::FullEthApi;
 use reth_tracing::tracing::info;
 use tokio::sync::oneshot;
 
@@ -46,9 +46,9 @@ async fn my_exex<Node: FullNodeComponents>(mut ctx: ExExContext<Node>) -> eyre::
 
 /// This is an example of how to access the `EthApi` inside an ExEx. It receives the `EthApi` once
 /// the node is launched fully.
-async fn ethapi_exex<Node>(
+async fn ethapi_exex<Node, EthApi: FullEthApi>(
     mut ctx: ExExContext<Node>,
-    ethapi_rx: oneshot::Receiver<EthApiFor<Node>>,
+    ethapi_rx: oneshot::Receiver<EthApi>,
 ) -> eyre::Result<()>
 where
     Node: FullNodeComponents,
