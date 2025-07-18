@@ -52,7 +52,7 @@ fn main() {
 
                     Ok(())
                 })
-                // launch the
+                // launch the node with custom rpc
                 .launch()
                 .await?;
 
