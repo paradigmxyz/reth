@@ -47,7 +47,7 @@ where
     if header.transactions_root() != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
             GotExpected { got: tx_root, expected: header.transactions_root() }.into(),
-        ));
+        ))
     }
 
     match (header.withdrawals_root(), body.calculate_withdrawals_root()) {
