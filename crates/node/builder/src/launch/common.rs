@@ -230,7 +230,7 @@ impl LaunchContext {
             .thread_name(|i| format!("reth-rayon-{i}"))
             .build_global()
         {
-            error!(%err, "Failed to build global thread pool")
+            warn!(%err, "Failed to build global thread pool")
         }
     }
 }
