@@ -378,7 +378,7 @@ where
     N: Network,
     Node: NodeTypes,
     BlockTy<Node>: TryFromBlockResponse<N>,
-    ReceiptTy<Node>: TryFromReceiptResponse<N>,
+    TxTy<Node>: TryFromTransactionResponse<N>,
 {
     type Block = BlockTy<Node>;
 
@@ -458,7 +458,7 @@ where
     N: Network,
     Node: NodeTypes,
     BlockTy<Node>: TryFromBlockResponse<N>,
-    ReceiptTy<Node>: TryFromReceiptResponse<N>,
+    TxTy<Node>: TryFromTransactionResponse<N>,
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
