@@ -19,7 +19,7 @@ pub const COMPRESSED_BEACON_STATE: [u8; 2] = [0x02, 0x00];
 /// See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md#compressedsignedbeaconblock>.
 #[derive(Debug, Clone)]
 pub struct CompressedSignedBeaconBlock {
-    /// Snappy-compressed ssz-encoded SignedBeaconBlock
+    /// Snappy-compressed ssz-encoded `SignedBeaconBlock`
     pub data: Vec<u8>,
 }
 
@@ -97,7 +97,7 @@ impl DecodeCompressedSsz for CompressedSignedBeaconBlock {
 /// See also <https://github.com/status-im/nimbus-eth2/blob/stable/docs/e2store.md#compressedbeaconstate>.
 #[derive(Debug, Clone)]
 pub struct CompressedBeaconState {
-    /// Snappy-compressed ssz-encoded BeaconState
+    /// Snappy-compressed ssz-encoded `BeaconState`
     pub data: Vec<u8>,
 }
 
