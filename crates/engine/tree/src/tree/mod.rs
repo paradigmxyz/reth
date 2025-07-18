@@ -526,6 +526,8 @@ where
         trace!(target: "engine::tree", "invoked new payload");
         self.metrics.engine.new_payload_messages.increment(1);
 
+        let validation_start = Instant::now();
+
         // Ensures that the given payload does not violate any consensus rules that concern the
         // block's layout, like:
         //    - missing or invalid base fee
@@ -572,6 +574,10 @@ where
                 return Ok(TreeOutcome::new(PayloadStatus::new(status, latest_valid_hash)))
             }
         };
+
+        self.metrics
+            .block_validation
+            .record_payload_validation(validation_start.elapsed().as_secs_f64());
 
         let num_hash = block.num_hash();
         let engine_event = BeaconConsensusEngineEvent::BlockReceived(num_hash);
