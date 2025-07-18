@@ -21,7 +21,7 @@ mod tests {
 
     #[test]
     fn test_resolve_transaction_empty_request() {
-        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()), ());
+        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
         let tx = TransactionRequest::default();
         let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
@@ -36,7 +36,7 @@ mod tests {
     #[test]
     fn test_resolve_transaction_legacy() {
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
-        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()), ());
+        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest { gas_price: Some(100), ..Default::default() };
 
@@ -52,7 +52,7 @@ mod tests {
     #[test]
     fn test_resolve_transaction_partial_eip1559() {
         let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
-        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()), ());
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
 
         let tx = TransactionRequest {
             max_fee_per_gas: Some(200),

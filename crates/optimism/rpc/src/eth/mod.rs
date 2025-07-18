@@ -350,6 +350,7 @@ pub type OpRpcConvert<N, NetworkT> = RpcConverter<
     NetworkT,
     <N as FullNodeComponents>::Evm,
     OpReceiptConverter<<N as FullNodeTypes>::Provider>,
+    (),
     OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
 >;
 
@@ -420,10 +421,9 @@ where
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let Self { sequencer_url, sequencer_headers, min_suggested_priority_fee, .. } = self;
-        let rpc_converter = RpcConverter::new(
-            OpReceiptConverter::new(ctx.components.provider().clone()),
-            OpTxInfoMapper::new(ctx.components.provider().clone()),
-        );
+        let rpc_converter =
+            RpcConverter::new(OpReceiptConverter::new(ctx.components.provider().clone()))
+                .with_mapper(OpTxInfoMapper::new(ctx.components.provider().clone()));
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),

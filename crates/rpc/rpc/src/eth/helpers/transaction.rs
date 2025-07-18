@@ -93,7 +93,7 @@ mod tests {
         let cache = EthStateCache::spawn(noop_provider.clone(), Default::default());
         let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
         let rpc_converter =
-            EthRpcConverter::new(EthReceiptConverter::new(noop_provider.chain_spec()), ());
+            EthRpcConverter::new(EthReceiptConverter::new(noop_provider.chain_spec()));
         let eth_api = EthApi::new(
             noop_provider.clone(),
             pool.clone(),

@@ -64,7 +64,7 @@ where
     where
         Provider: BlockReaderIdExt,
     {
-        let rpc_converter = RpcConverter::new(EthReceiptConverter::new(provider.chain_spec()), ());
+        let rpc_converter = RpcConverter::new(EthReceiptConverter::new(provider.chain_spec()));
         Self {
             provider,
             pool,

@@ -7,7 +7,6 @@ use reth_node_api::NodePrimitives;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
-    types::RpcTypes,
     FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::PendingBlock;
@@ -41,9 +40,7 @@ where
         >,
     Provider: BlockReader,
     EvmConfig: ConfigureEvm<Primitives = Self::Primitives>,
-    Rpc: RpcConvert<
-        Network: RpcTypes<Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>>,
-    >,
+    Rpc: RpcConvert,
 {
     #[inline]
     fn pending_block(
