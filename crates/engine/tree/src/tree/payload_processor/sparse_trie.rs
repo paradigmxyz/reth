@@ -11,7 +11,7 @@ use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    SerialSparseTrie, ClearedSparseStateTrie, SparseStateTrie, SparseTrieInterface,
+    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrieInterface,
 };
 use std::{
     sync::mpsc,
