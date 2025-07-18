@@ -3,7 +3,6 @@
 use crate::{
     fees::{CallFees, CallFeesError},
     RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
-};
 use alloy_consensus::{
     error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
 };
