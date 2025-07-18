@@ -70,7 +70,6 @@ std = [
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-trie/std",
-
     "reth-revm/std",
     "revm/std",
     "tracing/std",
