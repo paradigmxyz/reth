@@ -40,13 +40,21 @@ async function injectCargoDocs() {
   for (const file of htmlFiles) {
     let content = await fs.readFile(file, 'utf-8');
     
-    // Extract the current crate name from the file path
-    const pathParts = file.split('/');
+    // Extract the current crate name and module path from the file path
+    // Remove the base path to get the relative path within the docs
+    const relativePath = file.startsWith('./') ? file.slice(2) : file;
+    const docsRelativePath = relativePath.replace(/^docs\/dist\/docs\//, '');
+    const pathParts = docsRelativePath.split('/');
     const fileName = pathParts[pathParts.length - 1];
-    const crateNameFromPath = pathParts[pathParts.length - 2]; // Get the parent directory name
     
-    // Check if this is the root index.html (crate listing page)
-    const isRootIndex = crateNameFromPath === 'docs' && fileName === 'index.html';
+    // Determine if this is the root index
+    const isRootIndex = pathParts.length === 1 && fileName === 'index.html';
+    
+    // Extract crate name - it's the first directory in the docs-relative path
+    const crateName = isRootIndex ? null : pathParts[0];
+    
+    // Build the current module path (everything between crate and filename)
+    const modulePath = pathParts.slice(1, -1).join('/');
     
     // Fix static file references
     content = content
@@ -74,8 +82,10 @@ async function injectCargoDocs() {
         if (isRootIndex) {
           return `href="${BASE_PATH}/${moduleName}/index.html"`;
         }
-        // For module links, prepend the current crate name
-        return `href="${BASE_PATH}/${crateNameFromPath}/${moduleName}/index.html"`;
+        // For module links within a crate, we need to build the full path
+        // If we're in a nested module, we need to go up to the crate root then down to the target
+        const fullPath = modulePath ? `${crateName}/${modulePath}/${moduleName}` : `${crateName}/${moduleName}`;
+        return `href="${BASE_PATH}/${fullPath}/index.html"`;
       })
       
       // Also fix other relative links (structs, enums, traits) that don't have index.html
@@ -88,8 +98,9 @@ async function injectCargoDocs() {
         if (isRootIndex) {
           return match;
         }
-        // For other doc pages, prepend the current crate name
-        return `href="${BASE_PATH}/${crateNameFromPath}/${pageName}"`;
+        // For other doc pages in nested modules, build the full path
+        const fullPath = modulePath ? `${crateName}/${modulePath}/${pageName}` : `${crateName}/${pageName}`;
+        return `href="${BASE_PATH}/${fullPath}"`;
       })
       
       // Fix root index.html links
