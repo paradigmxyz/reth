@@ -10,7 +10,7 @@ use alloy_primitives::B256;
 use derive_more::Constructor;
 use reth_ethereum_primitives::Receipt;
 use reth_evm::EvmEnv;
-use reth_primitives_traits::{Block, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedHeader};
 
 /// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
@@ -75,11 +75,11 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
 
 /// Locally built pending block for `pending` tag.
 #[derive(Debug, Constructor)]
-pub struct PendingBlock<B: Block, R> {
+pub struct PendingBlock<N: NodePrimitives> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The locally built pending block.
-    pub block: Arc<RecoveredBlock<B>>,
+    pub block: Arc<RecoveredBlock<N::Block>>,
     /// The receipts for the pending block
-    pub receipts: Arc<Vec<R>>,
+    pub receipts: Arc<Vec<N::Receipt>>,
 }

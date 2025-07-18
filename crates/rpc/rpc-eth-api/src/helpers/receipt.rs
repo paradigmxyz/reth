@@ -4,11 +4,10 @@
 use crate::{EthApiTypes, RpcNodeCoreExt, RpcReceipt};
 use alloy_consensus::{transaction::TransactionMeta, TxReceipt};
 use futures::Future;
-use reth_node_api::NodePrimitives;
 use reth_primitives_traits::SignerRecoverable;
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
 use reth_rpc_eth_types::{error::FromEthApiError, EthApiError};
-use reth_storage_api::{ProviderReceipt, ProviderTx, ReceiptProvider, TransactionsProvider};
+use reth_storage_api::{ProviderReceipt, ProviderTx};
 use std::borrow::Cow;
 
 /// Assembles transaction receipt data w.r.t to network.
@@ -22,13 +21,8 @@ pub trait LoadReceipt:
             Network = Self::NetworkTypes,
         >,
         Error: FromEthApiError,
-    > + RpcNodeCoreExt<
-        Provider: TransactionsProvider + ReceiptProvider,
-        Primitives: NodePrimitives<
-            Receipt = ProviderReceipt<Self::Provider>,
-            SignedTx = ProviderTx<Self::Provider>,
-        >,
-    > + Send
+    > + RpcNodeCoreExt
+    + Send
     + Sync
 {
     /// Helper method for `eth_getBlockReceipts` and `eth_getTransactionReceipt`.

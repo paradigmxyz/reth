@@ -218,7 +218,7 @@ pub async fn fee_history_cache_new_blocks_task<St, Provider, N>(
     fee_history_cache: FeeHistoryCache<N::BlockHeader>,
     mut events: St,
     provider: Provider,
-    cache: EthStateCache<N::Block, N::Receipt>,
+    cache: EthStateCache<N>,
 ) where
     St: Stream<Item = CanonStateNotification<N>> + Unpin + 'static,
     Provider:

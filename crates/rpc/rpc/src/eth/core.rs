@@ -75,17 +75,15 @@ pub type EthApiBuilderFor<N> = EthApiBuilder<
 /// While this type requires various unrestricted generic components, trait bounds are enforced when
 /// additional traits are implemented for this type.
 #[derive(Deref)]
-pub struct EthApi<Provider: BlockReader, Pool, Network, EvmConfig: ConfigureEvm, Rpc: RpcConvert> {
+pub struct EthApi<N: RpcNodeCore, Rpc: RpcConvert> {
     /// All nested fields bundled together.
     #[deref]
-    pub(super) inner: Arc<EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>>,
+    pub(super) inner: Arc<EthApiInner<N, Rpc>>,
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> Clone
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> Clone for EthApi<N, Rpc>
 where
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
 {
     fn clone(&self) -> Self {
@@ -140,34 +138,28 @@ impl EthApi<NoopProvider, (), (), EthEvmConfig, EthRpcConverter<ChainSpec>> {
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthApi<N, Rpc>
 where
-    Provider: BlockReaderIdExt + ChainSpecProvider,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
-    (): PendingEnvBuilder<EvmConfig>,
+    (): PendingEnvBuilder<N::Evm>,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
-        gas_oracle: GasPriceOracle<Provider>,
+        components: N,
+        eth_cache: EthStateCache<N::Primitives>,
+        gas_oracle: GasPriceOracle<N::Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
-        evm_config: EvmConfig,
+        fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         proof_permits: usize,
         rpc_converter: Rpc,
     ) -> Self {
         let inner = EthApiInner::new(
-            provider,
-            pool,
-            network,
+            components,
             eth_cache,
             gas_oracle,
             gas_cap,
@@ -175,7 +167,6 @@ where
             eth_proof_window,
             blocking_task_pool,
             fee_history_cache,
-            evm_config,
             TokioTaskExecutor::default().boxed(),
             proof_permits,
             rpc_converter,
@@ -186,12 +177,9 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiTypes
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthApiTypes for EthApi<N, Rpc>
 where
-    Self: Send + Sync,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
 {
     type Error = EthApiError;
@@ -203,21 +191,16 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> RpcNodeCore
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> RpcNodeCore for EthApi<N, Rpc>
 where
-    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
-    Pool: Send + Sync + Clone + Unpin,
-    Network: Send + Sync + Clone,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
 {
-    type Primitives = Provider::Primitives;
-    type Provider = Provider;
-    type Pool = Pool;
-    type Evm = EvmConfig;
-    type Network = Network;
-    type PayloadBuilder = ();
+    type Primitives = N::Primitives;
+    type Provider = N::Provider;
+    type Pool = N::Pool;
+    type Evm = N::Evm;
+    type Network = N::Network;
 
     fn pool(&self) -> &Self::Pool {
         self.inner.pool()
@@ -231,35 +214,25 @@ where
         self.inner.network()
     }
 
-    fn payload_builder(&self) -> &Self::PayloadBuilder {
-        &()
-    }
-
     fn provider(&self) -> &Self::Provider {
         self.inner.provider()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> RpcNodeCoreExt
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> RpcNodeCoreExt for EthApi<N, Rpc>
 where
-    Provider: BlockReader + NodePrimitivesProvider + Clone + Unpin,
-    Pool: Send + Sync + Clone + Unpin,
-    Network: Send + Sync + Clone,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
 {
     #[inline]
-    fn cache(&self) -> &EthStateCache<ProviderBlock<Provider>, ProviderReceipt<Provider>> {
+    fn cache(&self) -> &EthStateCache<N::Primitives> {
         self.inner.cache()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> std::fmt::Debug
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> std::fmt::Debug for EthApi<N, Rpc>
 where
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -267,12 +240,9 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> SpawnBlocking
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> SpawnBlocking for EthApi<N, Rpc>
 where
-    Self: EthApiTypes<NetworkTypes = Rpc::Network> + Clone + Send + Sync + 'static,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
 {
     #[inline]
@@ -293,25 +263,15 @@ where
 
 /// Container type `EthApi`
 #[expect(missing_debug_implementations)]
-pub struct EthApiInner<
-    Provider: BlockReader,
-    Pool,
-    Network,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
-> {
-    /// The transaction pool.
-    pool: Pool,
-    /// The provider that can interact with the chain.
-    provider: Provider,
-    /// An interface to interact with the network
-    network: Network,
+pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
+    /// The components of the node.
+    components: N,
     /// All configured Signers
-    signers: SignersForRpc<Provider, Rpc::Network>,
+    signers: SignersForRpc<N::Provider, Rpc::Network>,
     /// The async cache frontend for eth related data
-    eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
+    eth_cache: EthStateCache<N::Primitives>,
     /// The async gas oracle frontend for gas price suggestions
-    gas_oracle: GasPriceOracle<Provider>,
+    gas_oracle: GasPriceOracle<N::Provider>,
     /// Maximum gas limit for `eth_call` and call tracing RPC methods.
     gas_cap: u64,
     /// Maximum number of blocks for `eth_simulateV1`.
@@ -323,13 +283,11 @@ pub struct EthApiInner<
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
     /// Cached pending block if any
-    pending_block: Mutex<Option<PendingBlock<Provider::Block, Provider::Receipt>>>,
+    pending_block: Mutex<Option<PendingBlock<N::Primitives>>>,
     /// A pool dedicated to CPU heavy blocking tasks.
     blocking_task_pool: BlockingTaskPool,
     /// Cache for block fees history
-    fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
-    /// The type that defines how to configure the EVM
-    evm_config: EvmConfig,
+    fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
 
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
@@ -341,38 +299,35 @@ pub struct EthApiInner<
     tx_resp_builder: Rpc,
 
     /// Builder for pending block environment.
-    next_env_builder: Box<dyn PendingEnvBuilder<EvmConfig>>,
+    next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthApiInner<N, Rpc>
 where
-    Provider: BlockReaderIdExt,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
 {
     /// Creates a new, shareable instance using the default tokio task spawner.
     #[expect(clippy::too_many_arguments)]
     pub fn new(
-        provider: Provider,
-        pool: Pool,
-        network: Network,
-        eth_cache: EthStateCache<Provider::Block, Provider::Receipt>,
-        gas_oracle: GasPriceOracle<Provider>,
+        components: N,
+        eth_cache: EthStateCache<N::Primitives>,
+        gas_oracle: GasPriceOracle<N::Provider>,
         gas_cap: impl Into<GasCap>,
         max_simulate_blocks: u64,
         eth_proof_window: u64,
         blocking_task_pool: BlockingTaskPool,
-        fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
-        evm_config: EvmConfig,
+        fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
         tx_resp_builder: Rpc,
-        next_env: impl PendingEnvBuilder<EvmConfig>,
+        next_env: impl PendingEnvBuilder<N::Evm>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
         let starting_block = U256::from(
-            provider
+            components
+                .provider()
                 .header_by_number_or_tag(BlockNumberOrTag::Latest)
                 .ok()
                 .flatten()
@@ -383,9 +338,7 @@ where
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
         Self {
-            provider,
-            pool,
-            network,
+            components,
             signers,
             eth_cache,
             gas_oracle,
@@ -397,7 +350,6 @@ where
             pending_block: Default::default(),
             blocking_task_pool,
             fee_history_cache,
-            evm_config,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
             raw_tx_sender,
             tx_resp_builder,
@@ -406,16 +358,15 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthApiInner<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthApiInner<N, Rpc>
 where
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
+    N: RpcNodeCore,
     Rpc: RpcConvert,
 {
     /// Returns a handle to data on disk.
     #[inline]
-    pub const fn provider(&self) -> &Provider {
-        &self.provider
+    pub fn provider(&self) -> &N::Provider {
+        self.components.provider()
     }
 
     /// Returns a handle to the transaction response builder.
@@ -426,22 +377,20 @@ where
 
     /// Returns a handle to data in memory.
     #[inline]
-    pub const fn cache(&self) -> &EthStateCache<Provider::Block, Provider::Receipt> {
+    pub const fn cache(&self) -> &EthStateCache<N::Primitives> {
         &self.eth_cache
     }
 
     /// Returns a handle to the pending block.
     #[inline]
-    pub const fn pending_block(
-        &self,
-    ) -> &Mutex<Option<PendingBlock<Provider::Block, Provider::Receipt>>> {
+    pub const fn pending_block(&self) -> &Mutex<Option<PendingBlock<N::Primitives>>> {
         &self.pending_block
     }
 
     /// Returns a type that knows how to build a [`ConfigureEvm::NextBlockEnvCtx`] for a pending
     /// block.
     #[inline]
-    pub const fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<EvmConfig> {
+    pub const fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<N::Evm> {
         &*self.next_env_builder
     }
 
@@ -459,14 +408,14 @@ where
 
     /// Returns a handle to the EVM config.
     #[inline]
-    pub const fn evm_config(&self) -> &EvmConfig {
-        &self.evm_config
+    pub fn evm_config(&self) -> &N::Evm {
+        self.components.evm_config()
     }
 
     /// Returns a handle to the transaction pool.
     #[inline]
-    pub const fn pool(&self) -> &Pool {
-        &self.pool
+    pub fn pool(&self) -> &N::Pool {
+        self.components.pool()
     }
 
     /// Returns the gas cap.
@@ -483,19 +432,19 @@ where
 
     /// Returns a handle to the gas oracle.
     #[inline]
-    pub const fn gas_oracle(&self) -> &GasPriceOracle<Provider> {
+    pub const fn gas_oracle(&self) -> &GasPriceOracle<N::Provider> {
         &self.gas_oracle
     }
 
     /// Returns a handle to the fee history cache.
     #[inline]
-    pub const fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<Provider>> {
+    pub const fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         &self.fee_history_cache
     }
 
     /// Returns a handle to the signers.
     #[inline]
-    pub const fn signers(&self) -> &SignersForRpc<Provider, Rpc::Network> {
+    pub const fn signers(&self) -> &SignersForRpc<N::Provider, Rpc::Network> {
         &self.signers
     }
 
@@ -507,8 +456,8 @@ where
 
     /// Returns the inner `Network`
     #[inline]
-    pub const fn network(&self) -> &Network {
-        &self.network
+    pub const fn network(&self) -> &N::Network {
+        self.components.network()
     }
 
     /// The maximum number of blocks into the past for generating state proofs.
