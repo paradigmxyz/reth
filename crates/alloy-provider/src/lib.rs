@@ -464,20 +464,26 @@ where
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
-            BlockId::Number(number_or_tag) => self.block_by_number_or_tag(number_or_tag),
             BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+            BlockId::Number(number_or_tag) => self.block_by_number_or_tag(number_or_tag),
         }
     }
 
     fn sealed_header_by_id(
         &self,
-        _id: BlockId,
+        id: BlockId,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        Err(ProviderError::UnsupportedProvider)
+        match id {
+            BlockId::Hash(hash) => self.sealed_header_by_hash(hash.block_hash),
+            BlockId::Number(number_or_tag) => self.sealed_header_by_number_or_tag(number_or_tag),
+        }
     }
 
-    fn header_by_id(&self, _id: BlockId) -> ProviderResult<Option<Self::Header>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
+        match id {
+            BlockId::Hash(hash) => self.header_by_hash_or_number(hash.block_hash.into()),
+            BlockId::Number(number_or_tag) => self.header_by_number_or_tag(number_or_tag),
+        }
     }
 }
 
