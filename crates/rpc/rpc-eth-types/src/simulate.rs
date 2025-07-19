@@ -12,7 +12,7 @@ use alloy_eips::eip2718::WithEncoded;
 use alloy_network::TransactionBuilder;
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
-    Block, BlockTransactionsKind, Header,
+    BlockTransactionsKind,
 };
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
@@ -20,9 +20,9 @@ use reth_evm::{
     Evm,
 };
 use reth_primitives_traits::{
-    block::BlockTx, BlockBody as _, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
+    BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock, SignedTransaction,
 };
-use reth_rpc_convert::{RpcConvert, RpcTransaction, RpcTxReq};
+use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
 use reth_rpc_server_types::result::rpc_err;
 use reth_storage_api::noop::NoopProvider;
 use revm::{
@@ -187,19 +187,14 @@ where
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-#[expect(clippy::type_complexity)]
-pub fn build_simulated_block<T, B, Halt: Clone>(
-    block: RecoveredBlock<B>,
+pub fn build_simulated_block<T, Halt: Clone>(
+    block: RecoveredBlock<BlockTy<T::Primitives>>,
     results: Vec<ExecutionResult<Halt>>,
     txs_kind: BlockTransactionsKind,
     tx_resp_builder: &T,
-) -> Result<SimulatedBlock<Block<RpcTransaction<T::Network>, Header<B::Header>>>, T::Error>
+) -> Result<SimulatedBlock<RpcBlock<T::Network>>, T::Error>
 where
-    T: RpcConvert<
-        Primitives: NodePrimitives<SignedTx = BlockTx<B>>,
-        Error: FromEthApiError + FromEvmHalt<Halt>,
-    >,
-    B: reth_primitives_traits::Block,
+    T: RpcConvert<Error: FromEthApiError + FromEvmHalt<Halt>>,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
@@ -258,6 +253,10 @@ where
         calls.push(call);
     }
 
-    let block = block.into_rpc_block(txs_kind, |tx, tx_info| tx_resp_builder.fill(tx, tx_info))?;
+    let block = block.into_rpc_block(
+        txs_kind,
+        |tx, tx_info| tx_resp_builder.fill(tx, tx_info),
+        |header, size| tx_resp_builder.convert_header(header, size),
+    )?;
     Ok(SimulatedBlock { inner: block, calls })
 }

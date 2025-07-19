@@ -27,7 +27,7 @@ use reth_evm::{
     TxEnvFor,
 };
 use reth_node_api::{BlockBody, NodePrimitives};
-use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -193,17 +193,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )?
                     };
 
+                    parent = result.block.clone_sealed_header();
+
                     let block = simulate::build_simulated_block(
                         result.block,
                         results,
                         return_full_transactions.into(),
                         this.tx_resp_builder(),
                     )?;
-
-                    parent = SealedHeader::new(
-                        block.inner.header.inner.clone(),
-                        block.inner.header.hash,
-                    );
 
                     blocks.push(block);
                 }

@@ -2,7 +2,7 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
@@ -42,14 +42,11 @@ use tracing::debug;
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadPendingBlock:
     EthApiTypes<
-        NetworkTypes: RpcTypes<
-            Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
-        >,
         Error: FromEvmError<Self::Evm>,
         RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
     > + RpcNodeCore<
         Provider: BlockReaderIdExt<Receipt: Receipt> + ChainSpecProvider + StateProviderFactory,
-        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives> + 'static,
+        Evm: ConfigureEvm<Primitives = Self::Primitives> + 'static,
         Primitives: NodePrimitives<
             BlockHeader = ProviderHeader<Self::Provider>,
             SignedTx = ProviderTx<Self::Provider>,
@@ -364,13 +361,7 @@ pub trait BuildPendingEnv<Header> {
     fn build_pending_env(parent: &SealedHeader<Header>) -> Self;
 }
 
-/// Basic implementation of [`PendingEnvBuilder`] that assumes that the
-/// [`ConfigureEvm::NextBlockEnvCtx`] type implements [`BuildPendingEnv`] trait.
-#[derive(Debug, Default, Clone, Copy)]
-#[non_exhaustive]
-pub struct BasicPendingEnvBuilder;
-
-impl<Evm> PendingEnvBuilder<Evm> for BasicPendingEnvBuilder
+impl<Evm> PendingEnvBuilder<Evm> for ()
 where
     Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<Evm::Primitives>>>,
 {

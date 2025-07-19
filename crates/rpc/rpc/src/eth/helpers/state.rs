@@ -72,8 +72,7 @@ mod tests {
         let evm_config = EthEvmConfig::mainnet();
 
         let cache = EthStateCache::spawn(NoopProvider::default(), Default::default());
-        let rpc_converter =
-            EthRpcConverter::new(EthReceiptConverter::new(provider.chain_spec()), ());
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(provider.chain_spec()));
         EthApi::new(
             provider,
             pool,
@@ -102,7 +101,7 @@ mod tests {
 
         let cache = EthStateCache::spawn(mock_provider.clone(), Default::default());
         let rpc_converter =
-            EthRpcConverter::new(EthReceiptConverter::new(mock_provider.chain_spec()), ());
+            EthRpcConverter::new(EthReceiptConverter::new(mock_provider.chain_spec()));
         EthApi::new(
             mock_provider.clone(),
             pool,

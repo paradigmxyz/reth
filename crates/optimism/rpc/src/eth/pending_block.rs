@@ -10,7 +10,6 @@ use reth_node_api::NodePrimitives;
 use reth_primitives_traits::RecoveredBlock;
 use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
-    types::RpcTypes,
     EthApiTypes, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
@@ -24,9 +23,6 @@ impl<N, Rpc> LoadPendingBlock for OpEthApi<N, Rpc>
 where
     Self: SpawnBlocking
         + EthApiTypes<
-            NetworkTypes: RpcTypes<
-                Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
-            >,
             Error: FromEvmError<Self::Evm>,
             RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
         >,
