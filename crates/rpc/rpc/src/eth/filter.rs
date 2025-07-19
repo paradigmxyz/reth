@@ -8,6 +8,7 @@ use alloy_rpc_types_eth::{
 };
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
+use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
 use reth_primitives_traits::{NodePrimitives, SealedHeader};
@@ -1106,11 +1107,12 @@ impl<
     ) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
         // Split headers into chunks
         let chunk_size = std::cmp::max(range_headers.len() / DEFAULT_PARALLEL_CONCURRENCY, 1);
-        let mut header_chunks = Vec::new();
-        for chunk_start in (0..range_headers.len()).step_by(chunk_size) {
-            let chunk_end = std::cmp::min(chunk_start + chunk_size, range_headers.len());
-            header_chunks.push(range_headers[chunk_start..chunk_end].to_vec());
-        }
+        let header_chunks = range_headers
+            .into_iter()
+            .chunks(chunk_size)
+            .into_iter()
+            .map(|chunk| chunk.collect::<Vec<_>>())
+            .collect::<Vec<_>>();
 
         // Process chunks in parallel
         let mut tasks = Vec::new();
