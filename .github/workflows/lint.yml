@@ -276,7 +276,7 @@ jobs:
       - fmt
       - udeps
       - book
-      - codespell
+      - typos
       - grafana
       - no-test-deps
       - features
