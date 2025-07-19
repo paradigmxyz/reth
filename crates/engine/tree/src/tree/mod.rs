@@ -72,6 +72,7 @@ mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
+mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
