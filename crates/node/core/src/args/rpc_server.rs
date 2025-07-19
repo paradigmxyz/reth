@@ -94,6 +94,12 @@ pub struct RpcServerArgs {
     #[arg(long, default_value_t = constants::DEFAULT_IPC_ENDPOINT.to_string())]
     pub ipcpath: String,
 
+    /// Set the permissions for the IPC socket file, in octal format.
+    ///
+    /// If not specified, the permissions will be set by the system's umask.
+    #[arg(long = "ipc.permissions")]
+    pub ipc_socket_permissions: Option<String>,
+
     /// Auth server address to listen on
     #[arg(long = "authrpc.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub auth_addr: IpAddr,
@@ -337,6 +343,7 @@ impl Default for RpcServerArgs {
             ws_api: None,
             ipcdisable: false,
             ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
+            ipc_socket_permissions: None,
             auth_addr: Ipv4Addr::LOCALHOST.into(),
             auth_port: constants::DEFAULT_AUTH_PORT,
             auth_jwtsecret: None,

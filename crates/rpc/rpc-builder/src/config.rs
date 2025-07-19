@@ -174,6 +174,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_request_body_size(self.rpc_max_request_size_bytes())
             .max_response_body_size(self.rpc_max_response_size_bytes())
             .max_connections(self.rpc_max_connections.get())
+            .set_ipc_socket_permissions(self.ipc_socket_permissions.clone())
     }
 
     fn rpc_server_config(&self) -> RpcServerConfig {
