@@ -21,19 +21,15 @@ use reth_primitives_traits::{
     AlloyBlockHeader, Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider,
-    DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
-    ProviderResult, StateCommitmentProvider, StateProvider, StateProviderFactory, StateReader,
+    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
+    HashedPostStateProvider, HeaderProvider, ProviderError, ProviderResult,
+    StateCommitmentProvider, StateProvider, StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{
-    collections::HashMap,
-    sync::Arc,
-    time::Instant,
-};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, trace};
 
 /// A helper type that provides reusable payload validation logic for network-specific validators.
@@ -360,20 +356,21 @@ where
 
         // Get parent header for validation
         let parent_hash = block.header().parent_hash();
-        let parent_header =
-            if let Some(parent_block) = ctx.state().tree_state.executed_block_by_hash(parent_hash) {
-                parent_block.block.recovered_block.sealed_header().clone()
-            } else {
-                // Fallback to database if not in tree state
-                let header: N::BlockHeader = self
-                    .provider
-                    .header(&parent_hash)
-                    .map_err(|e| ConsensusError::Other(e.to_string()))?
-                    .ok_or_else(|| {
-                        ConsensusError::Other(format!("Parent header not found: {parent_hash}"))
-                    })?;
-                SealedHeader::seal_slow(header)
-            };
+        let parent_header = if let Some(parent_block) =
+            ctx.state().tree_state.executed_block_by_hash(parent_hash)
+        {
+            parent_block.block.recovered_block.sealed_header().clone()
+        } else {
+            // Fallback to database if not in tree state
+            let header: N::BlockHeader = self
+                .provider
+                .header(&parent_hash)
+                .map_err(|e| ConsensusError::Other(e.to_string()))?
+                .ok_or_else(|| {
+                    ConsensusError::Other(format!("Parent header not found: {parent_hash}"))
+                })?;
+            SealedHeader::seal_slow(header)
+        };
 
         // Validate against parent
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block against parent");
@@ -515,8 +512,7 @@ where
         &self,
         parent_hash: B256,
         hashed_state: &HashedPostState,
-    ) -> Result<(B256, TrieUpdates), NewPayloadError>
-    {
+    ) -> Result<(B256, TrieUpdates), NewPayloadError> {
         // Get the state provider for the parent block
         let state_provider = self
             .provider
@@ -639,8 +635,7 @@ where
         hashed_state: &HashedPostState,
         tree_state: &EngineApiTreeState<N>,
         persisting_kind: PersistingKind,
-    ) -> Result<(B256, TrieUpdates), ParallelStateRootError>
-    {
+    ) -> Result<(B256, TrieUpdates), ParallelStateRootError> {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
         // Compute trie input using the tree state
@@ -736,11 +731,8 @@ where
 
         if !use_state_root_task {
             // Use cache-only spawn when state root tasks are not needed
-            let handle = self.payload_processor.spawn_cache_exclusive(
-                header,
-                txs,
-                provider_builder,
-            );
+            let handle =
+                self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder);
             return (handle, false);
         }
 
@@ -748,21 +740,15 @@ where
         let Ok(consistent_view) = ConsistentDbView::new_with_latest_tip(self.provider.clone())
         else {
             // Fall back to cache-only spawn if consistent view fails
-            let handle = self.payload_processor.spawn_cache_exclusive(
-                header,
-                txs,
-                provider_builder,
-            );
+            let handle =
+                self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder);
             return (handle, false);
         };
 
         let Ok(provider_ro) = consistent_view.provider_ro() else {
             // Fall back to cache-only spawn if provider creation fails
-            let handle = self.payload_processor.spawn_cache_exclusive(
-                header,
-                txs,
-                provider_builder,
-            );
+            let handle =
+                self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder);
             return (handle, false);
         };
 
@@ -776,11 +762,8 @@ where
             self.compute_trie_input(provider_ro, parent_hash, tree_state, persisting_kind)
         else {
             // Fall back to cache-only spawn if trie input computation fails
-            let handle = self.payload_processor.spawn_cache_exclusive(
-                header,
-                txs,
-                provider_builder,
-            );
+            let handle =
+                self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder);
             return (handle, false);
         };
         let trie_input_elapsed = trie_input_start.elapsed();
@@ -801,11 +784,8 @@ where
             (handle, true)
         } else {
             debug!(target: "engine::tree", block=?block.num_hash(), "Disabling state root task due to non-empty prefix sets");
-            let handle = self.payload_processor.spawn_cache_exclusive(
-                header,
-                txs,
-                provider_builder,
-            );
+            let handle =
+                self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder);
             (handle, false)
         }
     }
@@ -815,8 +795,7 @@ where
         &self,
         parent_hash: B256,
         tree_state: &EngineApiTreeState<N>,
-    ) -> Result<SealedHeader<N::BlockHeader>, ProviderError>
-    {
+    ) -> Result<SealedHeader<N::BlockHeader>, ProviderError> {
         // First try to get from tree state
         if let Some(parent_block) = tree_state.tree_state.executed_block_by_hash(parent_hash) {
             Ok(parent_block.block.recovered_block.sealed_header().clone())
@@ -850,8 +829,7 @@ where
         &self,
         hash: B256,
         tree_state: &EngineApiTreeState<N>,
-    ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>>
-    {
+    ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>> {
         // check memory first
         let block = tree_state
             .tree_state
@@ -875,8 +853,7 @@ where
         target_header: &SealedHeader<N::BlockHeader>,
         tree_state: &EngineApiTreeState<N>,
         canonical_in_memory_state: &CanonicalInMemoryState<N>,
-    ) -> Result<bool, ProviderError>
-    {
+    ) -> Result<bool, ProviderError> {
         let target_hash = target_header.hash();
 
         // Verify that the given hash is not part of an extension of the canon chain.
