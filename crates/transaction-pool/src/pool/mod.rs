@@ -458,7 +458,7 @@ where
         pool: &mut RwLockWriteGuard<'_, TxPool<T>>,
         origin: TransactionOrigin,
         tx: TransactionValidationOutcome<T::Transaction>,
-    ) -> PoolResult<TxHash> {
+    ) -> PoolResult<AddedTransactionOutcome> {
         match tx {
             TransactionValidationOutcome::Valid {
                 balance,
@@ -494,6 +494,10 @@ where
 
                 let added = pool.add_transaction(tx, balance, state_nonce, bytecode_hash)?;
                 let hash = *added.hash();
+                let state = match added.subpool() {
+                    SubPool::Pending => AddedTransactionState::Pending,
+                    _ => AddedTransactionState::Queued,
+                };
 
                 // transaction was successfully inserted into the pool
                 if let Some(sidecar) = maybe_sidecar {
@@ -524,7 +528,7 @@ where
                 // Notify listeners for _all_ transactions
                 self.on_new_transaction(added.into_new_transaction_event());
 
-                Ok(hash)
+                Ok(AddedTransactionOutcome { hash, state })
             }
             TransactionValidationOutcome::Invalid(tx, err) => {
                 let mut listener = self.event_listener.write();
@@ -563,7 +567,7 @@ where
         &self,
         origin: TransactionOrigin,
         transactions: impl IntoIterator<Item = TransactionValidationOutcome<T::Transaction>>,
-    ) -> Vec<PoolResult<TxHash>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         // Add the transactions and enforce the pool size limits in one write lock
         let (mut added, discarded) = {
             let mut pool = self.pool.write();
@@ -599,7 +603,7 @@ where
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
             for res in &mut added {
-                if let Ok(hash) = res {
+                if let Ok(AddedTransactionOutcome { hash, .. }) = res {
                     if discarded_hashes.contains(hash) {
                         *res = Err(PoolError::new(*hash, PoolErrorKind::DiscardedOnInsert))
                     }
@@ -1167,7 +1171,6 @@ impl<T: PoolTransaction> AddedTransaction<T> {
     }
 
     /// Returns the subpool this transaction was added to
-    #[cfg(test)]
     pub(crate) const fn subpool(&self) -> SubPool {
         match self {
             Self::Pending(_) => SubPool::Pending,
@@ -1183,6 +1186,24 @@ impl<T: PoolTransaction> AddedTransaction<T> {
             Self::Parked { transaction, .. } => transaction.id(),
         }
     }
+}
+
+/// The state of a transaction when is was added to the pool
+#[derive(Debug)]
+pub enum AddedTransactionState {
+    /// Ready for execution
+    Pending,
+    /// Not ready for execution due to a nonce gap or insufficient balance
+    Queued, // TODO: Break it down to missing nonce, insufficient balance, etc.
+}
+
+/// The outcome of a successful transaction addition
+#[derive(Debug)]
+pub struct AddedTransactionOutcome {
+    /// The hash of the transaction
+    pub hash: TxHash,
+    /// The state of the transaction
+    pub state: AddedTransactionState,
 }
 
 /// Contains all state changes after a [`CanonicalStateUpdate`] was processed

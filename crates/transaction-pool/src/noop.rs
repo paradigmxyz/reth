@@ -9,9 +9,9 @@ use crate::{
     pool::TransactionListenerKind,
     traits::{BestTransactionsAttributes, GetPooledTransactionLimit, NewBlobSidecar},
     validate::ValidTransaction,
-    AllPoolTransactions, AllTransactionsEvents, BestTransactions, BlockInfo, EthPoolTransaction,
-    EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize, PoolTransaction,
-    PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
+    AddedTransactionOutcome, AllPoolTransactions, AllTransactionsEvents, BestTransactions,
+    BlockInfo, EthPoolTransaction, EthPooledTransaction, NewTransactionEvent, PoolResult, PoolSize,
+    PoolTransaction, PropagatedTransactions, TransactionEvents, TransactionOrigin, TransactionPool,
     TransactionValidationOutcome, TransactionValidator, ValidPoolTransaction,
 };
 use alloy_eips::{
@@ -79,7 +79,7 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         &self,
         _origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> PoolResult<TxHash> {
+    ) -> PoolResult<AddedTransactionOutcome> {
         let hash = *transaction.hash();
         Err(PoolError::other(hash, Box::new(NoopInsertError::new(transaction))))
     }
@@ -88,7 +88,7 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         &self,
         _origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> Vec<PoolResult<TxHash>> {
+    ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         transactions
             .into_iter()
             .map(|transaction| {
