@@ -415,12 +415,12 @@ clippy-op-dev:
 	--locked \
 	--all-features
 
-lint-codespell: ensure-codespell
-	codespell --skip "*.json" --skip "./testing/ef-tests/ethereum-tests"
+lint-typos: ensure-typos
+	typos
 
-ensure-codespell:
-	@if ! command -v codespell &> /dev/null; then \
-		echo "codespell not found. Please install it by running the command `pip install codespell` or refer to the following link for more information: https://github.com/codespell-project/codespell" \
+ensure-typos:
+	@if ! command -v typos &> /dev/null; then \
+		echo "typos not found. Please install it by running the command `cargo install typos-cli` or refer to the following link for more information: https://github.com/crate-ci/typos" \
 		exit 1; \
     fi
 
@@ -446,7 +446,7 @@ ensure-dprint:
 lint:
 	make fmt && \
 	make clippy && \
-	make lint-codespell && \
+	make lint-typos && \
 	make lint-toml
 
 clippy-fix:
