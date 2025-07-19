@@ -9819,6 +9819,7 @@ dependencies = [
  "http",
  "http-body",
  "hyper",
+ "itertools 0.14.0",
  "jsonrpsee",
  "jsonrpsee-types",
  "jsonwebtoken",
