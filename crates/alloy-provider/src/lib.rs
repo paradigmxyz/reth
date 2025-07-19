@@ -60,6 +60,8 @@ use std::{
 use tokio::{runtime::Handle, sync::broadcast};
 use tracing::trace;
 
+pub mod forkable_provider;
+
 /// Configuration for `AlloyRethProvider`
 #[derive(Debug, Clone, Default)]
 pub struct AlloyRethProviderConfig {
