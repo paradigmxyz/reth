@@ -21,7 +21,7 @@ use reth_primitives_traits::{
     AlloyBlockHeader, Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
-    BlockExecutionOutput, BlockNumReader, BlockReader, ChainSpecProvider, DBProvider,
+    BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider,
     DatabaseProviderFactory, HashedPostStateProvider, HeaderProvider, ProviderError,
     ProviderResult, StateCommitmentProvider, StateProvider, StateProviderFactory, StateReader,
 };
@@ -31,7 +31,6 @@ use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{
     collections::HashMap,
-    marker::Unpin,
     sync::Arc,
     time::Instant,
 };
@@ -53,8 +52,8 @@ where
         + StateReader
         + StateCommitmentProvider
         + HashedPostStateProvider
+        + HeaderProvider<Header = N::BlockHeader>
         + Clone
-        + Unpin
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -91,8 +90,8 @@ where
         + StateReader
         + StateCommitmentProvider
         + HashedPostStateProvider
+        + HeaderProvider<Header = N::BlockHeader>
         + Clone
-        + Unpin
         + 'static,
     C: ConfigureEvm<Primitives = N> + 'static,
 {
@@ -158,7 +157,6 @@ where
         N::Block: Block<Body: BlockBody<Transaction = N::SignedTx>>
             + From<alloy_consensus::Block<N::SignedTx>>,
         N::SignedTx: Decodable2718,
-        P: ChainSpecProvider + HeaderProvider<Header = N::BlockHeader>,
     {
         // First, convert the payload to a block
         let block = self.payload_to_block(payload)?;
@@ -349,7 +347,6 @@ where
     ) -> Result<(), ConsensusError>
     where
         N::Block: Block,
-        P: HeaderProvider<Header = N::BlockHeader>,
     {
         let block_num_hash = block.num_hash();
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block.header().parent_hash(), "Validating downloaded block");
@@ -519,8 +516,6 @@ where
         parent_hash: B256,
         hashed_state: &HashedPostState,
     ) -> Result<(B256, TrieUpdates), NewPayloadError>
-    where
-        P: BlockNumReader,
     {
         // Get the state provider for the parent block
         let state_provider = self
@@ -590,7 +585,6 @@ where
     ) -> Result<(B256, TrieUpdates), NewPayloadError>
     where
         N::Block: Block,
-        P: BlockNumReader,
     {
         if !run_parallel_state_root {
             // Use synchronous computation
@@ -646,8 +640,6 @@ where
         tree_state: &EngineApiTreeState<N>,
         persisting_kind: PersistingKind,
     ) -> Result<(B256, TrieUpdates), ParallelStateRootError>
-    where
-        P: BlockNumReader,
     {
         let consistent_view = ConsistentDbView::new_with_latest_tip(self.provider.clone())?;
 
@@ -824,8 +816,6 @@ where
         parent_hash: B256,
         tree_state: &EngineApiTreeState<N>,
     ) -> Result<SealedHeader<N::BlockHeader>, ProviderError>
-    where
-        P: HeaderProvider<Header = N::BlockHeader>,
     {
         // First try to get from tree state
         if let Some(parent_block) = tree_state.tree_state.executed_block_by_hash(parent_hash) {
@@ -861,8 +851,6 @@ where
         hash: B256,
         tree_state: &EngineApiTreeState<N>,
     ) -> ProviderResult<Option<SealedHeader<N::BlockHeader>>>
-    where
-        P: HeaderProvider<Header = N::BlockHeader>,
     {
         // check memory first
         let block = tree_state
@@ -888,8 +876,6 @@ where
         tree_state: &EngineApiTreeState<N>,
         canonical_in_memory_state: &CanonicalInMemoryState<N>,
     ) -> Result<bool, ProviderError>
-    where
-        P: BlockNumReader + HeaderProvider<Header = N::BlockHeader>,
     {
         let target_hash = target_header.hash();
 
