@@ -42,6 +42,30 @@ pub use invalid_block_hook::InvalidBlockHook;
 pub mod config;
 pub use config::*;
 
+/// Outcome of validating a payload
+#[derive(Debug)]
+pub enum PayloadValidationOutcome<Block: reth_primitives_traits::Block> {
+    /// Payload is valid and produced a block
+    Valid {
+        /// The block created from the payload
+        block: RecoveredBlock<Block>,
+    },
+    /// Payload is invalid but block construction succeeded
+    Invalid {
+        /// The block created from the payload
+        block: RecoveredBlock<Block>,
+        /// The validation error
+        error: NewPayloadError,
+    },
+}
+
+/// Context providing access to tree state during validation
+#[derive(Debug)]
+pub struct TreeCtx<'a, State> {
+    /// The engine API tree state
+    pub state: &'a State,
+}
+
 /// This type defines the versioned types of the engine API based on the [ethereum engine API](https://github.com/ethereum/execution-apis/tree/main/src/engine).
 ///
 /// This includes the execution payload types and payload attributes that are used to trigger a
@@ -106,7 +130,7 @@ pub trait EngineTypes:
 
 /// Type that validates an [`ExecutionPayload`].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PayloadValidator: Send + Sync + Unpin + 'static {
+pub trait PayloadValidator<State = ()>: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
 
@@ -125,6 +149,29 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
         &self,
         payload: Self::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
+
+    /// Validates a payload received from engine API.
+    fn validate_payload(
+        &self,
+        payload: Self::ExecutionData,
+        _ctx: TreeCtx<'_, State>,
+    ) -> Result<PayloadValidationOutcome<Self::Block>, NewPayloadError> {
+        // Default implementation: try to convert using existing method
+        match self.ensure_well_formed_payload(payload) {
+            Ok(block) => Ok(PayloadValidationOutcome::Valid { block }),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Validates a block downloaded from the network.
+    fn validate_block(
+        &self,
+        _block: &RecoveredBlock<Self::Block>,
+        _ctx: TreeCtx<'_, State>,
+    ) -> Result<(), ConsensusError> {
+        // Default implementation: accept all blocks
+        Ok(())
+    }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
     fn validate_block_post_execution_with_hashed_state(
