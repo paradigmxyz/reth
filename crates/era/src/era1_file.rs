@@ -3,7 +3,7 @@
 //! The structure of an Era1 file follows the specification:
 //! `Version | block-tuple* | other-entries* | Accumulator | BlockIndex`
 //!
-//! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
+//! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>.
 
 use crate::{
     e2s_file::{E2StoreReader, E2StoreWriter},
@@ -59,6 +59,7 @@ impl Era1File {
         self.block_range().contains(&number)
     }
 }
+
 /// Reader for Era1 files that builds on top of [`E2StoreReader`]
 #[derive(Debug)]
 pub struct Era1Reader<R: Read> {
