@@ -184,7 +184,7 @@ fn get_entry(cmd: &Cmd) -> io::Result<(Vec<String>, String)> {
 /// Returns a list of subcommands from the help output of a command.
 fn parse_sub_commands(s: &str) -> Vec<String> {
     // This regex matches lines starting with two spaces, followed by the subcommand name.
-    let re = regex!(r"^  (\S+)");
+    let re = regex!(r"^\s{2}(\S+)");
 
     s.split("Commands:")
         .nth(1) // Get the part after "Commands:"
