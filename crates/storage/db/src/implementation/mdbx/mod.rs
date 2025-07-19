@@ -173,6 +173,11 @@ impl DatabaseArguments {
     pub const fn client_version(&self) -> &ClientVersion {
         &self.client_version
     }
+
+    /// Returns the maximum read transaction duration if any.
+    pub const fn max_read_transaction_duration(&self) -> Option<MaxReadTransactionDuration> {
+        self.max_read_transaction_duration
+    }
 }
 
 /// Wrapper for the libmdbx environment: [Environment]
