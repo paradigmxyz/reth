@@ -534,7 +534,7 @@ mod tests {
         let mut encoded = Vec::new();
         msg.encode(&mut encoded);
 
-        // Decode the bytes back into RawCapbailitMessage
+        // Decode the bytes back into RawCapabilityMessage
         let decoded = RawCapabilityMessage::decode(&mut &encoded[..]).unwrap();
 
         // Verify that the decoded message matches the original
