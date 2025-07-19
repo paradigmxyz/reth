@@ -1,0 +1,17 @@
+#!/bin/sh
+set -e
+
+if [ "$1" = "purge" ]; then
+    # Remove user (optional - some prefer to keep it)
+    if getent passwd reth >/dev/null 2>&1; then
+        deluser reth || true
+    fi
+    
+    # Remove data directory (be careful!)
+    # rm -rf /var/lib/reth || true
+    # rm -rf /var/log/reth || true
+fi
+
+#DEBHELPER#
+
+exit 0
