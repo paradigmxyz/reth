@@ -49,7 +49,7 @@ const ERA1_MAINNET_FILES_NAMES: [&str; 6] = [
 /// Sepolia network name
 const SEPOLIA: &str = "sepolia";
 
-/// Default sepolia mainnet url
+/// Default sepolia url
 /// for downloading sepolia `.era1` files
 const SEPOLIA_URL: &str = "https://era.ithaca.xyz/sepolia-era1/";
 
