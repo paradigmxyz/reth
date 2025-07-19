@@ -21,8 +21,6 @@ pub const CAPABILITIES: &[&str] = &[
     "engine_getBlobsV2",
 ];
 
-// The list of all supported Engine capabilities available over the engine endpoint.
-///
 /// Latest spec: Prague
 #[derive(Debug, Clone)]
 pub struct EngineCapabilities {
