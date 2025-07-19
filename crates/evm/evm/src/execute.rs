@@ -344,15 +344,22 @@ pub trait BlockBuilder {
     fn into_executor(self) -> Self::Executor;
 }
 
-pub(crate) struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
+/// A type that constructs a block from transactions and execution results.
+#[derive(Debug)]
+pub struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
 where
     F: BlockExecutorFactory,
 {
-    pub(crate) executor: Executor,
-    pub(crate) transactions: Vec<Recovered<TxTy<N>>>,
-    pub(crate) ctx: F::ExecutionCtx<'a>,
-    pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
-    pub(crate) assembler: Builder,
+    /// The block executor used to execute transactions.
+    pub executor: Executor,
+    /// The transactions executed in this block.
+    pub transactions: Vec<Recovered<TxTy<N>>>,
+    /// The parent block execution context.
+    pub ctx: F::ExecutionCtx<'a>,
+    /// The sealed parent block header.
+    pub parent: &'a SealedHeader<HeaderTy<N>>,
+    /// The assembler used to build the block.
+    pub assembler: Builder,
 }
 
 /// Conversions for executable transactions.
