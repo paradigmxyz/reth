@@ -1,14 +1,14 @@
 //! Contains RPC handler implementations specific to transactions
 
 use crate::EthApi;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{hex, Bytes, B256};
 use reth_evm::ConfigureEvm;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
     EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
 };
-use reth_rpc_eth_types::utils::recover_raw_transaction;
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
@@ -32,9 +32,29 @@ where
         let recovered = recover_raw_transaction(&tx)?;
 
         // broadcast raw transaction to subscribers if there is any.
-        self.broadcast_raw_transaction(tx);
+        self.broadcast_raw_transaction(tx.clone());
 
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+
+        // forward the transaction to the specific endpoint if configured.
+        if let Some(client) = self.raw_tx_forwarder() {
+            tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to forwarder");
+            let rlp_hex = hex::encode_prefixed(tx);
+
+            let hash =
+                client.request("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
+                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
+                }).map_err(EthApiError::other)?;
+
+            // Retain tx in local tx pool after forwarding, for local RPC usage.
+            let _ = self
+                .pool()
+                .add_transaction(TransactionOrigin::Local, pool_transaction)
+                .await
+                .map_err(Self::Error::from_eth_err);
+
+            return Ok(hash);
+        }
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self
@@ -108,6 +128,7 @@ mod tests {
             evm_config,
             DEFAULT_PROOF_PERMITS,
             rpc_converter,
+            None,
         );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d

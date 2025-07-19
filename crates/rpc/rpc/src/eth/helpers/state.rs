@@ -88,6 +88,7 @@ mod tests {
             evm_config,
             DEFAULT_PROOF_PERMITS,
             rpc_converter,
+            None,
         )
     }
 
@@ -117,6 +118,7 @@ mod tests {
             evm_config,
             DEFAULT_PROOF_PERMITS,
             rpc_converter,
+            None,
         )
     }
 
