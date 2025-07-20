@@ -21,7 +21,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use alloy_consensus::BlockHeader;
-use alloy_eips::BlockHashOrNumber;
+use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
@@ -33,7 +33,9 @@ use reth_db_api::{
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
-use reth_node_types::{Block, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
+use reth_node_types::{
+    Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
+};
 use reth_primitives::{Account, Bytecode, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
@@ -53,12 +55,12 @@ use reth_storage_api::{
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
 use std::{
     collections::BTreeMap,
-    future::Future,
+    future::{Future, IntoFuture},
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 use tokio::{runtime::Handle, sync::broadcast};
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// Configuration for `AlloyRethProvider`
 #[derive(Debug, Clone, Default)]
@@ -163,6 +165,7 @@ where
             block_id,
             self.chain_spec.clone(),
         )
+        .with_compute_state_root(self.config.compute_state_root)
     }
 
     /// Helper function to get state provider by block number
@@ -209,8 +212,16 @@ where
     Node: NodeTypes,
 {
     fn chain_info(&self) -> Result<reth_chainspec::ChainInfo, ProviderError> {
-        // For RPC provider, we can't get full chain info
-        Err(ProviderError::UnsupportedProvider)
+        self.block_on_async(async {
+            let block = self
+                .provider
+                .get_block(BlockId::Number(BlockNumberOrTag::Latest))
+                .await
+                .map_err(ProviderError::other)?
+                .ok_or(ProviderError::HeaderNotFound(0.into()))?;
+
+            Ok(ChainInfo { best_hash: block.header().hash(), best_number: block.header().number() })
+        })
     }
 
     fn best_block_number(&self) -> Result<BlockNumber, ProviderError> {
@@ -309,12 +320,16 @@ where
         Ok(Some(sealed_header.into_header()))
     }
 
-    fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+        let header = self.header(hash).map_err(ProviderError::other)?;
+
+        Ok(header.map(|b| b.difficulty()))
     }
 
-    fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
+        let header = self.header_by_number(number).map_err(ProviderError::other)?;
+
+        Ok(header.map(|b| b.difficulty()))
     }
 
     fn headers_range(
@@ -520,9 +535,33 @@ where
 
     fn receipts_by_block(
         &self,
-        _block: BlockHashOrNumber,
+        block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        Err(ProviderError::UnsupportedProvider)
+        self.block_on_async(async {
+            let receipts_response = self
+                .provider
+                .get_block_receipts(block.into())
+                .await
+                .map_err(ProviderError::other)?;
+
+            let Some(receipts) = receipts_response else {
+                // If the receipts were not found, return None
+                return Ok(None);
+            };
+
+            // Convert the network receipts response to primitive receipts
+            let receipts = receipts
+                .into_iter()
+                .map(|receipt_response| {
+                    <ReceiptTy<Node> as TryFromReceiptResponse<N>>::from_receipt_response(
+                        receipt_response,
+                    )
+                    .map_err(ProviderError::other)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(Some(receipts))
+        })
     }
 
     fn receipts_by_tx_range(
@@ -554,6 +593,7 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    BlockTy<Node>: TryFromBlockResponse<N>,
     TxTy<Node>: TryFromTransactionResponse<N>,
 {
     type Transaction = TxTy<Node>;
@@ -605,9 +645,22 @@ where
 
     fn transactions_by_block(
         &self,
-        _block: BlockHashOrNumber,
+        block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        Err(ProviderError::UnsupportedProvider)
+        let block_response = self.block_on_async(async {
+            self.provider.get_block(block.into()).full().await.map_err(ProviderError::other)
+        })?;
+
+        let Some(block_response) = block_response else {
+            // If the block was not found, return None
+            return Ok(None);
+        };
+
+        // Convert the network block response to primitive block
+        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
+            .map_err(ProviderError::other)?;
+
+        Ok(Some(block.into_body().into_transactions()))
     }
 
     fn transactions_by_block_range(
@@ -643,13 +696,7 @@ where
     Node: NodeTypes,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        trace!(target: "alloy-provider", "Getting latest state provider");
-
-        let block_number = self.block_on_async(async {
-            self.provider.get_block_number().await.map_err(ProviderError::other)
-        })?;
-
-        self.state_by_block_number(block_number)
+        Ok(Box::new(self.create_state_provider(self.best_block_number()?.into())))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -822,6 +869,8 @@ where
     network: std::marker::PhantomData<N>,
     /// Cached chain spec (shared with parent provider)
     chain_spec: Option<Arc<Node::ChainSpec>>,
+    /// Whether to enable state root calculation
+    compute_state_root: bool,
 }
 
 impl<P: std::fmt::Debug, Node: NodeTypes, N> std::fmt::Debug
@@ -848,6 +897,7 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
             node_types: std::marker::PhantomData,
             network: std::marker::PhantomData,
             chain_spec: None,
+            compute_state_root: false,
         }
     }
 
@@ -863,6 +913,7 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
             node_types: std::marker::PhantomData,
             network: std::marker::PhantomData,
             chain_spec: Some(chain_spec),
+            compute_state_root: false,
         }
     }
 
@@ -882,7 +933,17 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
             node_types: self.node_types,
             network: self.network,
             chain_spec: self.chain_spec.clone(),
+            compute_state_root: self.compute_state_root,
         }
+    }
+
+    /// Helper function to enable state root calculation
+    ///
+    /// If enabled, the node will compute the state root and updates.
+    /// When disabled, it will return zero for state root and no updates.
+    pub const fn with_compute_state_root(mut self, is_enable: bool) -> Self {
+        self.compute_state_root = is_enable;
+        self
     }
 
     /// Get account information from RPC
@@ -935,18 +996,13 @@ where
         storage_key: StorageKey,
     ) -> Result<Option<U256>, ProviderError> {
         self.block_on_async(async {
-            let value = self
-                .provider
-                .get_storage_at(address, storage_key.into())
-                .block_id(self.block_id)
-                .await
-                .map_err(ProviderError::other)?;
-
-            if value.is_zero() {
-                Ok(None)
-            } else {
-                Ok(Some(value))
-            }
+            Ok(Some(
+                self.provider
+                    .get_storage_at(address, storage_key.into())
+                    .block_id(self.block_id)
+                    .await
+                    .map_err(ProviderError::other)?,
+            ))
         })
     }
 
@@ -1018,36 +1074,41 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn state_root(&self, _state: HashedPostState) -> Result<B256, ProviderError> {
-        // Return the state root from the block
-        self.block_on_async(async {
-            let block = self
-                .provider
-                .get_block(self.block_id)
-                .await
-                .map_err(ProviderError::other)?
-                .ok_or(ProviderError::HeaderNotFound(0.into()))?;
-
-            Ok(block.header().state_root())
-        })
+    fn state_root(&self, hashed_state: HashedPostState) -> Result<B256, ProviderError> {
+        self.state_root_from_nodes(TrieInput::from_state(hashed_state))
     }
 
     fn state_root_from_nodes(&self, _input: TrieInput) -> Result<B256, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
+        warn!("state_root_from_nodes is not implemented and will return zero");
+        Ok(B256::ZERO)
     }
 
     fn state_root_with_updates(
         &self,
-        _state: HashedPostState,
+        hashed_state: HashedPostState,
     ) -> Result<(B256, TrieUpdates), ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
+        if !self.compute_state_root {
+            return Ok((B256::ZERO, TrieUpdates::default()));
+        }
+
+        self.block_on_async(async {
+            self.provider
+                .raw_request::<(HashedPostState, BlockId), (B256, TrieUpdates)>(
+                    "debug_stateRootWithUpdates".into(),
+                    (hashed_state, self.block_id),
+                )
+                .into_future()
+                .await
+                .map_err(ProviderError::other)
+        })
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         _input: TrieInput,
     ) -> Result<(B256, TrieUpdates), ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
+        warn!("state_root_from_nodes_with_updates is not implemented and will return zero");
+        Ok((B256::ZERO, TrieUpdates::default()))
     }
 }
 
@@ -1606,7 +1667,7 @@ where
     Self: Clone + 'static,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        Ok(Box::new(self.clone()) as StateProviderBox)
+        Ok(Box::new(self.with_block_id(self.best_block_number()?.into())))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -1823,17 +1884,28 @@ where
         })
     }
 
-    fn code_by_hash(&mut self, _code_hash: B256) -> Result<revm::bytecode::Bytecode, Self::Error> {
-        // Cannot fetch bytecode by hash via RPC
-        Ok(revm::bytecode::Bytecode::default())
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::bytecode::Bytecode, Self::Error> {
+        self.block_on_async(async {
+            // The method `debug_codeByHash` is currently only available on a Reth node
+            let code = self
+                .provider
+                .debug_code_by_hash(code_hash, None)
+                .await
+                .map_err(Self::Error::other)?;
+
+            let Some(code) = code else {
+                // If the code was not found, return
+                return Ok(revm::bytecode::Bytecode::new());
+            };
+
+            Ok(revm::bytecode::Bytecode::new_raw(code))
+        })
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        let index = B256::from(index);
-
         self.block_on_async(async {
             self.provider
-                .get_storage_at(address, index.into())
+                .get_storage_at(address, index)
                 .block_id(self.block_id)
                 .await
                 .map_err(ProviderError::other)
