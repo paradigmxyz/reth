@@ -80,6 +80,8 @@ where
     accounts_trie: Arc<Mutex<Option<SparseTrie<ConfiguredSparseTrie>>>>,
     /// Whether to use the parallel sparse trie.
     use_parallel_sparse_trie: bool,
+    /// A cleared trie input, kept around to be reused so allocations can be minimized.
+    trie_input: Option<TrieInput>,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -105,6 +107,7 @@ where
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             accounts_trie: Arc::default(),
+            trie_input: None,
             use_parallel_sparse_trie: config.enable_parallel_sparse_trie(),
             _marker: Default::default(),
         }
@@ -167,8 +170,10 @@ where
             + 'static,
     {
         let (to_sparse_trie, sparse_trie_rx) = channel();
-        // spawn multiproof task
-        let state_root_config = MultiProofConfig::new_from_input(consistent_view, trie_input);
+        // spawn multiproof task, save the trie input
+        let (trie_input, state_root_config) =
+            MultiProofConfig::new_from_input(consistent_view, trie_input);
+        self.trie_input = Some(trie_input);
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(
@@ -307,6 +312,11 @@ where
             prewarm_task.run();
         });
         CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
+    }
+
+    /// Takes the trie input from the inner payload processor, if it exists.
+    pub const fn take_trie_input(&mut self) -> Option<TrieInput> {
+        self.trie_input.take()
     }
 
     /// Returns the cache for the given parent hash.
