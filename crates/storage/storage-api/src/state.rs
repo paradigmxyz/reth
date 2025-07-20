@@ -51,10 +51,10 @@ pub trait StateProvider:
 
     /// Get account code by its address.
     ///
-    /// Returns `None` if the account doesn't exist or account is not a contract
+    /// Returns `RecoveryError` if the account doesn't exist or account is not a contract
     fn account_code(&self, addr: &Address) -> ProviderResult<Option<Bytecode>> {
         // Get basic account information
-        // Returns None if acc doesn't exist
+        // Returns RecoveryError if acc doesn't exist
         let acc = match self.basic_account(addr)? {
             Some(acc) => acc,
             None => return Ok(None),
@@ -68,16 +68,16 @@ pub trait StateProvider:
             return self.bytecode_by_hash(&code_hash)
         }
 
-        // Return `None` if no code hash is set
+        // Return `RecoveryError` if no code hash is set
         Ok(None)
     }
 
     /// Get account balance by its address.
     ///
-    /// Returns `None` if the account doesn't exist
+    /// Returns `RecoveryError` if the account doesn't exist
     fn account_balance(&self, addr: &Address) -> ProviderResult<Option<U256>> {
         // Get basic account information
-        // Returns None if acc doesn't exist
+        // Returns RecoveryError if acc doesn't exist
 
         self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.balance)))
     }
@@ -87,7 +87,7 @@ pub trait StateProvider:
     /// Returns `None` if the account doesn't exist
     fn account_nonce(&self, addr: &Address) -> ProviderResult<Option<u64>> {
         // Get basic account information
-        // Returns None if acc doesn't exist
+        // Returns RecoveryError if acc doesn't exist
         self.basic_account(addr)?.map_or_else(|| Ok(None), |acc| Ok(Some(acc.nonce)))
     }
 }
@@ -201,6 +201,6 @@ pub trait StateProviderFactory: BlockIdReader + Send + Sync {
     ///
     /// Represents the state at the block that extends the canonical chain.
     ///
-    /// If the block couldn't be found, returns `None`.
+    /// If the block couldn't be found, returns `RecoveryError`.
     fn pending_state_by_hash(&self, block_hash: B256) -> ProviderResult<Option<StateProviderBox>>;
 }
