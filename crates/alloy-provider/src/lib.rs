@@ -1673,7 +1673,8 @@ where
     Self: Clone + 'static,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        Ok(Box::new(self.clone()) as StateProviderBox)
+        let best_block_number = self.best_block_number().map_err(ProviderError::other)?;
+        Ok(Box::new(self.with_block_id(best_block_number.into())))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
