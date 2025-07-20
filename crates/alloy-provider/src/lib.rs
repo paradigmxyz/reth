@@ -696,11 +696,7 @@ where
     Node: NodeTypes,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        Ok(Box::new(
-            self.create_state_provider(
-                self.best_block_number().map_err(ProviderError::other)?.into(),
-            ),
-        ))
+        Ok(Box::new(self.create_state_provider(self.best_block_number()?.into())))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -1671,9 +1667,7 @@ where
     Self: Clone + 'static,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        Ok(Box::new(
-            self.with_block_id(self.best_block_number().map_err(ProviderError::other)?.into()),
-        ))
+        Ok(Box::new(self.with_block_id(self.best_block_number()?.into())))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
