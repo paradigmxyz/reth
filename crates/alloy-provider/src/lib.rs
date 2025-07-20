@@ -696,13 +696,11 @@ where
     Node: NodeTypes,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        trace!(target: "alloy-provider", "Getting latest state provider");
-
-        let block_number = self.block_on_async(async {
-            self.provider.get_block_number().await.map_err(ProviderError::other)
-        })?;
-
-        self.state_by_block_number(block_number)
+        Ok(Box::new(
+            self.create_state_provider(
+                self.best_block_number().map_err(ProviderError::other)?.into(),
+            ),
+        ))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -1673,8 +1671,9 @@ where
     Self: Clone + 'static,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        let best_block_number = self.best_block_number().map_err(ProviderError::other)?;
-        Ok(Box::new(self.with_block_id(best_block_number.into())))
+        Ok(Box::new(
+            self.with_block_id(self.best_block_number().map_err(ProviderError::other)?.into()),
+        ))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
