@@ -8,18 +8,21 @@ use alloy_eips::eip2718::Decodable2718;
 use alloy_primitives::{eip191_hash_message, Address, Signature, B256};
 use alloy_signer::SignerSync;
 use alloy_signer_local::PrivateKeySigner;
-use reth_evm::ConfigureEvm;
 use reth_rpc_convert::{RpcConvert, RpcTypes, SignableTxRequest};
-use reth_rpc_eth_api::helpers::{signer::Result, AddDevSigners, EthSigner};
-use reth_rpc_eth_types::SignError;
-use reth_storage_api::{BlockReader, ProviderTx};
+use reth_rpc_eth_api::{
+    helpers::{signer::Result, AddDevSigners, EthSigner},
+    FromEvmError, RpcNodeCore,
+};
+use reth_rpc_eth_types::{EthApiError, SignError};
+use reth_storage_api::ProviderTx;
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> AddDevSigners
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> AddDevSigners for EthApi<N, Rpc>
 where
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert<Network: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<Provider>>>>,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<
+        Network: RpcTypes<TransactionRequest: SignableTxRequest<ProviderTx<N::Provider>>>,
+    >,
 {
     fn with_dev_accounts(&self) {
         *self.inner.signers().write() = DevSigner::random_signers(20)
