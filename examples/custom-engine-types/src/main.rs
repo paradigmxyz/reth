@@ -41,7 +41,7 @@ use reth_ethereum::{
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
             rpc::{EngineValidatorBuilder, RpcAddOns},
-            BuilderContext, Node, NodeAdapter, NodeBuilder, NodeComponentsBuilder,
+            BuilderContext, Node, NodeAdapter, NodeBuilder,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
         node::{
@@ -292,14 +292,7 @@ pub type MyNodeAddOns<N> = RpcAddOns<N, EthereumEthApiBuilder, CustomEngineValid
 /// This provides a preset configuration for the node
 impl<N> Node<N> for MyCustomNode
 where
-    N: FullNodeTypes<
-        Types: NodeTypes<
-            Payload = CustomEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-            Storage = EthStorage,
-        >,
-    >,
+    N: FullNodeTypes<Types = Self>,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -309,9 +302,7 @@ where
         EthereumExecutorBuilder,
         EthereumConsensusBuilder,
     >;
-    type AddOns = MyNodeAddOns<
-        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
-    >;
+    type AddOns = MyNodeAddOns<NodeAdapter<N>>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
