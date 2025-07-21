@@ -70,32 +70,12 @@ where
         self.inner.transact_system_call(caller, contract, data)
     }
 
-    fn db_mut(&mut self) -> &mut Self::DB {
-        self.inner.db_mut()
-    }
-
     fn finish(self) -> (Self::DB, EvmEnv<Self::Spec>) {
         self.inner.finish()
     }
 
     fn set_inspector_enabled(&mut self, enabled: bool) {
         self.inner.set_inspector_enabled(enabled)
-    }
-
-    fn precompiles(&self) -> &Self::Precompiles {
-        self.inner.precompiles()
-    }
-
-    fn precompiles_mut(&mut self) -> &mut Self::Precompiles {
-        self.inner.precompiles_mut()
-    }
-
-    fn inspector(&self) -> &Self::Inspector {
-        self.inner.inspector()
-    }
-
-    fn inspector_mut(&mut self) -> &mut Self::Inspector {
-        self.inner.inspector_mut()
     }
 
     fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
