@@ -77,7 +77,7 @@ where
     /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
     sparse_state_trie: Arc<
-        tokio::sync::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
+        parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
     >,
     /// Whether to use the parallel sparse trie.
     use_parallel_sparse_trie: bool,
@@ -325,8 +325,8 @@ where
     {
         // Reuse a stored SparseStateTrie, or create a new one using the desired configuration if
         // there's none to reuse.
-        let mut sparse_state_trie_lock_guard = self.sparse_state_trie.clone().blocking_lock_owned();
-        let sparse_state_trie = sparse_state_trie_lock_guard.take().unwrap_or_else(|| {
+        let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
+        let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
             let accounts_trie = if self.use_parallel_sparse_trie {
                 ConfiguredSparseTrie::Parallel(Default::default())
             } else {
@@ -352,9 +352,10 @@ where
             let (result, trie) = task.run();
             // Send state root computation result
             let _ = state_root_tx.send(result);
-            // Clear the SparseStateTrie and replace it back into the mutex _after_ returning, so
-            // that time spent clearing doesn't block the step after this one.
-            sparse_state_trie_lock_guard.replace(ClearedSparseStateTrie::cleared(trie));
+
+            // Clear the SparseStateTrie and replace it back into the mutex _after_ acquiring the
+            // lock, so that time spent clearing doesn't block the step after this one.
+            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::cleared(trie));
         });
     }
 }
