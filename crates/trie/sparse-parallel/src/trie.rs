@@ -32,6 +32,47 @@ pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 
 /// A revealed sparse trie with subtries that can be updated in parallel.
 ///
+/// ## Structure
+///
+/// The trie is divided into two tiers for efficient parallel processing:
+/// - **Upper subtrie**: Contains nodes with paths shorter than `UPPER_TRIE_MAX_DEPTH` (2 nibbles)
+/// - **Lower subtries**: An array of 256 subtries, each handling nodes with paths of 2+ nibbles
+///
+/// Node placement is determined by path depth:
+/// - Paths with < 2 nibbles go to the upper subtrie
+/// - Paths with >= 2 nibbles go to lower subtries, indexed by their first 2 nibbles
+///
+/// ## Node Revealing
+///
+/// The trie uses lazy loading to efficiently handle large state tries. Nodes can be:
+/// - **Blind nodes**: Stored as hashes (`SparseNode::Hash`), representing unloaded trie parts
+/// - **Revealed nodes**: Fully loaded nodes (Branch, Extension, Leaf) with complete structure
+///
+/// Note: An empty trie contains an `EmptyRoot` node at the root path, rather than no nodes at all.
+/// A trie with no nodes is blinded, its root may be `EmptyRoot` or some other node type.
+///
+/// Revealing is generally done using pre-loaded node data provided to via `reveal_nodes`. In
+/// certain cases, such as edge-cases when updating/removing leaves, nodes are revealed on-demand.
+///
+/// ## Leaf Operations
+///
+/// **Update**: When updating a leaf, the `prefix_set` is marked to track the change. The value
+/// is stored in the appropriate subtrie's values map. If the leaf is new, the trie structure
+/// is updated by walking to the leaf from the root, creating necessary intermediate branch nodes.
+///
+/// **Removal**: Leaf removal may require parent node modifications. The algorithm walks up the
+/// trie, removing nodes that become empty and converting single-child branches to extensions.
+///
+/// ## Root Hash Calculation
+///
+/// Root hash computation follows a bottom-up approach:
+/// 1. Update hashes for all modified lower subtries (can be done in parallel)
+/// 2. Update hashes for the upper subtrie (which may reference lower subtrie hashes)
+/// 3. Calculate the final root hash from the upper subtrie's root node
+///
+/// The `prefix_set` tracks which paths have been modified, enabling incremental updates
+/// instead of recalculating the entire trie.
+///
 /// ## Invariants
 ///
 /// - Each leaf entry in the `subtries` and `upper_trie` collection must have a corresponding entry
