@@ -117,7 +117,7 @@ Networking:
           [default: 200]
 
       --trusted-peers <TRUSTED_PEERS>
-          Comma separated enode URLs of trusted peers for P2P connections.
+          Comma-separated enode URLs of trusted peers for P2P connections.
 
           --trusted-peers enode://abcd@192.168.0.1:30303
 
@@ -125,7 +125,7 @@ Networking:
           Connect to or accept from trusted peers only
 
       --bootnodes <BOOTNODES>
-          Comma separated enode URLs for P2P discovery bootstrap.
+          Comma-separated enode URLs for P2P discovery bootstrap.
 
           Will fall back to a network-specific default if not specified.
 
@@ -381,7 +381,7 @@ RPC:
           [default: 256]
 
       --rpc.eth-proof-window <RPC_ETH_PROOF_WINDOW>
-          The maximum proof window for historical proof generation. This value allows for generating historical proofs up to configured number of blocks from current tip (up to `tip - window`)
+          The maximum proof window for historical proof generation. This value allows for generating historical proofs up to a configured number of blocks from current tip (up to `tip - window`)
 
           [default: 0]
 
@@ -400,7 +400,7 @@ RPC State Cache:
           [default: 5000]
 
       --rpc-cache.max-receipts <MAX_RECEIPTS>
-          Max number receipts in cache
+          Max number of receipts in cache
 
           [default: 2000]
 
@@ -437,7 +437,7 @@ Gas Price Oracle:
 
 TxPool:
       --txpool.pending-max-count <PENDING_MAX_COUNT>
-          Max number of transaction in the pending sub-pool
+          Max number of transactions in the pending sub-pool
 
           [default: 10000]
 
@@ -447,7 +447,7 @@ TxPool:
           [default: 20]
 
       --txpool.basefee-max-count <BASEFEE_MAX_COUNT>
-          Max number of transaction in the basefee sub-pool
+          Max number of transactions in the basefee sub-pool
 
           [default: 10000]
 
@@ -457,7 +457,7 @@ TxPool:
           [default: 20]
 
       --txpool.queued-max-count <QUEUED_MAX_COUNT>
-          Max number of transaction in the queued sub-pool
+          Max number of transactions in the queued sub-pool
 
           [default: 10000]
 
@@ -467,7 +467,7 @@ TxPool:
           [default: 20]
 
       --txpool.blobpool-max-count <BLOBPOOL_MAX_COUNT>
-          Max number of transaction in the blobpool
+          Max number of transactions in the blobpool
 
           [default: 10000]
 
@@ -550,7 +550,7 @@ TxPool:
           [default: 200]
 
       --txpool.lifetime <DURATION>
-          Maximum amount of time non-executable transaction are queued
+          Maximum amount of time non-executable transactions are queued
 
           [default: 10800]
 
@@ -617,7 +617,7 @@ Debug:
           The reorg depth for chain reorgs
 
       --debug.engine-api-store <PATH>
-          The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to specified location
+          The path to store engine API messages at. If specified, all of the intercepted engine API messages will be written to the specified location
 
       --debug.invalid-block-hook <INVALID_BLOCK_HOOK>
           Determines which type of invalid block hook to install
@@ -646,7 +646,7 @@ Database:
           - fatal:   Enables logging for critical conditions, i.e. assertion failures
           - error:   Enables logging for error conditions
           - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
+          - notice:  Enables logging for normal but significant conditions
           - verbose: Enables logging for verbose informational
           - debug:   Enables logging for debug-level messages
           - trace:   Enables logging for trace debug-level messages
