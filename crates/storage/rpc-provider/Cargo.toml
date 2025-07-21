@@ -1,12 +1,12 @@
 [package]
-name = "reth-alloy-provider"
+name = "reth-storage-rpc-provider"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-description = "Alloy provider implementation for reth that fetches state via RPC"
+description = "RPC-based blockchain provider for reth that fetches data via RPC calls"
 
 [lints]
 workspace = true
@@ -44,7 +44,6 @@ parking_lot.workspace = true
 
 # revm
 revm.workspace = true
-revm-primitives.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
