@@ -354,7 +354,7 @@ pub(super) mod serde_bincode_compat {
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
                 #[serde_as(as = "serde_bincode_compat::SealedHeader")]
-                transaction: SealedHeader,
+                header: SealedHeader,
             }
 
             let mut bytes = [0u8; 1024];
