@@ -13,6 +13,7 @@ mod tests {
     use op_revm::constants::L1_BLOCK_CONTRACT;
     use reth_chainspec::MIN_TRANSACTION_GAS;
     use reth_evm::execute::{BasicBlockExecutor, Executor};
+    use reth_execution_types::BlockExecutionInput;
     use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::{Account, RecoveredBlock};
@@ -98,15 +99,15 @@ mod tests {
         });
 
         // Attempt to execute a block with one deposit and one non-deposit transaction
-        let output = executor
-            .execute(&RecoveredBlock::new_unhashed(
-                Block {
-                    header,
-                    body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
-                },
-                vec![addr, addr],
-            ))
-            .unwrap();
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header,
+                body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
+            },
+            vec![addr, addr],
+        );
+        let input = BlockExecutionInput::new(&block, Vec::new());
+        let output = executor.execute(input).unwrap();
 
         let receipts = &output.receipts;
         let tx_receipt = &receipts[0];
@@ -171,14 +172,16 @@ mod tests {
         });
 
         // attempt to execute an empty block with parent beacon block root, this should not fail
+        let block = RecoveredBlock::new_unhashed(
+            Block {
+                header,
+                body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
+            },
+            vec![addr, addr],
+        );
+        let input = BlockExecutionInput::new(&block, Vec::new());
         let output = executor
-            .execute(&RecoveredBlock::new_unhashed(
-                Block {
-                    header,
-                    body: BlockBody { transactions: vec![tx, tx_deposit], ..Default::default() },
-                },
-                vec![addr, addr],
-            ))
+            .execute(input)
             .expect("Executing a block while canyon is active should not fail");
 
         let receipts = &output.receipts;

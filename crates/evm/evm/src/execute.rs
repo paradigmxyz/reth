@@ -15,9 +15,10 @@ pub use reth_execution_errors::{
     BlockExecutionError, BlockValidationError, InternalBlockExecutionError,
 };
 use reth_execution_types::BlockExecutionResult;
-pub use reth_execution_types::{BlockExecutionOutput, ExecutionOutcome};
+pub use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, ExecutionOutcome};
 use reth_primitives_traits::{
-    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader, TxTy,
+    Block, HeaderTy, NodePrimitives, ReceiptTy, Recovered, RecoveredBlock, SealedHeader,
+    TxTy,
 };
 use reth_storage_api::StateProvider;
 pub use reth_storage_errors::provider::ProviderError;
@@ -36,16 +37,16 @@ pub trait Executor<DB: Database>: Sized {
     type Error;
 
     /// Executes a single block and returns [`BlockExecutionResult`], without the state changes.
-    fn execute_one(
+    fn execute_one<'a>(
         &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>;
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
-    fn execute_one_with_state_hook<F>(
+    fn execute_one_with_state_hook<'a, F>(
         &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -58,9 +59,9 @@ pub trait Executor<DB: Database>: Sized {
     ///
     /// # Returns
     /// The output of the block execution.
-    fn execute(
+    fn execute<'a>(
         mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         let result = self.execute_one(block)?;
@@ -74,13 +75,18 @@ pub trait Executor<DB: Database>: Sized {
         blocks: I,
     ) -> Result<ExecutionOutcome<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
-        I: IntoIterator<Item = &'a RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
+        I: IntoIterator<
+            Item = BlockExecutionInput<
+                'a,
+                RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+            >,
+        >,
     {
         let mut results = Vec::new();
         let mut first_block = None;
         for block in blocks {
             if first_block.is_none() {
-                first_block = Some(block.header().number());
+                first_block = Some(block.block.header().number());
             }
             results.push(self.execute_one(block)?);
         }
@@ -94,9 +100,9 @@ pub trait Executor<DB: Database>: Sized {
 
     /// Executes the EVM with the given input and accepts a state closure that is invoked with
     /// the EVM state after execution.
-    fn execute_with_state_closure<F>(
+    fn execute_with_state_closure<'a, F>(
         mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
         mut f: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -110,9 +116,9 @@ pub trait Executor<DB: Database>: Sized {
 
     /// Executes the EVM with the given input and accepts a state hook closure that is invoked with
     /// the EVM state after execution.
-    fn execute_with_state_hook<F>(
+    fn execute_with_state_hook<'a, F>(
         mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
         state_hook: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -427,24 +433,24 @@ where
     type Primitives = F::Primitives;
     type Error = BlockExecutionError;
 
-    fn execute_one(
+    fn execute_one<'a>(
         &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         let result = self
             .strategy_factory
-            .executor_for_block(&mut self.db, block)
-            .execute_block(block.transactions_recovered())?;
+            .executor_for_block(&mut self.db, block.block)
+            .execute_block(block.block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
         Ok(result)
     }
 
-    fn execute_one_with_state_hook<H>(
+    fn execute_one_with_state_hook<'a, H>(
         &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
         state_hook: H,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -452,9 +458,9 @@ where
     {
         let result = self
             .strategy_factory
-            .executor_for_block(&mut self.db, block)
+            .executor_for_block(&mut self.db, block.block)
             .with_state_hook(Some(Box::new(state_hook)))
-            .execute_block(block.transactions_recovered())?;
+            .execute_block(block.block.transactions_recovered())?;
 
         self.db.merge_transitions(BundleRetention::Reverts);
 
@@ -502,17 +508,23 @@ mod tests {
         type Primitives = EthPrimitives;
         type Error = BlockExecutionError;
 
-        fn execute_one(
+        fn execute_one<'a>(
             &mut self,
-            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+            _block: BlockExecutionInput<
+                'a,
+                RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+            >,
         ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         {
             Err(BlockExecutionError::msg("execution unavailable for tests"))
         }
 
-        fn execute_one_with_state_hook<F>(
+        fn execute_one_with_state_hook<'a, F>(
             &mut self,
-            _block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+            _block: BlockExecutionInput<
+                'a,
+                RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+            >,
             _state_hook: F,
         ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
         where
@@ -535,7 +547,8 @@ mod tests {
         let provider = TestExecutorProvider;
         let db = CacheDB::<EmptyDB>::default();
         let executor = provider.executor(db);
-        let _ = executor.execute(&Default::default());
+        let input = BlockExecutionInput { block: &Default::default(), il: vec![] };
+        let _ = executor.execute(input);
     }
 
     fn setup_state_with_account(

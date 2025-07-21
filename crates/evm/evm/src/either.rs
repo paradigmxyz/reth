@@ -4,7 +4,7 @@ use crate::{execute::Executor, Database, OnStateHook};
 
 // re-export Either
 pub use futures_util::future::Either;
-use reth_execution_types::{BlockExecutionOutput, BlockExecutionResult};
+use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, BlockExecutionResult};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
 
 impl<A, B, DB> Executor<DB> for Either<A, B>
@@ -16,9 +16,9 @@ where
     type Primitives = A::Primitives;
     type Error = A::Error;
 
-    fn execute_one(
+    fn execute_one<'a>(
         &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         match self {
@@ -27,9 +27,9 @@ where
         }
     }
 
-    fn execute_one_with_state_hook<F>(
+    fn execute_one_with_state_hook<'a, F>(
         &mut self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
         state_hook: F,
     ) -> Result<BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where
@@ -41,9 +41,9 @@ where
         }
     }
 
-    fn execute(
+    fn execute<'a>(
         self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     {
         match self {
@@ -52,9 +52,9 @@ where
         }
     }
 
-    fn execute_with_state_closure<F>(
+    fn execute_with_state_closure<'a, F>(
         self,
-        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        block: BlockExecutionInput<'a, RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>>,
         state: F,
     ) -> Result<BlockExecutionOutput<<Self::Primitives as NodePrimitives>::Receipt>, Self::Error>
     where

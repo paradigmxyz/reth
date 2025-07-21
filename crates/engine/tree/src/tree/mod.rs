@@ -11,6 +11,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_evm::block::BlockExecutor;
 use alloy_primitives::B256;
+use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
@@ -30,11 +31,13 @@ use reth_engine_primitives::{
     ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ConfigureEvm, Evm, SpecFor};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
-    Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+    Block, GotExpected, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
+    SignerRecoverable,
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -47,6 +50,7 @@ use reth_stages_api::ControlFlow;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+
 use state::TreeState;
 use std::{
     borrow::Cow,
@@ -89,6 +93,7 @@ pub use payload_processor::*;
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
+use reth_provider::BlockExecutionInput;
 
 pub mod state;
 
@@ -554,6 +559,25 @@ where
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
+
+        // NOTE
+        //
+        // we may not want to `flat_map` here so that IL indices of invalid transactions are
+        // preserved.
+        let il: Option<Vec<Recovered<TransactionSigned>>> = payload.inclusion_list().map(|il| {
+            il.into_iter()
+                .flat_map(|tx| {
+                    let Some(signed) = TransactionSigned::decode(&mut tx.as_ref()).ok() else {
+                        return None;
+                    };
+                    let Ok(signer) = signed.recover_signer() else {
+                        return None;
+                    };
+                    Some(Recovered::new_unchecked(signed, signer))
+                })
+                .collect()
+        });
+
         let block = match self.payload_validator.ensure_well_formed_payload(payload) {
             Ok(block) => block,
             Err(error) => {
@@ -595,7 +619,7 @@ where
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
             let num_hash = block.num_hash();
-            match self.insert_block(block) {
+            match self.insert_block(block, il) {
                 Ok(status) => {
                     let status = match status {
                         InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -624,6 +648,10 @@ where
             PayloadStatus::from_status(PayloadStatusEnum::Syncing)
         };
 
+        // TODO Pelle
+        //
+        // pass in the IL along with the block to buffer, so that, when we catch up via sync, then
+        // we can check the IL that we got for the block.
         let mut outcome = TreeOutcome::new(status);
         // if the block is valid and it is the current sync target head, make it canonical
         if outcome.outcome.is_valid() && self.is_sync_target_head(block_hash) {
@@ -1711,7 +1739,11 @@ where
         let block_count = blocks.len();
         for child in blocks {
             let child_num_hash = child.num_hash();
-            match self.insert_block(child) {
+            // NOTE
+            //
+            // we insert without an inclusion list, because we only enforce the IL for
+            // `on_new_payload`.
+            match self.insert_block(child, None) {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
                     if self.is_sync_target_head(child_num_hash.hash) &&
@@ -2053,7 +2085,11 @@ where
         }
 
         // try to append the block
-        match self.insert_block(block) {
+        //
+        // NOTE
+        //
+        // we insert without an inclusion list, because we only enforce the IL for `on_new_payload`.
+        match self.insert_block(block, None) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
                 if self.is_sync_target_head(block_num_hash.hash) {
                     trace!(target: "engine::tree", "appended downloaded sync target block");
@@ -2093,8 +2129,9 @@ where
     fn insert_block(
         &mut self,
         block: RecoveredBlock<N::Block>,
+        il: Option<Vec<Recovered<TransactionSigned>>>,
     ) -> Result<InsertPayloadOk, InsertBlockError<N::Block>> {
-        match self.insert_block_inner(block) {
+        match self.insert_block_inner(block, il) {
             Ok(result) => Ok(result),
             Err((kind, block)) => Err(InsertBlockError::new(block.into_sealed_block(), kind)),
         }
@@ -2103,6 +2140,7 @@ where
     fn insert_block_inner(
         &mut self,
         block: RecoveredBlock<N::Block>,
+        il: Option<Vec<Recovered<TransactionSigned>>>,
     ) -> Result<InsertPayloadOk, (InsertBlockErrorKind, RecoveredBlock<N::Block>)> {
         /// A helper macro that returns the block in case there was an error
         macro_rules! ensure_ok {
@@ -2261,12 +2299,12 @@ where
         let (output, execution_finish) = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
             let (output, execution_finish) =
-                ensure_ok!(self.execute_block(&state_provider, &block, &handle));
+                ensure_ok!(self.execute_block(&state_provider, &block, &handle, il));
             state_provider.record_total_latency();
             (output, execution_finish)
         } else {
             let (output, execution_finish) =
-                ensure_ok!(self.execute_block(&state_provider, &block, &handle));
+                ensure_ok!(self.execute_block(&state_provider, &block, &handle, il));
             (output, execution_finish)
         };
 
@@ -2432,6 +2470,7 @@ where
         state_provider: S,
         block: &RecoveredBlock<N::Block>,
         handle: &PayloadHandle,
+        il: Option<Vec<Recovered<TransactionSigned>>>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind> {
         debug!(target: "engine::tree", block=?block.num_hash(), "Executing block");
         let mut db = State::builder()
@@ -2452,10 +2491,11 @@ where
             });
         }
 
+        let exec_input = BlockExecutionInput::new(block, il.unwrap_or_default());
         let execution_start = Instant::now();
         let output = self.metrics.executor.execute_metered(
             executor,
-            block,
+            exec_input,
             Box::new(handle.state_hook()),
         )?;
         let execution_finish = Instant::now();

@@ -232,7 +232,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
                 let evm_config = EthEvmConfig::ethereum(provider_factory.chain_spec());
                 let executor = evm_config.batch_executor(db);
 
-                let block_execution_output = executor.execute(&block_with_senders)?;
+                let block_execution_output = executor.execute((&block_with_senders).into())?;
                 let execution_outcome =
                     ExecutionOutcome::from((block_execution_output, block.number));
                 debug!(target: "reth::cli", ?execution_outcome, "Executed block");

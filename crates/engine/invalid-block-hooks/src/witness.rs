@@ -162,7 +162,7 @@ where
             self.provider.state_by_block_hash(parent_header.hash())?,
         ));
 
-        executor.execute_one(block)?;
+        executor.execute_one(block.into())?;
 
         // Take the bundle state
         let mut db = executor.into_state();

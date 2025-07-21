@@ -115,7 +115,7 @@ where
             let (header, body) = block.split_sealed_header_body();
             let block = P::Block::new_sealed(header, body).with_senders(senders);
 
-            results.push(executor.execute_one(&block)?);
+            results.push(executor.execute_one((&block).into())?);
             execution_duration += execute_start.elapsed();
 
             // TODO(alexey): report gas metrics using `block.header.gas_used`
@@ -223,7 +223,7 @@ where
 
         trace!(target: "exex::backfill", number = block_number, txs = block_with_senders.body().transaction_count(), "Executing block");
 
-        let block_execution_output = executor.execute(&block_with_senders)?;
+        let block_execution_output = executor.execute((&block_with_senders).into())?;
 
         Ok((block_with_senders, block_execution_output))
     }

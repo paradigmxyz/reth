@@ -158,7 +158,7 @@ impl<C: ChainSpecParser<ChainSpec = ChainSpec>> Command<C> {
             let executor = executor_provider.batch_executor(StateProviderDatabase::new(
                 LatestStateProviderRef::new(&provider_rw),
             ));
-            let output = executor.execute(&sealed_block)?;
+            let output = executor.execute((&sealed_block).into())?;
 
             provider_rw.write_state(
                 &ExecutionOutcome::single(block_number, output),

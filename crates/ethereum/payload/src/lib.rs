@@ -10,13 +10,13 @@
 #![allow(clippy::useless_let_if_seq)]
 
 use alloy_consensus::Transaction;
-use alloy_primitives::{Address, U256};
+use alloy_primitives::U256;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
+use reth_errors::{BlockExecutionError, BlockValidationError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},

@@ -11,7 +11,7 @@ use alloy_evm::{
 use core::borrow::BorrowMut;
 use metrics::{Counter, Gauge, Histogram};
 use reth_execution_errors::BlockExecutionError;
-use reth_execution_types::BlockExecutionOutput;
+use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput};
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Block, BlockBody, RecoveredBlock};
 use revm::{
@@ -102,10 +102,13 @@ impl ExecutorMetrics {
     /// of accounts, storage slots and bytecodes loaded and updated.
     /// Execute the given block using the provided [`BlockExecutor`] and update metrics for the
     /// execution.
-    pub fn execute_metered<E, DB>(
+    pub fn execute_metered<'a, E, DB>(
         &self,
         executor: E,
-        input: &RecoveredBlock<impl Block<Body: BlockBody<Transaction = E::Transaction>>>,
+        input: BlockExecutionInput<
+            'a,
+            RecoveredBlock<impl Block<Body: BlockBody<Transaction = E::Transaction>>>,
+        >,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
@@ -120,9 +123,9 @@ impl ExecutorMetrics {
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         // Use metered to execute and track timing/gas metrics
-        let (mut db, result) = self.metered(input, || {
+        let (mut db, result) = self.metered(input.block, || {
             executor.apply_pre_execution_changes()?;
-            for tx in input.transactions_recovered() {
+            for tx in input.block.transactions_recovered() {
                 executor.execute_transaction(tx)?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
@@ -294,7 +297,9 @@ mod tests {
             state
         };
         let executor = MockExecutor::new(state);
-        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
+        let input_exec: BlockExecutionInput<'_, _> = (&input).into();
+        let _result =
+            metrics.execute_metered::<_, EmptyDB>(executor, input_exec, state_hook).unwrap();
 
         let snapshot = snapshotter.snapshot().into_vec();
 
@@ -326,7 +331,9 @@ mod tests {
         let state = EvmState::default();
 
         let executor = MockExecutor::new(state);
-        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
+        let input_exec: BlockExecutionInput<'_, _> = (&input).into();
+        let _result =
+            metrics.execute_metered::<_, EmptyDB>(executor, input_exec, state_hook).unwrap();
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);

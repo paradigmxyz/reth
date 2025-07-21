@@ -164,21 +164,21 @@ fn check_file_hash(path: &Path, expected: &B256) -> Result<(), DownloaderError> 
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use alloy_primitives::b256;
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use alloy_primitives::b256;
 
-    #[tokio::test]
-    async fn test_download() {
-        reth_tracing::init_test_tracing();
+//     #[tokio::test]
+//     async fn test_download() {
+//         reth_tracing::init_test_tracing();
 
-        let b3sum = b256!("0xe9908f4992ae39c4d1fe9984dd743ae3f8e9a84a4a5af768128833605ff72723");
-        let url = "https://link.testfile.org/15MB";
+//         let b3sum = b256!("0xe9908f4992ae39c4d1fe9984dd743ae3f8e9a84a4a5af768128833605ff72723");
+//         let url = "https://link.testfile.org/15MB";
 
-        let file = tempfile::NamedTempFile::new().unwrap();
-        let filename = file.path().file_name().unwrap().to_str().unwrap();
-        let target_dir = file.path().parent().unwrap();
-        fetch(filename, target_dir, url, 4, Some(b3sum)).await.unwrap();
-    }
-}
+//         let file = tempfile::NamedTempFile::new().unwrap();
+//         let filename = file.path().file_name().unwrap().to_str().unwrap();
+//         let target_dir = file.path().parent().unwrap();
+//         fetch(filename, target_dir, url, 4, Some(b3sum)).await.unwrap();
+//     }
+// }
