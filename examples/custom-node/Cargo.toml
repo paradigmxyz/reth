@@ -54,20 +54,20 @@ test-fuzz.workspace = true
 
 [features]
 arbitrary = [
-	"alloy-consensus/arbitrary",
-	"alloy-eips/arbitrary",
-	"alloy-primitives/arbitrary",
-	"alloy-serde/arbitrary",
-	"op-alloy-consensus/arbitrary",
-	"op-alloy-rpc-types-engine/arbitrary",
-	"reth-codecs/arbitrary",
-	"reth-op/arbitrary",
-	"revm-primitives/arbitrary",
-	"revm/arbitrary",
-	"reth-ethereum/arbitrary",
-	"alloy-rpc-types-engine/arbitrary",
-	"reth-db-api/arbitrary",
-	"alloy-rpc-types-eth/arbitrary",
-	"op-alloy-rpc-types/arbitrary"
+    "alloy-consensus/arbitrary",
+    "alloy-eips/arbitrary",
+    "alloy-primitives/arbitrary",
+    "alloy-serde/arbitrary",
+    "op-alloy-consensus/arbitrary",
+    "op-alloy-rpc-types-engine/arbitrary",
+    "reth-codecs/arbitrary",
+    "reth-op/arbitrary",
+    "revm-primitives/arbitrary",
+    "revm/arbitrary",
+    "reth-ethereum/arbitrary",
+    "alloy-rpc-types-engine/arbitrary",
+    "reth-db-api/arbitrary",
+    "alloy-rpc-types-eth/arbitrary",
+    "op-alloy-rpc-types/arbitrary",
 ]
 default = []

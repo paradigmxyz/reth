@@ -290,17 +290,17 @@ pub struct OpAddOns<N: FullNodeComponents, EthB: EthApiBuilder<N>, EV, EB, RpcMi
     min_suggested_priority_fee: u64,
 }
 
-impl<N, NetworkT> Default
+impl<N> Default
     for OpAddOns<
         N,
-        OpEthApiBuilder<NetworkT>,
+        OpEthApiBuilder,
         OpEngineValidatorBuilder,
         OpEngineApiBuilder<OpEngineValidatorBuilder>,
         Identity,
     >
 where
     N: FullNodeComponents<Types: NodeTypes>,
-    OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
+    OpEthApiBuilder: EthApiBuilder<N>,
 {
     fn default() -> Self {
         Self::builder().build()
