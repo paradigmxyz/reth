@@ -97,6 +97,14 @@ where
     fn inspector_mut(&mut self) -> &mut Self::Inspector {
         self.inner.inspector_mut()
     }
+
+    fn components(&self) -> (&Self::DB, &Self::Inspector, &Self::Precompiles) {
+        self.inner.components()
+    }
+
+    fn components_mut(&mut self) -> (&mut Self::DB, &mut Self::Inspector, &mut Self::Precompiles) {
+        self.inner.components_mut()
+    }
 }
 
 #[derive(Default, Debug, Clone, Copy)]
