@@ -18,7 +18,7 @@ use reth_node_core::{
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_rpc::eth::{EthApiTypes, FullEthApiServer};
+use reth_rpc::eth::{core::EthRpcConverterFor, EthApiTypes, FullEthApiServer};
 use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
@@ -954,6 +954,21 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub config: EthConfig,
     /// Cache for eth state
     pub cache: EthStateCache<PrimitivesTy<N::Types>>,
+}
+
+impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> EthApiCtx<'a, N> {
+    /// Provides a [`EthApiBuilder`] with preconfigured config and components.
+    pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
+        reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
+            .eth_cache(self.cache)
+            .task_spawner(self.components.task_executor().clone())
+            .gas_cap(self.config.rpc_gas_cap.into())
+            .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
+            .eth_proof_window(self.config.eth_proof_window)
+            .fee_history_cache_config(self.config.fee_history_cache)
+            .proof_permits(self.config.proof_permits)
+            .gas_oracle_config(self.config.gas_oracle)
+    }
 }
 
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].
