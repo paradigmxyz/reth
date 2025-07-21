@@ -223,8 +223,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     where
         Self: 'static,
     {
-        let provider = self.provider().clone();
-        self.spawn_blocking_io(move |_| {
+        self.spawn_blocking_io(move |this| {
+            let provider = this.provider();
             let (tx, meta) = match provider
                 .transaction_by_hash_with_meta(hash)
                 .map_err(Self::Error::from_eth_err)?

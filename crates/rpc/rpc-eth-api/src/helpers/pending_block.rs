@@ -2,7 +2,7 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
@@ -14,9 +14,8 @@ use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
 };
-use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, HeaderTy, Receipt, RecoveredBlock, SealedHeader,
+    transaction::error::InvalidTransactionError, HeaderTy, RecoveredBlock, SealedHeader,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
@@ -42,29 +41,14 @@ use tracing::debug;
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadPendingBlock:
     EthApiTypes<
-        NetworkTypes: RpcTypes<
-            Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
-        >,
         Error: FromEvmError<Self::Evm>,
         RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
-    > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: Receipt> + ChainSpecProvider + StateProviderFactory,
-        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives> + 'static,
-        Primitives: NodePrimitives<
-            BlockHeader = ProviderHeader<Self::Provider>,
-            SignedTx = ProviderTx<Self::Provider>,
-            Receipt = ProviderReceipt<Self::Provider>,
-            Block = ProviderBlock<Self::Provider>,
-        >,
-    >
+    > + RpcNodeCore
 {
     /// Returns a handle to the pending block.
     ///
     /// Data access in default (L1) trait method implementations.
-    #[expect(clippy::type_complexity)]
-    fn pending_block(
-        &self,
-    ) -> &Mutex<Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>>;
+    fn pending_block(&self) -> &Mutex<Option<PendingBlock<Self::Primitives>>>;
 
     /// Returns a [`PendingEnvBuilder`] for the pending block.
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
@@ -364,13 +348,7 @@ pub trait BuildPendingEnv<Header> {
     fn build_pending_env(parent: &SealedHeader<Header>) -> Self;
 }
 
-/// Basic implementation of [`PendingEnvBuilder`] that assumes that the
-/// [`ConfigureEvm::NextBlockEnvCtx`] type implements [`BuildPendingEnv`] trait.
-#[derive(Debug, Default, Clone, Copy)]
-#[non_exhaustive]
-pub struct BasicPendingEnvBuilder;
-
-impl<Evm> PendingEnvBuilder<Evm> for BasicPendingEnvBuilder
+impl<Evm> PendingEnvBuilder<Evm> for ()
 where
     Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<Evm::Primitives>>>,
 {

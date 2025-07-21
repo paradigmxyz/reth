@@ -26,8 +26,8 @@ use reth_evm::{
     ConfigureEvm, Evm, EvmEnv, EvmEnvFor, HaltReasonFor, InspectorFor, SpecFor, TransactionEnv,
     TxEnvFor,
 };
-use reth_node_api::{BlockBody, NodePrimitives};
-use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
+use reth_node_api::BlockBody;
+use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -39,7 +39,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
+use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
     context_interface::{
         result::{ExecutionResult, ResultAndState},
@@ -193,17 +193,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )?
                     };
 
+                    parent = result.block.clone_sealed_header();
+
                     let block = simulate::build_simulated_block(
                         result.block,
                         results,
                         return_full_transactions.into(),
                         this.tx_resp_builder(),
                     )?;
-
-                    parent = SealedHeader::new(
-                        block.inner.header.inner.clone(),
-                        block.inner.header.hash,
-                    );
 
                     blocks.push(block);
                 }
@@ -456,12 +453,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 /// Executes code on state.
 pub trait Call:
     LoadState<
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-            >,
-        >,
         RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>

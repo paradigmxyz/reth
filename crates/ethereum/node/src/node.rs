@@ -6,7 +6,6 @@ use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
-use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -157,21 +156,16 @@ where
     type EthApi = EthApiFor<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let api = reth_rpc::EthApiBuilder::new(
-            ctx.components.provider().clone(),
-            ctx.components.pool().clone(),
-            ctx.components.network().clone(),
-            ctx.components.evm_config().clone(),
-        )
-        .eth_cache(ctx.cache)
-        .task_spawner(ctx.components.task_executor().clone())
-        .gas_cap(ctx.config.rpc_gas_cap.into())
-        .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
-        .eth_proof_window(ctx.config.eth_proof_window)
-        .fee_history_cache_config(ctx.config.fee_history_cache)
-        .proof_permits(ctx.config.proof_permits)
-        .gas_oracle_config(ctx.config.gas_oracle)
-        .build();
+        let api = reth_rpc::EthApiBuilder::new_with_components(ctx.components.clone())
+            .eth_cache(ctx.cache)
+            .task_spawner(ctx.components.task_executor().clone())
+            .gas_cap(ctx.config.rpc_gas_cap.into())
+            .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
+            .eth_proof_window(ctx.config.eth_proof_window)
+            .fee_history_cache_config(ctx.config.fee_history_cache)
+            .proof_permits(ctx.config.proof_permits)
+            .gas_oracle_config(ctx.config.gas_oracle)
+            .build();
         Ok(api)
     }
 }
@@ -516,7 +510,7 @@ where
         Types: NodeTypes<ChainSpec: EthChainSpec + EthereumHardforks, Primitives = EthPrimitives>,
     >,
 {
-    type Consensus = Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>>;
+    type Consensus = Arc<EthBeaconConsensus<<Node::Types as NodeTypes>::ChainSpec>>;
 
     async fn build_consensus(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::Consensus> {
         Ok(Arc::new(EthBeaconConsensus::new(ctx.chain_spec())))

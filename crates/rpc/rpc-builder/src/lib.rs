@@ -42,16 +42,17 @@ use reth_rpc::{
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
     helpers::{
-        pending_block::{BasicPendingEnvBuilder, PendingEnvBuilder},
-        Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt,
+        pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, LoadPendingBlock,
+        TraceExt,
     },
+    node::RpcNodeCoreAdapter,
     EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcConvert, RpcConverter, RpcHeader,
-    RpcReceipt, RpcTransaction, RpcTxReq,
+    RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
-    AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider, ProviderBlock,
+    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
     StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
@@ -253,20 +254,19 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
 
     /// Instantiates a new [`EthApiBuilder`] from the configured components.
     #[expect(clippy::type_complexity)]
-    pub fn eth_api_builder(
+    pub fn eth_api_builder<ChainSpec>(
         &self,
     ) -> EthApiBuilder<
-        Provider,
-        Pool,
-        Network,
-        EvmConfig,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
     >
     where
-        Provider: BlockReaderIdExt + ChainSpecProvider + Clone,
+        Provider: Clone,
         Pool: Clone,
         Network: Clone,
         EvmConfig: Clone,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
+            RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
     {
         EthApiBuilder::new(
             self.provider.clone(),
@@ -282,29 +282,21 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     ///
     /// See also [`EthApiBuilder`].
     #[expect(clippy::type_complexity)]
-    pub fn bootstrap_eth_api(
+    pub fn bootstrap_eth_api<ChainSpec>(
         &self,
     ) -> EthApi<
-        Provider,
-        Pool,
-        Network,
-        EvmConfig,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
     >
     where
-        N: NodePrimitives,
-        Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
-            + StateProviderFactory
-            + CanonStateSubscriptions<Primitives = N>
-            + ChainSpecProvider
-            + Clone
-            + Unpin
-            + 'static,
+        Provider: Clone,
         Pool: Clone,
-        EvmConfig: ConfigureEvm,
         Network: Clone,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<Provider::ChainSpec>>: RpcConvert,
-        BasicPendingEnvBuilder: PendingEnvBuilder<EvmConfig>,
+        EvmConfig: ConfigureEvm + Clone,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
+            RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>: RpcConvert,
+        (): PendingEnvBuilder<EvmConfig>,
     {
         self.eth_api_builder().build()
     }
@@ -815,12 +807,8 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<EthApi, EvmConfig> {
-        DebugApi::new(
-            self.eth_api().clone(),
-            self.blocking_pool_guard.clone(),
-            self.evm_config.clone(),
-        )
+    pub fn debug_api(&self) -> DebugApi<EthApi> {
+        DebugApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
     }
 
     /// Instantiates `NetApi`
@@ -852,7 +840,7 @@ where
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+    EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
@@ -937,13 +925,11 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        RethRpcModule::Debug => DebugApi::new(
-                            eth_api.clone(),
-                            self.blocking_pool_guard.clone(),
-                            self.evm_config.clone(),
-                        )
-                        .into_rpc()
-                        .into(),
+                        RethRpcModule::Debug => {
+                            DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
+                                .into_rpc()
+                                .into()
+                        }
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();

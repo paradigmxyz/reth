@@ -2,23 +2,19 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
-use reth_evm::ConfigureEvm;
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
-    EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
+    FromEvmError, RpcNodeCore,
 };
-use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> EthTransactions
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<NetworkTypes = Rpc::Network>,
-    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
     #[inline]
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
@@ -37,49 +33,29 @@ where
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
         // submit the transaction to the pool with a `Local` origin
-        let hash = self
-            .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
-            .await
-            .map_err(Self::Error::from_eth_err)?;
+        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
 
         Ok(hash)
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig, Rpc> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig, Rpc>
+impl<N, Rpc> LoadTransaction for EthApi<N, Rpc>
 where
-    Self: SpawnBlocking
-        + FullEthApiTypes
-        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>
-        + EthApiTypes<NetworkTypes = Rpc::Network>,
-    Provider: BlockReader,
-    EvmConfig: ConfigureEvm,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::eth::helpers::types::EthRpcConverter;
-
     use super::*;
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{hex_literal::hex, Bytes};
     use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
-    use reth_rpc_eth_types::{
-        receipt::EthReceiptConverter, EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig,
-        GasPriceOracle,
-    };
-    use reth_rpc_server_types::constants::{
-        DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
-    };
-    use reth_tasks::pool::BlockingTaskPool;
     use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
     #[tokio::test]
@@ -90,25 +66,9 @@ mod tests {
         let pool = testing_pool();
 
         let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
-        let cache = EthStateCache::spawn(noop_provider.clone(), Default::default());
-        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
-        let rpc_converter =
-            EthRpcConverter::new(EthReceiptConverter::new(noop_provider.chain_spec()), ());
-        let eth_api = EthApi::new(
-            noop_provider.clone(),
-            pool.clone(),
-            noop_network_provider,
-            cache.clone(),
-            GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
-            ETHEREUM_BLOCK_GAS_LIMIT_30M,
-            DEFAULT_MAX_SIMULATE_BLOCKS,
-            DEFAULT_ETH_PROOF_WINDOW,
-            BlockingTaskPool::build().expect("failed to build tracing pool"),
-            fee_history_cache,
-            evm_config,
-            DEFAULT_PROOF_PERMITS,
-            rpc_converter,
-        );
+        let eth_api =
+            EthApi::builder(noop_provider.clone(), pool.clone(), noop_network_provider, evm_config)
+                .build();
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
         let tx_1 = Bytes::from(hex!(

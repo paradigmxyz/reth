@@ -2,9 +2,11 @@
 
 use crate::{
     fees::{CallFees, CallFeesError},
-    RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
+    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
 };
-use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
+use alloy_consensus::{
+    error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
+};
 use alloy_network::Network;
 use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
@@ -16,7 +18,9 @@ use reth_evm::{
     revm::context_interface::{either::Either, Block},
     ConfigureEvm, TxEnvFor,
 };
-use reth_primitives_traits::{NodePrimitives, TransactionMeta, TxTy};
+use reth_primitives_traits::{
+    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
+};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
 use std::{borrow::Cow, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
@@ -37,7 +41,7 @@ pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
 }
 
 /// A type that knows how to convert primitive receipts to RPC representations.
-pub trait ReceiptConverter<N: NodePrimitives>: Debug {
+pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
     /// RPC representation.
     type RpcReceipt;
 
@@ -52,6 +56,35 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug {
     ) -> Result<Vec<Self::RpcReceipt>, Self::Error>;
 }
 
+/// A type that knows how to convert a consensus header into an RPC header.
+pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
+    /// Converts a consensus header into an RPC header.
+    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc;
+}
+
+/// Default implementation of [`HeaderConverter`] that uses [`FromConsensusHeader`] to convert
+/// headers.
+impl<Consensus, Rpc> HeaderConverter<Consensus, Rpc> for ()
+where
+    Rpc: FromConsensusHeader<Consensus>,
+{
+    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc {
+        Rpc::from_consensus_header(header, block_size)
+    }
+}
+
+/// Conversion trait for obtaining RPC header from a consensus header.
+pub trait FromConsensusHeader<T> {
+    /// Takes a consensus header and converts it into `self`.
+    fn from_consensus_header(header: SealedHeader<T>, block_size: usize) -> Self;
+}
+
+impl<T: Sealable> FromConsensusHeader<T> for alloy_rpc_types_eth::Header<T> {
+    fn from_consensus_header(header: SealedHeader<T>, block_size: usize) -> Self {
+        Self::from_consensus(header.into(), None, Some(U256::from(block_size)))
+    }
+}
+
 /// Responsible for the conversions from and into RPC requests and responses.
 ///
 /// The JSON-RPC schema and the Node primitives are configurable using the [`RpcConvert::Network`]
@@ -60,7 +93,7 @@ pub trait ReceiptConverter<N: NodePrimitives>: Debug {
 /// A generic implementation [`RpcConverter`] should be preferred over a manual implementation. As
 /// long as its trait bound requirements are met, the implementation is created automatically and
 /// can be used in RPC method handlers for all the conversions.
-pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
+pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
@@ -117,6 +150,13 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
+
+    /// Converts a primitive header to an RPC header.
+    fn convert_header(
+        &self,
+        header: SealedHeaderFor<Self::Primitives>,
+        block_size: usize,
+    ) -> Result<RpcHeader<Self::Network>, Self::Error>;
 }
 
 /// Converts `self` into `T`. The opposite of [`FromConsensusTx`].
@@ -362,48 +402,74 @@ pub struct TransactionConversionError(String);
 ///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
 ///   object.
 #[derive(Debug)]
-pub struct RpcConverter<E, Evm, Receipt, Map = ()> {
+pub struct RpcConverter<E, Evm, Receipt, Header = (), Map = ()> {
     phantom: PhantomData<(E, Evm)>,
     receipt_converter: Receipt,
+    header_converter: Header,
     mapper: Map,
 }
 
-impl<E, Evm, Receipt, Map> RpcConverter<E, Evm, Receipt, Map> {
+impl<E, Evm, Receipt> RpcConverter<E, Evm, Receipt> {
     /// Creates a new [`RpcConverter`] with `receipt_converter` and `mapper`.
-    pub const fn new(receipt_converter: Receipt, mapper: Map) -> Self {
-        Self { phantom: PhantomData, receipt_converter, mapper }
+    pub const fn new(receipt_converter: Receipt) -> Self {
+        Self { phantom: PhantomData, receipt_converter, header_converter: (), mapper: () }
     }
 }
 
-impl<E, Evm, Receipt, Map> Default for RpcConverter<E, Evm, Receipt, Map>
+impl<E, Evm, Receipt, Header, Map> RpcConverter<E, Evm, Receipt, Header, Map> {
+    /// Configures the header converter.
+    pub fn with_header_converter<HeaderNew>(
+        self,
+        header_converter: HeaderNew,
+    ) -> RpcConverter<E, Evm, Receipt, HeaderNew, Map> {
+        let Self { receipt_converter, header_converter: _, mapper, phantom } = self;
+        RpcConverter { receipt_converter, header_converter, mapper, phantom }
+    }
+
+    /// Configures the mapper.
+    pub fn with_mapper<MapNew>(
+        self,
+        mapper: MapNew,
+    ) -> RpcConverter<E, Evm, Receipt, Header, MapNew> {
+        let Self { receipt_converter, header_converter, mapper: _, phantom } = self;
+        RpcConverter { receipt_converter, header_converter, mapper, phantom }
+    }
+}
+
+impl<E, Evm, Receipt, Header, Map> Default for RpcConverter<E, Evm, Receipt, Header, Map>
 where
     Receipt: Default,
+    Header: Default,
     Map: Default,
 {
     fn default() -> Self {
         Self {
             phantom: PhantomData,
             receipt_converter: Default::default(),
+            header_converter: Default::default(),
             mapper: Default::default(),
         }
     }
 }
 
-impl<E, Evm, Receipt: Clone, Map: Clone> Clone for RpcConverter<E, Evm, Receipt, Map> {
+impl<E, Evm, Receipt: Clone, Header: Clone, Map: Clone> Clone
+    for RpcConverter<E, Evm, Receipt, Header, Map>
+{
     fn clone(&self) -> Self {
         Self {
             phantom: PhantomData,
             receipt_converter: self.receipt_converter.clone(),
+            header_converter: self.header_converter.clone(),
             mapper: self.mapper.clone(),
         }
     }
 }
 
-impl<N, E, Evm, Receipt, Map> RpcConvert for RpcConverter<E, Evm, Receipt, Map>
+impl<N, E, Evm, Receipt, Header, Map> RpcConvert for RpcConverter<E, Evm, Receipt, Header, Map>
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
     TxTy<N>: IntoRpcTx<E::TransactionResponse> + Clone + Debug,
     RpcTxReq<E>: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
     Receipt: ReceiptConverter<
@@ -422,6 +488,7 @@ where
         + Unpin
         + Clone
         + Debug,
+    Header: HeaderConverter<HeaderTy<N>, RpcHeader<E>>,
     Map: for<'a> TxInfoMapper<
             &'a TxTy<N>,
             Out = <TxTy<N> as IntoRpcTx<E::TransactionResponse>>::TxInfo,
@@ -429,7 +496,8 @@ where
         + Debug
         + Unpin
         + Send
-        + Sync,
+        + Sync
+        + 'static,
 {
     type Primitives = N;
     type Network = E;
@@ -465,6 +533,14 @@ where
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
         self.receipt_converter.convert_receipts(receipts)
+    }
+
+    fn convert_header(
+        &self,
+        header: SealedHeaderFor<Self::Primitives>,
+        block_size: usize,
+    ) -> Result<RpcHeader<Self::Network>, Self::Error> {
+        Ok(self.header_converter.convert_header(header, block_size))
     }
 }
 
