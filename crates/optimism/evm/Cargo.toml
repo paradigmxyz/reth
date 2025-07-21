@@ -35,7 +35,7 @@ reth-optimism-forks.workspace = true
 reth-optimism-primitives.workspace = true
 
 # revm
-revm.workspace = true
+revm = { workspace = true, features = [ "c-kzg" ] }
 op-revm.workspace = true
 
 # misc
