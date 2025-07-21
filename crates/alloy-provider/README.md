@@ -40,11 +40,21 @@ use reth_alloy_provider::{AlloyRethProvider, AlloyRethProviderConfig};
 use reth_ethereum_node::EthereumNode;
 
 let config = AlloyRethProviderConfig {
-    compute_state_root: true, // Enable state root computation
+    compute_state_root: true,  // Enable state root computation
+    reth_rpc_support: true,    // Use Reth-specific RPC methods (default: true)
 };
 
 let db_provider = AlloyRethProvider::new_with_config(provider, EthereumNode, config);
 ```
+
+## Configuration Options
+
+- `compute_state_root`: When enabled, computes state root and trie updates (requires Reth-specific RPC methods)
+- `reth_rpc_support`: When enabled (default), uses Reth-specific RPC methods for better performance:
+  - `eth_getAccountInfo`: Fetches account balance, nonce, and code in a single call
+  - `debug_codeByHash`: Retrieves bytecode by hash without needing the address
+  
+  When disabled, falls back to standard RPC methods and caches bytecode locally for compatibility with non-Reth nodes.
 
 ## Technical Details
 
