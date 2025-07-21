@@ -24,7 +24,6 @@ reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm.workspace = true
 reth-evm-ethereum.workspace = true
-reth-consensus.workspace = true
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
@@ -83,7 +82,6 @@ js-tracer = ["reth-node-builder/js-tracer"]
 test-utils = [
     "reth-node-builder/test-utils",
     "reth-chainspec/test-utils",
-    "reth-consensus/test-utils",
     "reth-network/test-utils",
     "reth-ethereum-primitives/test-utils",
     "reth-revm/test-utils",

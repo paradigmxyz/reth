@@ -10,11 +10,9 @@ use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
 use futures::Future;
-use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{
-    AlloyBlockHeader, NodePrimitives, RecoveredBlock, SealedHeader, SignedTransaction,
-    TransactionMeta,
+    AlloyBlockHeader, RecoveredBlock, SealedHeader, SignedTransaction, TransactionMeta,
 };
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
@@ -275,15 +273,7 @@ pub trait EthBlocks:
 /// Loads a block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadBlock:
-    LoadPendingBlock
-    + SpawnBlocking
-    + RpcNodeCoreExt<
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Primitives: NodePrimitives<SignedTx = ProviderTx<Self::Provider>>,
-        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
-    >
-{
+pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]
     fn recovered_block(
