@@ -255,18 +255,17 @@ impl<T> WithPeerId<T> {
 }
 
 impl<T> WithPeerId<Option<T>> {
-    /// Returns `None` if the inner value is `None`, otherwise returns `Some(WithPeerId<T>)`.
-    pub fn transpose(self) -> Option<WithPeerId<T>> {
-        self.1.map(|v| WithPeerId(self.0, v))
+    /// Converts `WithPeerId<Option<T>>` into `Result<WithPeerId<T>, E>`, returning the provided error if `None`.
+    pub fn ok_or<E>(self, err: E) -> Result<WithPeerId<T>, E> {
+        self.transpose().ok_or(err)
     }
 
     /// Returns the contained Some value, consuming the self value.
     ///
-    /// See also [`Option::unwrap`]
-    ///
     /// # Panics
     ///
-    /// Panics if the value is a None
+    /// Panics if the value is a None.
+    #[deprecated(note = "Use ok_or() or explicit error handling instead of unwrap()")]
     pub fn unwrap(self) -> T {
         self.1.unwrap()
     }
@@ -275,7 +274,8 @@ impl<T> WithPeerId<Option<T>> {
     ///
     /// # Panics
     ///
-    /// Panics if the value is a None
+    /// Panics if the value is a None.
+    #[deprecated(note = "Use ok_or() or explicit error handling instead of unwrapped()")]
     pub fn unwrapped(self) -> WithPeerId<T> {
         self.transpose().unwrap()
     }
