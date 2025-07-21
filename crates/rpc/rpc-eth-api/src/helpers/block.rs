@@ -63,7 +63,7 @@ pub trait EthBlocks:
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = Arc::unwrap_or_clone(block).into_rpc_block(
+            let block = block.clone_into_rpc_block(
                 full.into(),
                 |tx, tx_info| self.tx_resp_builder().fill(tx, tx_info),
                 |header, size| self.tx_resp_builder().convert_header(header, size),
