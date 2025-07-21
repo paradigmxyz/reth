@@ -156,17 +156,7 @@ where
     type EthApi = EthApiFor<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let api = reth_rpc::EthApiBuilder::new_with_components(ctx.components.clone())
-            .eth_cache(ctx.cache)
-            .task_spawner(ctx.components.task_executor().clone())
-            .gas_cap(ctx.config.rpc_gas_cap.into())
-            .max_simulate_blocks(ctx.config.rpc_max_simulate_blocks)
-            .eth_proof_window(ctx.config.eth_proof_window)
-            .fee_history_cache_config(ctx.config.fee_history_cache)
-            .proof_permits(ctx.config.proof_permits)
-            .gas_oracle_config(ctx.config.gas_oracle)
-            .build();
-        Ok(api)
+        Ok(ctx.eth_api_builder().build())
     }
 }
 
