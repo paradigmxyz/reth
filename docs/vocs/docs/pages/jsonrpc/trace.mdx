@@ -191,7 +191,14 @@ The third and optional parameter is a block number, block hash, or a block tag (
         "output": "0x",
         "stateDiff": null,
         "trace": [{
-            "action": { ... },
+            "action": {
+                "callType": "call",
+                "from": "0x0000000000000000000000000000000000000000",
+                "to": "0x0000000000000000000000000000000000000000",
+                "gas": "0x76c0",
+                "input": "0x",
+                "value": "0x0"
+            },
             "result": {
                 "gasUsed": "0x0",
                 "output": "0x"
@@ -290,9 +297,16 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
     "jsonrpc": "2.0",
     "result": {
         "output": "0x",
-            "stateDiff": null,
-            "trace": [{
-            "action": { ... },
+        "stateDiff": null,
+        "trace": [{
+            "action": {
+                "callType": "call",
+                "from": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                "to": "0x6295ee1b4f6dd65047762f924ecd367c17eabf8f",
+                "gas": "0x186a0",
+                "input": "0x",
+                "value": "0x0"
+            },
             "result": {
                 "gasUsed": "0x0",
                 "output": "0x"
@@ -301,7 +315,7 @@ Traces a call to `eth_sendRawTransaction` without making the call, returning the
             "traceAddress": [],
             "type": "call"
         }],
-            "vmTrace": null
+        "vmTrace": null
     }
 }
 ```
@@ -326,7 +340,14 @@ Replays all transactions in a block returning the requested traces for each tran
             "output": "0x",
             "stateDiff": null,
             "trace": [{
-                "action": { ... },
+                "action": {
+                    "callType": "call",
+                    "from": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+                    "to": "0x6295ee1b4f6dd65047762f924ecd367c17eabf8f",
+                    "gas": "0x186a0",
+                    "input": "0x",
+                    "value": "0x0"
+                },
                 "result": {
                     "gasUsed": "0x0",
                     "output": "0x"
@@ -335,10 +356,9 @@ Replays all transactions in a block returning the requested traces for each tran
                 "traceAddress": [],
                 "type": "call"
             }],
-            "transactionHash": "0x...",
+            "transactionHash": "0x4e70b5d8d5dc43e0e61e4a8f1e6e4e6e4e6e4e6e4e6e4e6e4e6e4e6e4e6e4e6e4",
             "vmTrace": null
-        },
-        { ... }
+        }
     ]
 }
 ```
@@ -362,10 +382,17 @@ Replays a transaction, returning the traces.
         "output": "0x",
         "stateDiff": null,
         "trace": [{
-            "action": { ... },
+            "action": {
+                "callType": "call",
+                "from": "0x1c39ba39e4735cb65978d4db400ddd70a72dc750",
+                "to": "0x2bd2326c993dfaef84f696526064ff22eba5b362",
+                "gas": "0x13e99",
+                "input": "0x16c72721",
+                "value": "0x0"
+            },
             "result": {
-                "gasUsed": "0x0",
-                "output": "0x"
+                "gasUsed": "0x183",
+                "output": "0x0000000000000000000000000000000000000000000000000000000000000001"
             },
             "subtraces": 0,
             "traceAddress": [],
@@ -412,8 +439,7 @@ Returns traces created at given block.
             "transactionHash": "0x07da28d752aba3b9dd7060005e554719c6205c8a3aea358599fc9b245c52f1f6",
             "transactionPosition": 0,
             "type": "call"
-        },
-        ...
+        }
     ]
 }
 ```
@@ -465,8 +491,7 @@ All properties are optional.
             "transactionHash": "0x3321a7708b1083130bd78da0d62ead9f6683033231617c9d268e2c7e3fa6c104",
             "transactionPosition": 3,
             "type": "call"
-        },
-        ...
+        }
     ]
 }
 ```
@@ -550,8 +575,7 @@ Returns all traces of given transaction
             "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
             "transactionPosition": 2,
             "type": "call"
-        },
-        ...
+        }
     ]
 }
 ```
