@@ -149,7 +149,7 @@ pub trait EthBlocks:
                         };
 
                         gas_used = receipt.cumulative_gas_used();
-                        next_log_index = receipt.logs().len();
+                        next_log_index += receipt.logs().len();
 
                         input
                     })

@@ -20,20 +20,25 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
-use alloy_consensus::BlockHeader;
-use alloy_eips::BlockHashOrNumber;
+use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
+use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
-use alloy_primitives::{Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256};
+use alloy_primitives::{
+    map::HashMap, Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256,
+};
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
-use alloy_rpc_types::BlockId;
+use alloy_rpc_types::{AccountInfo, BlockId};
 use alloy_rpc_types_engine::ForkchoiceState;
+use parking_lot::RwLock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider};
 use reth_db_api::{
     mock::{DatabaseMock, TxMock},
     models::StoredBlockBodyIndices,
 };
 use reth_errors::{ProviderError, ProviderResult};
-use reth_node_types::{Block, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
+use reth_node_types::{
+    Block, BlockBody, BlockTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy,
+};
 use reth_primitives::{Account, Bytecode, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_provider::{
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BytecodeReader,
@@ -53,24 +58,42 @@ use reth_storage_api::{
 use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
 use std::{
     collections::BTreeMap,
-    future::Future,
+    future::{Future, IntoFuture},
     ops::{RangeBounds, RangeInclusive},
     sync::Arc,
 };
 use tokio::{runtime::Handle, sync::broadcast};
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// Configuration for `AlloyRethProvider`
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct AlloyRethProviderConfig {
     /// Whether to compute state root when creating execution outcomes
     pub compute_state_root: bool,
+    /// Whether to use Reth-specific RPC methods for better performance
+    ///
+    /// If enabled, the node will use Reth's RPC methods (`debug_codeByHash` and
+    /// `eth_getAccountInfo`) to speed up account information retrieval. When disabled, it will
+    /// use multiple standard RPC calls to get account information.
+    pub reth_rpc_support: bool,
+}
+
+impl Default for AlloyRethProviderConfig {
+    fn default() -> Self {
+        Self { compute_state_root: false, reth_rpc_support: true }
+    }
 }
 
 impl AlloyRethProviderConfig {
     /// Sets whether to compute state root when creating execution outcomes
     pub const fn with_compute_state_root(mut self, compute: bool) -> Self {
         self.compute_state_root = compute;
+        self
+    }
+
+    /// Sets whether to use Reth-specific RPC methods for better performance
+    pub const fn with_reth_rpc_support(mut self, support: bool) -> Self {
+        self.reth_rpc_support = support;
         self
     }
 }
@@ -134,6 +157,18 @@ impl<P, Node: NodeTypes, N> AlloyRethProvider<P, Node, N> {
         }
     }
 
+    /// Use a custom chain spec for the provider
+    pub fn with_chain_spec(self, chain_spec: Arc<Node::ChainSpec>) -> Self {
+        Self {
+            provider: self.provider,
+            node_types: std::marker::PhantomData,
+            network: std::marker::PhantomData,
+            canon_state_notification: self.canon_state_notification,
+            config: self.config,
+            chain_spec,
+        }
+    }
+
     /// Helper function to execute async operations in a blocking context
     fn block_on_async<F, T>(&self, fut: F) -> T
     where
@@ -163,6 +198,8 @@ where
             block_id,
             self.chain_spec.clone(),
         )
+        .with_compute_state_root(self.config.compute_state_root)
+        .with_reth_rpc_support(self.config.reth_rpc_support)
     }
 
     /// Helper function to get state provider by block number
@@ -209,8 +246,16 @@ where
     Node: NodeTypes,
 {
     fn chain_info(&self) -> Result<reth_chainspec::ChainInfo, ProviderError> {
-        // For RPC provider, we can't get full chain info
-        Err(ProviderError::UnsupportedProvider)
+        self.block_on_async(async {
+            let block = self
+                .provider
+                .get_block(BlockId::Number(BlockNumberOrTag::Latest))
+                .await
+                .map_err(ProviderError::other)?
+                .ok_or(ProviderError::HeaderNotFound(0.into()))?;
+
+            Ok(ChainInfo { best_hash: block.header().hash(), best_number: block.header().number() })
+        })
     }
 
     fn best_block_number(&self) -> Result<BlockNumber, ProviderError> {
@@ -309,12 +354,16 @@ where
         Ok(Some(sealed_header.into_header()))
     }
 
-    fn header_td(&self, _hash: &BlockHash) -> ProviderResult<Option<U256>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn header_td(&self, hash: &BlockHash) -> ProviderResult<Option<U256>> {
+        let header = self.header(hash).map_err(ProviderError::other)?;
+
+        Ok(header.map(|b| b.difficulty()))
     }
 
-    fn header_td_by_number(&self, _number: BlockNumber) -> ProviderResult<Option<U256>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
+        let header = self.header_by_number(number).map_err(ProviderError::other)?;
+
+        Ok(header.map(|b| b.difficulty()))
     }
 
     fn headers_range(
@@ -464,20 +513,26 @@ where
 {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {
-            BlockId::Number(number_or_tag) => self.block_by_number_or_tag(number_or_tag),
             BlockId::Hash(hash) => self.block_by_hash(hash.block_hash),
+            BlockId::Number(number_or_tag) => self.block_by_number_or_tag(number_or_tag),
         }
     }
 
     fn sealed_header_by_id(
         &self,
-        _id: BlockId,
+        id: BlockId,
     ) -> ProviderResult<Option<SealedHeader<Self::Header>>> {
-        Err(ProviderError::UnsupportedProvider)
+        match id {
+            BlockId::Hash(hash) => self.sealed_header_by_hash(hash.block_hash),
+            BlockId::Number(number_or_tag) => self.sealed_header_by_number_or_tag(number_or_tag),
+        }
     }
 
-    fn header_by_id(&self, _id: BlockId) -> ProviderResult<Option<Self::Header>> {
-        Err(ProviderError::UnsupportedProvider)
+    fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>> {
+        match id {
+            BlockId::Hash(hash) => self.header_by_hash_or_number(hash.block_hash.into()),
+            BlockId::Number(number_or_tag) => self.header_by_number_or_tag(number_or_tag),
+        }
     }
 }
 
@@ -514,9 +569,33 @@ where
 
     fn receipts_by_block(
         &self,
-        _block: BlockHashOrNumber,
+        block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        Err(ProviderError::UnsupportedProvider)
+        self.block_on_async(async {
+            let receipts_response = self
+                .provider
+                .get_block_receipts(block.into())
+                .await
+                .map_err(ProviderError::other)?;
+
+            let Some(receipts) = receipts_response else {
+                // If the receipts were not found, return None
+                return Ok(None);
+            };
+
+            // Convert the network receipts response to primitive receipts
+            let receipts = receipts
+                .into_iter()
+                .map(|receipt_response| {
+                    <ReceiptTy<Node> as TryFromReceiptResponse<N>>::from_receipt_response(
+                        receipt_response,
+                    )
+                    .map_err(ProviderError::other)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(Some(receipts))
+        })
     }
 
     fn receipts_by_tx_range(
@@ -548,6 +627,7 @@ where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
+    BlockTy<Node>: TryFromBlockResponse<N>,
     TxTy<Node>: TryFromTransactionResponse<N>,
 {
     type Transaction = TxTy<Node>;
@@ -599,9 +679,22 @@ where
 
     fn transactions_by_block(
         &self,
-        _block: BlockHashOrNumber,
+        block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        Err(ProviderError::UnsupportedProvider)
+        let block_response = self.block_on_async(async {
+            self.provider.get_block(block.into()).full().await.map_err(ProviderError::other)
+        })?;
+
+        let Some(block_response) = block_response else {
+            // If the block was not found, return None
+            return Ok(None);
+        };
+
+        // Convert the network block response to primitive block
+        let block = <BlockTy<Node> as TryFromBlockResponse<N>>::from_block_response(block_response)
+            .map_err(ProviderError::other)?;
+
+        Ok(Some(block.into_body().into_transactions()))
     }
 
     fn transactions_by_block_range(
@@ -637,13 +730,7 @@ where
     Node: NodeTypes,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        trace!(target: "alloy-provider", "Getting latest state provider");
-
-        let block_number = self.block_on_async(async {
-            self.provider.get_block_number().await.map_err(ProviderError::other)
-        })?;
-
-        self.state_by_block_number(block_number)
+        Ok(Box::new(self.create_state_provider(self.best_block_number()?.into())))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -801,7 +888,6 @@ where
 }
 
 /// State provider implementation that fetches state via RPC
-#[derive(Clone)]
 pub struct AlloyRethStateProvider<P, Node, N = alloy_network::AnyNetwork>
 where
     Node: NodeTypes,
@@ -816,6 +902,14 @@ where
     network: std::marker::PhantomData<N>,
     /// Cached chain spec (shared with parent provider)
     chain_spec: Option<Arc<Node::ChainSpec>>,
+    /// Whether to enable state root calculation
+    compute_state_root: bool,
+    /// Cached bytecode for accounts
+    ///
+    /// Since the state provider is short-lived, we don't worry about memory leaks.
+    code_store: RwLock<HashMap<B256, Bytecode>>,
+    /// Whether to use Reth-specific RPC methods for better performance
+    reth_rpc_support: bool,
 }
 
 impl<P: std::fmt::Debug, Node: NodeTypes, N> std::fmt::Debug
@@ -831,7 +925,7 @@ impl<P: std::fmt::Debug, Node: NodeTypes, N> std::fmt::Debug
 
 impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
     /// Creates a new state provider for the given block
-    pub const fn new(
+    pub fn new(
         provider: P,
         block_id: BlockId,
         _primitives: std::marker::PhantomData<Node>,
@@ -842,11 +936,14 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
             node_types: std::marker::PhantomData,
             network: std::marker::PhantomData,
             chain_spec: None,
+            compute_state_root: false,
+            code_store: RwLock::new(HashMap::default()),
+            reth_rpc_support: true,
         }
     }
 
     /// Creates a new state provider with a cached chain spec
-    pub const fn with_chain_spec(
+    pub fn with_chain_spec(
         provider: P,
         block_id: BlockId,
         chain_spec: Arc<Node::ChainSpec>,
@@ -857,6 +954,9 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
             node_types: std::marker::PhantomData,
             network: std::marker::PhantomData,
             chain_spec: Some(chain_spec),
+            compute_state_root: false,
+            code_store: RwLock::new(HashMap::default()),
+            reth_rpc_support: true,
         }
     }
 
@@ -876,7 +976,29 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
             node_types: self.node_types,
             network: self.network,
             chain_spec: self.chain_spec.clone(),
+            compute_state_root: self.compute_state_root,
+            code_store: RwLock::new(HashMap::default()),
+            reth_rpc_support: self.reth_rpc_support,
         }
+    }
+
+    /// Helper function to enable state root calculation
+    ///
+    /// If enabled, the node will compute the state root and updates.
+    /// When disabled, it will return zero for state root and no updates.
+    pub const fn with_compute_state_root(mut self, is_enable: bool) -> Self {
+        self.compute_state_root = is_enable;
+        self
+    }
+
+    /// Sets whether to use Reth-specific RPC methods for better performance
+    ///
+    /// If enabled, the node will use Reth's RPC methods (`debug_codeByHash` and
+    /// `eth_getAccountInfo`) to speed up account information retrieval. When disabled, it will
+    /// use multiple standard RPC calls to get account information.
+    pub const fn with_reth_rpc_support(mut self, is_enable: bool) -> Self {
+        self.reth_rpc_support = is_enable;
+        self
     }
 
     /// Get account information from RPC
@@ -885,35 +1007,57 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
         P: Provider<N> + Clone + 'static,
         N: Network,
     {
-        self.block_on_async(async {
-            // Get account info in a single RPC call
-            let account_info = self
-                .provider
-                .get_account_info(address)
-                .block_id(self.block_id)
-                .await
-                .map_err(ProviderError::other)?;
-
-            // Only return account if it exists (has balance, nonce, or code)
-            if account_info.balance.is_zero() &&
-                account_info.nonce == 0 &&
-                account_info.code.is_empty()
-            {
-                Ok(None)
-            } else {
-                let bytecode = if account_info.code.is_empty() {
-                    None
-                } else {
-                    Some(Bytecode::new_raw(account_info.code))
-                };
-
-                Ok(Some(Account {
-                    balance: account_info.balance,
-                    nonce: account_info.nonce,
-                    bytecode_hash: bytecode.as_ref().map(|b| b.hash_slow()),
-                }))
+        let account_info = self.block_on_async(async {
+            // Get account info in a single RPC call using `eth_getAccountInfo`
+            if self.reth_rpc_support {
+                return self
+                    .provider
+                    .get_account_info(address)
+                    .block_id(self.block_id)
+                    .await
+                    .map_err(ProviderError::other);
             }
-        })
+            // Get account info in multiple RPC calls
+            let nonce = self.provider.get_transaction_count(address).block_id(self.block_id);
+            let balance = self.provider.get_balance(address).block_id(self.block_id);
+            let code = self.provider.get_code_at(address).block_id(self.block_id);
+
+            let (nonce, balance, code) = tokio::join!(nonce, balance, code,);
+
+            let account_info = AccountInfo {
+                balance: balance.map_err(ProviderError::other)?,
+                nonce: nonce.map_err(ProviderError::other)?,
+                code: code.map_err(ProviderError::other)?,
+            };
+
+            let code_hash = account_info.code_hash();
+            if code_hash != KECCAK_EMPTY {
+                // Insert code into the cache
+                self.code_store
+                    .write()
+                    .insert(code_hash, Bytecode::new_raw(account_info.code.clone()));
+            }
+
+            Ok(account_info)
+        })?;
+
+        // Only return account if it exists (has balance, nonce, or code)
+        if account_info.balance.is_zero() && account_info.nonce == 0 && account_info.code.is_empty()
+        {
+            Ok(None)
+        } else {
+            let bytecode = if account_info.code.is_empty() {
+                None
+            } else {
+                Some(Bytecode::new_raw(account_info.code))
+            };
+
+            Ok(Some(Account {
+                balance: account_info.balance,
+                nonce: account_info.nonce,
+                bytecode_hash: bytecode.as_ref().map(|b| b.hash_slow()),
+            }))
+        }
     }
 }
 
@@ -929,18 +1073,13 @@ where
         storage_key: StorageKey,
     ) -> Result<Option<U256>, ProviderError> {
         self.block_on_async(async {
-            let value = self
-                .provider
-                .get_storage_at(address, storage_key.into())
-                .block_id(self.block_id)
-                .await
-                .map_err(ProviderError::other)?;
-
-            if value.is_zero() {
-                Ok(None)
-            } else {
-                Ok(Some(value))
-            }
+            Ok(Some(
+                self.provider
+                    .get_storage_at(address, storage_key.into())
+                    .block_id(self.block_id)
+                    .await
+                    .map_err(ProviderError::other)?,
+            ))
         })
     }
 
@@ -977,6 +1116,10 @@ where
     Node: NodeTypes,
 {
     fn bytecode_by_hash(&self, code_hash: &B256) -> Result<Option<Bytecode>, ProviderError> {
+        if !self.reth_rpc_support {
+            return Ok(self.code_store.read().get(code_hash).cloned());
+        }
+
         self.block_on_async(async {
             // The method `debug_codeByHash` is currently only available on a Reth node
             let code = self
@@ -1012,36 +1155,41 @@ where
     N: Network,
     Node: NodeTypes,
 {
-    fn state_root(&self, _state: HashedPostState) -> Result<B256, ProviderError> {
-        // Return the state root from the block
-        self.block_on_async(async {
-            let block = self
-                .provider
-                .get_block(self.block_id)
-                .await
-                .map_err(ProviderError::other)?
-                .ok_or(ProviderError::HeaderNotFound(0.into()))?;
-
-            Ok(block.header().state_root())
-        })
+    fn state_root(&self, hashed_state: HashedPostState) -> Result<B256, ProviderError> {
+        self.state_root_from_nodes(TrieInput::from_state(hashed_state))
     }
 
     fn state_root_from_nodes(&self, _input: TrieInput) -> Result<B256, ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
+        warn!("state_root_from_nodes is not implemented and will return zero");
+        Ok(B256::ZERO)
     }
 
     fn state_root_with_updates(
         &self,
-        _state: HashedPostState,
+        hashed_state: HashedPostState,
     ) -> Result<(B256, TrieUpdates), ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
+        if !self.compute_state_root {
+            return Ok((B256::ZERO, TrieUpdates::default()));
+        }
+
+        self.block_on_async(async {
+            self.provider
+                .raw_request::<(HashedPostState, BlockId), (B256, TrieUpdates)>(
+                    "debug_stateRootWithUpdates".into(),
+                    (hashed_state, self.block_id),
+                )
+                .into_future()
+                .await
+                .map_err(ProviderError::other)
+        })
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
         _input: TrieInput,
     ) -> Result<(B256, TrieUpdates), ProviderError> {
-        Err(ProviderError::UnsupportedProvider)
+        warn!("state_root_from_nodes_with_updates is not implemented and will return zero");
+        Ok((B256::ZERO, TrieUpdates::default()))
     }
 }
 
@@ -1600,7 +1748,7 @@ where
     Self: Clone + 'static,
 {
     fn latest(&self) -> Result<StateProviderBox, ProviderError> {
-        Ok(Box::new(self.clone()) as StateProviderBox)
+        Ok(Box::new(self.with_block_id(self.best_block_number()?.into())))
     }
 
     fn state_by_block_id(&self, block_id: BlockId) -> Result<StateProviderBox, ProviderError> {
@@ -1817,17 +1965,28 @@ where
         })
     }
 
-    fn code_by_hash(&mut self, _code_hash: B256) -> Result<revm::bytecode::Bytecode, Self::Error> {
-        // Cannot fetch bytecode by hash via RPC
-        Ok(revm::bytecode::Bytecode::default())
+    fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::bytecode::Bytecode, Self::Error> {
+        self.block_on_async(async {
+            // The method `debug_codeByHash` is currently only available on a Reth node
+            let code = self
+                .provider
+                .debug_code_by_hash(code_hash, None)
+                .await
+                .map_err(Self::Error::other)?;
+
+            let Some(code) = code else {
+                // If the code was not found, return
+                return Ok(revm::bytecode::Bytecode::new());
+            };
+
+            Ok(revm::bytecode::Bytecode::new_raw(code))
+        })
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        let index = B256::from(index);
-
         self.block_on_async(async {
             self.provider
-                .get_storage_at(address, index.into())
+                .get_storage_at(address, index)
                 .block_id(self.block_id)
                 .await
                 .map_err(ProviderError::other)

@@ -352,7 +352,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
     ///
     /// This
     /// 1. fetches all transactions of the block
-    /// 2. configures the EVM evn
+    /// 2. configures the EVM env
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
     ///    _after_ the transaction [`StateProviderDatabase`] and the database that points to the
@@ -388,7 +388,7 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
     ///
     /// This
     /// 1. fetches all transactions of the block
-    /// 2. configures the EVM evn
+    /// 2. configures the EVM env
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
     ///    _after_ the transaction `EvmState` and the database that points to the state right

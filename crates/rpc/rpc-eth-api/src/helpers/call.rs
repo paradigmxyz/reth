@@ -762,6 +762,11 @@ pub trait Call:
         let request_gas = request.as_ref().gas_limit();
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
 
+        // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
+        if tx_env.gas_price() == 0 {
+            evm_env.block_env.basefee = 0;
+        }
+
         if request_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit
             if tx_env.gas_price() > 0 {

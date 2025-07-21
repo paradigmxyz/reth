@@ -785,10 +785,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn trace_api(&self) -> TraceApi<EthApi>
-    where
-        EthApi: TraceExt,
-    {
+    pub fn trace_api(&self) -> TraceApi<EthApi> {
         TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone(), self.eth_config)
     }
 

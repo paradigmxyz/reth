@@ -349,7 +349,7 @@ impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
         self.header.set_hash(hash)
     }
 
-    /// Returns a mutable reference to the header.
+    /// Returns a mutable reference to the body.
     pub const fn body_mut(&mut self) -> &mut B::Body {
         &mut self.body
     }
