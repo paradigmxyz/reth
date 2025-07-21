@@ -5,6 +5,7 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
+use alloy_rpc_types_eth::TransactionRequest;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
@@ -41,7 +42,7 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
-use reth_rpc_eth_api::{helpers::pending_block::BuildPendingEnv, RpcConvert};
+use reth_rpc_eth_api::{helpers::pending_block::BuildPendingEnv, RpcConvert, SignableTxRequest};
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -141,7 +142,7 @@ pub struct EthereumEthApiBuilder;
 impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
 where
     N: FullNodeComponents<
-        Types: NodeTypes<ChainSpec: EthereumHardforks, Primitives = EthPrimitives>,
+        Types: NodeTypes<ChainSpec: EthereumHardforks>,
         Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
     >,
     EthRpcConverterFor<N>: RpcConvert<
@@ -150,6 +151,7 @@ where
         Error = EthApiError,
         Network = Ethereum,
     >,
+    TransactionRequest: SignableTxRequest<TxTy<N::Types>>,
     EthApiError: FromEvmError<N::Evm>,
 {
     type EthApi = EthApiFor<N>;
