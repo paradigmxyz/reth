@@ -58,7 +58,7 @@ where
             executor,
             updates,
             metrics,
-            trie: sparse_state_trie.unwrap(),
+            trie: sparse_state_trie.into_inner(),
             blinded_provider_factory,
         }
     }

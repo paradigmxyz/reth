@@ -28,12 +28,14 @@ pub struct ClearedSparseStateTrie<
     S = SerialSparseTrie, // Storage trie implementation
 >(SparseStateTrie<A, S>);
 
-impl<A, S> From<SparseStateTrie<A, S>> for ClearedSparseStateTrie<A, S>
+impl<A, S> ClearedSparseStateTrie<A, S>
 where
-    A: SparseTrieInterface,
-    S: SparseTrieInterface,
+    A: SparseTrieInterface + Default,
+    S: SparseTrieInterface + Default,
 {
-    fn from(mut trie: SparseStateTrie<A, S>) -> Self {
+    /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
+    /// [`SparseStateTrie`] and then storing that instance for later re-use.
+    pub fn cleared(mut trie: SparseStateTrie<A, S>) -> Self {
         trie.state = trie.state.clear();
         trie.cleared_storages.extend(trie.storages.drain().map(|(_, trie)| trie.clear()));
         trie.revealed_account_paths.clear();
@@ -41,15 +43,9 @@ where
         trie.account_rlp_buf.clear();
         Self(trie)
     }
-}
 
-impl<A, S> ClearedSparseStateTrie<A, S>
-where
-    A: SparseTrieInterface + Default,
-    S: SparseTrieInterface + Default,
-{
-    /// Returns the cleared `SparseStateTrie`, consuming this instance.
-    pub fn unwrap(self) -> SparseStateTrie<A, S> {
+    /// Returns the cleared [`SparseStateTrie`], consuming this instance.
+    pub fn into_inner(self) -> SparseStateTrie<A, S> {
         self.0
     }
 }
