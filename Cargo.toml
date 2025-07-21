@@ -743,6 +743,18 @@ alloy-transport-http = { git = "https://github.com/alloy-rs/alloy", branch = "fu
 alloy-transport-ipc = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
 alloy-transport-ws = { git = "https://github.com/alloy-rs/alloy", branch = "fusaka-devnet-3" }
 
+revm = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-database = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-state = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-inspector = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-context = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-context-interface = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+op-revm = { git = "https://github.com/bluealloy/revm", branch = "fusaka-devnet-3" }
+
 # op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
 # op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
