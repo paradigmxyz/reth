@@ -20,6 +20,36 @@ use reth_trie_common::{
 };
 use tracing::trace;
 
+/// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
+/// across payload runs.
+#[derive(Debug)]
+pub struct ClearedSparseStateTrie<
+    A = SerialSparseTrie, // Account trie implementation
+    S = SerialSparseTrie, // Storage trie implementation
+>(SparseStateTrie<A, S>);
+
+impl<A, S> ClearedSparseStateTrie<A, S>
+where
+    A: SparseTrieInterface + Default,
+    S: SparseTrieInterface + Default,
+{
+    /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
+    /// [`SparseStateTrie`] and then storing that instance for later re-use.
+    pub fn from_state_trie(mut trie: SparseStateTrie<A, S>) -> Self {
+        trie.state = trie.state.clear();
+        trie.cleared_storages.extend(trie.storages.drain().map(|(_, trie)| trie.clear()));
+        trie.revealed_account_paths.clear();
+        trie.revealed_storage_paths.clear();
+        trie.account_rlp_buf.clear();
+        Self(trie)
+    }
+
+    /// Returns the cleared [`SparseStateTrie`], consuming this instance.
+    pub fn into_inner(self) -> SparseStateTrie<A, S> {
+        self.0
+    }
+}
+
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
 pub struct SparseStateTrie<
@@ -30,6 +60,8 @@ pub struct SparseStateTrie<
     state: SparseTrie<A>,
     /// Sparse storage tries.
     storages: B256Map<SparseTrie<S>>,
+    /// Cleared storage tries, kept for re-use
+    cleared_storages: Vec<SparseTrie<S>>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// Collection of revealed storage trie paths, per account.
@@ -52,6 +84,7 @@ where
         Self {
             state: Default::default(),
             storages: Default::default(),
+            cleared_storages: Default::default(),
             revealed_account_paths: Default::default(),
             revealed_storage_paths: Default::default(),
             retain_updates: false,
@@ -70,16 +103,7 @@ impl SparseStateTrie {
     }
 }
 
-impl<A, S> SparseStateTrie<A, S>
-where
-    A: SparseTrieInterface + Default,
-    S: SparseTrieInterface + Default,
-{
-    /// Create new [`SparseStateTrie`]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
+impl<A, S> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.retain_updates = retain_updates;
@@ -91,10 +115,16 @@ where
         self.state = trie;
         self
     }
+}
 
-    /// Takes the accounts trie.
-    pub fn take_accounts_trie(&mut self) -> SparseTrie<A> {
-        core::mem::take(&mut self.state)
+impl<A, S> SparseStateTrie<A, S>
+where
+    A: SparseTrieInterface + Default,
+    S: SparseTrieInterface + Default,
+{
+    /// Create new [`SparseStateTrie`]
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Returns `true` if account was already revealed.
@@ -164,6 +194,16 @@ where
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie<S>) {
         self.storages.insert(address, storage_trie);
+    }
+
+    /// Retrieves the storage trie for the given address, creating a new one if it doesn't exist.
+    ///
+    /// This method should always be used to create a storage trie, as it will re-use previously
+    /// allocated and cleared storage tries when possible.
+    fn get_or_create_storage_trie(&mut self, address: B256) -> &mut SparseTrie<S> {
+        self.storages
+            .entry(address)
+            .or_insert_with(|| self.cleared_storages.pop().unwrap_or_default())
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -302,10 +342,11 @@ where
         if let Some(root_node) = root_node {
             // Reveal root node if it wasn't already.
             trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node");
-            let trie = self.storages.entry(account).or_default().reveal_root(
+            let retain_updates = self.retain_updates;
+            let trie = self.get_or_create_storage_trie(account).reveal_root(
                 root_node.node,
                 root_node.masks,
-                self.retain_updates,
+                retain_updates,
             )?;
 
             // Reserve the capacity for new nodes ahead of time, if the trie implementation
@@ -380,13 +421,14 @@ where
                     .get(&account)
                     .is_none_or(|paths| !paths.contains(&path))
                 {
-                    let storage_trie_entry = self.storages.entry(account).or_default();
+                    let retain_updates = self.retain_updates;
+                    let storage_trie_entry = self.get_or_create_storage_trie(account);
                     if path.is_empty() {
                         // Handle special storage state root node case.
                         storage_trie_entry.reveal_root(
                             trie_node,
                             TrieMasks::none(),
-                            self.retain_updates,
+                            retain_updates,
                         )?;
                     } else {
                         // Reveal non-root storage trie node.

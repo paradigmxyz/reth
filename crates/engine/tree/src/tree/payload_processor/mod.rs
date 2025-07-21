@@ -14,7 +14,7 @@ use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use reth_evm::{ConfigureEvm, OnStateHook, SpecFor};
 use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
@@ -30,9 +30,8 @@ use reth_trie_parallel::{
 };
 use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
-    SerialSparseTrie, SparseTrie, SparseTrieInterface,
+    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
-use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::{
     collections::VecDeque,
     sync::{
@@ -75,9 +74,11 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A cleared accounts sparse trie, kept around to be reused for the state root computation so
+    /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
     /// that allocations can be minimized.
-    accounts_trie: Arc<Mutex<Option<SparseTrie<ConfiguredSparseTrie>>>>,
+    sparse_state_trie: Arc<
+        parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
+    >,
     /// Whether to use the parallel sparse trie.
     use_parallel_sparse_trie: bool,
     _marker: std::marker::PhantomData<N>,
@@ -104,7 +105,7 @@ where
             evm_config,
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
-            accounts_trie: Arc::default(),
+            sparse_state_trie: Arc::default(),
             use_parallel_sparse_trie: config.enable_parallel_sparse_trie(),
             _marker: Default::default(),
         }
@@ -209,17 +210,8 @@ where
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
 
-        // Take the stored accounts trie
-        let stored_accounts_trie = self.accounts_trie.lock().take();
-
         // Spawn the sparse trie task using any stored trie and parallel trie configuration.
-        self.spawn_sparse_trie_task(
-            sparse_trie_rx,
-            proof_task.handle(),
-            state_root_tx,
-            stored_accounts_trie,
-            self.use_parallel_sparse_trie,
-        );
+        self.spawn_sparse_trie_task(sparse_trie_rx, proof_task.handle(), state_root_tx);
 
         // spawn the proof task
         self.executor.spawn_blocking(move || {
@@ -320,127 +312,51 @@ where
         })
     }
 
-    /// Generic function to spawn a sparse trie task for any trie type that can be converted to
-    /// `ConfiguredSparseTrie`.
-    fn spawn_trie_task<BPF, A>(
-        &self,
-        sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_task_handle: BPF,
-        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
-        sparse_trie: Option<SparseTrie<A>>,
-    ) where
-        BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
-        BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
-        BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-        A: SparseTrieInterface + Send + Sync + Default + 'static,
-        ConfiguredSparseTrie: From<A>,
-    {
-        let mut task = SparseTrieTask::<_, A, SerialSparseTrie>::new_with_stored_trie(
-            self.executor.clone(),
-            sparse_trie_rx,
-            proof_task_handle,
-            self.trie_metrics.clone(),
-            sparse_trie,
-        );
-
-        let accounts_trie = Arc::clone(&self.accounts_trie);
-        self.executor.spawn_blocking(move || {
-            let (result, trie) = task.run();
-            // Send state root computation result
-            let _ = state_root_tx.send(result);
-
-            // Clear and return accounts trie back to the payload processor
-            let trie = match trie {
-                SparseTrie::Blind(opt) => {
-                    SparseTrie::Blind(opt.map(|t| Box::new(ConfiguredSparseTrie::from(*t))))
-                }
-                SparseTrie::Revealed(t) => {
-                    SparseTrie::Revealed(Box::new(ConfiguredSparseTrie::from(*t)))
-                }
-            };
-            accounts_trie.lock().replace(trie.clear());
-        });
-    }
-
-    /// Helper to dispatch trie spawn based on the `ConfiguredSparseTrie` variant
-    fn dispatch_trie_spawn<BPF>(
-        &self,
-        configured_trie: ConfiguredSparseTrie,
-        sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
-        proof_task_handle: BPF,
-        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
-        is_revealed: bool,
-    ) where
-        BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
-        BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
-        BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
-    {
-        match configured_trie {
-            ConfiguredSparseTrie::Serial(boxed_serial) => {
-                let trie = if is_revealed {
-                    Some(SparseTrie::Revealed(boxed_serial))
-                } else {
-                    Some(SparseTrie::Blind(Some(boxed_serial)))
-                };
-                self.spawn_trie_task(sparse_trie_rx, proof_task_handle, state_root_tx, trie);
-            }
-            ConfiguredSparseTrie::Parallel(boxed_parallel) => {
-                let trie = if is_revealed {
-                    Some(SparseTrie::Revealed(boxed_parallel))
-                } else {
-                    Some(SparseTrie::Blind(Some(boxed_parallel)))
-                };
-                self.spawn_trie_task(sparse_trie_rx, proof_task_handle, state_root_tx, trie);
-            }
-        }
-    }
-
-    /// Helper method that handles sparse trie task spawning.
-    ///
-    /// If we have a stored trie, we will reuse it for spawning. If we do not have a stored trie,
-    /// we will create a new trie based on the configured trie type (parallel or serial).
+    /// Spawns the [`SparseTrieTask`] for this payload processor.
     fn spawn_sparse_trie_task<BPF>(
         &self,
         sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
         proof_task_handle: BPF,
         state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
-        stored_accounts_trie: Option<SparseTrie<ConfiguredSparseTrie>>,
-        use_parallel_for_new: bool,
     ) where
         BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
         BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
         BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     {
-        let is_revealed = stored_accounts_trie.as_ref().is_some_and(|trie| trie.is_revealed());
-        match stored_accounts_trie {
-            Some(SparseTrie::Revealed(boxed) | SparseTrie::Blind(Some(boxed))) => {
-                self.dispatch_trie_spawn(
-                    *boxed,
-                    sparse_trie_rx,
-                    proof_task_handle,
-                    state_root_tx,
-                    is_revealed,
-                );
-            }
-            _ => {
-                // No stored trie, create new based on config
-                if use_parallel_for_new {
-                    self.spawn_trie_task::<_, ParallelSparseTrie>(
-                        sparse_trie_rx,
-                        proof_task_handle,
-                        state_root_tx,
-                        None,
-                    );
-                } else {
-                    self.spawn_trie_task::<_, SerialSparseTrie>(
-                        sparse_trie_rx,
-                        proof_task_handle,
-                        state_root_tx,
-                        None,
-                    );
-                }
-            }
-        }
+        // Reuse a stored SparseStateTrie, or create a new one using the desired configuration if
+        // there's none to reuse.
+        let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
+        let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
+            let accounts_trie = if self.use_parallel_sparse_trie {
+                ConfiguredSparseTrie::Parallel(Default::default())
+            } else {
+                ConfiguredSparseTrie::Serial(Default::default())
+            };
+            ClearedSparseStateTrie::from_state_trie(
+                SparseStateTrie::new()
+                    .with_accounts_trie(SparseTrie::Blind(Some(Box::new(accounts_trie))))
+                    .with_updates(true),
+            )
+        });
+
+        let task =
+            SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
+                self.executor.clone(),
+                sparse_trie_rx,
+                proof_task_handle,
+                self.trie_metrics.clone(),
+                sparse_state_trie,
+            );
+
+        self.executor.spawn_blocking(move || {
+            let (result, trie) = task.run();
+            // Send state root computation result
+            let _ = state_root_tx.send(result);
+
+            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending results
+            // to the next step, so that time spent clearing doesn't block the step after this one.
+            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
+        });
     }
 }
 
