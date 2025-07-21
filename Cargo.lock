@@ -8964,7 +8964,6 @@ dependencies = [
  "futures",
  "rand 0.9.1",
  "reth-chainspec",
- "reth-consensus",
  "reth-db",
  "reth-e2e-test-utils",
  "reth-engine-local",
