@@ -376,8 +376,8 @@ where
         &self.pending_block
     }
 
-    /// Returns a type that knows how to build a [`ConfigureEvm::NextBlockEnvCtx`] for a pending
-    /// block.
+    /// Returns a type that knows how to build a [`reth_evm::ConfigureEvm::NextBlockEnvCtx`] for a
+    /// pending block.
     #[inline]
     pub const fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<N::Evm> {
         &*self.next_env_builder
