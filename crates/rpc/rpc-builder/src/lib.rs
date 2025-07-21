@@ -807,10 +807,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<EthApi>
-    where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
-    {
+    pub fn debug_api(&self) -> DebugApi<EthApi> {
         DebugApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
     }
 
