@@ -473,16 +473,28 @@ impl ChainSpec {
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
-        let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
-            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
-            // fork filter.
-            Some(match condition {
-                ForkCondition::Block(block) |
-                ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
-                ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
-                _ => return None,
+        let forks = self
+            .hardforks
+            .forks_iter()
+            .filter_map(|(_, condition)| {
+                // We filter out TTD-based forks w/o a pre-known block since those do not show up in
+                // the fork filter.
+                Some(match condition {
+                    ForkCondition::Block(block) |
+                    ForkCondition::TTD { fork_block: Some(block), .. } => {
+                        ForkFilterKey::Block(block)
+                    }
+                    ForkCondition::Timestamp(time) => ForkFilterKey::Time(time),
+                    _ => return None,
+                })
             })
-        });
+            // also need to include BPOs as orkFilterKey::Time(
+            .chain(
+                self.blob_params
+                    .scheduled
+                    .iter()
+                    .map(|(activation, _)| ForkFilterKey::Time(*activation)),
+            );
 
         ForkFilter::new(head, self.genesis_hash(), self.genesis_timestamp(), forks)
     }
@@ -522,13 +534,22 @@ impl ChainSpec {
             }
         }
 
+        let bpo_forks = self.blob_params.scheduled.iter().map(|(activation, _)| *activation);
+
+        let mut timestamp_forks = self
+            .hardforks
+            .forks_iter()
+            .filter_map(|(_, cond)| cond.as_timestamp())
+            .chain(bpo_forks)
+            .filter(|time| time > &self.genesis.timestamp)
+            .collect::<Vec<_>>();
+        // sort because bpo can happen in between
+        timestamp_forks.sort();
+
         // timestamp are ALWAYS applied after the merge.
         //
         // this filter ensures that no block-based forks are returned
-        for timestamp in self.hardforks.forks_iter().filter_map(|(_, cond)| {
-            // ensure we only get timestamp forks activated __after__ the genesis block
-            cond.as_timestamp().filter(|time| time > &self.genesis.timestamp)
-        }) {
+        for timestamp in timestamp_forks {
             if head.timestamp >= timestamp {
                 // skip duplicated hardfork activated at the same timestamp
                 if timestamp != current_applied {
@@ -2528,6 +2549,7 @@ Post-merge hard forks (timestamp based):
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
                 max_blobs_per_tx: 6,
+                blob_base_cost: 0,
             },
             prague: BlobParams {
                 target_blob_count: 3,
@@ -2535,6 +2557,7 @@ Post-merge hard forks (timestamp based):
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
                 max_blobs_per_tx: 6,
+                blob_base_cost: 0,
             },
             ..Default::default()
         };
