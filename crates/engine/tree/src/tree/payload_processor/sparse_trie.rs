@@ -31,7 +31,7 @@ where
     pub(super) executor: WorkloadExecutor,
     /// Receives updates from the state root task.
     pub(super) updates: mpsc::Receiver<SparseTrieUpdate>,
-    /// `SparseStateTrie` used for computating the state root.
+    /// `SparseStateTrie` used for computing the state root.
     pub(super) trie: SparseStateTrie<A, S>,
     pub(super) metrics: MultiProofTaskMetrics,
     /// Trie node provider factory.

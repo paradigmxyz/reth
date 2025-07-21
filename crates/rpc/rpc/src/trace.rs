@@ -402,9 +402,9 @@ where
                 Some(block.clone()),
                 None,
                 TracingInspectorConfig::default_parity(),
-                move |tx_info, ctx| {
+                move |tx_info, mut ctx| {
                     let mut traces = ctx
-                        .inspector
+                        .take_inspector()
                         .into_parity_builder()
                         .into_localized_transaction_traces(tx_info);
                     traces.retain(|trace| matcher.matches(&trace.trace));
@@ -471,9 +471,11 @@ where
             block_id,
             None,
             TracingInspectorConfig::default_parity(),
-            |tx_info, ctx| {
-                let traces =
-                    ctx.inspector.into_parity_builder().into_localized_transaction_traces(tx_info);
+            |tx_info, mut ctx| {
+                let traces = ctx
+                    .take_inspector()
+                    .into_parity_builder()
+                    .into_localized_transaction_traces(tx_info);
                 Ok(traces)
             },
         );
@@ -508,9 +510,9 @@ where
                 block_id,
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
-                move |tx_info, ctx| {
+                move |tx_info, mut ctx| {
                     let mut full_trace = ctx
-                        .inspector
+                        .take_inspector()
                         .into_parity_builder()
                         .into_trace_results(&ctx.result, &trace_types);
 

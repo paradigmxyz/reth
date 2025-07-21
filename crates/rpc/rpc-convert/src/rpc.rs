@@ -4,7 +4,9 @@ use alloy_consensus::{
     EthereumTxEnvelope, EthereumTypedTransaction, SignableTransaction, TxEip4844,
 };
 use alloy_json_rpc::RpcObject;
-use alloy_network::{Network, ReceiptResponse, TransactionResponse, TxSigner};
+use alloy_network::{
+    primitives::HeaderResponse, Network, ReceiptResponse, TransactionResponse, TxSigner,
+};
 use alloy_primitives::Signature;
 use alloy_rpc_types_eth::TransactionRequest;
 
@@ -13,7 +15,7 @@ use alloy_rpc_types_eth::TransactionRequest;
 /// This is a subset of [`Network`] trait with only RPC response types kept.
 pub trait RpcTypes: Send + Sync + Clone + Unpin + Debug + 'static {
     /// Header response type.
-    type Header: RpcObject;
+    type Header: RpcObject + HeaderResponse;
     /// Receipt response type.
     type Receipt: RpcObject + ReceiptResponse;
     /// Transaction response type.
@@ -37,6 +39,12 @@ pub type RpcTransaction<T> = <T as RpcTypes>::TransactionResponse;
 
 /// Adapter for network specific receipt response.
 pub type RpcReceipt<T> = <T as RpcTypes>::Receipt;
+
+/// Adapter for network specific header response.
+pub type RpcHeader<T> = <T as RpcTypes>::Header;
+
+/// Adapter for network specific block type.
+pub type RpcBlock<T> = alloy_rpc_types_eth::Block<RpcTransaction<T>, RpcHeader<T>>;
 
 /// Adapter for network specific transaction request.
 pub type RpcTxReq<T> = <T as RpcTypes>::TransactionRequest;

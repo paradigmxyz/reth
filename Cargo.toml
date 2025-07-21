@@ -11,7 +11,7 @@ exclude = [".github/"]
 members = [
     "bin/reth-bench/",
     "bin/reth/",
-    "crates/alloy-provider/",
+    "crates/storage/rpc-provider/",
     "crates/chain-state/",
     "crates/chainspec/",
     "crates/cli/cli/",
@@ -323,7 +323,7 @@ codegen-units = 1
 # reth
 op-reth = { path = "crates/optimism/bin" }
 reth = { path = "bin/reth" }
-reth-alloy-provider = { path = "crates/alloy-provider" }
+reth-storage-rpc-provider = { path = "crates/storage/rpc-provider" }
 reth-basic-payload-builder = { path = "crates/payload/basic" }
 reth-bench = { path = "bin/reth-bench" }
 reth-chain-state = { path = "crates/chain-state" }
@@ -471,7 +471,7 @@ revm-inspectors = "0.26.5"
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.2.0"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.14", default-features = false }
+alloy-evm = { version = "0.15", default-features = false }
 alloy-primitives = { version = "1.2.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.2.0"
@@ -509,7 +509,7 @@ alloy-transport-ipc = { version = "1.0.22", default-features = false }
 alloy-transport-ws = { version = "1.0.22", default-features = false }
 
 # op
-alloy-op-evm = { version = "0.14", default-features = false }
+alloy-op-evm = { version = "0.15", default-features = false }
 alloy-op-hardforks = "0.2.2"
 op-alloy-rpc-types = { version = "0.18.11", default-features = false }
 op-alloy-rpc-types-engine = { version = "0.18.11", default-features = false }

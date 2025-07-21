@@ -75,6 +75,7 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-primitives/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
+    "reth-node-ethereum/asm-keccak",
 ]
 
 jemalloc = [

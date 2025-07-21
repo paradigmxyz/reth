@@ -35,7 +35,7 @@ where
 {
     /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
     /// [`SparseStateTrie`] and then storing that instance for later re-use.
-    pub fn cleared(mut trie: SparseStateTrie<A, S>) -> Self {
+    pub fn from_state_trie(mut trie: SparseStateTrie<A, S>) -> Self {
         trie.state = trie.state.clear();
         trie.revealed_account_paths.clear();
         trie.storage.clear();
@@ -491,6 +491,7 @@ where
                     .get(&account)
                     .is_none_or(|paths| !paths.contains(&path))
                 {
+                    let retain_updates = self.retain_updates;
                     let (storage_trie_entry, revealed_storage_paths) =
                         self.storage.get_trie_and_revealed_paths_mut(account);
 
@@ -499,7 +500,7 @@ where
                         storage_trie_entry.reveal_root(
                             trie_node,
                             TrieMasks::none(),
-                            self.retain_updates,
+                            retain_updates,
                         )?;
                     } else {
                         // Reveal non-root storage trie node.

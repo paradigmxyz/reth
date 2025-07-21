@@ -1,7 +1,11 @@
-//! # Alloy Provider for Reth
+//! # RPC Blockchain Provider for Reth
 //!
-//! This crate provides an implementation of reth's `StateProviderFactory` and related traits
-//! that fetches state data via RPC instead of from a local database.
+//! This crate provides an RPC-based implementation of reth's `StateProviderFactory` and related
+//! traits that fetches blockchain data via RPC instead of from a local database.
+//!
+//! Similar to the [`BlockchainProvider`](../../provider/src/providers/blockchain_provider.rs)
+//! which provides access to local blockchain data, this crate offers the same functionality but for
+//! remote blockchain access via RPC.
 //!
 //! Originally created by [cakevm](https://github.com/cakevm/alloy-reth-provider).
 //!
@@ -65,9 +69,9 @@ use std::{
 use tokio::{runtime::Handle, sync::broadcast};
 use tracing::{trace, warn};
 
-/// Configuration for `AlloyRethProvider`
+/// Configuration for `RpcBlockchainProvider`
 #[derive(Debug, Clone)]
-pub struct AlloyRethProviderConfig {
+pub struct RpcBlockchainProviderConfig {
     /// Whether to compute state root when creating execution outcomes
     pub compute_state_root: bool,
     /// Whether to use Reth-specific RPC methods for better performance
@@ -78,13 +82,13 @@ pub struct AlloyRethProviderConfig {
     pub reth_rpc_support: bool,
 }
 
-impl Default for AlloyRethProviderConfig {
+impl Default for RpcBlockchainProviderConfig {
     fn default() -> Self {
         Self { compute_state_root: false, reth_rpc_support: true }
     }
 }
 
-impl AlloyRethProviderConfig {
+impl RpcBlockchainProviderConfig {
     /// Sets whether to compute state root when creating execution outcomes
     pub const fn with_compute_state_root(mut self, compute: bool) -> Self {
         self.compute_state_root = compute;
@@ -98,17 +102,23 @@ impl AlloyRethProviderConfig {
     }
 }
 
-/// A provider implementation that uses Alloy RPC to fetch state data
+/// An RPC-based blockchain provider that fetches blockchain data via remote RPC calls.
 ///
-/// This provider implements reth's `StateProviderFactory` and related traits,
-/// allowing it to be used as a drop-in replacement for database-backed providers
-/// in scenarios where RPC access is preferred (e.g., testing).
+/// This is the RPC equivalent of
+/// [`BlockchainProvider`](../../provider/src/providers/blockchain_provider.rs), implementing
+/// the same `StateProviderFactory` and related traits but fetching data from a remote node instead
+/// of local storage.
+///
+/// This provider is useful for:
+/// - Testing without requiring a full local database
+/// - Accessing blockchain state from remote nodes
+/// - Building light clients or tools that don't need full node storage
 ///
 /// The provider type is generic over the network type N (defaulting to `AnyNetwork`),
 /// but the current implementation is specialized for `alloy_network::AnyNetwork`
 /// as it needs to access block header fields directly.
 #[derive(Clone)]
-pub struct AlloyRethProvider<P, Node, N = alloy_network::AnyNetwork>
+pub struct RpcBlockchainProvider<P, Node, N = alloy_network::AnyNetwork>
 where
     Node: NodeTypes,
 {
@@ -121,28 +131,28 @@ where
     /// Broadcast channel for canon state notifications
     canon_state_notification: broadcast::Sender<CanonStateNotification<PrimitivesTy<Node>>>,
     /// Configuration for the provider
-    config: AlloyRethProviderConfig,
+    config: RpcBlockchainProviderConfig,
     /// Cached chain spec
     chain_spec: Arc<Node::ChainSpec>,
 }
 
-impl<P, Node: NodeTypes, N> std::fmt::Debug for AlloyRethProvider<P, Node, N> {
+impl<P, Node: NodeTypes, N> std::fmt::Debug for RpcBlockchainProvider<P, Node, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AlloyRethProvider").field("config", &self.config).finish()
+        f.debug_struct("RpcBlockchainProvider").field("config", &self.config).finish()
     }
 }
 
-impl<P, Node: NodeTypes, N> AlloyRethProvider<P, Node, N> {
-    /// Creates a new `AlloyRethProvider` with default configuration
+impl<P, Node: NodeTypes, N> RpcBlockchainProvider<P, Node, N> {
+    /// Creates a new `RpcBlockchainProvider` with default configuration
     pub fn new(provider: P) -> Self
     where
         Node::ChainSpec: Default,
     {
-        Self::new_with_config(provider, AlloyRethProviderConfig::default())
+        Self::new_with_config(provider, RpcBlockchainProviderConfig::default())
     }
 
-    /// Creates a new `AlloyRethProvider` with custom configuration
-    pub fn new_with_config(provider: P, config: AlloyRethProviderConfig) -> Self
+    /// Creates a new `RpcBlockchainProvider` with custom configuration
+    pub fn new_with_config(provider: P, config: RpcBlockchainProviderConfig) -> Self
     where
         Node::ChainSpec: Default,
     {
@@ -185,15 +195,15 @@ impl<P, Node: NodeTypes, N> AlloyRethProvider<P, Node, N> {
     }
 }
 
-impl<P, Node, N> AlloyRethProvider<P, Node, N>
+impl<P, Node, N> RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
 {
     /// Helper function to create a state provider for a given block ID
-    fn create_state_provider(&self, block_id: BlockId) -> AlloyRethStateProvider<P, Node, N> {
-        AlloyRethStateProvider::with_chain_spec(
+    fn create_state_provider(&self, block_id: BlockId) -> RpcBlockchainStateProvider<P, Node, N> {
+        RpcBlockchainStateProvider::with_chain_spec(
             self.provider.clone(),
             block_id,
             self.chain_spec.clone(),
@@ -216,7 +226,7 @@ where
 // This allows the types to be instantiated with any network while the actual functionality
 // requires AnyNetwork. Future improvements could add trait bounds for networks with
 // compatible block structures.
-impl<P, Node, N> BlockHashReader for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> BlockHashReader for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -239,7 +249,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockNumReader for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> BlockNumReader for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -276,7 +286,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockIdReader for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> BlockIdReader for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -319,7 +329,7 @@ where
     }
 }
 
-impl<P, Node, N> HeaderProvider for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> HeaderProvider for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -403,7 +413,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockBodyIndicesProvider for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> BlockBodyIndicesProvider for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -421,7 +431,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockReader for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> BlockReader for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -502,7 +512,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockReaderIdExt for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> BlockReaderIdExt for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -536,7 +546,7 @@ where
     }
 }
 
-impl<P, Node, N> ReceiptProvider for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> ReceiptProvider for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -613,7 +623,7 @@ where
     }
 }
 
-impl<P, Node, N> ReceiptProviderIdExt for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> ReceiptProviderIdExt for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -622,7 +632,7 @@ where
 {
 }
 
-impl<P, Node, N> TransactionsProvider for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> TransactionsProvider for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -723,7 +733,7 @@ where
     }
 }
 
-impl<P, Node, N> StateProviderFactory for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> StateProviderFactory for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -795,15 +805,15 @@ where
     }
 }
 
-impl<P, Node, N> DatabaseProviderFactory for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> DatabaseProviderFactory for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
     Node: NodeTypes,
 {
     type DB = DatabaseMock;
-    type ProviderRW = AlloyRethStateProvider<P, Node, N>;
-    type Provider = AlloyRethStateProvider<P, Node, N>;
+    type ProviderRW = RpcBlockchainStateProvider<P, Node, N>;
+    type Provider = RpcBlockchainStateProvider<P, Node, N>;
 
     fn database_provider_ro(&self) -> Result<Self::Provider, ProviderError> {
         // RPC provider returns a new state provider
@@ -824,7 +834,7 @@ where
     }
 }
 
-impl<P, Node, N> CanonChainTracker for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> CanonChainTracker for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -852,7 +862,7 @@ where
     }
 }
 
-impl<P, Node, N> NodePrimitivesProvider for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> NodePrimitivesProvider for RpcBlockchainProvider<P, Node, N>
 where
     P: Send + Sync,
     N: Send + Sync,
@@ -861,7 +871,7 @@ where
     type Primitives = PrimitivesTy<Node>;
 }
 
-impl<P, Node, N> CanonStateSubscriptions for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> CanonStateSubscriptions for RpcBlockchainProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -873,7 +883,7 @@ where
     }
 }
 
-impl<P, Node, N> ChainSpecProvider for AlloyRethProvider<P, Node, N>
+impl<P, Node, N> ChainSpecProvider for RpcBlockchainProvider<P, Node, N>
 where
     P: Send + Sync,
     N: Send + Sync,
@@ -887,8 +897,11 @@ where
     }
 }
 
-/// State provider implementation that fetches state via RPC
-pub struct AlloyRethStateProvider<P, Node, N = alloy_network::AnyNetwork>
+/// RPC-based state provider implementation that fetches blockchain state via remote RPC calls.
+///
+/// This is the state provider counterpart to `RpcBlockchainProvider`, handling state queries
+/// at specific block heights via RPC instead of local database access.
+pub struct RpcBlockchainStateProvider<P, Node, N = alloy_network::AnyNetwork>
 where
     Node: NodeTypes,
 {
@@ -913,17 +926,17 @@ where
 }
 
 impl<P: std::fmt::Debug, Node: NodeTypes, N> std::fmt::Debug
-    for AlloyRethStateProvider<P, Node, N>
+    for RpcBlockchainStateProvider<P, Node, N>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AlloyRethStateProvider")
+        f.debug_struct("RpcBlockchainStateProvider")
             .field("provider", &self.provider)
             .field("block_id", &self.block_id)
             .finish()
     }
 }
 
-impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
+impl<P: Clone, Node: NodeTypes, N> RpcBlockchainStateProvider<P, Node, N> {
     /// Creates a new state provider for the given block
     pub fn new(
         provider: P,
@@ -1061,7 +1074,7 @@ impl<P: Clone, Node: NodeTypes, N> AlloyRethStateProvider<P, Node, N> {
     }
 }
 
-impl<P, Node, N> StateProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> StateProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1109,7 +1122,7 @@ where
     }
 }
 
-impl<P, Node, N> BytecodeReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> BytecodeReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1138,7 +1151,7 @@ where
     }
 }
 
-impl<P, Node, N> AccountReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> AccountReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1149,7 +1162,7 @@ where
     }
 }
 
-impl<P, Node, N> StateRootProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> StateRootProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1193,7 +1206,7 @@ where
     }
 }
 
-impl<P, Node, N> StorageReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> StorageReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1232,7 +1245,7 @@ where
     }
 }
 
-impl<P, Node, N> reth_storage_api::StorageRootProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> reth_storage_api::StorageRootProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1266,7 +1279,7 @@ where
     }
 }
 
-impl<P, Node, N> reth_storage_api::StateProofProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> reth_storage_api::StateProofProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1298,7 +1311,8 @@ where
     }
 }
 
-impl<P, Node, N> reth_storage_api::HashedPostStateProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> reth_storage_api::HashedPostStateProvider
+    for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1310,7 +1324,7 @@ where
     }
 }
 
-impl<P, Node, N> StateReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> StateReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1327,7 +1341,7 @@ where
     }
 }
 
-impl<P, Node, N> DBProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> DBProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1359,7 +1373,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockNumReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> BlockNumReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1398,7 +1412,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockHashReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> BlockHashReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1425,7 +1439,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockIdReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> BlockIdReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1451,7 +1465,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> BlockReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1522,7 +1536,7 @@ where
     }
 }
 
-impl<P, Node, N> TransactionsProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> TransactionsProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1593,7 +1607,7 @@ where
     }
 }
 
-impl<P, Node, N> ReceiptProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> ReceiptProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1631,7 +1645,7 @@ where
     }
 }
 
-impl<P, Node, N> HeaderProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> HeaderProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1685,7 +1699,7 @@ where
     }
 }
 
-impl<P, Node, N> PruneCheckpointReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> PruneCheckpointReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1703,7 +1717,7 @@ where
     }
 }
 
-impl<P, Node, N> StageCheckpointReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> StageCheckpointReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1725,7 +1739,7 @@ where
     }
 }
 
-impl<P, Node, N> ChangeSetReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> ChangeSetReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1739,7 +1753,7 @@ where
     }
 }
 
-impl<P, Node, N> StateProviderFactory for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> StateProviderFactory for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static + Send + Sync,
     Node: NodeTypes + 'static,
@@ -1805,7 +1819,7 @@ where
     }
 }
 
-impl<P, Node, N> ChainSpecProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> ChainSpecProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Send + Sync + std::fmt::Debug,
     N: Send + Sync,
@@ -1827,7 +1841,7 @@ where
 // Note: FullExecutionDataProvider is already implemented via the blanket implementation
 // for types that implement both ExecutionDataProvider and BlockExecutionForkProvider
 
-impl<P, Node, N> StatsReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> StatsReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1838,7 +1852,7 @@ where
     }
 }
 
-impl<P, Node, N> BlockBodyIndicesProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> BlockBodyIndicesProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1859,7 +1873,7 @@ where
     }
 }
 
-impl<P, Node, N> NodePrimitivesProvider for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> NodePrimitivesProvider for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Send + Sync + std::fmt::Debug,
     N: Send + Sync,
@@ -1868,7 +1882,7 @@ where
     type Primitives = PrimitivesTy<Node>;
 }
 
-impl<P, Node, N> ChainStateBlockReader for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> ChainStateBlockReader for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1883,7 +1897,7 @@ where
     }
 }
 
-impl<P, Node, N> ChainStateBlockWriter for AlloyRethStateProvider<P, Node, N>
+impl<P, Node, N> ChainStateBlockWriter for RpcBlockchainStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,
     N: Network,
@@ -1895,114 +1909,5 @@ where
 
     fn save_safe_block_number(&self, _block_number: BlockNumber) -> Result<(), ProviderError> {
         Err(ProviderError::UnsupportedProvider)
-    }
-}
-
-// Async database wrapper for revm compatibility
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-struct AsyncDbWrapper<P, N = alloy_network::AnyNetwork> {
-    provider: P,
-    block_id: BlockId,
-    network: std::marker::PhantomData<N>,
-}
-
-#[allow(dead_code)]
-impl<P, N> AsyncDbWrapper<P, N> {
-    const fn new(provider: P, block_id: BlockId) -> Self {
-        Self { provider, block_id, network: std::marker::PhantomData }
-    }
-
-    /// Helper function to execute async operations in a blocking context
-    fn block_on_async<F, T>(&self, fut: F) -> T
-    where
-        F: Future<Output = T>,
-    {
-        tokio::task::block_in_place(move || Handle::current().block_on(fut))
-    }
-}
-
-impl<P, N> revm::Database for AsyncDbWrapper<P, N>
-where
-    P: Provider<N> + Clone + 'static,
-    N: Network,
-{
-    type Error = ProviderError;
-
-    fn basic(&mut self, address: Address) -> Result<Option<revm::state::AccountInfo>, Self::Error> {
-        self.block_on_async(async {
-            let account_info = self
-                .provider
-                .get_account_info(address)
-                .block_id(self.block_id)
-                .await
-                .map_err(ProviderError::other)?;
-
-            // Only return account if it exists
-            if account_info.balance.is_zero() &&
-                account_info.nonce == 0 &&
-                account_info.code.is_empty()
-            {
-                Ok(None)
-            } else {
-                let code_hash = if account_info.code.is_empty() {
-                    revm_primitives::KECCAK_EMPTY
-                } else {
-                    revm_primitives::keccak256(&account_info.code)
-                };
-
-                Ok(Some(revm::state::AccountInfo {
-                    balance: account_info.balance,
-                    nonce: account_info.nonce,
-                    code_hash,
-                    code: if account_info.code.is_empty() {
-                        None
-                    } else {
-                        Some(revm::bytecode::Bytecode::new_raw(account_info.code))
-                    },
-                }))
-            }
-        })
-    }
-
-    fn code_by_hash(&mut self, code_hash: B256) -> Result<revm::bytecode::Bytecode, Self::Error> {
-        self.block_on_async(async {
-            // The method `debug_codeByHash` is currently only available on a Reth node
-            let code = self
-                .provider
-                .debug_code_by_hash(code_hash, None)
-                .await
-                .map_err(Self::Error::other)?;
-
-            let Some(code) = code else {
-                // If the code was not found, return
-                return Ok(revm::bytecode::Bytecode::new());
-            };
-
-            Ok(revm::bytecode::Bytecode::new_raw(code))
-        })
-    }
-
-    fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.block_on_async(async {
-            self.provider
-                .get_storage_at(address, index)
-                .block_id(self.block_id)
-                .await
-                .map_err(ProviderError::other)
-        })
-    }
-
-    fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        self.block_on_async(async {
-            let block = self
-                .provider
-                .get_block_by_number(number.into())
-                .await
-                .map_err(ProviderError::other)?
-                .ok_or(ProviderError::HeaderNotFound(number.into()))?;
-
-            Ok(block.header().hash())
-        })
     }
 }
