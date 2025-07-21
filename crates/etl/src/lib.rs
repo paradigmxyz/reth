@@ -131,15 +131,30 @@ where
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.buffer_size_bytes = 0;
-        self.buffer.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        let mut buf = Vec::with_capacity(self.buffer.len());
-        std::mem::swap(&mut buf, &mut self.buffer);
+    self.buffer_size_bytes = 0;
+    self.buffer.par_sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    let mut buf = Vec::with_capacity(self.buffer.len());
+    std::mem::swap(&mut buf, &mut self.buffer);
 
-        let path = self.dir()?.path().to_path_buf();
-        self.files.push(EtlFile::new(path.as_path(), buf)?);
+    let path = self.dir()?.path().to_path_buf();
 
-        Ok(())
+    // Try to create a new temporary ETL file and handle errors properly
+    match EtlFile::new(path.as_path(), buf) {
+        Ok(file) => {
+            // Success: add the file to the list of ETL files
+            self.files.push(file);
+        }
+        Err(e) => {
+            // If an error occurs, try to remove the temporary file to avoid leaving garbage on disk
+            // (This is especially important if EtlFile::new created the file but failed to write)
+            let _ = std::fs::remove_file(&path);
+            // Return the original error to the caller
+            return Err(e);
+        }
+    }
+
+    Ok(())
+}
     }
 
     /// Returns an iterator over the collector data.
