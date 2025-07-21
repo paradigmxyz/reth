@@ -36,10 +36,15 @@ impl BenchContext {
     pub(crate) async fn new(bench_args: &BenchmarkArgs, rpc_url: String) -> eyre::Result<Self> {
         info!("Running benchmark using data from RPC URL: {}", rpc_url);
 
-        // Ensure that output directory is a directory
+        // Ensure that output directory exists and is a directory
         if let Some(output) = &bench_args.output {
             if output.is_file() {
                 return Err(eyre::eyre!("Output path must be a directory"));
+            }
+            // Create the directory if it doesn't exist
+            if !output.exists() {
+                std::fs::create_dir_all(output)?;
+                info!("Created output directory: {:?}", output);
             }
         }
 
