@@ -23,10 +23,9 @@ where
 {
     /// Map of block numbers to block hashes.
     /// This is used to service the `BLOCKHASH` opcode.
-    // TODO: use Vec instead -- ancestors should be contiguous
-    // TODO: so we can use the current_block_number and an offset to
-    // TODO: get the block number of a particular ancestor
-    block_hashes_by_block_number: BTreeMap<u64, B256>,
+    /// Switched from BTreeMap to Vec for contiguous ancestors for faster access by offset.
+    /// TODO: If block numbers are not contiguous, ensure Vec is filled correctly or handle gaps.
+    block_hashes_by_block_number: Vec<B256>,
     /// Map of code hashes to bytecode.
     /// Used to fetch contract code needed during execution.
     bytecode: B256Map<Bytecode>,
@@ -60,7 +59,7 @@ where
         bytecode: B256Map<Bytecode>,
         ancestor_hashes: BTreeMap<u64, B256>,
     ) -> Self {
-        Self { trie, block_hashes_by_block_number: ancestor_hashes, bytecode }
+        Self { trie, block_hashes_by_block_number: ancestor_hashes.into_values().collect(), bytecode }
     }
 }
 
@@ -107,7 +106,7 @@ where
     /// Returns an error if the hash for the given block number is not found in the map.
     fn block_hash(&mut self, block_number: u64) -> Result<B256, Self::Error> {
         self.block_hashes_by_block_number
-            .get(&block_number)
+            .get(block_number as usize)
             .copied()
             .ok_or(ProviderError::StateForNumberNotFound(block_number))
     }
