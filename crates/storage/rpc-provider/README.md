@@ -1,11 +1,12 @@
-# Alloy Provider for Reth
+# RPC Blockchain Provider for Reth
 
-This crate provides an implementation of reth's `StateProviderFactory` and related traits that fetches state data via RPC instead of from a local database.
+This crate provides an RPC-based implementation of reth's [`BlockchainProvider`](../provider/src/providers/blockchain_provider.rs) which provides access to local blockchain data, this crate offers the same functionality but for remote blockchain access via RPC.
 
 Originally created by [cakevm](https://github.com/cakevm/alloy-reth-provider).
 
 ## Features
 
+- Provides the same interface as `BlockchainProvider` but for remote nodes
 - Implements `StateProviderFactory` for remote RPC state access
 - Supports Ethereum networks
 - Useful for testing without requiring a full database
@@ -15,8 +16,7 @@ Originally created by [cakevm](https://github.com/cakevm/alloy-reth-provider).
 
 ```rust
 use alloy_provider::ProviderBuilder;
-use reth_alloy_provider::AlloyRethProvider;
-use reth_ethereum_node::EthereumNode;
+use reth_storage_rpc_provider::RpcBlockchainProvider;
 
 // Initialize provider
 let provider = ProviderBuilder::new()
@@ -24,11 +24,11 @@ let provider = ProviderBuilder::new()
     .await
     .unwrap();
 
-// Create database provider with NodeTypes
-let db_provider = AlloyRethProvider::new(provider, EthereumNode);
+// Create RPC blockchain provider with NodeTypes
+let rpc_provider = RpcBlockchainProvider::new(provider);
 
-// Get state at specific block
-let state = db_provider.state_by_block_id(BlockId::number(16148323)).unwrap();
+// Get state at specific block - same interface as BlockchainProvider
+let state = rpc_provider.state_by_block_id(BlockId::number(16148323)).unwrap();
 ```
 
 ## Configuration
@@ -36,15 +36,14 @@ let state = db_provider.state_by_block_id(BlockId::number(16148323)).unwrap();
 The provider can be configured with custom settings:
 
 ```rust
-use reth_alloy_provider::{AlloyRethProvider, AlloyRethProviderConfig};
-use reth_ethereum_node::EthereumNode;
+use reth_storage_rpc_provider::{RpcBlockchainProvider, RpcBlockchainProviderConfig};
 
-let config = AlloyRethProviderConfig {
+let config = RpcBlockchainProviderConfig {
     compute_state_root: true,  // Enable state root computation
     reth_rpc_support: true,    // Use Reth-specific RPC methods (default: true)
 };
 
-let db_provider = AlloyRethProvider::new_with_config(provider, EthereumNode, config);
+let rpc_provider = RpcBlockchainProvider::new_with_config(provider, config);
 ```
 
 ## Configuration Options
@@ -58,7 +57,9 @@ let db_provider = AlloyRethProvider::new_with_config(provider, EthereumNode, con
 
 ## Technical Details
 
-The provider uses `alloy_network::AnyNetwork` for network operations, providing compatibility with various Ethereum-based networks while maintaining the expected block structure with headers.
+The `RpcBlockchainProvider` uses `alloy_network::AnyNetwork` for network operations, providing compatibility with various Ethereum-based networks while maintaining the expected block structure with headers.
+
+This provider implements the same traits as the local `BlockchainProvider`, making it a drop-in replacement for scenarios where remote RPC access is preferred over local database access.
 
 ## License
 
