@@ -43,6 +43,5 @@ pub use reth_optimism_evm::*;
 
 pub use reth_optimism_storage::OpStorage;
 
-
 use op_revm as _;
 use revm as _;
