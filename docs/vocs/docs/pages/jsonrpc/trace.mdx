@@ -4,8 +4,6 @@ description: Trace API for inspecting Ethereum state and transactions.
 
 # `trace` Namespace
 
-{/* TODO: We should probably document the format of the traces themselves, OE does not do that */}
-
 The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces.
 
 A similar module exists (with other debug functions) with Geth-style traces ([`debug`](/jsonrpc/debug)).
@@ -16,6 +14,128 @@ There are two types of methods in this API:
 
 -   **Ad-hoc tracing APIs** for performing diagnostics on calls or transactions (historical or hypothetical).
 -   **Transaction-trace filtering APIs** for getting full externality traces on any transaction executed by reth.
+
+## Trace Format Specification
+
+The trace API returns different types of trace data depending on the requested trace types. Understanding these formats is crucial for interpreting the results.
+
+### TraceResults
+
+The `TraceResults` object is returned by ad-hoc tracing methods (`trace_call`, `trace_callMany`, `trace_rawTransaction`, `trace_replayTransaction`, `trace_replayBlockTransactions`). It contains the following fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `output` | `string` | The return value of the traced call, encoded as hex |
+| `stateDiff` | `object \| null` | State changes caused by the transaction (only if `stateDiff` trace type requested) |
+| `trace` | `array \| null` | Array of transaction traces (only if `trace` trace type requested) |
+| `vmTrace` | `object \| null` | Virtual machine execution trace (only if `vmTrace` trace type requested) |
+
+### LocalizedTransactionTrace
+
+Individual transaction traces in `trace_block`, `trace_filter`, `trace_get`, and `trace_transaction` methods return `LocalizedTransactionTrace` objects:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `action` | `object` | The action performed by this trace |
+| `result` | `object \| null` | The result of the trace execution |
+| `error` | `string \| null` | Error message if the trace failed |
+| `blockHash` | `string \| null` | Hash of the block containing this trace |
+| `blockNumber` | `number \| null` | Number of the block containing this trace |
+| `transactionHash` | `string \| null` | Hash of the transaction containing this trace |
+| `transactionPosition` | `number \| null` | Position of the transaction in the block |
+| `subtraces` | `number` | Number of child traces |
+| `traceAddress` | `array` | Position of this trace in the call tree |
+| `type` | `string` | Type of action: `"call"`, `"create"`, `"suicide"`, or `"reward"` |
+
+### Action Types
+
+#### Call Action (`type: "call"`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `callType` | `string` | Type of call: `"call"`, `"callcode"`, `"delegatecall"`, or `"staticcall"` |
+| `from` | `string` | Address of the caller |
+| `to` | `string` | Address of the callee |
+| `gas` | `string` | Gas provided for the call |
+| `input` | `string` | Input data for the call |
+| `value` | `string` | Value transferred in the call |
+
+#### Create Action (`type: "create"`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `from` | `string` | Address of the creator |
+| `gas` | `string` | Gas provided for contract creation |
+| `init` | `string` | Contract initialization code |
+| `value` | `string` | Value sent to the new contract |
+
+#### Suicide Action (`type: "suicide"`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `address` | `string` | Address of the contract being destroyed |
+| `refundAddress` | `string` | Address receiving the remaining balance |
+| `balance` | `string` | Balance transferred to refund address |
+
+#### Reward Action (`type: "reward"`)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `author` | `string` | Address receiving the reward |
+| `value` | `string` | Amount of the reward |
+| `rewardType` | `string` | Type of reward: `"block"` or `"uncle"` |
+
+### Result Format
+
+When a trace executes successfully, the `result` field contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `gasUsed` | `string` | Amount of gas consumed by this trace |
+| `output` | `string` | Return data from the trace execution |
+| `address` | `string` | Created contract address (for create actions only) |
+| `code` | `string` | Deployed contract code (for create actions only) |
+
+### State Diff Format
+
+When `stateDiff` trace type is requested, the `stateDiff` field contains an object mapping addresses to their state changes:
+
+```json
+{
+  "0x123...": {
+    "balance": {
+      "*": {
+        "from": "0x0",
+        "to": "0x1000"
+      }
+    },
+    "nonce": {
+      "*": {
+        "from": "0x0",
+        "to": "0x1"
+      }
+    },
+    "code": {
+      "*": {
+        "from": "0x",
+        "to": "0x608060405234801561001057600080fd5b50..."
+      }
+    },
+    "storage": {
+      "0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563": {
+        "*": {
+          "from": "0x0",
+          "to": "0x1"
+        }
+      }
+    }
+  }
+}
+```
+
+### VM Trace Format
+
+When `vmTrace` trace type is requested, the `vmTrace` field contains detailed virtual machine execution information including opcodes, stack, memory, and storage changes at each step. The exact format depends on the specific VM tracer implementation.
 
 ## Ad-hoc tracing APIs
 
