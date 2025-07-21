@@ -174,7 +174,7 @@ pub(crate) struct StateProviderMetrics {
 impl<S: AccountReader> AccountReader for InstrumentedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         let start = Instant::now();
-        let res = self.state_provider.basic_account(address);
+        let res = self.state_provider.basic_account(address)?;
         self.record_account_fetch(start.elapsed());
         res
     }
@@ -187,7 +187,7 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         let start = Instant::now();
-        let res = self.state_provider.storage(account, storage_key);
+        let res = self.state_provider.storage(account, storage_key)?;
         self.record_storage_fetch(start.elapsed());
         res
     }
@@ -196,7 +196,7 @@ impl<S: StateProvider> StateProvider for InstrumentedStateProvider<S> {
 impl<S: BytecodeReader> BytecodeReader for InstrumentedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         let start = Instant::now();
-        let res = self.state_provider.bytecode_by_hash(code_hash);
+        let res = self.state_provider.bytecode_by_hash(code_hash)?;
         self.record_code_fetch(start.elapsed());
         res
     }
