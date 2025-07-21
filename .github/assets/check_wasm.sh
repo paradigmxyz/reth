@@ -60,7 +60,7 @@ exclude_crates=(
   reth-ress-provider
   # The following are not supposed to be working
   reth # all of the crates below
-  reth-alloy-provider
+  reth-storage-rpc-provider
   reth-invalid-block-hooks # reth-provider
   reth-libmdbx # mdbx
   reth-mdbx-sys # mdbx
