@@ -332,7 +332,7 @@ where
             } else {
                 ConfiguredSparseTrie::Serial(Default::default())
             };
-            ClearedSparseStateTrie::cleared(
+            ClearedSparseStateTrie::from_state_trie(
                 SparseStateTrie::new()
                     .with_accounts_trie(SparseTrie::Blind(Some(Box::new(accounts_trie))))
                     .with_updates(true),
@@ -353,9 +353,9 @@ where
             // Send state root computation result
             let _ = state_root_tx.send(result);
 
-            // Clear the SparseStateTrie and replace it back into the mutex _after_ acquiring the
-            // lock, so that time spent clearing doesn't block the step after this one.
-            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::cleared(trie));
+            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending results
+            // to the next step, so that time spent clearing doesn't block the step after this one.
+            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
         });
     }
 }
