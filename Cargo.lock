@@ -7202,6 +7202,7 @@ dependencies = [
  "alloy-provider",
  "alloy-rpc-types",
  "alloy-rpc-types-engine",
+ "parking_lot",
  "reth-chainspec",
  "reth-db-api",
  "reth-errors",
