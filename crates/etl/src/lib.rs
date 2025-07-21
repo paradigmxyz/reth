@@ -146,7 +146,8 @@ where
             }
             Err(e) => {
                 // If an error occurs, try to remove the temporary file to avoid leaving garbage on
-                // disk. This is especially important if EtlFile::new created the file but failed to write
+                // disk. This is especially important if EtlFile::new created the file but failed to
+                // write
                 let _ = std::fs::remove_file(&path);
                 // Return the original error to the caller
                 return Err(e);
