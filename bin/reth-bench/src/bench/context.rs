@@ -79,9 +79,15 @@ impl BenchContext {
         let auth_provider = RootProvider::<AnyNetwork>::new(client);
 
         let first_block = match benchmark_mode {
-            BenchMode::Continuous => {
-                // fetch Latest block
-                block_provider.get_block_by_number(BlockNumberOrTag::Latest).full().await?.unwrap()
+            BenchMode::Continuous { start } => {
+                let block_number = if start == 0 && bench_args.from.is_none() {
+                    BlockNumberOrTag::Latest
+                } else {
+                    BlockNumberOrTag::Number(start)
+                };
+
+                // fetch block
+                block_provider.get_block_by_number(block_number).full().await?.unwrap()
             }
             BenchMode::Range(ref mut range) => {
                 match range.next() {
