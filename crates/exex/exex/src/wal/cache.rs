@@ -3,9 +3,11 @@ use std::{
     collections::{BinaryHeap, HashSet},
 };
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_primitives::{map::FbHashMap, BlockNumber, B256};
 use reth_exex_types::ExExNotification;
+use reth_node_api::NodePrimitives;
 
 /// The block cache of the WAL.
 ///
@@ -33,6 +35,11 @@ impl BlockCache {
     /// Returns `true` if the cache is empty.
     pub(super) fn is_empty(&self) -> bool {
         self.notification_max_blocks.is_empty()
+    }
+
+    /// Returns the number of blocks in the cache.
+    pub(super) fn num_blocks(&self) -> usize {
+        self.committed_blocks.len()
     }
 
     /// Removes all files from the cache that has notifications with a tip block less than or equal
@@ -86,16 +93,16 @@ impl BlockCache {
     }
 
     /// Inserts the blocks from the notification into the cache with the given file ID.
-    pub(super) fn insert_notification_blocks_with_file_id(
+    pub(super) fn insert_notification_blocks_with_file_id<N: NodePrimitives>(
         &mut self,
         file_id: u32,
-        notification: &ExExNotification,
+        notification: &ExExNotification<N>,
     ) {
         let reverted_chain = notification.reverted_chain();
         let committed_chain = notification.committed_chain();
 
         let max_block =
-            reverted_chain.iter().chain(&committed_chain).map(|chain| chain.tip().number).max();
+            reverted_chain.iter().chain(&committed_chain).map(|chain| chain.tip().number()).max();
         if let Some(max_block) = max_block {
             self.notification_max_blocks.push(Reverse((max_block, file_id)));
         }
@@ -103,13 +110,13 @@ impl BlockCache {
         if let Some(committed_chain) = &committed_chain {
             for block in committed_chain.blocks().values() {
                 let cached_block = CachedBlock {
-                    block: (block.number, block.hash()).into(),
-                    parent_hash: block.parent_hash,
+                    block: (block.number(), block.hash()).into(),
+                    parent_hash: block.parent_hash(),
                 };
                 self.committed_blocks.insert(block.hash(), (file_id, cached_block));
             }
 
-            self.highest_committed_block_height = Some(committed_chain.tip().number);
+            self.highest_committed_block_height = Some(committed_chain.tip().number());
         }
     }
 

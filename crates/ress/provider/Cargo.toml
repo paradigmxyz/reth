@@ -1,0 +1,37 @@
+[package]
+name = "reth-ress-provider"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+reth-ress-protocol.workspace = true
+reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
+reth-errors.workspace = true
+reth-evm.workspace = true
+reth-revm = { workspace = true, features = ["witness"] }
+reth-chain-state.workspace = true
+reth-trie.workspace = true
+reth-ethereum-primitives.workspace = true
+reth-tasks.workspace = true
+reth-tokio-util.workspace = true
+reth-node-api.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+
+# misc
+futures.workspace = true
+tokio.workspace = true
+parking_lot.workspace = true
+schnellru.workspace = true
+eyre.workspace = true
+tracing.workspace = true

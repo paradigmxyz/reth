@@ -1,22 +1,24 @@
 //! This example shows how to run a custom dev node programmatically and submit a transaction
 //! through rpc.
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use std::sync::Arc;
 
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures_util::StreamExt;
-use reth::{
-    builder::{NodeBuilder, NodeHandle},
-    providers::CanonStateSubscriptions,
+use reth_ethereum::{
+    chainspec::ChainSpec,
+    node::{
+        builder::{NodeBuilder, NodeHandle},
+        core::{args::RpcServerArgs, node_config::NodeConfig},
+        EthereumNode,
+    },
+    provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,
     tasks::TaskManager,
 };
-use reth_chainspec::ChainSpec;
-use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
-use reth_node_ethereum::EthereumNode;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -37,21 +39,23 @@ async fn main() -> eyre::Result<()> {
     let mut notifications = node.provider.canonical_state_stream();
 
     // submit tx through rpc
-    let raw_tx = hex!("02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090");
+    let raw_tx = hex!(
+        "02f876820a28808477359400847735940082520894ab0840c0e43688012c1adb0f5e3fc665188f83d28a029d394a5d630544000080c080a0a044076b7e67b5deecc63f61a8d7913fab86ca365b344b5759d1fe3563b4c39ea019eab979dd000da04dfc72bb0377c092d30fd9e1cab5ae487de49586cc8b0090"
+    );
 
     let eth_api = node.rpc_registry.eth_api();
 
     let hash = eth_api.send_raw_transaction(raw_tx.into()).await?;
 
-    let expected = b256!("b1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
+    let expected = b256!("0xb1c6512f4fc202c04355fbda66755e0e344b152e633010e8fd75ecec09b63398");
 
     assert_eq!(hash, expected);
     println!("submitted transaction: {hash}");
 
     let head = notifications.next().await.unwrap();
 
-    let tx = head.tip().transactions().next().unwrap();
-    assert_eq!(tx.hash(), hash);
+    let tx = &head.tip().body().transactions().next().unwrap();
+    assert_eq!(*tx.tx_hash(), hash);
     println!("mined transaction: {hash}");
     Ok(())
 }
@@ -62,7 +66,7 @@ fn custom_chain() -> Arc<ChainSpec> {
     "nonce": "0x42",
     "timestamp": "0x0",
     "extraData": "0x5343",
-    "gasLimit": "0x1388",
+    "gasLimit": "0x5208",
     "difficulty": "0x400000000",
     "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
     "coinbase": "0x0000000000000000000000000000000000000000",

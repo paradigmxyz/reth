@@ -1,14 +1,18 @@
-//! Error types emitted by types or implementations of this crate.
+//! Error types for payload operations.
 
+use alloc::{boxed::Box, string::ToString};
 use alloy_primitives::B256;
-use reth_errors::{ProviderError, RethError};
-use reth_primitives::revm_primitives::EVMError;
-use reth_transaction_pool::BlobStoreError;
+use alloy_rpc_types_engine::{ForkchoiceUpdateError, PayloadError, PayloadStatusEnum};
+use core::error;
+use reth_errors::{BlockExecutionError, ProviderError, RethError};
 use tokio::sync::oneshot;
 
 /// Possible error variants during payload building.
 #[derive(Debug, thiserror::Error)]
 pub enum PayloadBuilderError {
+    /// Thrown when the parent header cannot be found
+    #[error("missing parent header: {0}")]
+    MissingParentHeader(B256),
     /// Thrown when the parent block is missing.
     #[error("missing parent block {0}")]
     MissingParentBlock(B256),
@@ -18,27 +22,26 @@ pub enum PayloadBuilderError {
     /// If there's no payload to resolve.
     #[error("missing payload")]
     MissingPayload,
-    /// Build cancelled
-    #[error("build outcome cancelled")]
-    BuildOutcomeCancelled,
-    /// Error occurring in the blob store.
-    #[error(transparent)]
-    BlobStore(#[from] BlobStoreError),
     /// Other internal error
     #[error(transparent)]
     Internal(#[from] RethError),
     /// Unrecoverable error during evm execution.
     #[error("evm execution error: {0}")]
-    EvmExecutionError(EVMError<ProviderError>),
-    /// Thrown if the payload requests withdrawals before Shanghai activation.
-    #[error("withdrawals set before Shanghai activation")]
-    WithdrawalsBeforeShanghai,
+    EvmExecutionError(Box<dyn core::error::Error + Send + Sync>),
     /// Any other payload building errors.
     #[error(transparent)]
     Other(Box<dyn core::error::Error + Send + Sync>),
 }
 
 impl PayloadBuilderError {
+    /// Create a new EVM error from a boxed error.
+    pub fn evm<E>(error: E) -> Self
+    where
+        E: core::error::Error + Send + Sync + 'static,
+    {
+        Self::EvmExecutionError(Box::new(error))
+    }
+
     /// Create a new error from a boxed error.
     pub fn other<E>(error: E) -> Self
     where
@@ -60,7 +63,13 @@ impl From<oneshot::error::RecvError> for PayloadBuilderError {
     }
 }
 
-/// Thrown when the payload or attributes are known to be invalid before processing.
+impl From<BlockExecutionError> for PayloadBuilderError {
+    fn from(error: BlockExecutionError) -> Self {
+        Self::evm(error)
+    }
+}
+
+/// Thrown when the payload or attributes are known to be invalid __before__ processing.
 ///
 /// This is used mainly for
 /// [`validate_version_specific_fields`](crate::validate_version_specific_fields), which validates
@@ -113,6 +122,45 @@ pub enum VersionSpecificValidationError {
     NoParentBeaconBlockRootPostCancun,
 }
 
+/// Error validating payload received over `newPayload` API.
+#[derive(thiserror::Error, Debug)]
+pub enum NewPayloadError {
+    /// Payload validation error.
+    #[error(transparent)]
+    Eth(#[from] PayloadError),
+    /// Custom payload validation error.
+    #[error(transparent)]
+    Other(Box<dyn error::Error + Send + Sync>),
+}
+
+impl NewPayloadError {
+    /// Creates instance of variant [`NewPayloadError::Other`].
+    #[inline]
+    pub fn other(err: impl error::Error + Send + Sync + 'static) -> Self {
+        Self::Other(Box::new(err))
+    }
+}
+
+impl NewPayloadError {
+    /// Returns `true` if the error is caused by a block hash mismatch.
+    #[inline]
+    pub const fn is_block_hash_mismatch(&self) -> bool {
+        matches!(self, Self::Eth(PayloadError::BlockHash { .. }))
+    }
+
+    /// Returns `true` if the error is caused by invalid block hashes (Cancun).
+    #[inline]
+    pub const fn is_invalid_versioned_hashes(&self) -> bool {
+        matches!(self, Self::Eth(PayloadError::InvalidVersionedHashes))
+    }
+}
+
+impl From<NewPayloadError> for PayloadStatusEnum {
+    fn from(error: NewPayloadError) -> Self {
+        Self::Invalid { validation_error: error.to_string() }
+    }
+}
+
 impl EngineObjectValidationError {
     /// Creates an instance of the `InvalidParams` variant with the given error.
     pub fn invalid_params<E>(error: E) -> Self
@@ -120,5 +168,22 @@ impl EngineObjectValidationError {
         E: core::error::Error + Send + Sync + 'static,
     {
         Self::InvalidParams(Box::new(error))
+    }
+}
+
+/// Thrown when validating the correctness of a payloadattributes object.
+#[derive(thiserror::Error, Debug)]
+pub enum InvalidPayloadAttributesError {
+    /// Thrown if the timestamp of the payload attributes is invalid according to the engine specs.
+    #[error("invalid timestamp")]
+    InvalidTimestamp,
+    /// Another type of error that is not covered by the above variants.
+    #[error("Invalid params: {0}")]
+    InvalidParams(#[from] Box<dyn core::error::Error + Send + Sync>),
+}
+
+impl From<InvalidPayloadAttributesError> for ForkchoiceUpdateError {
+    fn from(_: InvalidPayloadAttributesError) -> Self {
+        Self::UpdatedInvalidPayloadAttributes
     }
 }

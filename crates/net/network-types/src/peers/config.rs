@@ -24,6 +24,9 @@ pub const DEFAULT_MAX_COUNT_PEERS_INBOUND: u32 = 30;
 /// This restricts how many outbound dials can be performed concurrently.
 pub const DEFAULT_MAX_COUNT_CONCURRENT_OUTBOUND_DIALS: usize = 15;
 
+/// A temporary timeout for ips on incoming connection attempts.
+pub const INBOUND_IP_THROTTLE_DURATION: Duration = Duration::from_secs(30);
+
 /// The durations to use when a backoff should be applied to a peer.
 ///
 /// See also [`BackoffKind`].
@@ -128,6 +131,9 @@ pub struct PeersConfig {
     /// Connect to or accept from trusted nodes only?
     #[cfg_attr(feature = "serde", serde(alias = "connect_trusted_nodes_only"))]
     pub trusted_nodes_only: bool,
+    /// Interval to update trusted nodes DNS resolution
+    #[cfg_attr(feature = "serde", serde(with = "humantime_serde"))]
+    pub trusted_nodes_resolution_interval: Duration,
     /// Maximum number of backoff attempts before we give up on a peer and dropping.
     ///
     /// The max time spent of a peer before it's removed from the set is determined by the
@@ -155,6 +161,11 @@ pub struct PeersConfig {
     ///
     /// The backoff duration increases with number of backoff attempts.
     pub backoff_durations: PeerBackoffDurations,
+    /// How long to temporarily ban ips on incoming connection attempts.
+    ///
+    /// This acts as an IP based rate limit.
+    #[cfg_attr(feature = "serde", serde(default, with = "humantime_serde"))]
+    pub incoming_ip_throttle_duration: Duration,
 }
 
 impl Default for PeersConfig {
@@ -169,8 +180,10 @@ impl Default for PeersConfig {
             backoff_durations: Default::default(),
             trusted_nodes: Default::default(),
             trusted_nodes_only: false,
+            trusted_nodes_resolution_interval: Duration::from_secs(60 * 60),
             basic_nodes: Default::default(),
             max_backoff_count: 5,
+            incoming_ip_throttle_duration: INBOUND_IP_THROTTLE_DURATION,
         }
     }
 }
@@ -185,6 +198,12 @@ impl PeersConfig {
     /// Configure how long to ban bad peers
     pub const fn with_ban_duration(mut self, ban_duration: Duration) -> Self {
         self.ban_duration = ban_duration;
+        self
+    }
+
+    /// Configure how long to refill outbound slots
+    pub const fn with_refill_slots_interval(mut self, interval: Duration) -> Self {
+        self.refill_slots_interval = interval;
         self
     }
 

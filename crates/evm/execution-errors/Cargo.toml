@@ -12,18 +12,22 @@ workspace = true
 
 [dependencies]
 # reth
-reth-consensus.workspace = true
 reth-storage-errors.workspace = true
-reth-prune-types.workspace = true
 
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
-alloy-eips.workspace = true
-revm-primitives.workspace = true
 nybbles.workspace = true
 
-derive_more.workspace = true
+thiserror.workspace = true
 
 [features]
 default = ["std"]
-std = ["reth-consensus/std"]
+std = [
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "thiserror/std",
+    "nybbles/std",
+    "reth-storage-errors/std",
+    "alloy-evm/std",
+]

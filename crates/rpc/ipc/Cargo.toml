@@ -12,13 +12,11 @@ description = "IPC support for reth"
 workspace = true
 
 [dependencies]
-
 # async/net
 futures.workspace = true
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread"] }
 tokio-util = { workspace = true, features = ["codec"] }
 tokio-stream.workspace = true
-async-trait.workspace = true
 pin-project.workspace = true
 tower.workspace = true
 
@@ -28,10 +26,11 @@ serde_json.workspace = true
 tracing.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
-futures-util = "0.3.30"
-interprocess = { version = "2.2.0", features = ["tokio"] }
+futures-util.workspace = true
+interprocess = { workspace = true, features = ["tokio"] }
 
 [dev-dependencies]
 tokio-stream = { workspace = true, features = ["sync"] }
+serde.workspace = true
 reth-tracing.workspace = true
 rand.workspace = true

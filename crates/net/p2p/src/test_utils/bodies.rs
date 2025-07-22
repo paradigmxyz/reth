@@ -6,8 +6,12 @@ use crate::{
 };
 use alloy_primitives::B256;
 use futures::FutureExt;
-use reth_primitives::BlockBody;
-use std::fmt::{Debug, Formatter};
+use reth_ethereum_primitives::BlockBody;
+use reth_network_peers::PeerId;
+use std::{
+    fmt::{Debug, Formatter},
+    ops::RangeInclusive,
+};
 use tokio::sync::oneshot;
 
 /// A test client for fetching bodies
@@ -23,7 +27,7 @@ impl<F> Debug for TestBodiesClient<F> {
 }
 
 impl<F: Sync + Send> DownloadClient for TestBodiesClient<F> {
-    fn report_bad_message(&self, _peer_id: reth_network_peers::PeerId) {
+    fn report_bad_message(&self, _peer_id: PeerId) {
         // noop
     }
 
@@ -36,12 +40,14 @@ impl<F> BodiesClient for TestBodiesClient<F>
 where
     F: Fn(Vec<B256>) -> PeerRequestResult<Vec<BlockBody>> + Send + Sync,
 {
+    type Body = BlockBody;
     type Output = BodiesFut;
 
-    fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority_and_range_hint(
         &self,
         hashes: Vec<B256>,
         _priority: Priority,
+        _range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         let (tx, rx) = oneshot::channel();
         let _ = tx.send((self.responder)(hashes));

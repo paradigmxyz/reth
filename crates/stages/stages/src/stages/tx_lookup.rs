@@ -1,12 +1,16 @@
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
-use reth_db::{tables, RawKey, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    transaction::{DbTx, DbTxMut},
+    table::Value,
+    tables,
+    transaction::DbTxMut,
+    RawKey, RawValue,
 };
 use reth_etl::Collector;
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{
     BlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
     StaticFileProviderFactory, StatsReader, TransactionsProvider, TransactionsProviderExt,
@@ -60,7 +64,7 @@ where
         + BlockReader
         + PruneCheckpointReader
         + StatsReader
-        + StaticFileProviderFactory
+        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value + SignedTransaction>>
         + TransactionsProviderExt,
 {
     /// Return the id of the stage
@@ -161,9 +165,9 @@ where
 
                     let key = RawKey::<TxHash>::from_vec(hash);
                     if append_only {
-                        txhash_cursor.append(key, RawValue::<TxNumber>::from_vec(number))?
+                        txhash_cursor.append(key, &RawValue::<TxNumber>::from_vec(number))?
                     } else {
-                        txhash_cursor.insert(key, RawValue::<TxNumber>::from_vec(number))?
+                        txhash_cursor.insert(key, &RawValue::<TxNumber>::from_vec(number))?
                     }
                 }
 
@@ -192,12 +196,16 @@ where
         let tx = provider.tx_ref();
         let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
-        // Cursors to unwind tx hash to number
-        let mut body_cursor = tx.cursor_read::<tables::BlockBodyIndices>()?;
+        // Cursor to unwind tx hash to number
         let mut tx_hash_number_cursor = tx.cursor_write::<tables::TransactionHashNumbers>()?;
         let static_file_provider = provider.static_file_provider();
-        let mut rev_walker = body_cursor.walk_back(Some(*range.end()))?;
-        while let Some((number, body)) = rev_walker.next().transpose()? {
+        let rev_walker = provider
+            .block_body_indices_range(range.clone())?
+            .into_iter()
+            .zip(range.collect::<Vec<_>>())
+            .rev();
+
+        for (body, number) in rev_walker {
             if number <= unwind_to {
                 break;
             }
@@ -206,7 +214,7 @@ where
             for tx_id in body.tx_num_range() {
                 // First delete the transaction and hash to id mapping
                 if let Some(transaction) = static_file_provider.transaction_by_id(tx_id)? {
-                    if tx_hash_number_cursor.seek_exact(transaction.hash())?.is_some() {
+                    if tx_hash_number_cursor.seek_exact(transaction.trie_hash())?.is_some() {
                         tx_hash_number_cursor.delete_current()?;
                     }
                 }
@@ -252,9 +260,12 @@ mod tests {
     };
     use alloy_primitives::{BlockNumber, B256};
     use assert_matches::assert_matches;
-    use reth_primitives::SealedBlock;
+    use reth_db_api::transaction::DbTx;
+    use reth_ethereum_primitives::Block;
+    use reth_primitives_traits::SealedBlock;
     use reth_provider::{
-        providers::StaticFileWriter, DatabaseProviderFactory, StaticFileProviderFactory,
+        providers::StaticFileWriter, BlockBodyIndicesProvider, DatabaseProviderFactory,
+        StaticFileProviderFactory,
     };
     use reth_stages_api::StageUnitCheckpoint;
     use reth_testing_utils::generators::{
@@ -381,9 +392,9 @@ mod tests {
         let mut tx_hash_numbers = Vec::new();
         let mut tx_hash_number = 0;
         for block in &blocks[..=max_processed_block] {
-            for transaction in &block.body.transactions {
+            for transaction in &block.body().transactions {
                 if block.number > max_pruned_block {
-                    tx_hash_numbers.push((transaction.hash, tx_hash_number));
+                    tx_hash_numbers.push((*transaction.tx_hash(), tx_hash_number));
                 }
                 tx_hash_number += 1;
             }
@@ -399,7 +410,7 @@ mod tests {
                     tx_number: Some(
                         blocks[..=max_pruned_block as usize]
                             .iter()
-                            .map(|block| block.body.transactions.len() as u64)
+                            .map(|block| block.transaction_count() as u64)
                             .sum::<u64>()
                             .sub(1), // `TxNumber` is 0-indexed
                     ),
@@ -415,9 +426,9 @@ mod tests {
             EntitiesCheckpoint {
                 processed: blocks[..=max_processed_block]
                     .iter()
-                    .map(|block| block.body.transactions.len() as u64)
-                    .sum::<u64>(),
-                total: blocks.iter().map(|block| block.body.transactions.len() as u64).sum::<u64>()
+                    .map(|block| block.transaction_count() as u64)
+                    .sum(),
+                total: blocks.iter().map(|block| block.transaction_count() as u64).sum()
             }
         );
     }
@@ -449,7 +460,7 @@ mod tests {
         ///
         /// 1. If there are any entries in the [`tables::TransactionHashNumbers`] table above a
         ///    given block number.
-        /// 2. If the is no requested block entry in the bodies table, but
+        /// 2. If there is no requested block entry in the bodies table, but
         ///    [`tables::TransactionHashNumbers`] is    not empty.
         fn ensure_no_hash_by_block(&self, number: BlockNumber) -> Result<(), TestRunnerError> {
             let body_result = self
@@ -491,7 +502,7 @@ mod tests {
     }
 
     impl ExecuteStageTestRunner for TransactionLookupTestRunner {
-        type Seed = Vec<SealedBlock>;
+        type Seed = Vec<SealedBlock<Block>>;
 
         fn seed_execution(&mut self, input: ExecInput) -> Result<Self::Seed, TestRunnerError> {
             let stage_progress = input.checkpoint().block_number;
@@ -548,7 +559,10 @@ mod tests {
                         for tx_id in body.tx_num_range() {
                             let transaction =
                                 provider.transaction_by_id(tx_id)?.expect("no transaction entry");
-                            assert_eq!(Some(tx_id), provider.transaction_id(transaction.hash())?);
+                            assert_eq!(
+                                Some(tx_id),
+                                provider.transaction_id(*transaction.tx_hash())?
+                            );
                         }
                     }
                 }

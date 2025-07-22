@@ -11,16 +11,22 @@
 pub mod common;
 pub mod config_cmd;
 pub mod db;
+pub mod download;
 pub mod dump_genesis;
+pub mod export_era;
 pub mod import;
+pub mod import_era;
+pub mod import_op;
 pub mod init_cmd;
 pub mod init_state;
+pub mod launcher;
 pub mod node;
 pub mod p2p;
 pub mod prune;
+pub mod re_execute;
 pub mod recover;
 pub mod stage;
-#[cfg(feature = "dev")]
+#[cfg(feature = "arbitrary")]
 pub mod test_vectors;
 
 pub use node::NodeCommand;

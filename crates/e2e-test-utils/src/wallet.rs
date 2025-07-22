@@ -32,7 +32,7 @@ impl Wallet {
     }
 
     /// Generates a list of wallets
-    pub fn gen(&self) -> Vec<PrivateKeySigner> {
+    pub fn wallet_gen(&self) -> Vec<PrivateKeySigner> {
         let builder = MnemonicBuilder::<English>::default().phrase(TEST_MNEMONIC);
 
         // use the derivation path

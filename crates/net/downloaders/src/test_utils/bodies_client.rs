@@ -1,14 +1,15 @@
 use alloy_primitives::B256;
+use reth_ethereum_primitives::BlockBody;
 use reth_network_p2p::{
     bodies::client::{BodiesClient, BodiesFut},
     download::DownloadClient,
     priority::Priority,
 };
 use reth_network_peers::PeerId;
-use reth_primitives::BlockBody;
 use std::{
     collections::HashMap,
     fmt::Debug,
+    ops::RangeInclusive,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
@@ -78,12 +79,14 @@ impl DownloadClient for TestBodiesClient {
 }
 
 impl BodiesClient for TestBodiesClient {
+    type Body = BlockBody;
     type Output = BodiesFut;
 
-    fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority_and_range_hint(
         &self,
         hashes: Vec<B256>,
         _priority: Priority,
+        _range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         let should_delay = self.should_delay;
         let bodies = self.bodies.clone();

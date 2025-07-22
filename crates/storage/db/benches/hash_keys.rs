@@ -3,12 +3,11 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
 use criterion::{
-    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use pprof::criterion::{Output, PProfProfiler};
 use proptest::{
     arbitrary::Arbitrary,
-    prelude::{any_with, ProptestConfig},
+    prelude::any_with,
     strategy::{Strategy, ValueTree},
     test_runner::TestRunner,
 };
@@ -20,13 +19,14 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_fs_util as fs;
+use std::hint::black_box;
 
 mod utils;
 use utils::*;
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = hash_keys
 }
 criterion_main!(benches);
@@ -46,6 +46,12 @@ pub fn hash_keys(c: &mut Criterion) {
     group.sample_size(10);
 
     for size in [10_000, 100_000, 1_000_000] {
+        // Too slow.
+        #[expect(unexpected_cfgs)]
+        if cfg!(codspeed) && size > 10_000 {
+            continue;
+        }
+
         measure_table_insertion::<TransactionHashNumbers>(&mut group, size);
     }
 }
@@ -157,7 +163,7 @@ where
     .no_shrink()
     .boxed();
 
-    let mut runner = TestRunner::new(ProptestConfig::default());
+    let mut runner = TestRunner::deterministic();
     let mut preload = strategy.new_tree(&mut runner).unwrap().current();
     let mut input = strategy.new_tree(&mut runner).unwrap().current();
 
@@ -177,7 +183,7 @@ where
         let mut crsr = tx.cursor_write::<T>().expect("cursor");
         black_box({
             for (k, v) in input {
-                crsr.append(k, v).expect("submit");
+                crsr.append(k, &v).expect("submit");
             }
 
             tx.inner.commit().unwrap()
@@ -195,7 +201,7 @@ where
         let mut crsr = tx.cursor_write::<T>().expect("cursor");
         black_box({
             for (k, v) in input {
-                crsr.insert(k, v).expect("submit");
+                crsr.insert(k, &v).expect("submit");
             }
 
             tx.inner.commit().unwrap()
@@ -222,7 +228,7 @@ where
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 struct TableStats {
     page_size: usize,
     leaf_pages: usize,

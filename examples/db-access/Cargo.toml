@@ -5,17 +5,8 @@ publish = false
 edition.workspace = true
 license.workspace = true
 
-
 [dependencies]
-reth-chainspec.workspace = true
-reth-db.workspace = true
-reth-primitives.workspace = true
-reth-provider.workspace = true
-reth-node-ethereum.workspace = true
-reth-node-types.workspace = true
-
-alloy-rpc-types.workspace = true
+reth-ethereum = { workspace = true, features = ["node"] }
 alloy-primitives.workspace = true
-
 
 eyre.workspace = true

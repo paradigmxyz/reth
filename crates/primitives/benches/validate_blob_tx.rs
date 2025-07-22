@@ -1,30 +1,22 @@
 #![allow(missing_docs)]
 
 use alloy_consensus::TxEip4844;
-use alloy_eips::eip4844::env_settings::EnvKzgSettings;
-use alloy_primitives::hex;
+use alloy_eips::eip4844::{
+    env_settings::EnvKzgSettings, BlobTransactionSidecar, MAX_BLOBS_PER_BLOCK_DENCUN,
+};
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use proptest::{
-    prelude::*,
-    strategy::ValueTree,
-    test_runner::{RngAlgorithm, TestRng, TestRunner},
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use proptest_arbitrary_interop::arb;
-use reth_primitives::BlobTransactionSidecar;
-use revm_primitives::MAX_BLOB_NUMBER_PER_BLOCK;
 
-// constant seed to use for the rng
-const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");
-
-/// Benchmarks EIP-48444 blob validation.
+/// Benchmarks EIP-4844 blob validation.
 fn blob_validation(c: &mut Criterion) {
     let mut group = c.benchmark_group("Blob Transaction KZG validation");
 
-    for num_blobs in 1..=MAX_BLOB_NUMBER_PER_BLOCK {
+    for num_blobs in 1..=MAX_BLOBS_PER_BLOCK_DENCUN {
         println!("Benchmarking validation for tx with {num_blobs} blobs");
-        validate_blob_tx(&mut group, "ValidateBlob", num_blobs, EnvKzgSettings::Default);
+        validate_blob_tx(&mut group, "ValidateBlob", num_blobs as u64, EnvKzgSettings::Default);
     }
 }
 
@@ -35,9 +27,7 @@ fn validate_blob_tx(
     kzg_settings: EnvKzgSettings,
 ) {
     let setup = || {
-        let config = ProptestConfig::default();
-        let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &SEED);
-        let mut runner = TestRunner::new_with_rng(config, rng);
+        let mut runner = TestRunner::deterministic();
 
         // generate tx and sidecar
         let mut tx = arb::<TxEip4844>().new_tree(&mut runner).unwrap().current();
@@ -67,14 +57,12 @@ fn validate_blob_tx(
 
     let group_id = format!("validate_blob | num blobs: {num_blobs} | {description}");
 
+    let kzg_settings = kzg_settings.get();
     // for now we just use the default SubPoolLimit
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |(tx, blob_sidecar)| {
-            if let Err(err) =
-                std::hint::black_box(tx.validate_blob(&blob_sidecar, kzg_settings.get()))
-            {
-                println!("Validation failed: {err:?}");
-            }
+            let r = tx.validate_blob(&blob_sidecar, kzg_settings);
+            (r, tx, blob_sidecar)
         });
     });
 }

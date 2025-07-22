@@ -3,14 +3,14 @@
 use std::{path::Path, sync::Arc};
 
 use criterion::{
-    black_box, criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
+    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use pprof::criterion::{Output, PProfProfiler};
-use reth_db::{tables::*, test_utils::create_test_rw_db_with_path};
+use reth_db::test_utils::create_test_rw_db_with_path;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     table::{Compress, Decode, Decompress, DupSort, Encode, Table},
+    tables::*,
     transaction::{DbTx, DbTxMut},
 };
 use reth_fs_util as fs;
@@ -20,7 +20,7 @@ use utils::*;
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = db, serialization
 }
 criterion_main!(benches);
@@ -63,20 +63,17 @@ pub fn serialization(c: &mut Criterion) {
 fn measure_table_serialization<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table,
-    T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
-    T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
+    T::Key: Clone + for<'de> serde::Deserialize<'de>,
+    T::Value: Clone + for<'de> serde::Deserialize<'de>,
 {
     let input = &load_vectors::<T>();
     group.bench_function(format!("{}.KeyEncode", T::NAME), move |b| {
         b.iter_with_setup(
             || input.clone(),
             |input| {
-                {
-                    for (k, _, _, _) in input {
-                        k.encode();
-                    }
-                };
-                black_box(());
+                for (k, _, _, _) in input {
+                    k.encode();
+                }
             },
         )
     });
@@ -85,12 +82,9 @@ where
         b.iter_with_setup(
             || input.clone(),
             |input| {
-                {
-                    for (_, k, _, _) in input {
-                        let _ = <T as Table>::Key::decode(&k);
-                    }
-                };
-                black_box(());
+                for (_, k, _, _) in input {
+                    let _ = <T as Table>::Key::decode(&k);
+                }
             },
         )
     });
@@ -99,12 +93,9 @@ where
         b.iter_with_setup(
             || input.clone(),
             |input| {
-                {
-                    for (_, _, v, _) in input {
-                        v.compress();
-                    }
-                };
-                black_box(());
+                for (_, _, v, _) in input {
+                    v.compress();
+                }
             },
         )
     });
@@ -113,12 +104,9 @@ where
         b.iter_with_setup(
             || input.clone(),
             |input| {
-                {
-                    for (_, _, _, v) in input {
-                        let _ = <T as Table>::Value::decompress(&v);
-                    }
-                };
-                black_box(());
+                for (_, _, _, v) in input {
+                    let _ = <T as Table>::Value::decompress(&v);
+                }
             },
         )
     });
@@ -128,8 +116,8 @@ where
 fn measure_table_db<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table,
-    T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
-    T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
+    T::Key: Clone + for<'de> serde::Deserialize<'de>,
+    T::Value: Clone + for<'de> serde::Deserialize<'de>,
 {
     let input = &load_vectors::<T>();
     let bench_db_path = Path::new(BENCH_DB_PATH);
@@ -148,14 +136,10 @@ where
                 // Create TX
                 let tx = db.tx_mut().expect("tx");
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
-
-                black_box({
-                    for (k, _, v, _) in input {
-                        crsr.append(k, v).expect("submit");
-                    }
-
-                    tx.inner.commit().unwrap()
-                });
+                for (k, _, v, _) in input {
+                    crsr.append(k, &v).expect("submit");
+                }
+                tx.inner.commit().unwrap()
             },
         )
     });
@@ -171,15 +155,12 @@ where
                 // Create TX
                 let tx = db.tx_mut().expect("tx");
                 let mut crsr = tx.cursor_write::<T>().expect("cursor");
+                for index in RANDOM_INDEXES {
+                    let (k, _, v, _) = input.get(index).unwrap().clone();
+                    crsr.insert(k, &v).expect("submit");
+                }
 
-                black_box({
-                    for index in RANDOM_INDEXES {
-                        let (k, _, v, _) = input.get(index).unwrap().clone();
-                        crsr.insert(k, v).expect("submit");
-                    }
-
-                    tx.inner.commit().unwrap()
-                });
+                tx.inner.commit().unwrap()
             },
         )
     });
@@ -190,15 +171,11 @@ where
         b.iter(|| {
             // Create TX
             let tx = db.tx().expect("tx");
-
-            {
-                let mut cursor = tx.cursor_read::<T>().expect("cursor");
-                let walker = cursor.walk(Some(input.first().unwrap().0.clone())).unwrap();
-                for element in walker {
-                    element.unwrap();
-                }
-            };
-            black_box(());
+            let mut cursor = tx.cursor_read::<T>().expect("cursor");
+            let walker = cursor.walk(Some(input.first().unwrap().0.clone())).unwrap();
+            for element in walker {
+                element.unwrap();
+            }
         })
     });
 
@@ -208,14 +185,10 @@ where
         b.iter(|| {
             // Create TX
             let tx = db.tx().expect("tx");
-
-            {
-                for index in RANDOM_INDEXES {
-                    let mut cursor = tx.cursor_read::<T>().expect("cursor");
-                    cursor.seek_exact(input.get(index).unwrap().0.clone()).unwrap();
-                }
-            };
-            black_box(());
+            for index in RANDOM_INDEXES {
+                let mut cursor = tx.cursor_read::<T>().expect("cursor");
+                cursor.seek_exact(input.get(index).unwrap().0.clone()).unwrap();
+            }
         })
     });
 }
@@ -224,8 +197,8 @@ where
 fn measure_dupsort_db<T>(group: &mut BenchmarkGroup<'_, WallTime>)
 where
     T: Table + DupSort,
-    T::Key: Default + Clone + for<'de> serde::Deserialize<'de>,
-    T::Value: Default + Clone + for<'de> serde::Deserialize<'de>,
+    T::Key: Clone + for<'de> serde::Deserialize<'de>,
+    T::Value: Clone + for<'de> serde::Deserialize<'de>,
     T::SubKey: Default + Clone + for<'de> serde::Deserialize<'de>,
 {
     let input = &load_vectors::<T>();
@@ -245,14 +218,10 @@ where
                 // Create TX
                 let tx = db.tx_mut().expect("tx");
                 let mut crsr = tx.cursor_dup_write::<T>().expect("cursor");
-
-                black_box({
-                    for (k, _, v, _) in input {
-                        crsr.append_dup(k, v).expect("submit");
-                    }
-
-                    tx.inner.commit().unwrap()
-                });
+                for (k, _, v, _) in input {
+                    crsr.append_dup(k, v).expect("submit");
+                }
+                tx.inner.commit().unwrap()
             },
         )
     });
@@ -268,12 +237,10 @@ where
             |(input, db)| {
                 // Create TX
                 let tx = db.tx_mut().expect("tx");
-
                 for index in RANDOM_INDEXES {
                     let (k, _, v, _) = input.get(index).unwrap().clone();
                     tx.put::<T>(k, v).unwrap();
                 }
-
                 tx.inner.commit().unwrap();
             },
         )
@@ -286,14 +253,11 @@ where
             // Create TX
             let tx = db.tx().expect("tx");
 
-            {
-                let mut cursor = tx.cursor_dup_read::<T>().expect("cursor");
-                let walker = cursor.walk_dup(None, Some(T::SubKey::default())).unwrap();
-                for element in walker {
-                    element.unwrap();
-                }
-            };
-            black_box(());
+            let mut cursor = tx.cursor_dup_read::<T>().expect("cursor");
+            let walker = cursor.walk_dup(None, Some(T::SubKey::default())).unwrap();
+            for element in walker {
+                element.unwrap();
+            }
         })
     });
 

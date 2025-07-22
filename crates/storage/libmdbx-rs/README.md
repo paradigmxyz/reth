@@ -12,8 +12,8 @@ To update the libmdbx version you must clone it and copy the `dist/` folder in `
 Make sure to follow the [building steps](https://libmdbx.dqdkfa.ru/usage.html#getting).
 
 ```bash
-# clone libmmdbx to a repository outside at specific tag
-git clone https://gitflic.ru/project/erthink/libmdbx.git ../libmdbx --branch v0.7.0
+# clone libmdbx to a repository outside at specific tag
+git clone https://github.com/erthink/libmdbx.git ../libmdbx --branch v0.7.0
 make -C ../libmdbx dist
 
 # copy the `libmdbx/dist/` folder just created into `mdbx-sys/libmdbx`

@@ -35,7 +35,7 @@ use serde_with::{DeserializeFromStr, SerializeDisplay};
 ///
 /// Taken from: <https://stackoverflow.com/questions/3253701/get-public-external-ip-address>
 const EXTERNAL_IP_APIS: &[&str] =
-    &["http://ipinfo.io/ip", "http://icanhazip.com", "http://ifconfig.me"];
+    &["https://ipinfo.io/ip", "https://icanhazip.com", "https://ifconfig.me"];
 
 /// All builtin resolvers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
@@ -60,6 +60,14 @@ impl NatResolver {
     /// Attempts to produce an IP address (best effort).
     pub async fn external_addr(self) -> Option<IpAddr> {
         external_addr_with(self).await
+    }
+
+    /// Returns the external ip, if it is [`NatResolver::ExternalIp`]
+    pub const fn as_external_ip(self) -> Option<IpAddr> {
+        match self {
+            Self::ExternalIp(ip) => Some(ip),
+            _ => None,
+        }
     }
 }
 
@@ -103,7 +111,7 @@ impl FromStr for NatResolver {
                         "Unknown Nat Resolver: {s}"
                     )))
                 };
-                Self::ExternalIp(ip.parse::<IpAddr>()?)
+                Self::ExternalIp(ip.parse()?)
             }
         };
         Ok(r)
@@ -151,6 +159,11 @@ impl ResolveNatInterval {
     ) -> Self {
         let interval = tokio::time::interval_at(start, period);
         Self::with_interval(resolver, interval)
+    }
+
+    /// Returns the resolver used by this interval
+    pub const fn resolver(&self) -> &NatResolver {
+        &self.resolver
     }
 
     /// Completes when the next [`IpAddr`] in the interval has been reached.
@@ -222,7 +235,8 @@ async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
 }
 
 async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
-    let response = reqwest::get(url).await.ok()?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().ok()?;
+    let response = client.get(url).send().await.ok()?;
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
     text.trim().parse().ok()

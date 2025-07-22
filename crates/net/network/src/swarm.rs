@@ -1,19 +1,3 @@
-use std::{
-    io,
-    net::SocketAddr,
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-};
-
-use futures::Stream;
-use reth_eth_wire::{
-    capability::CapabilityMessage, errors::EthStreamError, Capabilities, EthVersion, Status,
-};
-use reth_network_api::PeerRequestSender;
-use reth_network_peers::PeerId;
-use tracing::trace;
-
 use crate::{
     listener::{ConnectionListener, ListenerEvent},
     message::PeerMessage,
@@ -22,6 +6,21 @@ use crate::{
     session::{Direction, PendingSessionHandshakeError, SessionEvent, SessionId, SessionManager},
     state::{NetworkState, StateAction},
 };
+use futures::Stream;
+use reth_eth_wire::{
+    errors::EthStreamError, Capabilities, DisconnectReason, EthNetworkPrimitives, EthVersion,
+    NetworkPrimitives, UnifiedStatus,
+};
+use reth_network_api::{PeerRequest, PeerRequestSender};
+use reth_network_peers::PeerId;
+use std::{
+    io,
+    net::SocketAddr,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tracing::{debug, trace};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 /// Contains the connectivity related state of the network.
@@ -32,7 +31,7 @@ use crate::{
 /// [`SessionManager`]. Outgoing connections are either initiated on demand or triggered by the
 /// [`NetworkState`] and also delegated to the [`NetworkState`].
 ///
-/// Following diagram gives displays the dataflow contained in the [`Swarm`]
+/// Following diagram displays the dataflow contained in the [`Swarm`]
 ///
 /// The [`ConnectionListener`] yields incoming [`TcpStream`]s from peers that are spawned as session
 /// tasks. After a successful `RLPx` authentication, the task is ready to accept ETH requests or
@@ -49,39 +48,39 @@ use crate::{
 /// `include_mmd!("docs/mermaid/swarm.mmd`")
 #[derive(Debug)]
 #[must_use = "Swarm does nothing unless polled"]
-pub(crate) struct Swarm {
+pub(crate) struct Swarm<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Listens for new incoming connections.
     incoming: ConnectionListener,
     /// All sessions.
-    sessions: SessionManager,
+    sessions: SessionManager<N>,
     /// Tracks the entire state of the network and handles events received from the sessions.
-    state: NetworkState,
+    state: NetworkState<N>,
 }
 
 // === impl Swarm ===
 
-impl Swarm {
+impl<N: NetworkPrimitives> Swarm<N> {
     /// Configures a new swarm instance.
     pub(crate) const fn new(
         incoming: ConnectionListener,
-        sessions: SessionManager,
-        state: NetworkState,
+        sessions: SessionManager<N>,
+        state: NetworkState<N>,
     ) -> Self {
         Self { incoming, sessions, state }
     }
 
-    /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
+    /// Adds a protocol handler to the `RLPx` sub-protocol list.
     pub(crate) fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.sessions_mut().add_rlpx_sub_protocol(protocol);
     }
 
     /// Access to the state.
-    pub(crate) const fn state(&self) -> &NetworkState {
+    pub(crate) const fn state(&self) -> &NetworkState<N> {
         &self.state
     }
 
     /// Mutable access to the state.
-    pub(crate) fn state_mut(&mut self) -> &mut NetworkState {
+    pub(crate) const fn state_mut(&mut self) -> &mut NetworkState<N> {
         &mut self.state
     }
 
@@ -91,17 +90,17 @@ impl Swarm {
     }
 
     /// Access to the [`SessionManager`].
-    pub(crate) const fn sessions(&self) -> &SessionManager {
+    pub(crate) const fn sessions(&self) -> &SessionManager<N> {
         &self.sessions
     }
 
     /// Mutable access to the [`SessionManager`].
-    pub(crate) fn sessions_mut(&mut self) -> &mut SessionManager {
+    pub(crate) const fn sessions_mut(&mut self) -> &mut SessionManager<N> {
         &mut self.sessions
     }
 }
 
-impl Swarm {
+impl<N: NetworkPrimitives> Swarm<N> {
     /// Triggers a new outgoing connection to the given node
     pub(crate) fn dial_outbound(&mut self, remote_addr: SocketAddr, remote_id: PeerId) {
         self.sessions.dial_outbound(remote_addr, remote_id)
@@ -111,7 +110,7 @@ impl Swarm {
     ///
     /// This either updates the state or produces a new [`SwarmEvent`] that is bubbled up to the
     /// manager.
-    fn on_session_event(&mut self, event: SessionEvent) -> Option<SwarmEvent> {
+    fn on_session_event(&mut self, event: SessionEvent<N>) -> Option<SwarmEvent<N>> {
         match event {
             SessionEvent::SessionEstablished {
                 peer_id,
@@ -123,6 +122,7 @@ impl Swarm {
                 messages,
                 direction,
                 timeout,
+                range_info,
             } => {
                 self.state.on_session_activated(
                     peer_id,
@@ -130,6 +130,7 @@ impl Swarm {
                     status.clone(),
                     messages.clone(),
                     timeout,
+                    range_info,
                 );
                 Some(SwarmEvent::SessionEstablished {
                     peer_id,
@@ -149,9 +150,6 @@ impl Swarm {
             }
             SessionEvent::ValidMessage { peer_id, message } => {
                 Some(SwarmEvent::ValidMessage { peer_id, message })
-            }
-            SessionEvent::InvalidMessage { peer_id, capabilities, message } => {
-                Some(SwarmEvent::InvalidCapabilityMessage { peer_id, capabilities, message })
             }
             SessionEvent::IncomingPendingSessionClosed { remote_addr, error } => {
                 Some(SwarmEvent::IncomingPendingSessionClosed { remote_addr, error })
@@ -180,7 +178,7 @@ impl Swarm {
     /// Callback for events produced by [`ConnectionListener`].
     ///
     /// Depending on the event, this will produce a new [`SwarmEvent`].
-    fn on_connection(&mut self, event: ListenerEvent) -> Option<SwarmEvent> {
+    fn on_connection(&mut self, event: ListenerEvent) -> Option<SwarmEvent<N>> {
         match event {
             ListenerEvent::Error(err) => return Some(SwarmEvent::TcpListenerError(err)),
             ListenerEvent::ListenerClosed { local_address: address } => {
@@ -201,6 +199,10 @@ impl Swarm {
                         }
                         InboundConnectionError::ExceedsCapacity => {
                             trace!(target: "net", ?remote_addr, "No capacity for incoming connection");
+                            self.sessions.try_disconnect_incoming_connection(
+                                stream,
+                                DisconnectReason::TooManyPeers,
+                            );
                         }
                     }
                     return None
@@ -224,7 +226,7 @@ impl Swarm {
     }
 
     /// Hook for actions pulled from the state
-    fn on_state_action(&mut self, event: StateAction) -> Option<SwarmEvent> {
+    fn on_state_action(&mut self, event: StateAction<N>) -> Option<SwarmEvent<N>> {
         match event {
             StateAction::Connect { remote_addr, peer_id } => {
                 self.dial_outbound(remote_addr, peer_id);
@@ -257,6 +259,7 @@ impl Swarm {
                 if self.sessions.is_valid_fork_id(fork_id) {
                     self.state_mut().peers_mut().set_discovered_fork_id(peer_id, fork_id);
                 } else {
+                    debug!(target: "net", ?peer_id, remote_fork_id=?fork_id, our_fork_id=?self.sessions.fork_id(), "fork id mismatch, removing peer");
                     self.state_mut().peers_mut().remove_peer(peer_id);
                 }
             }
@@ -265,7 +268,7 @@ impl Swarm {
     }
 
     /// Set network connection state to `ShuttingDown`
-    pub(crate) fn on_shutdown_requested(&mut self) {
+    pub(crate) const fn on_shutdown_requested(&mut self) {
         self.state_mut().peers_mut().on_shutdown();
     }
 
@@ -276,13 +279,13 @@ impl Swarm {
     }
 
     /// Set network connection state to `Hibernate` or `Active`
-    pub(crate) fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
+    pub(crate) const fn on_network_state_change(&mut self, network_state: NetworkConnectionState) {
         self.state_mut().peers_mut().on_network_state_change(network_state);
     }
 }
 
-impl Stream for Swarm {
-    type Item = SwarmEvent;
+impl<N: NetworkPrimitives> Stream for Swarm<N> {
+    type Item = SwarmEvent<N>;
 
     /// This advances all components.
     ///
@@ -333,21 +336,13 @@ impl Stream for Swarm {
 
 /// All events created or delegated by the [`Swarm`] that represents changes to the state of the
 /// network.
-pub(crate) enum SwarmEvent {
+pub(crate) enum SwarmEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Events related to the actual network protocol.
     ValidMessage {
         /// The peer that sent the message
         peer_id: PeerId,
         /// Message received from the peer
-        message: PeerMessage,
-    },
-    /// Received a message that does not match the announced capabilities of the peer.
-    InvalidCapabilityMessage {
-        peer_id: PeerId,
-        /// Announced capabilities of the remote peer.
-        capabilities: Arc<Capabilities>,
-        /// Message received from the peer.
-        message: CapabilityMessage,
+        message: PeerMessage<N>,
     },
     /// Received a bad message from the peer.
     BadMessage {
@@ -389,8 +384,8 @@ pub(crate) enum SwarmEvent {
         capabilities: Arc<Capabilities>,
         /// negotiated eth version
         version: EthVersion,
-        messages: PeerRequestSender,
-        status: Arc<Status>,
+        messages: PeerRequestSender<PeerRequest<N>>,
+        status: Arc<UnifiedStatus>,
         direction: Direction,
     },
     SessionClosed {

@@ -1,6 +1,5 @@
 use super::BranchNodeCompact;
-use bytes::Buf;
-use reth_codecs::Compact;
+use alloc::vec::Vec;
 
 /// Walker sub node for storing intermediate state root calculation state in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -13,7 +12,8 @@ pub struct StoredSubNode {
     pub node: Option<BranchNodeCompact>,
 }
 
-impl Compact for StoredSubNode {
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for StoredSubNode {
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
         B: bytes::BufMut + AsMut<[u8]>,
@@ -46,21 +46,21 @@ impl Compact for StoredSubNode {
     }
 
     fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
         let key_len = buf.get_u16() as usize;
         let key = Vec::from(&buf[..key_len]);
         buf.advance(key_len);
 
         let nibbles_exists = buf.get_u8() != 0;
-        let nibble = if nibbles_exists { Some(buf.get_u8()) } else { None };
+        let nibble = nibbles_exists.then(|| buf.get_u8());
 
         let node_exists = buf.get_u8() != 0;
-        let node = if node_exists {
+        let node = node_exists.then(|| {
             let (node, rest) = BranchNodeCompact::from_compact(buf, 0);
             buf = rest;
-            Some(node)
-        } else {
-            None
-        };
+            node
+        });
 
         (Self { key, nibble, node }, buf)
     }
@@ -71,6 +71,7 @@ mod tests {
     use super::*;
     use crate::TrieMask;
     use alloy_primitives::B256;
+    use reth_codecs::Compact;
 
     #[test]
     fn subnode_roundtrip() {
@@ -81,7 +82,7 @@ mod tests {
                 state_mask: TrieMask::new(1),
                 tree_mask: TrieMask::new(0),
                 hash_mask: TrieMask::new(1),
-                hashes: vec![B256::ZERO],
+                hashes: vec![B256::ZERO].into(),
                 root_hash: None,
             }),
         };

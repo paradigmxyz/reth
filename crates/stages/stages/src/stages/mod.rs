@@ -17,12 +17,15 @@ mod index_storage_history;
 /// Stage for computing state root.
 mod merkle;
 mod prune;
+/// The s3 download stage
+mod s3;
 /// The sender recovery stage.
 mod sender_recovery;
 /// The transaction lookup stage
 mod tx_lookup;
 
 pub use bodies::*;
+pub use era::*;
 pub use execution::*;
 pub use finish::*;
 pub use hashing_account::*;
@@ -32,41 +35,50 @@ pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
 pub use prune::*;
+pub use s3::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;
 
+mod era;
 mod utils;
+
 use utils::*;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_utils::{StorageKind, TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, BlockNumber, B256, U256};
+    use alloy_consensus::{SignableTransaction, TxLegacy};
+    use alloy_primitives::{
+        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+    };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
-    use reth_db::{
-        mdbx::{cursor::Cursor, RW},
-        tables, AccountsHistory,
-    };
+    use reth_db::mdbx::{cursor::Cursor, RW};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW},
         table::Table,
+        tables,
         transaction::{DbTx, DbTxMut},
+        AccountsHistory,
     };
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_ethereum_consensus::EthBeaconConsensus;
+    use reth_ethereum_primitives::Block;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_exex::ExExManagerHandle;
-    use reth_primitives::{Account, Bytecode, SealedBlock, StaticFileSegment};
+    use reth_primitives_traits::{Account, Bytecode, SealedBlock};
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
-        AccountExtReader, BlockReader, DatabaseProviderFactory, ProviderFactory, ProviderResult,
-        ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory, StorageReader,
+        AccountExtReader, BlockBodyIndicesProvider, DatabaseProviderFactory, ProviderFactory,
+        ProviderResult, ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory,
+        StorageReader,
     };
     use reth_prune_types::{PruneMode, PruneModes};
     use reth_stages_api::{
         ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
     };
+    use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_receipt, BlockRangeParams,
     };
@@ -81,13 +93,11 @@ mod tests {
         let tip = 66;
         let input = ExecInput { target: Some(tip), checkpoint: None };
         let mut genesis_rlp = hex!("f901faf901f5a00000000000000000000000000000000000000000000000000000000000000000a01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa045571b40ae66ca7480791bbb2887286e4e4c4b1b298b191c889d6959023a32eda056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421b901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000808502540be400808000a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0").as_slice();
-        let genesis = SealedBlock::decode(&mut genesis_rlp).unwrap();
+        let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
-        let block = SealedBlock::decode(&mut block_rlp).unwrap();
-        provider_rw.insert_historical_block(genesis.try_seal_with_senders().unwrap()).unwrap();
-        provider_rw
-            .insert_historical_block(block.clone().try_seal_with_senders().unwrap())
-            .unwrap();
+        let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
+        provider_rw.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
+        provider_rw.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
         let mut head = block.hash();
@@ -99,7 +109,7 @@ mod tests {
                 generators::BlockParams { parent: Some(head), ..Default::default() },
             );
             head = nblock.hash();
-            provider_rw.insert_historical_block(nblock.try_seal_with_senders().unwrap()).unwrap();
+            provider_rw.insert_historical_block(nblock.try_recover().unwrap()).unwrap();
         }
         provider_rw
             .static_file_provider()
@@ -116,14 +126,14 @@ mod tests {
         provider_rw
             .tx_ref()
             .put::<tables::PlainAccountState>(
-                address!("1000000000000000000000000000000000000000"),
+                address!("0x1000000000000000000000000000000000000000"),
                 Account { nonce: 0, balance: U256::ZERO, bytecode_hash: Some(code_hash) },
             )
             .unwrap();
         provider_rw
             .tx_ref()
             .put::<tables::PlainAccountState>(
-                address!("a94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
+                address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"),
                 Account {
                     nonce: 0,
                     balance: U256::from(0x3635c9adc5dea00000u128),
@@ -147,17 +157,19 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EthExecutorProvider::ethereum(Arc::new(
+                EthEvmConfig::ethereum(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 )),
+                Arc::new(EthBeaconConsensus::new(Arc::new(
+                    ChainSpecBuilder::mainnet().berlin_activated().build(),
+                ))),
                 ExecutionStageThresholds {
                     max_blocks: Some(100),
                     max_changes: None,
                     max_cumulative_gas: None,
                     max_duration: None,
                 },
-                MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
-                prune_modes.clone(),
+                MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
                 ExExManagerHandle::empty(),
             );
 
@@ -201,7 +213,7 @@ mod tests {
 
             if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
-                assert!(acc_indexing_stage.execute(&provider, input).is_err());
+                assert!(storage_indexing_stage.execute(&provider, input).is_err());
             } else {
                 storage_indexing_stage.execute(&provider, input).unwrap();
 
@@ -263,11 +275,11 @@ mod tests {
         );
         db.insert_blocks(blocks.iter(), StorageKind::Static)?;
 
-        let mut receipts = Vec::new();
+        let mut receipts = Vec::with_capacity(blocks.len());
         let mut tx_num = 0u64;
         for block in &blocks {
-            let mut block_receipts = Vec::with_capacity(block.body.transactions.len());
-            for transaction in &block.body.transactions {
+            let mut block_receipts = Vec::with_capacity(block.transaction_count());
+            for transaction in &block.body().transactions {
                 block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
                 tx_num += 1;
             }
@@ -296,8 +308,8 @@ mod tests {
     ) {
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
-        let static_file_provider =
-            StaticFileProvider::read_write(db.factory.static_file_provider().path()).unwrap();
+        let mut static_file_provider = db.factory.static_file_provider();
+        static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
 
         // Simulate corruption by removing `prune_count` rows from the data file without updating
         // its offset list and configuration.
@@ -314,12 +326,13 @@ mod tests {
 
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
-        assert_eq!(
-            StaticFileProvider::read_write(db.factory.static_file_provider().path())
-                .unwrap()
+        let mut static_file_provider = db.factory.static_file_provider();
+        static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
+        assert!(matches!(
+            static_file_provider
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
-            Ok(expected)
-        );
+            Ok(e) if e == expected
+        ));
     }
 
     /// Saves a checkpoint with `checkpoint_block_number` and compare the check consistency result
@@ -336,12 +349,12 @@ mod tests {
             .unwrap();
         provider_rw.commit().unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             db.factory
                 .static_file_provider()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), false,),
-            Ok(expected)
-        );
+            Ok(e) if e == expected
+        ));
     }
 
     /// Inserts a dummy value at key and compare the check consistency result against the expected
@@ -353,17 +366,28 @@ mod tests {
     ) where
         <T as Table>::Value: Default,
     {
+        update_db_with_and_check::<T>(db, key, expected, &Default::default());
+    }
+
+    /// Inserts the given value at key and compare the check consistency result against the expected
+    /// one.
+    fn update_db_with_and_check<T: Table<Key = u64>>(
+        db: &TestStageDB,
+        key: u64,
+        expected: Option<PipelineTarget>,
+        value: &T::Value,
+    ) {
         let provider_rw = db.factory.provider_rw().unwrap();
         let mut cursor = provider_rw.tx_ref().cursor_write::<T>().unwrap();
-        cursor.insert(key, Default::default()).unwrap();
+        cursor.insert(key, value).unwrap();
         provider_rw.commit().unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             db.factory
                 .static_file_provider()
                 .check_consistency(&db.factory.database_provider_ro().unwrap(), false),
-            Ok(expected)
-        );
+            Ok(e) if e == expected
+        ));
     }
 
     #[test]
@@ -371,10 +395,10 @@ mod tests {
         let db = seed_data(90).unwrap();
         let db_provider = db.factory.database_provider_ro().unwrap();
 
-        assert_eq!(
+        assert!(matches!(
             db.factory.static_file_provider().check_consistency(&db_provider, false),
             Ok(None)
-        );
+        ));
     }
 
     #[test]
@@ -480,14 +504,20 @@ mod tests {
             .unwrap();
 
         // Creates a gap of one transaction: static_file <missing> db
-        update_db_and_check::<tables::Transactions>(
+        update_db_with_and_check::<tables::Transactions>(
             &db,
             current + 2,
             Some(PipelineTarget::Unwind(89)),
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
 
         // Fill the gap, and ensure no unwind is necessary.
-        update_db_and_check::<tables::Transactions>(&db, current + 1, None);
+        update_db_with_and_check::<tables::Transactions>(
+            &db,
+            current + 1,
+            None,
+            &TxLegacy::default().into_signed(Signature::test_signature()).into(),
+        );
     }
 
     #[test]

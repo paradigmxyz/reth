@@ -56,7 +56,17 @@ pub use datadir_args::DatadirArgs;
 mod benchmark_args;
 pub use benchmark_args::BenchmarkArgs;
 
-pub mod utils;
+/// EngineArgs for configuring the engine
+mod engine;
+pub use engine::EngineArgs;
+
+/// `RessArgs` for configuring ress subprotocol.
+mod ress_args;
+pub use ress_args::RessArgs;
+
+/// `EraArgs` for configuring ERA files import.
+mod era;
+pub use era::{DefaultEraHost, EraArgs, EraSourceArgs};
 
 mod error;
 pub mod types;

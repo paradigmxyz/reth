@@ -2,26 +2,20 @@
 
 //! clap [Args](clap::Args) for optimism rollup configuration
 
-use reth_node_builder::engine_tree_config::{
-    DEFAULT_MEMORY_BLOCK_BUFFER_TARGET, DEFAULT_PERSISTENCE_THRESHOLD,
-};
+use op_alloy_consensus::interop::SafetyLevel;
+use reth_optimism_txpool::supervisor::DEFAULT_SUPERVISOR_URL;
 
 /// Parameters for rollup configuration
 #[derive(Debug, Clone, PartialEq, Eq, clap::Args)]
 #[command(next_help_heading = "Rollup")]
 pub struct RollupArgs {
-    /// HTTP endpoint for the sequencer mempool
-    #[arg(long = "rollup.sequencer-http", value_name = "HTTP_URL")]
-    pub sequencer_http: Option<String>,
+    /// Endpoint for the sequencer mempool (can be both HTTP and WS)
+    #[arg(long = "rollup.sequencer", visible_aliases = ["rollup.sequencer-http", "rollup.sequencer-ws"])]
+    pub sequencer: Option<String>,
 
     /// Disable transaction pool gossip
     #[arg(long = "rollup.disable-tx-pool-gossip")]
     pub disable_txpool_gossip: bool,
-
-    /// Enable walkback to genesis on startup. This is useful for re-validating the existing DB
-    /// prior to beginning normal syncing.
-    #[arg(long = "rollup.enable-genesis-walkback")]
-    pub enable_genesis_walkback: bool,
 
     /// By default the pending block equals the latest block
     /// to save resources and not leak txs from the tx-pool,
@@ -38,30 +32,55 @@ pub struct RollupArgs {
     #[arg(long = "rollup.discovery.v4", default_value = "false")]
     pub discovery_v4: bool,
 
-    /// Enable the engine2 experimental features on op-reth binary
-    #[arg(long = "engine.experimental", default_value = "false")]
-    pub experimental: bool,
+    /// Enable transaction conditional support on sequencer
+    #[arg(long = "rollup.enable-tx-conditional", default_value = "false")]
+    pub enable_tx_conditional: bool,
 
-    /// Configure persistence threshold for engine experimental.
-    #[arg(long = "engine.persistence-threshold", requires = "experimental", default_value_t = DEFAULT_PERSISTENCE_THRESHOLD)]
-    pub persistence_threshold: u64,
+    /// HTTP endpoint for the supervisor
+    #[arg(
+        long = "rollup.supervisor-http",
+        value_name = "SUPERVISOR_HTTP_URL",
+        default_value = DEFAULT_SUPERVISOR_URL
+    )]
+    pub supervisor_http: String,
 
-    /// Configure the target number of blocks to keep in memory.
-    #[arg(long = "engine.memory-block-buffer-target", requires = "experimental", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
-    pub memory_block_buffer_target: u64,
+    /// Safety level for the supervisor
+    #[arg(
+        long = "rollup.supervisor-safety-level",
+        default_value_t = SafetyLevel::CrossUnsafe,
+    )]
+    pub supervisor_safety_level: SafetyLevel,
+
+    /// Optional headers to use when connecting to the sequencer.
+    #[arg(long = "rollup.sequencer-headers", requires = "sequencer")]
+    pub sequencer_headers: Vec<String>,
+
+    /// RPC endpoint for historical data.
+    #[arg(
+        long = "rollup.historicalrpc",
+        alias = "rollup.historical-rpc",
+        value_name = "HISTORICAL_HTTP_URL"
+    )]
+    pub historical_rpc: Option<String>,
+
+    /// Minimum suggested priority fee (tip) in wei, default `1_000_000`
+    #[arg(long, default_value_t = 1_000_000)]
+    pub min_suggested_priority_fee: u64,
 }
 
 impl Default for RollupArgs {
     fn default() -> Self {
         Self {
-            sequencer_http: None,
+            sequencer: None,
             disable_txpool_gossip: false,
-            enable_genesis_walkback: false,
             compute_pending_block: false,
             discovery_v4: false,
-            experimental: false,
-            persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
-            memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
+            enable_tx_conditional: false,
+            supervisor_http: DEFAULT_SUPERVISOR_URL.to_string(),
+            supervisor_safety_level: SafetyLevel::CrossUnsafe,
+            sequencer_headers: Vec::new(),
+            historical_rpc: None,
+            min_suggested_priority_fee: 1_000_000,
         }
     }
 }
@@ -86,15 +105,6 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_optimism_walkback_args() {
-        let expected_args = RollupArgs { enable_genesis_walkback: true, ..Default::default() };
-        let args =
-            CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.enable-genesis-walkback"])
-                .args;
-        assert_eq!(args, expected_args);
-    }
-
-    #[test]
     fn test_parse_optimism_compute_pending_block_args() {
         let expected_args = RollupArgs { compute_pending_block: true, ..Default::default() };
         let args =
@@ -113,7 +123,7 @@ mod tests {
     #[test]
     fn test_parse_optimism_sequencer_http_args() {
         let expected_args =
-            RollupArgs { sequencer_http: Some("http://host:port".into()), ..Default::default() };
+            RollupArgs { sequencer: Some("http://host:port".into()), ..Default::default() };
         let args = CommandParser::<RollupArgs>::parse_from([
             "reth",
             "--rollup.sequencer-http",
@@ -133,19 +143,28 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_optimism_enable_tx_conditional() {
+        let expected_args = RollupArgs { enable_tx_conditional: true, ..Default::default() };
+        let args =
+            CommandParser::<RollupArgs>::parse_from(["reth", "--rollup.enable-tx-conditional"])
+                .args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
     fn test_parse_optimism_many_args() {
         let expected_args = RollupArgs {
             disable_txpool_gossip: true,
             compute_pending_block: true,
-            enable_genesis_walkback: true,
-            sequencer_http: Some("http://host:port".into()),
+            enable_tx_conditional: true,
+            sequencer: Some("http://host:port".into()),
             ..Default::default()
         };
         let args = CommandParser::<RollupArgs>::parse_from([
             "reth",
             "--rollup.disable-tx-pool-gossip",
             "--rollup.compute-pending-block",
-            "--rollup.enable-genesis-walkback",
+            "--rollup.enable-tx-conditional",
             "--rollup.sequencer-http",
             "http://host:port",
         ])

@@ -1,17 +1,18 @@
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
+use alloy_consensus::BlockHeader;
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
-use reth_db::tables;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRW},
+    tables,
     transaction::DbTx,
 };
-use reth_node_builder::NodeTypesWithEngine;
 use reth_provider::{BlockNumReader, HeaderProvider, ProviderError};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
+use std::sync::Arc;
 use tracing::*;
 
 /// `reth recover storage-tries` command
@@ -23,7 +24,7 @@ pub struct Command<C: ChainSpecParser> {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `storage-tries` recovery command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
         _ctx: CliContext,
     ) -> eyre::Result<()> {
@@ -52,10 +53,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         }
 
         let state_root = StateRoot::from_tx(tx_mut).root()?;
-        if state_root != best_header.state_root {
+        if state_root != best_header.state_root() {
             eyre::bail!(
                 "Recovery failed. Incorrect state root. Expected: {:?}. Received: {:?}",
-                best_header.state_root,
+                best_header.state_root(),
                 state_root
             );
         }
@@ -64,5 +65,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         info!(target: "reth::cli", deleted = deleted_tries, "Finished recovery");
 
         Ok(())
+    }
+}
+
+impl<C: ChainSpecParser> Command<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }

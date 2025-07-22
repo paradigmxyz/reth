@@ -17,6 +17,7 @@ use reth_discv5::{
 use reth_net_nat::{NatResolver, DEFAULT_NET_IF_NAME};
 use reth_network::{
     transactions::{
+        config::TransactionPropagationKind,
         constants::{
             tx_fetcher::{
                 DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH, DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
@@ -30,7 +31,7 @@ use reth_network::{
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
-    HelloMessageWithProtocols, NetworkConfigBuilder, SessionsConfig,
+    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
@@ -46,7 +47,7 @@ pub struct NetworkArgs {
     #[command(flatten)]
     pub discovery: DiscoveryArgs,
 
-    #[allow(clippy::doc_markdown)]
+    #[expect(clippy::doc_markdown)]
     /// Comma separated enode URLs of trusted peers for P2P connections.
     ///
     /// --trusted-peers enode://abcd@192.168.0.1:30303
@@ -154,6 +155,12 @@ pub struct NetworkArgs {
     /// If flag is set, but no value is passed, the default interface for docker `eth0` is tried.
     #[arg(long = "net-if.experimental", conflicts_with = "addr", value_name = "IF_NAME")]
     pub net_if: Option<String>,
+
+    /// Transaction Propagation Policy
+    ///
+    /// The policy determines which peers transactions are gossiped to.
+    #[arg(long = "tx-propagation-policy", default_value_t = TransactionPropagationKind::All)]
+    pub tx_propagation_policy: TransactionPropagationKind,
 }
 
 impl NetworkArgs {
@@ -172,7 +179,7 @@ impl NetworkArgs {
 
                     DEFAULT_DISCOVERY_ADDR
                 }
-            }
+            };
         }
 
         self.addr
@@ -183,6 +190,20 @@ impl NetworkArgs {
         self.bootnodes.clone().map(|bootnodes| {
             bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
         })
+    }
+    /// Configures and returns a `TransactionsManagerConfig` based on the current settings.
+    pub fn transactions_manager_config(&self) -> TransactionsManagerConfig {
+        TransactionsManagerConfig {
+            transaction_fetcher_config: TransactionFetcherConfig::new(
+                self.max_concurrent_tx_requests,
+                self.max_concurrent_tx_requests_per_peer,
+                self.soft_limit_byte_size_pooled_transactions_response,
+                self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
+                self.max_capacity_cache_txns_pending_fetch,
+            ),
+            max_transactions_seen_by_peer_history: self.max_seen_tx_history,
+            propagation_mode: Default::default(),
+        }
     }
 
     /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`EthChainSpec`], in addition to
@@ -196,13 +217,13 @@ impl NetworkArgs {
     /// 1. --bootnodes flag
     /// 2. Network preset flags (e.g. --holesky)
     /// 3. default to mainnet nodes
-    pub fn network_config(
+    pub fn network_config<N: NetworkPrimitives>(
         &self,
         config: &Config,
         chain_spec: impl EthChainSpec,
         secret_key: SecretKey,
         default_peers_file: PathBuf,
-    ) -> NetworkConfigBuilder {
+    ) -> NetworkConfigBuilder<N> {
         let addr = self.resolved_addr();
         let chain_bootnodes = self
             .resolved_bootnodes()
@@ -216,20 +237,8 @@ impl NetworkArgs {
             .with_max_inbound_opt(self.max_inbound_peers)
             .with_max_outbound_opt(self.max_outbound_peers);
 
-        // Configure transactions manager
-        let transactions_manager_config = TransactionsManagerConfig {
-            transaction_fetcher_config: TransactionFetcherConfig::new(
-                self.max_concurrent_tx_requests,
-                self.max_concurrent_tx_requests_per_peer,
-                self.soft_limit_byte_size_pooled_transactions_response,
-                self.soft_limit_byte_size_pooled_transactions_response_on_pack_request,
-                self.max_capacity_cache_txns_pending_fetch,
-            ),
-            max_transactions_seen_by_peer_history: self.max_seen_tx_history,
-        };
-
         // Configure basic network stack
-        NetworkConfigBuilder::new(secret_key)
+        NetworkConfigBuilder::<N>::new(secret_key)
             .peer_config(config.peers_config_with_basic_nodes_from_file(
                 self.persistent_peers_file(peers_file).as_deref(),
             ))
@@ -239,7 +248,7 @@ impl NetworkArgs {
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
-            .transactions_manager_config(transactions_manager_config)
+            .transactions_manager_config(self.transactions_manager_config())
             // Configure node identity
             .apply(|builder| {
                 let peer_id = builder.get_peer_id();
@@ -285,15 +294,17 @@ impl NetworkArgs {
         self
     }
 
-    /// Change networking port numbers based on the instance number.
+    /// Change networking port numbers based on the instance number, if provided.
     /// Ports are updated to `previous_value + instance - 1`
     ///
     /// # Panics
     /// Warning: if `instance` is zero in debug mode, this will panic.
-    pub fn adjust_instance_ports(&mut self, instance: u16) {
-        debug_assert_ne!(instance, 0, "instance must be non-zero");
-        self.port += instance - 1;
-        self.discovery.adjust_instance_ports(instance);
+    pub fn adjust_instance_ports(&mut self, instance: Option<u16>) {
+        if let Some(instance) = instance {
+            debug_assert_ne!(instance, 0, "instance must be non-zero");
+            self.port += instance - 1;
+            self.discovery.adjust_instance_ports(instance);
+        }
     }
 
     /// Resolve all trusted peers at once
@@ -331,6 +342,7 @@ impl Default for NetworkArgs {
             max_seen_tx_history: DEFAULT_MAX_COUNT_TRANSACTIONS_SEEN_BY_PEER,
             max_capacity_cache_txns_pending_fetch: DEFAULT_MAX_CAPACITY_CACHE_PENDING_FETCH,
             net_if: None,
+            tx_propagation_policy: TransactionPropagationKind::default()
         }
     }
 }
@@ -353,6 +365,10 @@ pub struct DiscoveryArgs {
     /// Enable Discv5 discovery.
     #[arg(long, conflicts_with = "disable_discovery")]
     pub enable_discv5_discovery: bool,
+
+    /// Disable Nat discovery.
+    #[arg(long, conflicts_with = "disable_discovery")]
+    pub disable_nat: bool,
 
     /// The UDP address to use for devp2p peer discovery version 4.
     #[arg(id = "discovery.addr", long = "discovery.addr", value_name = "DISCOVERY_ADDR", default_value_t = DEFAULT_DISCOVERY_ADDR)]
@@ -403,12 +419,15 @@ pub struct DiscoveryArgs {
 
 impl DiscoveryArgs {
     /// Apply the discovery settings to the given [`NetworkConfigBuilder`]
-    pub fn apply_to_builder(
+    pub fn apply_to_builder<N>(
         &self,
-        mut network_config_builder: NetworkConfigBuilder,
+        mut network_config_builder: NetworkConfigBuilder<N>,
         rlpx_tcp_socket: SocketAddr,
         boot_nodes: impl IntoIterator<Item = NodeRecord>,
-    ) -> NetworkConfigBuilder {
+    ) -> NetworkConfigBuilder<N>
+    where
+        N: NetworkPrimitives,
+    {
         if self.disable_discovery || self.disable_dns_discovery {
             network_config_builder = network_config_builder.disable_dns_discovery();
         }
@@ -417,7 +436,12 @@ impl DiscoveryArgs {
             network_config_builder = network_config_builder.disable_discv4_discovery();
         }
 
-        if !self.disable_discovery && self.enable_discv5_discovery {
+        if self.disable_nat {
+            // we only check for `disable-nat` here and not for disable discovery because nat:extip can be used without discovery: <https://github.com/paradigmxyz/reth/issues/14878>
+            network_config_builder = network_config_builder.disable_nat();
+        }
+
+        if self.should_enable_discv5() {
             network_config_builder = network_config_builder
                 .discovery_v5(self.discovery_v5_builder(rlpx_tcp_socket, boot_nodes));
         }
@@ -466,6 +490,17 @@ impl DiscoveryArgs {
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown)
     }
 
+    /// Returns true if discv5 discovery should be configured
+    const fn should_enable_discv5(&self) -> bool {
+        if self.disable_discovery {
+            return false;
+        }
+
+        self.enable_discv5_discovery ||
+            self.discv5_addr.is_some() ||
+            self.discv5_addr_ipv6.is_some()
+    }
+
     /// Set the discovery port to zero, to allow the OS to assign a random unused port when
     /// discovery binds to the socket.
     pub const fn with_unused_discovery_port(mut self) -> Self {
@@ -493,6 +528,7 @@ impl Default for DiscoveryArgs {
             disable_dns_discovery: false,
             disable_discv4_discovery: false,
             enable_discv5_discovery: false,
+            disable_nat: false,
             addr: DEFAULT_DISCOVERY_ADDR,
             port: DEFAULT_DISCOVERY_PORT,
             discv5_addr: None,
@@ -581,7 +617,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(feature = "optimism"))]
     #[test]
     fn network_args_default_sanity_test() {
         let default_args = NetworkArgs::default();

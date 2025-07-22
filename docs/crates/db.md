@@ -61,14 +61,13 @@ There are many tables within the node, all used to store different types of data
 - StageCheckpointProgresses
 - PruneCheckpoints
 - VersionHistory
-- BlockRequests
 - ChainState
 
 <br>
 
 ## Database
 
-Reth's database design revolves around it's main [Database trait](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L8-L52), which implements the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
+Reth's database design revolves around its main [Database trait](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L8-L52), which implements the database's functionality across many types. Let's take a quick look at the `Database` trait and how it works.
 
 [File: crates/storage/db-api/src/database.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/db-api/src/database.rs#L8-L52)
 
@@ -213,7 +212,7 @@ pub trait DbTxMut: Send + Sync {
 
 Let's take a look at the `DbTx` and `DbTxMut` traits in action.
 
-Revisiting the `DatabaseProvider<Tx>` struct as an exampl, the `DatabaseProvider<Tx>::header_by_number()` function uses the `DbTx::get()` function to get a header from the `Headers` table.
+Revisiting the `DatabaseProvider<Tx>` struct as an example, the `DatabaseProvider<Tx>::header_by_number()` function uses the `DbTx::get()` function to get a header from the `Headers` table.
 
 [File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/provider/src/providers/database/provider.rs#L1319-L1336)
 
@@ -244,7 +243,7 @@ fn get<T: Table>(&self, key: T::Key) -> Result<Option<T::Value>, DatabaseError>;
 
 This design pattern is very powerful and allows Reth to use the methods available to the `DbTx` and `DbTxMut` traits without having to define implementation blocks for each table within the database.
 
-Let's take a look at a couple examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
+Let's take a look at a couple of examples before moving on. In the snippet below, the `DbTxMut::put()` method is used to insert values into the `CanonicalHeaders`, `Headers` and `HeaderNumbers` tables.
 
 [File: crates/storage/provider/src/providers/database/provider.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/storage/provider/src/providers/database/provider.rs#L2606-L2745)
 
@@ -255,7 +254,7 @@ self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
 ```
 
 Let's take a look at the `DatabaseProviderRW<DB: Database>` struct, which is used to create a mutable transaction to interact with the database.
-The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` trait, which returns a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
+The `DatabaseProviderRW<DB: Database>` struct implements the `Deref` and `DerefMut` traits, which return a reference to its first field, which is a `TxMut`. Recall that `TxMut` is a generic type on the `Database` trait, which is defined as `type TXMut: DbTxMut + DbTx + Send + Sync;`, giving it access to all of the functions available to `DbTx`, including the `DbTx::get()` function.
 
 This next example uses the `DbTx::cursor()` method to get a `Cursor`. The `Cursor` type provides a way to traverse through rows in a database table, one row at a time. A cursor enables the program to perform an operation (updating, deleting, etc) on each row in the table individually. The following code snippet gets a cursor for a few different tables in the database.
 
@@ -268,7 +267,7 @@ let mut headers_cursor = provider.tx_ref().cursor_read::<tables::Headers>()?;
 let headers_walker = headers_cursor.walk_range(block_range.clone())?;
 ```
 
-Lets look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
+Let's look at an examples of how cursors are used. The code snippet below contains the `unwind` method from the `BodyStage` defined in the `stages` crate. This function is responsible for unwinding any changes to the database if there is an error when executing the body stage within the Reth pipeline.
 
 [File: crates/stages/stages/src/stages/bodies.rs](https://github.com/paradigmxyz/reth/blob/bf9cac7571f018fec581fe3647862dab527aeafb/crates/stages/stages/src/stages/bodies.rs#L267-L345)
 
@@ -283,7 +282,6 @@ fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
     let mut body_cursor = tx.cursor_write::<tables::BlockBodyIndices>()?;
     let mut ommers_cursor = tx.cursor_write::<tables::BlockOmmers>()?;
     let mut withdrawals_cursor = tx.cursor_write::<tables::BlockWithdrawals>()?;
-    let mut requests_cursor = tx.cursor_write::<tables::BlockRequests>()?;
     // Cursors to unwind transitions
     let mut tx_block_cursor = tx.cursor_write::<tables::TransactionBlocks>()?;
 
@@ -322,7 +320,7 @@ fn unwind(&mut self, provider: &DatabaseProviderRW<DB>, input: UnwindInput) {
 }
 ```
 
-This function first grabs a mutable cursor for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals`, `BlockRequests`, `TransactionBlocks` tables.
+This function first grabs a mutable cursor for the `BlockBodyIndices`, `BlockOmmers`, `BlockWithdrawals`, `TransactionBlocks` tables.
 
 Then it gets a walker of the block body cursor, and then walk backwards through the cursor to delete the block body entries from the last block number to the block number specified in the `UnwindInput` struct.
 
@@ -332,7 +330,7 @@ While this is a brief look at how cursors work in the context of database tables
 
 ## Summary
 
-This chapter was packed with information, so lets do a quick review. The database is comprised of tables, with each table being a collection of key-value pairs representing various pieces of data in the blockchain. Any struct that implements the `Database` trait can view, update or delete entries in the various tables. The database design leverages nested traits and generic associated types to provide methods to interact with each table in the database.
+This chapter was packed with information, so let's do a quick review. The database is comprised of tables, with each table being a collection of key-value pairs representing various pieces of data in the blockchain. Any struct that implements the `Database` trait can view, update or delete entries in the various tables. The database design leverages nested traits and generic associated types to provide methods to interact with each table in the database.
 
 <br>
 

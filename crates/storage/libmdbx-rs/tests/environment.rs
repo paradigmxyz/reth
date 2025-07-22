@@ -128,6 +128,18 @@ fn test_info() {
     // assert_eq!(info.last_pgno(), 1);
     // assert_eq!(info.last_txnid(), 0);
     assert_eq!(info.num_readers(), 0);
+    assert!(matches!(info.mode(), Mode::ReadWrite { sync_mode: SyncMode::Durable }));
+    assert!(env.is_read_write().unwrap());
+
+    drop(env);
+    let env = Environment::builder()
+        .set_geometry(Geometry { size: Some(map_size..), ..Default::default() })
+        .set_flags(EnvironmentFlags { mode: Mode::ReadOnly, ..Default::default() })
+        .open(dir.path())
+        .unwrap();
+    let info = env.info().unwrap();
+    assert!(matches!(info.mode(), Mode::ReadOnly));
+    assert!(env.is_read_only().unwrap());
 }
 
 #[test]

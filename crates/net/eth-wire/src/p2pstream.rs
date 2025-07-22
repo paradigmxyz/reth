@@ -14,9 +14,10 @@ use futures::{Sink, SinkExt, StreamExt};
 use pin_project::pin_project;
 use reth_codecs::add_arbitrary_tests;
 use reth_metrics::metrics::counter;
-use reth_primitives::GotExpected;
+use reth_primitives_traits::GotExpected;
 use std::{
     collections::VecDeque,
+    future::Future,
     io,
     pin::Pin,
     task::{ready, Context, Poll},
@@ -41,7 +42,7 @@ const MAX_P2P_MESSAGE_ID: u8 = P2PMessageID::Pong as u8;
 
 /// [`HANDSHAKE_TIMEOUT`] determines the amount of time to wait before determining that a `p2p`
 /// handshake has timed out.
-pub(crate) const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// [`PING_TIMEOUT`] determines the amount of time to wait before determining that a `p2p` ping has
 /// timed out.
@@ -194,12 +195,15 @@ impl<S> CanDisconnect<Bytes> for P2PStream<S>
 where
     S: Sink<Bytes, Error = io::Error> + Unpin + Send + Sync,
 {
-    async fn disconnect(&mut self, reason: DisconnectReason) -> Result<(), P2PStreamError> {
-        self.disconnect(reason).await
+    fn disconnect(
+        &mut self,
+        reason: DisconnectReason,
+    ) -> Pin<Box<dyn Future<Output = Result<(), P2PStreamError>> + Send + '_>> {
+        Box::pin(async move { self.disconnect(reason).await })
     }
 }
 
-/// A P2PStream wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
+/// A `P2PStream` wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
 /// protocol messages.
 ///
 /// This stream supports multiple shared capabilities, that were negotiated during the handshake.
@@ -280,7 +284,7 @@ impl<S> P2PStream<S> {
     /// # Panics
     ///
     /// If the provided capacity is `0`.
-    pub fn set_outgoing_message_buffer_capacity(&mut self, capacity: usize) {
+    pub const fn set_outgoing_message_buffer_capacity(&mut self, capacity: usize) {
         self.outgoing_message_buffer_capacity = capacity;
     }
 

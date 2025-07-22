@@ -1,7 +1,9 @@
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::B256;
+use reth_fs_util::FsPathError;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs},
+    path::Path,
     str::FromStr,
     time::Duration,
 };
@@ -21,11 +23,11 @@ pub fn parse_duration_from_secs_or_ms(
     arg: &str,
 ) -> eyre::Result<Duration, std::num::ParseIntError> {
     if arg.ends_with("ms") {
-        arg.trim_end_matches("ms").parse::<u64>().map(Duration::from_millis)
+        arg.trim_end_matches("ms").parse().map(Duration::from_millis)
     } else if arg.ends_with('s') {
-        arg.trim_end_matches('s').parse::<u64>().map(Duration::from_secs)
+        arg.trim_end_matches('s').parse().map(Duration::from_secs)
     } else {
-        arg.parse::<u64>().map(Duration::from_secs)
+        arg.parse().map(Duration::from_secs)
     }
 }
 
@@ -73,13 +75,35 @@ pub fn parse_socket_address(value: &str) -> eyre::Result<SocketAddr, SocketAddre
         let port: u16 = port.parse()?;
         return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
     }
-    if let Ok(port) = value.parse::<u16>() {
+    if let Ok(port) = value.parse() {
         return Ok(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port))
     }
     value
         .to_socket_addrs()?
         .next()
         .ok_or_else(|| SocketAddressParsingError::Parse(value.to_string()))
+}
+
+/// Wrapper around [`reth_fs_util::read_json_file`] which can be used as a clap value parser.
+pub fn read_json_from_file<T: serde::de::DeserializeOwned>(path: &str) -> Result<T, FsPathError> {
+    reth_fs_util::read_json_file(Path::new(path))
+}
+
+/// Parses an ether value from a string.
+///
+/// The amount in eth like "1.05" will be interpreted in wei (1.05 * 1e18).
+/// Supports both decimal and integer inputs.
+///
+/// # Examples
+/// - "1.05" -> 1.05 ETH = 1.05 * 10^18 wei
+/// - "2" -> 2 ETH = 2 * 10^18 wei
+pub fn parse_ether_value(value: &str) -> eyre::Result<u128> {
+    let eth = value.parse::<f64>()?;
+    if eth.is_sign_negative() {
+        return Err(eyre::eyre!("Ether value cannot be negative"))
+    }
+    let wei = eth * 1e18;
+    Ok(wei as u128)
 }
 
 #[cfg(test)]
@@ -100,7 +124,7 @@ mod tests {
 
     #[test]
     fn parse_socket_address_random() {
-        let port: u16 = rand::thread_rng().gen();
+        let port: u16 = rand::rng().random();
 
         for value in [format!("localhost:{port}"), format!(":{port}"), port.to_string()] {
             let socket_addr = parse_socket_address(&value)
@@ -123,5 +147,26 @@ mod tests {
         assert_eq!(seconds, Duration::from_secs(5));
 
         assert!(parse_duration_from_secs_or_ms("5ns").is_err());
+    }
+
+    #[test]
+    fn parse_ether_values() {
+        // Test basic decimal value
+        let wei = parse_ether_value("1.05").unwrap();
+        assert_eq!(wei, 1_050_000_000_000_000_000u128);
+
+        // Test integer value
+        let wei = parse_ether_value("2").unwrap();
+        assert_eq!(wei, 2_000_000_000_000_000_000u128);
+
+        // Test zero
+        let wei = parse_ether_value("0").unwrap();
+        assert_eq!(wei, 0);
+
+        // Test negative value fails
+        assert!(parse_ether_value("-1").is_err());
+
+        // Test invalid input fails
+        assert!(parse_ether_value("abc").is_err());
     }
 }

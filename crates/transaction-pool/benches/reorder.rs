@@ -75,19 +75,17 @@ fn txpool_reordering_bench<T: BenchTxPool>(
     );
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |(mut txpool, new_txs)| {
-            {
-                // Reorder with new base fee
-                let bigger_base_fee = base_fee.saturating_add(10);
-                txpool.reorder(bigger_base_fee);
+            // Reorder with new base fee
+            let bigger_base_fee = base_fee.saturating_add(10);
+            txpool.reorder(bigger_base_fee);
 
-                // Reorder with new base fee after adding transactions.
-                for new_tx in new_txs {
-                    txpool.add_transaction(new_tx);
-                }
-                let smaller_base_fee = base_fee.saturating_sub(10);
-                txpool.reorder(smaller_base_fee)
-            };
-            std::hint::black_box(());
+            // Reorder with new base fee after adding transactions.
+            for new_tx in new_txs {
+                txpool.add_transaction(new_tx);
+            }
+            let smaller_base_fee = base_fee.saturating_sub(10);
+            txpool.reorder(smaller_base_fee);
+            txpool
         });
     });
 }
@@ -96,8 +94,7 @@ fn generate_test_data(
     seed_size: usize,
     input_size: usize,
 ) -> (Vec<MockTransaction>, Vec<MockTransaction>, u64) {
-    let config = ProptestConfig::default();
-    let mut runner = TestRunner::new(config);
+    let mut runner = TestRunner::deterministic();
 
     let txs = prop::collection::vec(any::<MockTransaction>(), seed_size)
         .new_tree(&mut runner)
@@ -116,7 +113,7 @@ fn generate_test_data(
 
 mod implementations {
     use super::*;
-    use reth_transaction_pool::PoolTransaction;
+    use alloy_consensus::Transaction;
     use std::collections::BinaryHeap;
 
     /// This implementation appends the transactions and uses [`Vec::sort_by`] function for sorting.
@@ -206,10 +203,12 @@ mod implementations {
             self.base_fee = Some(base_fee);
 
             let drained = self.inner.drain();
-            self.inner = BinaryHeap::from_iter(drained.map(|mock| {
-                let priority = mock.tx.effective_tip_per_gas(base_fee).expect("set");
-                MockTransactionWithPriority { tx: mock.tx, priority }
-            }));
+            self.inner = drained
+                .map(|mock| {
+                    let priority = mock.tx.effective_tip_per_gas(base_fee).expect("set");
+                    MockTransactionWithPriority { tx: mock.tx, priority }
+                })
+                .collect();
         }
     }
 }

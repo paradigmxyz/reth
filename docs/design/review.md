@@ -1,6 +1,6 @@
 # Review of other codebases
 
-This document contains some of our research in how other codebases designed various parts of their stack.
+This document contains some of our research on how other codebases designed various parts of their stack.
 
 ## P2P
 
@@ -18,15 +18,15 @@ This document contains some of our research in how other codebases designed vari
 
 ## Database
 
-* [Erigon's DB walkthrough](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) contains an overview. They made the most noticeable improvements on storage reduction.
+* [Erigon's DB walkthrough](https://github.com/ledgerwatch/erigon/blob/12ee33a492f5d240458822d052820d9998653a63/docs/programmers_guide/db_walkthrough.MD) contains an overview. They made the most noticeable improvements in storage reduction.
 * [Gio's erigon-db table macros](https://github.com/gio256/erigon-db) + [Akula's macros](https://github.com/akula-bft/akula/blob/74b172ee1d2d2a4f04ce057b5a76679c1b83df9c/src/kv/tables.rs#L61).
 
 ## Header Downloaders
 
 * Erigon Header Downloader:
-    * A header downloader algo was introduced in [`erigon#1016`](https://github.com/ledgerwatch/erigon/pull/1016) and finished in [`erigon#1145`](https://github.com/ledgerwatch/erigon/pull/1145). At a high level, the downloader concurrently requested headers by hash, then sorted, validated and fused the responses into chain segments. Smaller segments were fused into larger as the gaps between them were filled. The downloader is also used to maintain hardcoded hashes (later renamed to preverified) to bootstrap the sync.
+    * A header downloader algorithm was introduced in [`erigon#1016`](https://github.com/ledgerwatch/erigon/pull/1016) and finished in [`erigon#1145`](https://github.com/ledgerwatch/erigon/pull/1145). At a high level, the downloader concurrently requested headers by hash, then sorted, validated and fused the responses into chain segments. Smaller segments were fused into larger as the gaps between them were filled. The downloader is also used to maintain hardcoded hashes (later renamed to preverified) to bootstrap the sync.
     * The downloader was refactored multiple times: [`erigon#1471`](https://github.com/ledgerwatch/erigon/pull/1471), [`erigon#1559`](https://github.com/ledgerwatch/erigon/pull/1559) and [`erigon#2035`](https://github.com/ledgerwatch/erigon/pull/2035).
-    * With PoS transition in [`erigon#3075`](https://github.com/ledgerwatch/erigon/pull/3075) terminal td was introduced to the algo to stop forward syncing. For the downward sync (post merge), the download was now delegated to [`EthBackendServer`](https://github.com/ledgerwatch/erigon/blob/3c95db00788dc740849c2207d886fe4db5a8c473/ethdb/privateapi/ethbackend.go#L245)
+    * With PoS transition in [`erigon#3075`](https://github.com/ledgerwatch/erigon/pull/3075) terminal td was introduced to the algorithm to stop forward syncing. For the downward sync (post merge), the downloader was now delegated to [`EthBackendServer`](https://github.com/ledgerwatch/erigon/blob/3c95db00788dc740849c2207d886fe4db5a8c473/ethdb/privateapi/ethbackend.go#L245)
     * Proper reverse PoS downloader was introduced in [`erigon#3092`](https://github.com/ledgerwatch/erigon/pull/3092) which downloads the header batches from tip until local head is reached. Refactored later in [`erigon#3340`](https://github.com/ledgerwatch/erigon/pull/3340) and [`erigon#3717`](https://github.com/ledgerwatch/erigon/pull/3717).
 
 * Akula Headers & Stage Downloader:

@@ -1,5 +1,5 @@
 use crate::db::DatabaseError;
-use reth_primitives::StaticFileSegment;
+use reth_static_file_types::StaticFileSegment;
 
 /// `UnifiedStorageWriter` related errors
 /// `StorageWriter` related errors

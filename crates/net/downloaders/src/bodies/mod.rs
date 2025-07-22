@@ -1,5 +1,5 @@
 /// A naive concurrent downloader.
-#[allow(clippy::module_inception)]
+#[expect(clippy::module_inception)]
 pub mod bodies;
 
 /// A body downloader that does nothing. Useful to build unwind-only pipelines.

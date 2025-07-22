@@ -1,13 +1,18 @@
 use std::{collections::HashMap, future::Future, sync::Arc};
 
+use alloy_eips::BlockId;
 use alloy_primitives::{Address, U256};
 use async_trait::async_trait;
-use jsonrpsee::core::RpcResult;
+use futures::StreamExt;
+use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
+use jsonrpsee_types::ErrorObject;
+use reth_chain_state::{CanonStateNotificationStream, CanonStateSubscriptions};
 use reth_errors::RethResult;
-use reth_primitives::BlockId;
-use reth_provider::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};
+use reth_rpc_server_types::result::internal_rpc_err;
+use reth_storage_api::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use tokio::sync::oneshot;
 
@@ -73,7 +78,7 @@ where
         let hash_map = accounts_before.iter().try_fold(
             HashMap::default(),
             |mut hash_map, account_before| -> RethResult<_> {
-                let current_balance = state.account_balance(account_before.address)?;
+                let current_balance = state.account_balance(&account_before.address)?;
                 let prev_balance = account_before.info.map(|info| info.balance);
                 if current_balance != prev_balance {
                     hash_map.insert(account_before.address, current_balance.unwrap_or_default());
@@ -88,7 +93,11 @@ where
 #[async_trait]
 impl<Provider> RethApiServer for RethApi<Provider>
 where
-    Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
+    Provider: BlockReaderIdExt
+        + ChangeSetReader
+        + StateProviderFactory
+        + CanonStateSubscriptions
+        + 'static,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -96,6 +105,50 @@ where
         block_id: BlockId,
     ) -> RpcResult<HashMap<Address, U256>> {
         Ok(Self::balance_changes_in_block(self, block_id).await?)
+    }
+
+    /// Handler for `reth_subscribeChainNotifications`
+    async fn reth_subscribe_chain_notifications(
+        &self,
+        pending: PendingSubscriptionSink,
+    ) -> jsonrpsee::core::SubscriptionResult {
+        let sink = pending.accept().await?;
+        let stream = self.provider().canonical_state_stream();
+        self.inner.task_spawner.spawn(Box::pin(async move {
+            let _ = pipe_from_stream(sink, stream).await;
+        }));
+
+        Ok(())
+    }
+}
+
+/// Pipes all stream items to the subscription sink.
+async fn pipe_from_stream<N: NodePrimitives>(
+    sink: SubscriptionSink,
+    mut stream: CanonStateNotificationStream<N>,
+) -> Result<(), ErrorObject<'static>> {
+    loop {
+        tokio::select! {
+            _ = sink.closed() => {
+                // connection dropped
+                break Ok(())
+            }
+            maybe_item = stream.next() => {
+                let item = match maybe_item {
+                    Some(item) => item,
+                    None => {
+                        // stream ended
+                        break Ok(())
+                    },
+                };
+                let msg = SubscriptionMessage::new(sink.method_name(), sink.subscription_id(), &item)
+                    .map_err(|e| internal_rpc_err(e.to_string()))?;
+
+                if sink.send(msg).await.is_err() {
+                    break Ok(());
+                }
+            }
+        }
     }
 }
 

@@ -1,12 +1,9 @@
 use super::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
-use crate::{
-    forward_cursor::ForwardInMemoryCursor, HashedAccountsSorted, HashedPostStateSorted,
-    HashedStorageSorted,
-};
-use alloy_primitives::{B256, U256};
-use reth_primitives::Account;
+use crate::forward_cursor::ForwardInMemoryCursor;
+use alloy_primitives::{map::B256Set, B256, U256};
+use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
-use std::collections::HashSet;
+use reth_trie_common::{HashedAccountsSorted, HashedPostStateSorted, HashedStorageSorted};
 
 /// The hashed cursor factory for the post state.
 #[derive(Clone, Debug)]
@@ -49,7 +46,7 @@ pub struct HashedPostStateAccountCursor<'a, C> {
     /// Forward-only in-memory cursor over accounts.
     post_state_cursor: ForwardInMemoryCursor<'a, B256, Account>,
     /// Reference to the collection of account keys that were destroyed.
-    destroyed_accounts: &'a HashSet<B256>,
+    destroyed_accounts: &'a B256Set,
     /// The last hashed account that was returned by the cursor.
     /// De facto, this is a current cursor position.
     last_account: Option<B256>,
@@ -60,7 +57,7 @@ where
     C: HashedCursor<Value = Account>,
 {
     /// Create new instance of [`HashedPostStateAccountCursor`].
-    pub const fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
+    pub fn new(cursor: C, post_state_accounts: &'a HashedAccountsSorted) -> Self {
         let post_state_cursor = ForwardInMemoryCursor::new(&post_state_accounts.accounts);
         let destroyed_accounts = &post_state_accounts.destroyed_accounts;
         Self { cursor, post_state_cursor, destroyed_accounts, last_account: None }
@@ -82,14 +79,14 @@ where
 
         // It's an exact match, return the account from post state without looking up in the
         // database.
-        if post_state_entry.map_or(false, |entry| entry.0 == key) {
+        if post_state_entry.is_some_and(|entry| entry.0 == key) {
             return Ok(post_state_entry)
         }
 
         // It's not an exact match, reposition to the first greater or equal account that wasn't
         // cleared.
         let mut db_entry = self.cursor.seek(key)?;
-        while db_entry.as_ref().map_or(false, |(address, _)| self.is_account_cleared(address)) {
+        while db_entry.as_ref().is_some_and(|(address, _)| self.is_account_cleared(address)) {
             db_entry = self.cursor.next()?;
         }
 
@@ -103,7 +100,7 @@ where
 
         // If post state was given precedence or account was cleared, move the cursor forward.
         let mut db_entry = self.cursor.seek(last_account)?;
-        while db_entry.as_ref().map_or(false, |(address, _)| {
+        while db_entry.as_ref().is_some_and(|(address, _)| {
             address <= &last_account || self.is_account_cleared(address)
         }) {
             db_entry = self.cursor.next()?;
@@ -183,7 +180,7 @@ pub struct HashedPostStateStorageCursor<'a, C> {
     /// Forward-only in-memory cursor over non zero-valued account storage slots.
     post_state_cursor: Option<ForwardInMemoryCursor<'a, B256, U256>>,
     /// Reference to the collection of storage slot keys that were cleared.
-    cleared_slots: Option<&'a HashSet<B256>>,
+    cleared_slots: Option<&'a B256Set>,
     /// Flag indicating whether database storage was wiped.
     storage_wiped: bool,
     /// The last slot that has been returned by the cursor.
@@ -200,14 +197,14 @@ where
         let post_state_cursor =
             post_state_storage.map(|s| ForwardInMemoryCursor::new(&s.non_zero_valued_slots));
         let cleared_slots = post_state_storage.map(|s| &s.zero_valued_slots);
-        let storage_wiped = post_state_storage.map_or(false, |s| s.wiped);
+        let storage_wiped = post_state_storage.is_some_and(|s| s.wiped);
         Self { cursor, post_state_cursor, cleared_slots, storage_wiped, last_slot: None }
     }
 
     /// Check if the slot was zeroed out in the post state.
     /// The database is not checked since it already has no zero-valued slots.
     fn is_slot_zero_valued(&self, slot: &B256) -> bool {
-        self.cleared_slots.map_or(false, |s| s.contains(slot))
+        self.cleared_slots.is_some_and(|s| s.contains(slot))
     }
 
     /// Find the storage entry in post state or database that's greater or equal to provided subkey.
@@ -217,14 +214,14 @@ where
 
         // If database storage was wiped or it's an exact match,
         // return the storage slot from post state without looking up in the database.
-        if self.storage_wiped || post_state_entry.map_or(false, |entry| entry.0 == subkey) {
+        if self.storage_wiped || post_state_entry.is_some_and(|entry| entry.0 == subkey) {
             return Ok(post_state_entry)
         }
 
         // It's not an exact match and storage was not wiped,
         // reposition to the first greater or equal account.
         let mut db_entry = self.cursor.seek(subkey)?;
-        while db_entry.as_ref().map_or(false, |entry| self.is_slot_zero_valued(&entry.0)) {
+        while db_entry.as_ref().is_some_and(|entry| self.is_slot_zero_valued(&entry.0)) {
             db_entry = self.cursor.next()?;
         }
 
@@ -248,7 +245,7 @@ where
         let mut db_entry = self.cursor.seek(last_slot)?;
         while db_entry
             .as_ref()
-            .map_or(false, |entry| entry.0 == last_slot || self.is_slot_zero_valued(&entry.0))
+            .is_some_and(|entry| entry.0 == last_slot || self.is_slot_zero_valued(&entry.0))
         {
             db_entry = self.cursor.next()?;
         }

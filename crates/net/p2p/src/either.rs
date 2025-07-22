@@ -1,5 +1,7 @@
 //! Support for different download types.
 
+use std::ops::RangeInclusive;
+
 use crate::{
     bodies::client::BodiesClient,
     download::DownloadClient,
@@ -32,18 +34,24 @@ where
 impl<A, B> BodiesClient for Either<A, B>
 where
     A: BodiesClient,
-    B: BodiesClient,
+    B: BodiesClient<Body = A::Body>,
 {
+    type Body = A::Body;
     type Output = Either<A::Output, B::Output>;
 
-    fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority_and_range_hint(
         &self,
         hashes: Vec<B256>,
         priority: Priority,
+        range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         match self {
-            Self::Left(a) => Either::Left(a.get_block_bodies_with_priority(hashes, priority)),
-            Self::Right(b) => Either::Right(b.get_block_bodies_with_priority(hashes, priority)),
+            Self::Left(a) => Either::Left(
+                a.get_block_bodies_with_priority_and_range_hint(hashes, priority, range_hint),
+            ),
+            Self::Right(b) => Either::Right(
+                b.get_block_bodies_with_priority_and_range_hint(hashes, priority, range_hint),
+            ),
         }
     }
 }
@@ -51,8 +59,9 @@ where
 impl<A, B> HeadersClient for Either<A, B>
 where
     A: HeadersClient,
-    B: HeadersClient,
+    B: HeadersClient<Header = A::Header>,
 {
+    type Header = A::Header;
     type Output = Either<A::Output, B::Output>;
 
     fn get_headers_with_priority(

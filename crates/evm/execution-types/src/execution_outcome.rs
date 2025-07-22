@@ -1,12 +1,23 @@
-use crate::BlockExecutionOutput;
-use alloy_primitives::{Address, BlockNumber, Bloom, Log, B256, U256};
-use reth_primitives::{logs_bloom, Account, Bytecode, Receipt, Receipts, Requests, StorageEntry};
-use reth_trie::HashedPostState;
+use crate::{BlockExecutionOutput, BlockExecutionResult};
+use alloc::{vec, vec::Vec};
+use alloy_eips::eip7685::Requests;
+use alloy_primitives::{logs_bloom, map::HashMap, Address, BlockNumber, Bloom, Log, B256, U256};
+use reth_primitives_traits::{Account, Bytecode, Receipt, StorageEntry};
+use reth_trie_common::{HashedPostState, KeyHasher};
 use revm::{
-    db::{states::BundleState, BundleAccount},
-    primitives::AccountInfo,
+    database::{states::BundleState, BundleAccount},
+    state::AccountInfo,
 };
-use std::collections::HashMap;
+
+/// Type used to initialize revms bundle state.
+pub type BundleStateInit =
+    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+
+/// Types used inside `RevertsInit` to initialize revms reverts.
+pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
+
+/// Type used to initialize revms reverts.
+pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
 
 /// Represents a changed account
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,17 +41,15 @@ impl ChangedAccount {
 ///
 /// The `ExecutionOutcome` structure aggregates the state changes over an arbitrary number of
 /// blocks, capturing the resulting state, receipts, and requests following the execution.
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct ExecutionOutcome {
+pub struct ExecutionOutcome<T = reth_ethereum_primitives::Receipt> {
     /// Bundle state with reverts.
     pub bundle: BundleState,
     /// The collection of receipts.
     /// Outer vector stores receipts for each block sequentially.
     /// The inner vector stores receipts ordered by transaction number.
-    ///
-    /// If receipt is None it means it is pruned.
-    pub receipts: Receipts,
+    pub receipts: Vec<Vec<T>>,
     /// First block of bundle state.
     pub first_block: BlockNumber,
     /// The collection of EIP-7685 requests.
@@ -52,24 +61,25 @@ pub struct ExecutionOutcome {
     pub requests: Vec<Requests>,
 }
 
-/// Type used to initialize revms bundle state.
-pub type BundleStateInit =
-    HashMap<Address, (Option<Account>, Option<Account>, HashMap<B256, (U256, U256)>)>;
+impl<T> Default for ExecutionOutcome<T> {
+    fn default() -> Self {
+        Self {
+            bundle: Default::default(),
+            receipts: Default::default(),
+            first_block: Default::default(),
+            requests: Default::default(),
+        }
+    }
+}
 
-/// Types used inside `RevertsInit` to initialize revms reverts.
-pub type AccountRevertInit = (Option<Option<Account>>, Vec<StorageEntry>);
-
-/// Type used to initialize revms reverts.
-pub type RevertsInit = HashMap<BlockNumber, HashMap<Address, AccountRevertInit>>;
-
-impl ExecutionOutcome {
+impl<T> ExecutionOutcome<T> {
     /// Creates a new `ExecutionOutcome`.
     ///
     /// This constructor initializes a new `ExecutionOutcome` instance with the provided
     /// bundle state, receipts, first block number, and EIP-7685 requests.
     pub const fn new(
         bundle: BundleState,
-        receipts: Receipts,
+        receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
@@ -84,7 +94,7 @@ impl ExecutionOutcome {
         state_init: BundleStateInit,
         revert_init: RevertsInit,
         contracts_init: impl IntoIterator<Item = (B256, Bytecode)>,
-        receipts: Receipts,
+        receipts: Vec<Vec<T>>,
         first_block: BlockNumber,
         requests: Vec<Requests>,
     ) -> Self {
@@ -118,18 +128,42 @@ impl ExecutionOutcome {
         Self { bundle, receipts, first_block, requests }
     }
 
+    /// Creates a new `ExecutionOutcome` from a single block execution result.
+    pub fn single(block_number: u64, output: BlockExecutionOutput<T>) -> Self {
+        Self {
+            bundle: output.state,
+            receipts: vec![output.result.receipts],
+            first_block: block_number,
+            requests: vec![output.result.requests],
+        }
+    }
+
+    /// Creates a new `ExecutionOutcome` from multiple [`BlockExecutionResult`]s.
+    pub fn from_blocks(
+        first_block: u64,
+        bundle: BundleState,
+        results: Vec<BlockExecutionResult<T>>,
+    ) -> Self {
+        let mut value = Self { bundle, first_block, receipts: Vec::new(), requests: Vec::new() };
+        for result in results {
+            value.receipts.push(result.receipts);
+            value.requests.push(result.requests);
+        }
+        value
+    }
+
     /// Return revm bundle state.
     pub const fn state(&self) -> &BundleState {
         &self.bundle
     }
 
     /// Returns mutable revm bundle state.
-    pub fn state_mut(&mut self) -> &mut BundleState {
+    pub const fn state_mut(&mut self) -> &mut BundleState {
         &mut self.bundle
     }
 
     /// Set first block.
-    pub fn set_first_block(&mut self, first_block: BlockNumber) {
+    pub const fn set_first_block(&mut self, first_block: BlockNumber) {
         self.first_block = first_block;
     }
 
@@ -145,7 +179,7 @@ impl ExecutionOutcome {
 
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
-        self.bundle.account(address).map(|a| a.info.clone().map(Into::into))
+        self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
     }
 
     /// Get storage if value is known.
@@ -162,12 +196,12 @@ impl ExecutionOutcome {
 
     /// Returns [`HashedPostState`] for this execution outcome.
     /// See [`HashedPostState::from_bundle_state`] for more info.
-    pub fn hash_state_slow(&self) -> HashedPostState {
-        HashedPostState::from_bundle_state(&self.bundle.state)
+    pub fn hash_state_slow<KH: KeyHasher>(&self) -> HashedPostState {
+        HashedPostState::from_bundle_state::<KH>(&self.bundle.state)
     }
 
     /// Transform block number to the index of block.
-    fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
+    pub fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
             return None
         }
@@ -178,53 +212,29 @@ impl ExecutionOutcome {
         Some(index as usize)
     }
 
-    /// Returns an iterator over all block logs.
-    pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
-        let index = self.block_number_to_index(block_number)?;
-        Some(self.receipts[index].iter().filter_map(|r| Some(r.as_ref()?.logs.iter())).flatten())
-    }
-
-    /// Return blocks logs bloom
-    pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom> {
-        Some(logs_bloom(self.logs(block_number)?))
-    }
-
-    /// Returns the receipt root for all recorded receipts.
-    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
-    pub fn receipts_root_slow(&self, _block_number: BlockNumber) -> Option<B256> {
-        #[cfg(feature = "optimism")]
-        panic!("This should not be called in optimism mode. Use `optimism_receipts_root_slow` instead.");
-        #[cfg(not(feature = "optimism"))]
-        self.receipts.root_slow(
-            self.block_number_to_index(_block_number)?,
-            reth_primitives::proofs::calculate_receipt_root_no_memo,
-        )
-    }
-
     /// Returns the receipt root for all recorded receipts.
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
     /// of receipt. This is a expensive operation.
     pub fn generic_receipts_root_slow(
         &self,
         block_number: BlockNumber,
-        f: impl FnOnce(&[&Receipt]) -> B256,
+        f: impl FnOnce(&[T]) -> B256,
     ) -> Option<B256> {
-        self.receipts.root_slow(self.block_number_to_index(block_number)?, f)
+        Some(f(self.receipts.get(self.block_number_to_index(block_number)?)?))
     }
 
     /// Returns reference to receipts.
-    pub const fn receipts(&self) -> &Receipts {
+    pub const fn receipts(&self) -> &Vec<Vec<T>> {
         &self.receipts
     }
 
     /// Returns mutable reference to receipts.
-    pub fn receipts_mut(&mut self) -> &mut Receipts {
+    pub const fn receipts_mut(&mut self) -> &mut Vec<Vec<T>> {
         &mut self.receipts
     }
 
     /// Return all block receipts
-    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[Option<Receipt>] {
+    pub fn receipts_by_block(&self, block_number: BlockNumber) -> &[T] {
         let Some(index) = self.block_number_to_index(block_number) else { return &[] };
         &self.receipts[index]
     }
@@ -242,6 +252,11 @@ impl ExecutionOutcome {
     /// Return first block of the execution outcome
     pub const fn first_block(&self) -> BlockNumber {
         self.first_block
+    }
+
+    /// Return last block of the execution outcome
+    pub fn last_block(&self) -> BlockNumber {
+        (self.first_block + self.len() as u64).saturating_sub(1)
     }
 
     /// Revert the state to the given block number.
@@ -276,7 +291,10 @@ impl ExecutionOutcome {
     /// # Panics
     ///
     /// If the target block number is not included in the state block range.
-    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self) {
+    pub fn split_at(self, at: BlockNumber) -> (Option<Self>, Self)
+    where
+        T: Clone,
+    {
         if at == self.first_block {
             return (None, self)
         }
@@ -288,7 +306,7 @@ impl ExecutionOutcome {
 
         // Truncate higher state to [at..].
         let at_idx = higher_state.block_number_to_index(at).unwrap();
-        higher_state.receipts = higher_state.receipts.split_off(at_idx).into();
+        higher_state.receipts = higher_state.receipts.split_off(at_idx);
         // Ensure that there are enough requests to truncate.
         // Sometimes we just have receipts and no requests.
         if at_idx < higher_state.requests.len() {
@@ -307,7 +325,7 @@ impl ExecutionOutcome {
     /// In most cases this would be true.
     pub fn extend(&mut self, other: Self) {
         self.bundle.extend(other.bundle);
-        self.receipts.extend(other.receipts.receipt_vec);
+        self.receipts.extend(other.receipts);
         self.requests.extend(other.requests);
     }
 
@@ -318,17 +336,17 @@ impl ExecutionOutcome {
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
-        let this_bundle = std::mem::take(&mut self.bundle);
+        let this_bundle = core::mem::take(&mut self.bundle);
         // extend other bundle with this
         other.extend(this_bundle);
         // discard other reverts
         other.take_n_reverts(other_len);
         // swap bundles
-        std::mem::swap(&mut self.bundle, &mut other)
+        core::mem::swap(&mut self.bundle, &mut other)
     }
 
     /// Create a new instance with updated receipts.
-    pub fn with_receipts(mut self, receipts: Receipts) -> Self {
+    pub fn with_receipts(mut self, receipts: Vec<Vec<T>>) -> Self {
         self.receipts = receipts;
         self
     }
@@ -351,13 +369,184 @@ impl ExecutionOutcome {
     }
 }
 
-impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
-    fn from(value: (BlockExecutionOutput<Receipt>, BlockNumber)) -> Self {
-        Self {
-            bundle: value.0.state,
-            receipts: Receipts::from(value.0.receipts),
-            first_block: value.1,
-            requests: vec![Requests::from(value.0.requests)],
+impl<T: Receipt<Log = Log>> ExecutionOutcome<T> {
+    /// Returns an iterator over all block logs.
+    pub fn logs(&self, block_number: BlockNumber) -> Option<impl Iterator<Item = &Log>> {
+        let index = self.block_number_to_index(block_number)?;
+        Some(self.receipts[index].iter().flat_map(|r| r.logs()))
+    }
+
+    /// Return blocks logs bloom
+    pub fn block_logs_bloom(&self, block_number: BlockNumber) -> Option<Bloom> {
+        Some(logs_bloom(self.logs(block_number)?))
+    }
+}
+
+impl ExecutionOutcome {
+    /// Returns the ethereum receipt root for all recorded receipts.
+    ///
+    /// Note: this function calculated Bloom filters for every receipt and created merkle trees
+    /// of receipt. This is a expensive operation.
+    pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
+        self.generic_receipts_root_slow(
+            block_number,
+            reth_ethereum_primitives::Receipt::calculate_receipt_root_no_memo,
+        )
+    }
+}
+
+impl<T> From<(BlockExecutionOutput<T>, BlockNumber)> for ExecutionOutcome<T> {
+    fn from((output, block_number): (BlockExecutionOutput<T>, BlockNumber)) -> Self {
+        Self::single(block_number, output)
+    }
+}
+
+#[cfg(feature = "serde-bincode-compat")]
+pub(super) mod serde_bincode_compat {
+    use alloc::{borrow::Cow, vec::Vec};
+    use alloy_eips::eip7685::Requests;
+    use alloy_primitives::BlockNumber;
+    use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+    use revm::database::BundleState;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::ExecutionOutcome`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_execution_types::{serde_bincode_compat, ExecutionOutcome};
+    /// ///
+    /// use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data<T: SerdeBincodeCompat + core::fmt::Debug> {
+    ///     #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_, T>")]
+    ///     chain: ExecutionOutcome<T>,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct ExecutionOutcome<'a, T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        bundle: Cow<'a, BundleState>,
+        receipts: Vec<Vec<T::BincodeRepr<'a>>>,
+        first_block: BlockNumber,
+        #[expect(clippy::owned_cow)]
+        requests: Cow<'a, Vec<Requests>>,
+    }
+
+    impl<'a, T> From<&'a super::ExecutionOutcome<T>> for ExecutionOutcome<'a, T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        fn from(value: &'a super::ExecutionOutcome<T>) -> Self {
+            ExecutionOutcome {
+                bundle: Cow::Borrowed(&value.bundle),
+                receipts: value
+                    .receipts
+                    .iter()
+                    .map(|vec| vec.iter().map(|receipt| T::as_repr(receipt)).collect())
+                    .collect(),
+                first_block: value.first_block,
+                requests: Cow::Borrowed(&value.requests),
+            }
+        }
+    }
+
+    impl<'a, T> From<ExecutionOutcome<'a, T>> for super::ExecutionOutcome<T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        fn from(value: ExecutionOutcome<'a, T>) -> Self {
+            Self {
+                bundle: value.bundle.into_owned(),
+                receipts: value
+                    .receipts
+                    .into_iter()
+                    .map(|vec| vec.into_iter().map(|receipt| T::from_repr(receipt)).collect())
+                    .collect(),
+                first_block: value.first_block,
+                requests: value.requests.into_owned(),
+            }
+        }
+    }
+
+    impl<T> SerializeAs<super::ExecutionOutcome<T>> for ExecutionOutcome<'_, T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        fn serialize_as<S>(
+            source: &super::ExecutionOutcome<T>,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            ExecutionOutcome::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de, T> DeserializeAs<'de, super::ExecutionOutcome<T>> for ExecutionOutcome<'de, T>
+    where
+        T: SerdeBincodeCompat + core::fmt::Debug,
+    {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::ExecutionOutcome<T>, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            ExecutionOutcome::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    impl<T: SerdeBincodeCompat + core::fmt::Debug> SerdeBincodeCompat for super::ExecutionOutcome<T> {
+        type BincodeRepr<'a> = ExecutionOutcome<'a, T>;
+
+        fn as_repr(&self) -> Self::BincodeRepr<'_> {
+            self.into()
+        }
+
+        fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
+            repr.into()
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::super::{serde_bincode_compat, ExecutionOutcome};
+        use rand::Rng;
+        use reth_ethereum_primitives::Receipt;
+        use reth_primitives_traits::serde_bincode_compat::SerdeBincodeCompat;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_chain_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data<T: SerdeBincodeCompat + core::fmt::Debug> {
+                #[serde_as(as = "serde_bincode_compat::ExecutionOutcome<'_, T>")]
+                data: ExecutionOutcome<T>,
+            }
+
+            let mut bytes = [0u8; 1024];
+            rand::rng().fill(bytes.as_mut_slice());
+            let data = Data {
+                data: ExecutionOutcome {
+                    bundle: Default::default(),
+                    receipts: vec![],
+                    first_block: 0,
+                    requests: vec![],
+                },
+            };
+
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded = bincode::deserialize::<Data<Receipt>>(&encoded).unwrap();
+            assert_eq!(decoded, data);
         }
     }
 }
@@ -365,10 +554,8 @@ impl From<(BlockExecutionOutput<Receipt>, BlockNumber)> for ExecutionOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::{eip6110::DepositRequest, eip7002::WithdrawalRequest};
-    use alloy_primitives::{Address, FixedBytes, LogData, B256};
-    use reth_primitives::{Receipts, Request, Requests, TxType};
-    use std::collections::HashMap;
+    use alloy_consensus::TxType;
+    use alloy_primitives::{bytes, Address, LogData, B256};
 
     #[test]
     fn test_initialisation() {
@@ -380,42 +567,15 @@ mod tests {
         );
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 46913,
-                logs: vec![],
-                success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            })]],
-        };
+        let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+        })]];
 
-        // Create a Requests object with a vector of requests, including DepositRequest and
-        // WithdrawalRequest
-        let requests = vec![Requests(vec![
-            Request::DepositRequest(DepositRequest {
-                pubkey: FixedBytes::<48>::from([1; 48]),
-                withdrawal_credentials: B256::from([0; 32]),
-                amount: 1111,
-                signature: FixedBytes::<96>::from([2; 96]),
-                index: 222,
-            }),
-            Request::DepositRequest(DepositRequest {
-                pubkey: FixedBytes::<48>::from([23; 48]),
-                withdrawal_credentials: B256::from([0; 32]),
-                amount: 34343,
-                signature: FixedBytes::<96>::from([43; 96]),
-                index: 1212,
-            }),
-            Request::WithdrawalRequest(WithdrawalRequest {
-                source_address: Address::from([1; 20]),
-                validator_pubkey: FixedBytes::<48>::from([10; 48]),
-                amount: 72,
-            }),
-        ])];
+        // Create a Requests object with a vector of requests
+        let requests = vec![Requests::new(vec![bytes!("dead"), bytes!("beef"), bytes!("beebee")])];
 
         // Define the first block number
         let first_block = 123;
@@ -466,18 +626,12 @@ mod tests {
     #[test]
     fn test_block_number_to_index() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 46913,
-                logs: vec![],
-                success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            })]],
-        };
+        let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![],
+            success: true,
+        })]];
 
         // Define the first block number
         let first_block = 123;
@@ -494,7 +648,7 @@ mod tests {
         // Test before the first block
         assert_eq!(exec_res.block_number_to_index(12), None);
 
-        // Test after after the first block but index larger than receipts length
+        // Test after the first block but index larger than receipts length
         assert_eq!(exec_res.block_number_to_index(133), None);
 
         // Test after the first block
@@ -504,18 +658,12 @@ mod tests {
     #[test]
     fn test_get_logs() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 46913,
-                logs: vec![Log::<LogData>::default()],
-                success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            })]],
-        };
+        let receipts = vec![vec![reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![Log::<LogData>::default()],
+            success: true,
+        }]];
 
         // Define the first block number
         let first_block = 123;
@@ -539,18 +687,12 @@ mod tests {
     #[test]
     fn test_receipts_by_block() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 46913,
-                logs: vec![Log::<LogData>::default()],
-                success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            })]],
-        };
+        let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![Log::<LogData>::default()],
+            success: true,
+        })]];
 
         // Define the first block number
         let first_block = 123;
@@ -570,15 +712,11 @@ mod tests {
         // Assert that the receipts for block number 123 match the expected receipts
         assert_eq!(
             receipts_by_block,
-            vec![&Some(Receipt {
+            vec![&Some(reth_ethereum_primitives::Receipt {
                 tx_type: TxType::Legacy,
                 cumulative_gas_used: 46913,
                 logs: vec![Log::<LogData>::default()],
                 success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
             })]
         );
     }
@@ -586,21 +724,15 @@ mod tests {
     #[test]
     fn test_receipts_len() {
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(Receipt {
-                tx_type: TxType::Legacy,
-                cumulative_gas_used: 46913,
-                logs: vec![Log::<LogData>::default()],
-                success: true,
-                #[cfg(feature = "optimism")]
-                deposit_nonce: Some(18),
-                #[cfg(feature = "optimism")]
-                deposit_receipt_version: Some(34),
-            })]],
-        };
+        let receipts = vec![vec![Some(reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 46913,
+            logs: vec![Log::<LogData>::default()],
+            success: true,
+        })]];
 
         // Create an empty Receipts object
-        let receipts_empty = Receipts { receipt_vec: vec![] };
+        let receipts_empty = vec![];
 
         // Define the first block number
         let first_block = 123;
@@ -621,7 +753,7 @@ mod tests {
         assert!(!exec_res.is_empty());
 
         // Create a ExecutionOutcome object with an empty Receipts object
-        let exec_res_empty_receipts = ExecutionOutcome {
+        let exec_res_empty_receipts: ExecutionOutcome = ExecutionOutcome {
             bundle: Default::default(), // Default value for bundle
             receipts: receipts_empty,   // Include the empty receipts
             requests: vec![],           // Empty vector for requests
@@ -638,36 +770,25 @@ mod tests {
     #[test]
     fn test_revert_to() {
         // Create a random receipt object
-        let receipt = Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]],
-        };
+        let receipts = vec![vec![Some(receipt.clone())], vec![Some(receipt.clone())]];
 
         // Define the first block number
         let first_block = 123;
 
-        // Create a DepositRequest object with specific attributes.
-        let request = Request::DepositRequest(DepositRequest {
-            pubkey: FixedBytes::<48>::from([1; 48]),
-            withdrawal_credentials: B256::from([0; 32]),
-            amount: 1111,
-            signature: FixedBytes::<96>::from([2; 96]),
-            index: 222,
-        });
+        // Create a request.
+        let request = bytes!("deadbeef");
 
         // Create a vector of Requests containing the request.
-        let requests = vec![Requests(vec![request]), Requests(vec![request])];
+        let requests =
+            vec![Requests::new(vec![request.clone()]), Requests::new(vec![request.clone()])];
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
@@ -678,10 +799,10 @@ mod tests {
         assert!(exec_res.revert_to(123));
 
         // Assert that the receipts are properly cut after reverting to the initial block number.
-        assert_eq!(exec_res.receipts, Receipts { receipt_vec: vec![vec![Some(receipt)]] });
+        assert_eq!(exec_res.receipts, vec![vec![Some(receipt)]]);
 
         // Assert that the requests are properly cut after reverting to the initial block number.
-        assert_eq!(exec_res.requests, vec![Requests(vec![request])]);
+        assert_eq!(exec_res.requests, vec![Requests::new(vec![request])]);
 
         // Assert that the revert_to method returns false when attempting to revert to a block
         // number greater than the initial block number.
@@ -695,31 +816,21 @@ mod tests {
     #[test]
     fn test_extend_execution_outcome() {
         // Create a Receipt object with specific attributes.
-        let receipt = Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object containing the receipt.
-        let receipts = Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] };
+        let receipts = vec![vec![Some(receipt.clone())]];
 
-        // Create a DepositRequest object with specific attributes.
-        let request = Request::DepositRequest(DepositRequest {
-            pubkey: FixedBytes::<48>::from([1; 48]),
-            withdrawal_credentials: B256::from([0; 32]),
-            amount: 1111,
-            signature: FixedBytes::<96>::from([2; 96]),
-            index: 222,
-        });
+        // Create a request.
+        let request = bytes!("deadbeef");
 
         // Create a vector of Requests containing the request.
-        let requests = vec![Requests(vec![request])];
+        let requests = vec![Requests::new(vec![request.clone()])];
 
         // Define the initial block number.
         let first_block = 123;
@@ -736,10 +847,8 @@ mod tests {
             exec_res,
             ExecutionOutcome {
                 bundle: Default::default(),
-                receipts: Receipts {
-                    receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]]
-                },
-                requests: vec![Requests(vec![request]), Requests(vec![request])],
+                receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+                requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
                 first_block: 123,
             }
         );
@@ -748,41 +857,32 @@ mod tests {
     #[test]
     fn test_split_at_execution_outcome() {
         // Create a random receipt object
-        let receipt = Receipt {
+        let receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
             cumulative_gas_used: 46913,
             logs: vec![],
             success: true,
-            #[cfg(feature = "optimism")]
-            deposit_nonce: Some(18),
-            #[cfg(feature = "optimism")]
-            deposit_receipt_version: Some(34),
         };
 
         // Create a Receipts object with a vector of receipt vectors
-        let receipts = Receipts {
-            receipt_vec: vec![
-                vec![Some(receipt.clone())],
-                vec![Some(receipt.clone())],
-                vec![Some(receipt.clone())],
-            ],
-        };
+        let receipts = vec![
+            vec![Some(receipt.clone())],
+            vec![Some(receipt.clone())],
+            vec![Some(receipt.clone())],
+        ];
 
         // Define the first block number
         let first_block = 123;
 
-        // Create a DepositRequest object with specific attributes.
-        let request = Request::DepositRequest(DepositRequest {
-            pubkey: FixedBytes::<48>::from([1; 48]),
-            withdrawal_credentials: B256::from([0; 32]),
-            amount: 1111,
-            signature: FixedBytes::<96>::from([2; 96]),
-            index: 222,
-        });
+        // Create a request.
+        let request = bytes!("deadbeef");
 
         // Create a vector of Requests containing the request.
-        let requests =
-            vec![Requests(vec![request]), Requests(vec![request]), Requests(vec![request])];
+        let requests = vec![
+            Requests::new(vec![request.clone()]),
+            Requests::new(vec![request.clone()]),
+            Requests::new(vec![request.clone()]),
+        ];
 
         // Create a ExecutionOutcome object with the created bundle, receipts, requests, and
         // first_block
@@ -795,18 +895,16 @@ mod tests {
         // Define the expected lower ExecutionOutcome after splitting
         let lower_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts { receipt_vec: vec![vec![Some(receipt.clone())]] },
-            requests: vec![Requests(vec![request])],
+            receipts: vec![vec![Some(receipt.clone())]],
+            requests: vec![Requests::new(vec![request.clone()])],
             first_block,
         };
 
         // Define the expected higher ExecutionOutcome after splitting
         let higher_execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts: Receipts {
-                receipt_vec: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
-            },
-            requests: vec![Requests(vec![request]), Requests(vec![request])],
+            receipts: vec![vec![Some(receipt.clone())], vec![Some(receipt)]],
+            requests: vec![Requests::new(vec![request.clone()]), Requests::new(vec![request])],
             first_block: 124,
         };
 
@@ -863,9 +961,9 @@ mod tests {
             },
         );
 
-        let execution_outcome = ExecutionOutcome {
+        let execution_outcome: ExecutionOutcome = ExecutionOutcome {
             bundle: bundle_state,
-            receipts: Receipts::default(),
+            receipts: Default::default(),
             first_block: 0,
             requests: vec![],
         };

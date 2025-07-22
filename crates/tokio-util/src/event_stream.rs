@@ -36,7 +36,6 @@ where
                 Poll::Ready(Some(Ok(item))) => return Poll::Ready(Some(item)),
                 Poll::Ready(Some(Err(e))) => {
                     warn!("BroadcastStream lagged: {e:?}");
-                    continue
                 }
                 Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => return Poll::Pending,

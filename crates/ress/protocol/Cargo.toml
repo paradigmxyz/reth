@@ -1,0 +1,65 @@
+[package]
+name = "reth-ress-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-eth-wire.workspace = true
+reth-network-api.workspace = true
+reth-network.workspace = true
+reth-storage-errors.workspace = true
+reth-ethereum-primitives.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+alloy-rlp.workspace = true
+alloy-consensus.workspace = true
+
+# misc
+futures.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+tokio-stream.workspace = true
+tracing.workspace = true
+
+# feature `arbitrary`
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+
+[dev-dependencies]
+reth-eth-wire = { workspace = true, features = ["arbitrary"] }
+reth-network = { workspace = true, features = ["test-utils"] }
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-tracing.workspace = true
+
+# enable `test-utils` feature on this crate
+reth-ress-protocol = { path = ".", features = ["test-utils"] }
+
+tokio.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+arbitrary = { workspace = true, features = ["derive"] }
+proptest.workspace = true
+proptest-arbitrary-interop.workspace = true
+
+[features]
+test-utils = [
+    "reth-network/test-utils",
+    "reth-ress-protocol/test-utils",
+    "reth-ethereum-primitives/test-utils",
+    "reth-provider/test-utils",
+]
+arbitrary = [
+    "dep:arbitrary",
+    "reth-eth-wire/arbitrary",
+    "alloy-primitives/arbitrary",
+    "reth-ress-protocol/arbitrary",
+    "reth-ethereum-primitives/arbitrary",
+    "alloy-consensus/arbitrary",
+]

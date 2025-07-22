@@ -4,7 +4,7 @@ use crate::{
     flags::EnvironmentFlags,
     transaction::{RO, RW},
     txn_manager::{TxnManager, TxnManagerMessage, TxnPtr},
-    Transaction, TransactionKind,
+    Mode, SyncMode, Transaction, TransactionKind,
 };
 use byteorder::{ByteOrder, NativeEndian};
 use mem::size_of;
@@ -72,14 +72,14 @@ impl Environment {
 
     /// Returns true if the environment was opened in [`crate::Mode::ReadWrite`] mode.
     #[inline]
-    pub fn is_read_write(&self) -> bool {
-        self.inner.env_kind.is_write_map()
+    pub fn is_read_write(&self) -> Result<bool> {
+        Ok(!self.is_read_only()?)
     }
 
     /// Returns true if the environment was opened in [`crate::Mode::ReadOnly`] mode.
     #[inline]
-    pub fn is_read_only(&self) -> bool {
-        !self.inner.env_kind.is_write_map()
+    pub fn is_read_only(&self) -> Result<bool> {
+        Ok(matches!(self.info()?.mode(), Mode::ReadOnly))
     }
 
     /// Returns the transaction manager.
@@ -258,7 +258,7 @@ unsafe impl Sync for EnvironmentInner {}
 
 /// Determines how data is mapped into memory
 ///
-/// It only takes affect when the environment is opened.
+/// It only takes effect when the environment is opened.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EnvironmentKind {
     /// Open the environment in default mode, without WRITEMAP.
@@ -312,7 +312,7 @@ impl Stat {
     }
 
     /// Returns a mut pointer to `ffi::MDB_stat`.
-    pub(crate) fn mdb_stat(&mut self) -> *mut ffi::MDBX_stat {
+    pub(crate) const fn mdb_stat(&mut self) -> *mut ffi::MDBX_stat {
         &mut self.0
     }
 }
@@ -425,6 +425,23 @@ impl Info {
             fsync: self.0.mi_pgop_stat.fsync,
         }
     }
+
+    /// Return the mode of the database
+    #[inline]
+    pub const fn mode(&self) -> Mode {
+        let mode = self.0.mi_mode as ffi::MDBX_env_flags_t;
+        if (mode & ffi::MDBX_RDONLY) != 0 {
+            Mode::ReadOnly
+        } else if (mode & ffi::MDBX_UTTERLY_NOSYNC) != 0 {
+            Mode::ReadWrite { sync_mode: SyncMode::UtterlyNoSync }
+        } else if (mode & ffi::MDBX_NOMETASYNC) != 0 {
+            Mode::ReadWrite { sync_mode: SyncMode::NoMetaSync }
+        } else if (mode & ffi::MDBX_SAFE_NOSYNC) != 0 {
+            Mode::ReadWrite { sync_mode: SyncMode::SafeNoSync }
+        } else {
+            Mode::ReadWrite { sync_mode: SyncMode::Durable }
+        }
+    }
 }
 
 impl fmt::Debug for Environment {
@@ -472,8 +489,10 @@ pub struct PageOps {
     pub mincore: u64,
 }
 
+/// Represents the geometry settings for the database environment
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Geometry<R> {
+    /// The size range in bytes.
     pub size: Option<R>,
     pub growth_step: Option<isize>,
     pub shrink_threshold: Option<isize>,
@@ -492,7 +511,7 @@ impl<R> Default for Geometry<R> {
 /// Read transactions prevent reuse of pages freed by newer write transactions, thus the database
 /// can grow quickly. This callback will be called when there is not enough space in the database
 /// (i.e. before increasing the database size or before `MDBX_MAP_FULL` error) and thus can be
-/// used to resolve issues with a "long-lived" read transacttions.
+/// used to resolve issues with a "long-lived" read transactions.
 ///
 /// Depending on the arguments and needs, your implementation may wait,
 /// terminate a process or thread that is performing a long read, or perform
@@ -738,7 +757,7 @@ impl EnvironmentBuilder {
     }
 
     /// Configures how this environment will be opened.
-    pub fn set_kind(&mut self, kind: EnvironmentKind) -> &mut Self {
+    pub const fn set_kind(&mut self, kind: EnvironmentKind) -> &mut Self {
         self.kind = kind;
         self
     }
@@ -746,12 +765,12 @@ impl EnvironmentBuilder {
     /// Opens the environment with mdbx WRITEMAP
     ///
     /// See also [`EnvironmentKind`]
-    pub fn write_map(&mut self) -> &mut Self {
+    pub const fn write_map(&mut self) -> &mut Self {
         self.set_kind(EnvironmentKind::WriteMap)
     }
 
     /// Sets the provided options in the environment.
-    pub fn set_flags(&mut self, flags: EnvironmentFlags) -> &mut Self {
+    pub const fn set_flags(&mut self, flags: EnvironmentFlags) -> &mut Self {
         self.flags = flags;
         self
     }
@@ -759,9 +778,9 @@ impl EnvironmentBuilder {
     /// Sets the maximum number of threads or reader slots for the environment.
     ///
     /// This defines the number of slots in the lock table that is used to track readers in the
-    /// the environment. The default is 126. Starting a read-only transaction normally ties a lock
+    /// environment. The default is 126. Starting a read-only transaction normally ties a lock
     /// table slot to the [Transaction] object until it or the [Environment] object is destroyed.
-    pub fn set_max_readers(&mut self, max_readers: u64) -> &mut Self {
+    pub const fn set_max_readers(&mut self, max_readers: u64) -> &mut Self {
         self.max_readers = Some(max_readers);
         self
     }
@@ -775,21 +794,20 @@ impl EnvironmentBuilder {
     /// Currently a moderate number of slots are cheap but a huge number gets
     /// expensive: 7-120 words per transaction, and every [`Transaction::open_db()`]
     /// does a linear search of the opened slots.
-    pub fn set_max_dbs(&mut self, v: usize) -> &mut Self {
+    pub const fn set_max_dbs(&mut self, v: usize) -> &mut Self {
         self.max_dbs = Some(v as u64);
         self
     }
 
     /// Sets the interprocess/shared threshold to force flush the data buffers to disk, if
-    /// [`SyncMode::SafeNoSync`](crate::flags::SyncMode::SafeNoSync) is used.
-    pub fn set_sync_bytes(&mut self, v: usize) -> &mut Self {
+    /// [`SyncMode::SafeNoSync`] is used.
+    pub const fn set_sync_bytes(&mut self, v: usize) -> &mut Self {
         self.sync_bytes = Some(v as u64);
         self
     }
 
     /// Sets the interprocess/shared relative period since the last unsteady commit to force flush
-    /// the data buffers to disk, if [`SyncMode::SafeNoSync`](crate::flags::SyncMode::SafeNoSync) is
-    /// used.
+    /// the data buffers to disk, if [`SyncMode::SafeNoSync`] is used.
     pub fn set_sync_period(&mut self, v: Duration) -> &mut Self {
         // For this option, mdbx uses units of 1/65536 of a second.
         let as_mdbx_units = (v.as_secs_f64() * 65536f64) as u64;
@@ -797,22 +815,22 @@ impl EnvironmentBuilder {
         self
     }
 
-    pub fn set_rp_augment_limit(&mut self, v: u64) -> &mut Self {
+    pub const fn set_rp_augment_limit(&mut self, v: u64) -> &mut Self {
         self.rp_augment_limit = Some(v);
         self
     }
 
-    pub fn set_loose_limit(&mut self, v: u64) -> &mut Self {
+    pub const fn set_loose_limit(&mut self, v: u64) -> &mut Self {
         self.loose_limit = Some(v);
         self
     }
 
-    pub fn set_dp_reserve_limit(&mut self, v: u64) -> &mut Self {
+    pub const fn set_dp_reserve_limit(&mut self, v: u64) -> &mut Self {
         self.dp_reserve_limit = Some(v);
         self
     }
 
-    pub fn set_txn_dp_limit(&mut self, v: u64) -> &mut Self {
+    pub const fn set_txn_dp_limit(&mut self, v: u64) -> &mut Self {
         self.txn_dp_limit = Some(v);
         self
     }
@@ -845,7 +863,7 @@ impl EnvironmentBuilder {
         self
     }
 
-    pub fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
+    pub const fn set_log_level(&mut self, log_level: ffi::MDBX_log_level_t) -> &mut Self {
         self.log_level = Some(log_level);
         self
     }
@@ -885,7 +903,7 @@ pub(crate) mod read_transactions {
 
     impl EnvironmentBuilder {
         /// Set the maximum time a read-only transaction can be open.
-        pub fn set_max_read_transaction_duration(
+        pub const fn set_max_read_transaction_duration(
             &mut self,
             max_read_transaction_duration: MaxReadTransactionDuration,
         ) -> &mut Self {
@@ -896,7 +914,6 @@ pub(crate) mod read_transactions {
 }
 
 /// Converts a [`HandleSlowReadersCallback`] to the actual FFI function pointer.
-#[allow(clippy::missing_transmute_annotations)]
 fn convert_hsr_fn(callback: Option<HandleSlowReadersCallback>) -> ffi::MDBX_hsr_func {
     unsafe { std::mem::transmute(callback) }
 }
@@ -968,7 +985,7 @@ mod tests {
             let db = tx.open_db(None).unwrap();
             for i in 1_000usize..1_000_000 {
                 match tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
-                    Ok(_) => continue,
+                    Ok(_) => {}
                     Err(Error::MapFull) => break,
                     result @ Err(_) => result.unwrap(),
                 }

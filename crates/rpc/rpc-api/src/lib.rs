@@ -21,6 +21,7 @@ mod engine;
 mod ganache;
 mod hardhat;
 mod mev;
+mod miner;
 mod net;
 mod otterscan;
 mod reth;
@@ -37,9 +38,10 @@ pub use servers::*;
 pub mod servers {
     pub use crate::{
         admin::AdminApiServer,
-        debug::DebugApiServer,
-        engine::{EngineApiServer, EngineEthApiServer},
+        debug::{DebugApiServer, DebugExecutionWitnessApiServer},
+        engine::{EngineApiServer, EngineEthApiServer, IntoEngineApiRpcModule},
         mev::{MevFullApiServer, MevSimApiServer},
+        miner::MinerApiServer,
         net::NetApiServer,
         otterscan::OtterscanServer,
         reth::RethApiServer,
@@ -51,7 +53,7 @@ pub mod servers {
     };
     pub use reth_rpc_eth_api::{
         self as eth, EthApiServer, EthBundleApiServer, EthCallBundleApiServer, EthFilterApiServer,
-        EthPubSubApiServer,
+        EthPubSubApiServer, L2EthApiExtServer,
     };
 }
 
@@ -65,11 +67,12 @@ pub mod clients {
     pub use crate::{
         admin::AdminApiClient,
         anvil::AnvilApiClient,
-        debug::DebugApiClient,
+        debug::{DebugApiClient, DebugExecutionWitnessApiClient},
         engine::{EngineApiClient, EngineEthApiClient},
         ganache::GanacheApiClient,
         hardhat::HardhatApiClient,
         mev::{MevFullApiClient, MevSimApiClient},
+        miner::MinerApiClient,
         net::NetApiClient,
         otterscan::OtterscanClient,
         reth::RethApiClient,
@@ -81,5 +84,6 @@ pub mod clients {
     };
     pub use reth_rpc_eth_api::{
         EthApiClient, EthBundleApiClient, EthCallBundleApiClient, EthFilterApiClient,
+        L2EthApiExtServer,
     };
 }

@@ -1,17 +1,19 @@
+use alloy_eips::{BlockId, BlockNumberOrTag};
+use alloy_genesis::ChainConfig;
+use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256};
-use alloy_rpc_types::{Block, Bundle, StateContext};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_eth::{Block, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
-use reth_primitives::{BlockId, BlockNumberOrTag};
+use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
-pub trait DebugApi {
+pub trait DebugApi<TxReq: RpcObject> {
     /// Returns an RLP-encoded header.
     #[method(name = "getRawHeader")]
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes>;
@@ -53,7 +55,7 @@ pub trait DebugApi {
     /// This expects an rlp encoded block
     ///
     /// Note, the parent of this block must be present, or it will fail. For the second parameter
-    /// see [GethDebugTracingOptions] reference.
+    /// see [`GethDebugTracingOptions`] reference.
     #[method(name = "traceBlock")]
     async fn debug_trace_block(
         &self,
@@ -63,7 +65,7 @@ pub trait DebugApi {
 
     /// Similar to `debug_traceBlock`, `debug_traceBlockByHash` accepts a block hash and will replay
     /// the block that is already present in the database. For the second parameter see
-    /// [GethDebugTracingOptions].
+    /// [`GethDebugTracingOptions`].
     #[method(name = "traceBlockByHash")]
     async fn debug_trace_block_by_hash(
         &self,
@@ -72,8 +74,8 @@ pub trait DebugApi {
     ) -> RpcResult<Vec<TraceResult>>;
 
     /// Similar to `debug_traceBlockByHash`, `debug_traceBlockByNumber` accepts a block number
-    /// [BlockNumberOrTag] and will replay the block that is already present in the database.
-    /// For the second parameter see [GethDebugTracingOptions].
+    /// [`BlockNumberOrTag`] and will replay the block that is already present in the database.
+    /// For the second parameter see [`GethDebugTracingOptions`].
     #[method(name = "traceBlockByNumber")]
     async fn debug_trace_block_by_number(
         &self,
@@ -99,12 +101,12 @@ pub trait DebugApi {
     /// The block can optionally be specified either by hash or by number as
     /// the second argument.
     /// The trace can be configured similar to `debug_traceTransaction`,
-    /// see [GethDebugTracingOptions]. The method returns the same output as
+    /// see [`GethDebugTracingOptions`]. The method returns the same output as
     /// `debug_traceTransaction`.
     #[method(name = "traceCall")]
     async fn debug_trace_call(
         &self,
-        request: TransactionRequest,
+        request: TxReq,
         block_id: Option<BlockId>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<GethTrace>;
@@ -115,7 +117,7 @@ pub trait DebugApi {
     ///
     /// The first argument is a list of bundles. Each bundle can overwrite the block headers. This
     /// will affect all transaction in that bundle.
-    /// BlockNumber and transaction_index are optional. Transaction_index
+    /// `BlockNumber` and `transaction_index` are optional. `Transaction_index`
     /// specifies the number of tx in the block to replay and -1 means all transactions should be
     /// replayed.
     /// The trace can be configured similar to `debug_traceTransaction`.
@@ -127,7 +129,7 @@ pub trait DebugApi {
     #[method(name = "traceCallMany")]
     async fn debug_trace_call_many(
         &self,
-        bundles: Vec<Bundle>,
+        bundles: Vec<Bundle<TxReq>>,
         state_context: Option<StateContext>,
         opts: Option<GethDebugTracingCallOptions>,
     ) -> RpcResult<Vec<Vec<GethTrace>>>;
@@ -137,11 +139,22 @@ pub trait DebugApi {
     /// to their preimages that were required during the execution of the block, including during
     /// state root recomputation.
     ///
-    /// The first argument is the block number or block hash. The second argument is a boolean
-    /// indicating whether to include the preimages of keys in the response.
+    /// The first argument is the block number or tag.
     #[method(name = "executionWitness")]
     async fn debug_execution_witness(&self, block: BlockNumberOrTag)
         -> RpcResult<ExecutionWitness>;
+
+    /// The `debug_executionWitnessByBlockHash` method allows for re-execution of a block with the
+    /// purpose of generating an execution witness. The witness comprises of a map of all hashed
+    /// trie nodes to their preimages that were required during the execution of the block,
+    /// including during state root recomputation.
+    ///
+    /// The first argument is the block hash.
+    #[method(name = "executionWitnessByBlockHash")]
+    async fn debug_execution_witness_by_block_hash(
+        &self,
+        hash: B256,
+    ) -> RpcResult<ExecutionWitness>;
 
     /// Sets the logging backtrace location. When a backtrace location is set and a log message is
     /// emitted at that location, the stack of the goroutine executing the log statement will
@@ -176,9 +189,22 @@ pub trait DebugApi {
     #[method(name = "chaindbCompact")]
     async fn debug_chaindb_compact(&self) -> RpcResult<()>;
 
+    /// Returns the current chain config.
+    #[method(name = "chainConfig")]
+    async fn debug_chain_config(&self) -> RpcResult<ChainConfig>;
+
     /// Returns leveldb properties of the key-value database.
     #[method(name = "chaindbProperty")]
     async fn debug_chaindb_property(&self, property: String) -> RpcResult<()>;
+
+    /// Returns the code associated with a given hash at the specified block ID.
+    /// If no block ID is provided, it defaults to the latest block.
+    #[method(name = "codeByHash")]
+    async fn debug_code_by_hash(
+        &self,
+        hash: B256,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<Option<Bytes>>;
 
     /// Turns on CPU profiling for the given duration and writes profile data to disk.
     #[method(name = "cpuProfile")]
@@ -335,6 +361,15 @@ pub trait DebugApi {
     #[method(name = "startGoTrace")]
     async fn debug_start_go_trace(&self, file: String) -> RpcResult<()>;
 
+    /// Returns the state root of the `HashedPostState` on top of the state for the given block with
+    /// trie updates.
+    #[method(name = "stateRootWithUpdates")]
+    async fn debug_state_root_with_updates(
+        &self,
+        hashed_state: HashedPostState,
+        block_id: Option<BlockId>,
+    ) -> RpcResult<(B256, TrieUpdates)>;
+
     /// Stops an ongoing CPU profile.
     #[method(name = "stopCPUProfile")]
     async fn debug_stop_cpu_profile(&self) -> RpcResult<()>;
@@ -358,7 +393,7 @@ pub trait DebugApi {
 
     /// Returns the structured logs created during the execution of EVM against a block pulled
     /// from the pool of bad ones and returns them as a JSON object. For the second parameter see
-    /// TraceConfig reference.
+    /// `TraceConfig` reference.
     #[method(name = "traceBadBlock")]
     async fn debug_trace_bad_block(
         &self,
@@ -386,4 +421,27 @@ pub trait DebugApi {
     /// Writes a goroutine blocking profile to the given file.
     #[method(name = "writeMutexProfile")]
     async fn debug_write_mutex_profile(&self, file: String) -> RpcResult<()>;
+}
+
+/// An extension to the `debug_` namespace that provides additional methods for retrieving
+/// witnesses.
+///
+/// This is separate from the regular `debug_` api, because this depends on the network specific
+/// params. For optimism this will expect the optimism specific payload attributes
+#[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
+#[cfg_attr(feature = "client", rpc(server, client, namespace = "debug"))]
+pub trait DebugExecutionWitnessApi<Attributes> {
+    /// The `debug_executePayload` method allows for re-execution of a group of transactions with
+    /// the purpose of generating an execution witness. The witness comprises of a map of all
+    /// hashed trie nodes to their preimages that were required during the execution of the block,
+    /// including during state root recomputation.
+    ///
+    /// The first argument is the parent block hash. The second argument is the payload
+    /// attributes for the new block.
+    #[method(name = "executePayload")]
+    async fn execute_payload(
+        &self,
+        parent_block_hash: B256,
+        attributes: Attributes,
+    ) -> RpcResult<ExecutionWitness>;
 }

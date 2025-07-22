@@ -10,7 +10,7 @@ use jsonrpsee::{
     async_client::{Client, ClientBuilder},
     core::client::{ReceivedMessage, TransportReceiverT, TransportSenderT},
 };
-use std::io;
+use std::{io, time::Duration};
 use tokio::io::AsyncWriteExt;
 use tokio_util::codec::FramedRead;
 
@@ -20,7 +20,6 @@ pub(crate) struct Sender {
     inner: SendHalf,
 }
 
-#[async_trait::async_trait]
 impl TransportSenderT for Sender {
     type Error = IpcError;
 
@@ -47,7 +46,6 @@ pub(crate) struct Receiver {
     pub(crate) inner: FramedRead<RecvHalf, StreamCodec>,
 }
 
-#[async_trait::async_trait]
 impl TransportReceiverT for Receiver {
     type Error = IpcError;
 
@@ -79,12 +77,20 @@ impl IpcTransportClientBuilder {
 }
 
 /// Builder type for [`Client`]
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
-pub struct IpcClientBuilder;
+pub struct IpcClientBuilder {
+    request_timeout: Duration,
+}
+
+impl Default for IpcClientBuilder {
+    fn default() -> Self {
+        Self { request_timeout: Duration::from_secs(60) }
+    }
+}
 
 impl IpcClientBuilder {
-    /// Connects to a IPC socket
+    /// Connects to an IPC socket
     ///
     /// ```
     /// use jsonrpsee::{core::client::ClientT, rpc_params};
@@ -106,7 +112,15 @@ impl IpcClientBuilder {
         S: TransportSenderT + Send,
         R: TransportReceiverT + Send,
     {
-        ClientBuilder::default().build_with_tokio(sender, receiver)
+        ClientBuilder::default()
+            .request_timeout(self.request_timeout)
+            .build_with_tokio(sender, receiver)
+    }
+
+    /// Set request timeout (default is 60 seconds).
+    pub const fn request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = timeout;
+        self
     }
 }
 
@@ -136,10 +150,9 @@ pub enum IpcError {
 
 #[cfg(test)]
 mod tests {
-    use interprocess::local_socket::ListenerOptions;
-
     use super::*;
     use crate::server::dummy_name;
+    use interprocess::local_socket::ListenerOptions;
 
     #[tokio::test]
     async fn test_connect() {

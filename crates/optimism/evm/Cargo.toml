@@ -13,43 +13,64 @@ workspace = true
 [dependencies]
 # Reth
 reth-chainspec.workspace = true
-reth-ethereum-forks.workspace = true
-reth-evm.workspace = true
-reth-primitives.workspace = true
-reth-revm.workspace = true
+reth-evm = { workspace = true, features = ["op"] }
+reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
-reth-prune-types.workspace = true
+
+reth-rpc-eth-api = { workspace = true, optional = true }
 
 # ethereum
+alloy-eips.workspace = true
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
+alloy-op-evm.workspace = true
 op-alloy-consensus.workspace = true
+alloy-consensus.workspace = true
 
 # Optimism
-reth-optimism-consensus.workspace = true
 reth-optimism-chainspec.workspace = true
+reth-optimism-consensus.workspace = true
 reth-optimism-forks.workspace = true
+reth-optimism-primitives.workspace = true
 
 # revm
 revm.workspace = true
-revm-primitives.workspace = true
+op-revm.workspace = true
 
 # misc
 thiserror.workspace = true
-tracing.workspace = true
 
 [dev-dependencies]
-alloy-eips.workspace = true
-
+reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
-reth-optimism-chainspec.workspace = true
 alloy-genesis.workspace = true
 alloy-consensus.workspace = true
+reth-optimism-primitives = { workspace = true, features = ["arbitrary"] }
 
 [features]
-optimism = [
-    "reth-primitives/optimism",
-    "reth-execution-types/optimism",
-    "reth-optimism-consensus/optimism",
-    "reth-revm/optimism",
+default = ["std"]
+std = [
+    "reth-revm/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "reth-primitives-traits/std",
+    "revm/std",
+    "reth-optimism-primitives/std",
+    "reth-optimism-forks/std",
+    "thiserror/std",
+    "op-alloy-consensus/std",
+    "reth-chainspec/std",
+    "reth-optimism-consensus/std",
+    "reth-optimism-chainspec/std",
+    "reth-execution-errors/std",
+    "reth-execution-types/std",
+    "alloy-evm/std",
+    "alloy-op-evm/std",
+    "op-revm/std",
+    "reth-evm/std",
 ]
+portable = ["reth-revm/portable"]
+rpc = ["reth-rpc-eth-api"]

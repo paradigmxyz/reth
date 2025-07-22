@@ -1,25 +1,26 @@
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    vec::Vec,
+};
 use alloy_primitives::{Address, BlockNumber};
 use auto_impl::auto_impl;
+use core::ops::{RangeBounds, RangeInclusive};
 use reth_db_models::AccountBeforeTx;
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_storage_errors::provider::ProviderResult;
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    ops::{RangeBounds, RangeInclusive},
-};
 
 /// Account reader
 #[auto_impl(&, Arc, Box)]
-pub trait AccountReader: Send + Sync {
+pub trait AccountReader {
     /// Get basic account information.
     ///
     /// Returns `None` if the account doesn't exist.
-    fn basic_account(&self, address: Address) -> ProviderResult<Option<Account>>;
+    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>>;
 }
 
 /// Account reader
 #[auto_impl(&, Arc, Box)]
-pub trait AccountExtReader: Send + Sync {
+pub trait AccountExtReader {
     /// Iterate over account changesets and return all account address that were changed.
     fn changed_accounts_with_range(
         &self,
@@ -45,9 +46,9 @@ pub trait AccountExtReader: Send + Sync {
     ) -> ProviderResult<BTreeMap<Address, Vec<BlockNumber>>>;
 }
 
-/// AccountChange reader
+/// `AccountChange` reader
 #[auto_impl(&, Arc, Box)]
-pub trait ChangeSetReader: Send + Sync {
+pub trait ChangeSetReader {
     /// Iterate over account changesets and return the account state from before this block.
     fn account_block_changeset(
         &self,

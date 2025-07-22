@@ -57,7 +57,7 @@ where
     }
 
     /// Returns a mutable reference to the handler
-    pub fn handler_mut(&mut self) -> &mut T {
+    pub const fn handler_mut(&mut self) -> &mut T {
         &mut self.handler
     }
 
@@ -117,7 +117,6 @@ where
                         HandlerEvent::BackfillAction(action) => {
                             // forward action to backfill_sync
                             this.backfill_sync.on_action(action);
-                            continue 'outer
                         }
                         HandlerEvent::Event(ev) => {
                             // bubble up the event

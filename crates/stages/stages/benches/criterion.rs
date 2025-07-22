@@ -1,13 +1,11 @@
 #![allow(missing_docs)]
-use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
-#[cfg(not(target_os = "windows"))]
-use pprof::criterion::{Output, PProfProfiler};
-use reth_chainspec::ChainSpec;
-use reth_config::config::{EtlConfig, TransactionLookupConfig};
-use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
+#![allow(unexpected_cfgs)]
 
 use alloy_primitives::BlockNumber;
-use reth_provider::{DatabaseProvider, DatabaseProviderFactory};
+use criterion::{criterion_main, measurement::WallTime, BenchmarkGroup, Criterion};
+use reth_config::config::{EtlConfig, TransactionLookupConfig};
+use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
+use reth_provider::{test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory};
 use reth_stages::{
     stages::{MerkleStage, SenderRecoveryStage, TransactionLookupStage},
     test_utils::TestStageDB,
@@ -23,25 +21,24 @@ use setup::StageRange;
 // Expanded form of `criterion_group!`
 //
 // This is currently needed to only instantiate the tokio runtime once.
+#[cfg(not(codspeed))]
 fn benches() {
-    #[cfg(not(target_os = "windows"))]
-    let mut criterion = Criterion::default()
-        .with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)))
-        .configure_from_args();
-
-    let runtime = Runtime::new().unwrap();
-    let _guard = runtime.enter();
-
-    #[cfg(target_os = "windows")]
-    let mut criterion = Criterion::default().configure_from_args();
-
-    transaction_lookup(&mut criterion, &runtime);
-    account_hashing(&mut criterion, &runtime);
-    senders(&mut criterion, &runtime);
-    merkle(&mut criterion, &runtime);
+    run_benches(&mut Criterion::default().configure_from_args());
 }
 
+fn run_benches(criterion: &mut Criterion) {
+    let runtime = Runtime::new().unwrap();
+    let _guard = runtime.enter();
+    transaction_lookup(criterion, &runtime);
+    account_hashing(criterion, &runtime);
+    senders(criterion, &runtime);
+    merkle(criterion, &runtime);
+}
+
+#[cfg(not(codspeed))]
 criterion_main!(benches);
+#[cfg(codspeed)]
+criterion_main!(run_benches);
 
 const DEFAULT_NUM_BLOCKS: u64 = 10_000;
 
@@ -116,7 +113,7 @@ fn merkle(c: &mut Criterion, runtime: &Runtime) {
 
     let db = setup::txs_testdata(DEFAULT_NUM_BLOCKS);
 
-    let stage = MerkleStage::Both { clean_threshold: u64::MAX };
+    let stage = MerkleStage::Both { rebuild_threshold: u64::MAX, incremental_threshold: u64::MAX };
     measure_stage(
         runtime,
         &mut group,
@@ -127,7 +124,7 @@ fn merkle(c: &mut Criterion, runtime: &Runtime) {
         "Merkle-incremental".to_string(),
     );
 
-    let stage = MerkleStage::Both { clean_threshold: 0 };
+    let stage = MerkleStage::Both { rebuild_threshold: 0, incremental_threshold: 0 };
     measure_stage(
         runtime,
         &mut group,
@@ -148,7 +145,8 @@ fn measure_stage<F, S>(
     block_interval: RangeInclusive<BlockNumber>,
     label: String,
 ) where
-    S: Clone + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, ChainSpec>>,
+    S: Clone
+        + Stage<DatabaseProvider<<TempDatabase<DatabaseEnv> as Database>::TXMut, MockNodeTypesWithDB>>,
     F: Fn(S, &TestStageDB, StageRange),
 {
     let stage_range = (

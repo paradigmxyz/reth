@@ -54,7 +54,7 @@ impl LogFormat {
             .unwrap_or_else(|_|
                 // If `RUST_LOG_TARGET` is not set, show target in logs only if the max enabled
                 // level is higher than INFO (DEBUG, TRACE)
-                filter.max_level_hint().map_or(true, |max_level| max_level > tracing::Level::INFO));
+                filter.max_level_hint().is_none_or(|max_level| max_level > tracing::Level::INFO));
 
         match self {
             Self::Json => {

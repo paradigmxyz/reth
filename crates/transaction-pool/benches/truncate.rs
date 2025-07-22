@@ -1,41 +1,40 @@
 #![allow(missing_docs)]
-use alloy_primitives::{hex_literal::hex, Address};
+use alloy_primitives::Address;
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion,
 };
-use pprof::criterion::{Output, PProfProfiler};
-use proptest::{
-    prelude::*,
-    strategy::ValueTree,
-    test_runner::{RngAlgorithm, TestRng, TestRunner},
-};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{
-    pool::{BasefeeOrd, ParkedPool, PendingPool, QueuedOrd},
+    pool::{BasefeeOrd, BlobTransactions, ParkedPool, PendingPool, QueuedOrd},
     test_utils::{MockOrdering, MockTransaction, MockTransactionFactory},
     SubPoolLimit,
 };
 
-// constant seed to use for the rng
-const SEED: [u8; 32] = hex!("1337133713371337133713371337133713371337133713371337133713371337");
-
 /// Generates a set of `depth` dependent transactions, with the specified sender. Its values are
 /// generated using [Arbitrary].
 fn create_transactions_for_sender(
-    mut runner: TestRunner,
+    runner: &mut TestRunner,
     sender: Address,
     depth: usize,
+    only_eip4844: bool,
 ) -> Vec<MockTransaction> {
-    // TODO: for blob truncate, this would need a flag for _only_ generating 4844 mock transactions
-
     // assert that depth is always greater than zero, since empty vecs do not really make sense in
     // this context
     assert!(depth > 0);
 
-    // make sure these are all post-eip-1559 transactions
-    let mut txs = prop::collection::vec(any::<MockTransaction>(), depth)
-        .new_tree(&mut runner)
+    if only_eip4844 {
+        return prop::collection::vec(
+            any::<MockTransaction>().prop_filter("only eip4844", |tx| tx.is_eip4844()),
+            depth,
+        )
+        .new_tree(runner)
         .unwrap()
         .current();
+    }
+
+    // make sure these are all post-eip-1559 transactions
+    let mut txs =
+        prop::collection::vec(any::<MockTransaction>(), depth).new_tree(runner).unwrap().current();
 
     for (nonce, tx) in txs.iter_mut().enumerate() {
         // reject pre-eip1559 tx types, if there is a legacy tx, replace it with an eip1559 tx
@@ -43,8 +42,8 @@ fn create_transactions_for_sender(
             *tx = MockTransaction::eip1559();
 
             // set fee values using arbitrary
-            tx.set_priority_fee(any::<u128>().new_tree(&mut runner).unwrap().current());
-            tx.set_max_fee(any::<u128>().new_tree(&mut runner).unwrap().current());
+            tx.set_priority_fee(any::<u128>().new_tree(runner).unwrap().current());
+            tx.set_max_fee(any::<u128>().new_tree(runner).unwrap().current());
         }
 
         tx.set_sender(sender);
@@ -61,12 +60,14 @@ fn create_transactions_for_sender(
 /// is done by using the `max_depth` parameter.
 ///
 /// This uses [`create_transactions_for_sender`] to generate the transactions.
-fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTransaction> {
-    let config = ProptestConfig::default();
-    let rng = TestRng::from_seed(RngAlgorithm::ChaCha, &SEED);
-    let mut runner = TestRunner::new_with_rng(config, rng);
+fn generate_many_transactions(
+    senders: usize,
+    max_depth: usize,
+    only_eip4844: bool,
+) -> Vec<MockTransaction> {
+    let mut runner = TestRunner::deterministic();
 
-    let mut txs = Vec::new();
+    let mut txs = Vec::with_capacity(senders);
     for idx in 0..senders {
         // modulo max_depth so we know it is bounded, plus one so the minimum is always 1
         let depth = any::<usize>().new_tree(&mut runner).unwrap().current() % max_depth + 1;
@@ -79,7 +80,7 @@ fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTrans
         let addr_slice = [0u8; 12].into_iter().chain(idx_slice.into_iter()).collect::<Vec<_>>();
 
         let sender = Address::from_slice(&addr_slice);
-        txs.extend(create_transactions_for_sender(runner.clone(), sender, depth));
+        txs.extend(create_transactions_for_sender(&mut runner, sender, depth, only_eip4844));
     }
 
     txs
@@ -87,8 +88,10 @@ fn generate_many_transactions(senders: usize, max_depth: usize) -> Vec<MockTrans
 
 /// Benchmarks all pool types for the truncate function.
 fn benchmark_pools(group: &mut BenchmarkGroup<'_, WallTime>, senders: usize, max_depth: usize) {
-    println!("Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}...");
-    let txs = generate_many_transactions(senders, max_depth);
+    println!(
+        "Generating transactions for benchmark with {senders} unique senders and a max depth of {max_depth}..."
+    );
+    let txs = generate_many_transactions(senders, max_depth, false);
 
     // benchmark parked pool
     truncate_basefee(group, "BasefeePool", txs.clone(), senders, max_depth);
@@ -99,7 +102,8 @@ fn benchmark_pools(group: &mut BenchmarkGroup<'_, WallTime>, senders: usize, max
     // benchmark queued pool
     truncate_queued(group, "QueuedPool", txs, senders, max_depth);
 
-    // TODO: benchmark blob truncate
+    let blob_txs = generate_many_transactions(senders, max_depth, true);
+    truncate_blob(group, "BlobPool", blob_txs, senders, max_depth);
 }
 
 fn txpool_truncate(c: &mut Criterion) {
@@ -129,6 +133,41 @@ fn txpool_truncate(c: &mut Criterion) {
     let realistic_senders = 15000;
     let realistic_max_depth = 1;
     benchmark_pools(&mut group, realistic_senders, realistic_max_depth);
+}
+
+fn truncate_blob(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    description: &str,
+    seed: Vec<MockTransaction>,
+    senders: usize,
+    max_depth: usize,
+) {
+    let setup = || {
+        let mut txpool = BlobTransactions::default();
+        let mut f = MockTransactionFactory::default();
+
+        for tx in &seed {
+            txpool.add_transaction(f.validated_arc(tx.clone()))
+        }
+
+        txpool
+    };
+
+    let group_id = format!(
+        "txpool | total txs: {} | total senders: {} | max depth: {} | {}",
+        seed.len(),
+        senders,
+        max_depth,
+        description,
+    );
+
+    // for now we just use the default SubPoolLimit
+    group.bench_function(group_id, |b| {
+        b.iter_with_setup(setup, |mut txpool| {
+            txpool.truncate_pool(SubPoolLimit::default());
+            txpool
+        });
+    });
 }
 
 fn truncate_pending(
@@ -161,7 +200,7 @@ fn truncate_pending(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }
@@ -195,7 +234,7 @@ fn truncate_queued(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }
@@ -229,14 +268,14 @@ fn truncate_basefee(
     group.bench_function(group_id, |b| {
         b.iter_with_setup(setup, |mut txpool| {
             txpool.truncate_pool(SubPoolLimit::default());
-            std::hint::black_box(());
+            txpool
         });
     });
 }
 
 criterion_group! {
     name = truncate;
-    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default();
     targets = txpool_truncate
 }
 criterion_main!(truncate);

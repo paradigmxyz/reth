@@ -1,16 +1,13 @@
 //! Shared models for <https://github.com/ethereum/tests>
 
 use crate::{assert::assert_equal, Error};
+use alloy_consensus::Header as RethHeader;
+use alloy_eips::eip4895::Withdrawals;
+use alloy_genesis::GenesisAccount;
 use alloy_primitives::{keccak256, Address, Bloom, Bytes, B256, B64, U256};
 use reth_chainspec::{ChainSpec, ChainSpecBuilder};
-use reth_db::tables;
-use reth_db_api::{
-    cursor::DbDupCursorRO,
-    transaction::{DbTx, DbTxMut},
-};
-use reth_primitives::{
-    Account as RethAccount, Bytecode, Header as RethHeader, SealedHeader, StorageEntry, Withdrawals,
-};
+use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
+use reth_primitives_traits::SealedHeader;
 use serde::Deserialize;
 use std::{collections::BTreeMap, ops::Deref};
 
@@ -27,8 +24,6 @@ pub struct BlockchainTest {
     pub blocks: Vec<Block>,
     /// The expected post state.
     pub post_state: Option<BTreeMap<Address, Account>>,
-    /// The expected post state merkle root.
-    pub post_state_hash: Option<B256>,
     /// The test pre-state.
     pub pre: State,
     /// Hash of the best block.
@@ -87,7 +82,9 @@ pub struct Header {
     /// Parent beacon block root.
     pub parent_beacon_block_root: Option<B256>,
     /// Requests root.
-    pub requests_root: Option<B256>,
+    pub requests_hash: Option<B256>,
+    /// Target blobs per block.
+    pub target_blobs_per_block: Option<U256>,
 }
 
 impl From<Header> for SealedHeader {
@@ -113,7 +110,7 @@ impl From<Header> for SealedHeader {
             blob_gas_used: value.blob_gas_used.map(|v| v.to::<u64>()),
             excess_blob_gas: value.excess_blob_gas.map(|v| v.to::<u64>()),
             parent_beacon_block_root: value.parent_beacon_block_root,
-            requests_root: value.requests_root,
+            requests_hash: value.requests_hash,
         };
         Self::new(header, value.hash)
     }
@@ -127,6 +124,10 @@ pub struct Block {
     pub block_header: Option<Header>,
     /// RLP encoded block bytes
     pub rlp: Bytes,
+    /// If the execution of the block should fail,
+    /// `expect_exception` is `Some`.
+    /// Its contents detail the reason for the failure.
+    pub expect_exception: Option<String>,
     /// Transactions
     pub transactions: Option<Vec<Transaction>>,
     /// Uncle/ommer headers
@@ -152,36 +153,32 @@ pub struct TransactionSequence {
 pub struct State(BTreeMap<Address, Account>);
 
 impl State {
-    /// Write the state to the database.
-    pub fn write_to_db(&self, tx: &impl DbTxMut) -> Result<(), Error> {
-        for (&address, account) in &self.0 {
-            let hashed_address = keccak256(address);
-            let has_code = !account.code.is_empty();
-            let code_hash = has_code.then(|| keccak256(&account.code));
-            let reth_account = RethAccount {
-                balance: account.balance,
-                nonce: account.nonce.to::<u64>(),
-                bytecode_hash: code_hash,
-            };
-            tx.put::<tables::PlainAccountState>(address, reth_account)?;
-            tx.put::<tables::HashedAccounts>(hashed_address, reth_account)?;
-            if let Some(code_hash) = code_hash {
-                tx.put::<tables::Bytecodes>(code_hash, Bytecode::new_raw(account.code.clone()))?;
-            }
-            account.storage.iter().filter(|(_, v)| !v.is_zero()).try_for_each(|(k, v)| {
-                let storage_key = B256::from_slice(&k.to_be_bytes::<32>());
-                tx.put::<tables::PlainStorageState>(
-                    address,
-                    StorageEntry { key: storage_key, value: *v },
-                )?;
-                tx.put::<tables::HashedStorages>(
-                    hashed_address,
-                    StorageEntry { key: keccak256(storage_key), value: *v },
-                )
-            })?;
-        }
-
-        Ok(())
+    /// Return state as genesis state.
+    pub fn into_genesis_state(self) -> BTreeMap<Address, GenesisAccount> {
+        self.0
+            .into_iter()
+            .map(|(address, account)| {
+                let storage = account
+                    .storage
+                    .iter()
+                    .filter(|(_, v)| !v.is_zero())
+                    .map(|(k, v)| {
+                        (
+                            B256::from_slice(&k.to_be_bytes::<32>()),
+                            B256::from_slice(&v.to_be_bytes::<32>()),
+                        )
+                    })
+                    .collect();
+                let account = GenesisAccount {
+                    balance: account.balance,
+                    nonce: Some(account.nonce.try_into().unwrap()),
+                    code: Some(account.code).filter(|c| !c.is_empty()),
+                    storage: Some(storage),
+                    private_key: None,
+                };
+                (address, account)
+            })
+            .collect::<BTreeMap<_, _>>()
     }
 }
 
@@ -212,9 +209,12 @@ impl Account {
     ///
     /// In case of a mismatch, `Err(Error::Assertion)` is returned.
     pub fn assert_db(&self, address: Address, tx: &impl DbTx) -> Result<(), Error> {
-        let account = tx.get::<tables::PlainAccountState>(address)?.ok_or_else(|| {
-            Error::Assertion(format!("Expected account ({address}) is missing from DB: {self:?}"))
-        })?;
+        let account =
+            tx.get_by_encoded_key::<tables::PlainAccountState>(&address)?.ok_or_else(|| {
+                Error::Assertion(format!(
+                    "Expected account ({address}) is missing from DB: {self:?}"
+                ))
+            })?;
 
         assert_equal(self.balance, account.balance, "Balance does not match")?;
         assert_equal(self.nonce.to(), account.nonce, "Nonce does not match")?;
@@ -257,7 +257,7 @@ impl Account {
 }
 
 /// Fork specification.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Deserialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Hash, Ord, Clone, Copy, Deserialize)]
 pub enum ForkSpec {
     /// Frontier
     Frontier,
@@ -308,9 +308,8 @@ pub enum ForkSpec {
     MergePush0,
     /// Cancun
     Cancun,
-    /// Fork Spec which is unknown to us
-    #[serde(other)]
-    Unknown,
+    /// Prague
+    Prague,
 }
 
 impl From<ForkSpec> for ChainSpec {
@@ -342,9 +341,7 @@ impl From<ForkSpec> for ChainSpec {
             ForkSpec::ByzantiumToConstantinopleAt5 | ForkSpec::Constantinople => {
                 panic!("Overridden with PETERSBURG")
             }
-            ForkSpec::Unknown => {
-                panic!("Unknown fork");
-            }
+            ForkSpec::Prague => spec_builder.prague_activated(),
         }
         .build()
     }

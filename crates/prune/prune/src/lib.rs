@@ -12,7 +12,7 @@
 mod builder;
 mod db_ext;
 mod error;
-mod event;
+mod limiter;
 mod metrics;
 mod pruner;
 pub mod segments;
@@ -20,7 +20,7 @@ pub mod segments;
 use crate::metrics::Metrics;
 pub use builder::PrunerBuilder;
 pub use error::PrunerError;
-pub use event::PrunerEvent;
+pub use limiter::PruneLimiter;
 pub use pruner::{Pruner, PrunerResult, PrunerWithFactory, PrunerWithResult};
 
 // Re-export prune types

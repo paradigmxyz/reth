@@ -5,16 +5,52 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(all(not(test), feature = "optimism"), warn(unused_crate_dependencies))]
+#![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![allow(clippy::useless_let_if_seq)]
-// The `optimism` feature must be enabled to use this crate.
-#![cfg(feature = "optimism")]
+
+extern crate alloc;
 
 pub mod builder;
-pub use builder::OptimismPayloadBuilder;
+pub use builder::OpPayloadBuilder;
 pub mod error;
 pub mod payload;
+use op_alloy_rpc_types_engine::OpExecutionData;
 pub use payload::{
-    OptimismBuiltPayload, OptimismPayloadAttributes, OptimismPayloadBuilderAttributes,
+    payload_id_optimism, OpBuiltPayload, OpPayloadAttributes, OpPayloadBuilderAttributes,
 };
+mod traits;
+use reth_optimism_primitives::OpPrimitives;
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
+use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
+pub use traits::*;
+pub mod validator;
+pub use validator::OpExecutionPayloadValidator;
+
+pub mod config;
+
+/// ZST that aggregates Optimism [`PayloadTypes`].
+#[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
+#[non_exhaustive]
+pub struct OpPayloadTypes<N: NodePrimitives = OpPrimitives>(core::marker::PhantomData<N>);
+
+impl<N: NodePrimitives> PayloadTypes for OpPayloadTypes<N>
+where
+    OpBuiltPayload<N>: BuiltPayload,
+{
+    type ExecutionData = OpExecutionData;
+    type BuiltPayload = OpBuiltPayload<N>;
+    type PayloadAttributes = OpPayloadAttributes;
+    type PayloadBuilderAttributes = OpPayloadBuilderAttributes<N::SignedTx>;
+
+    fn block_to_payload(
+        block: SealedBlock<
+            <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
+        >,
+    ) -> Self::ExecutionData {
+        OpExecutionData::from_block_unchecked(
+            block.hash(),
+            &block.into_block().into_ethereum_block(),
+        )
+    }
+}

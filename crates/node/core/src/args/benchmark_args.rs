@@ -21,7 +21,13 @@ pub struct BenchmarkArgs {
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
-    #[arg(long = "jwtsecret", value_name = "PATH", global = true, required = false)]
+    #[arg(
+        long = "jwt-secret",
+        alias = "jwtsecret",
+        value_name = "PATH",
+        global = true,
+        required = false
+    )]
     pub auth_jwtsecret: Option<PathBuf>,
 
     /// The RPC url to use for sending engine requests.

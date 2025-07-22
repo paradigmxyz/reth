@@ -15,7 +15,7 @@
       "type": "grafana",
       "id": "grafana",
       "name": "Grafana",
-      "version": "11.1.3"
+      "version": "11.2.0"
     },
     {
       "type": "panel",
@@ -131,7 +131,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.2.0",
       "targets": [
         {
           "datasource": {
@@ -201,7 +201,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.2.0",
       "targets": [
         {
           "datasource": {
@@ -271,7 +271,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.2.0",
       "targets": [
         {
           "datasource": {
@@ -341,7 +341,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.2.0",
       "targets": [
         {
           "datasource": {
@@ -411,7 +411,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.2.0",
       "targets": [
         {
           "datasource": {
@@ -481,7 +481,7 @@
         "textMode": "name",
         "wideLayout": true
       },
-      "pluginVersion": "11.1.3",
+      "pluginVersion": "11.2.0",
       "targets": [
         {
           "datasource": {
@@ -534,6 +534,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -686,6 +687,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -817,6 +819,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -969,6 +972,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -1099,6 +1103,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -1261,6 +1266,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -1357,6 +1363,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -1491,7 +1498,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Egress RLPx capability traffic (default only `eth` capability)\n\nDropped - session channels are bounded, if there's no capacity, the message will be dropped.",
+      "description": "Measures the message send rate (MPS) for queued outgoing messages. Outgoing messages are added to the queue before being sent to other peers, and this metric helps track the rate of message dispatch.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1504,6 +1511,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -1553,7 +1561,7 @@
         "x": 12,
         "y": 29
       },
-      "id": 217,
+      "id": 219,
       "options": {
         "legend": {
           "calcs": [],
@@ -1574,17 +1582,17 @@
           },
           "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "rate(reth_network_total_outgoing_peer_messages_dropped{instance=\"$instance\"}[$__rate_interval])",
+          "expr": "rate(reth_network_queued_outgoing_messages{instance=\"$instance\"}[$__rate_interval])",
           "fullMetaSearch": false,
           "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Dropped",
+          "legendFormat": "Queued Messages per Second",
           "range": true,
           "refId": "A",
           "useBackend": false
         }
       ],
-      "title": "Outgoing Capability Messages",
+      "title": "Queued Outgoing Messages",
       "type": "timeseries"
     },
     {
@@ -1605,6 +1613,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -1743,7 +1752,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Currently active outgoing GetPooledTransactions requests.",
+      "description": "Egress RLPx capability traffic (default only `eth` capability)\n\nDropped - session channels are bounded, if there's no capacity, the message will be dropped.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1756,6 +1765,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -1794,7 +1804,8 @@
                 "value": 80
               }
             ]
-          }
+          },
+          "unit": "mps"
         },
         "overrides": []
       },
@@ -1804,7 +1815,7 @@
         "x": 12,
         "y": 37
       },
-      "id": 104,
+      "id": 217,
       "options": {
         "legend": {
           "calcs": [],
@@ -1823,15 +1834,19 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
+          "disableTextWrap": false,
           "editorMode": "builder",
-          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
-          "hide": false,
-          "legendFormat": "Inflight Transaction Requests",
+          "expr": "rate(reth_network_total_outgoing_peer_messages_dropped{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "instant": false,
+          "legendFormat": "Dropped",
           "range": true,
-          "refId": "C"
+          "refId": "A",
+          "useBackend": false
         }
       ],
-      "title": "Inflight Transaction Requests",
+      "title": "Outgoing Capability Messages",
       "type": "timeseries"
     },
     {
@@ -1852,6 +1867,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -1958,7 +1974,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "",
+      "description": "Currently active outgoing GetPooledTransactions requests.",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -1971,6 +1987,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -2019,7 +2036,7 @@
         "x": 12,
         "y": 45
       },
-      "id": 199,
+      "id": 104,
       "options": {
         "legend": {
           "calcs": [],
@@ -2038,49 +2055,15 @@
             "type": "prometheus",
             "uid": "${DS_PROMETHEUS}"
           },
-          "disableTextWrap": false,
-          "editorMode": "code",
-          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Hashes in Pending Fetch Cache",
-          "range": true,
-          "refId": "A",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "disableTextWrap": false,
-          "editorMode": "code",
-          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
-          "fullMetaSearch": false,
+          "editorMode": "builder",
+          "expr": "reth_network_inflight_transaction_requests{instance=~\"$instance\"}",
           "hide": false,
-          "includeNullMetadata": true,
-          "instant": false,
-          "legendFormat": "Hashes in Inflight Requests",
-          "range": true,
-          "refId": "B",
-          "useBackend": false
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_PROMETHEUS}"
-          },
-          "editorMode": "code",
-          "expr": "sum(reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}) + sum(reth_network_hashes_pending_fetch{instance=~\"$instance\"})",
-          "hide": false,
-          "instant": false,
-          "legendFormat": "Total Hashes in Transaction Fetcher",
+          "legendFormat": "Inflight Transaction Requests",
           "range": true,
           "refId": "C"
         }
       ],
-      "title": "Transaction Fetcher Hashes",
+      "title": "Inflight Transaction Requests",
       "type": "timeseries"
     },
     {
@@ -2101,6 +2084,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -2310,7 +2294,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "Frequency of a peer sending a transaction that has already been marked as seen by that peer. This could for example be the case if a transaction is sent/announced to the peer at the same time that the peer sends/announces the same transaction to us.\n\nThis reflects the latency in the mempool.",
+      "description": "",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -2323,6 +2307,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -2361,8 +2346,7 @@
                 "value": 80
               }
             ]
-          },
-          "unit": "cps"
+          }
         },
         "overrides": []
       },
@@ -2372,7 +2356,7 @@
         "x": 12,
         "y": 53
       },
-      "id": 208,
+      "id": 199,
       "options": {
         "legend": {
           "calcs": [],
@@ -2392,13 +2376,12 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "rate(reth_network_occurrences_hash_already_seen_by_peer{instance=\"$instance\"}[$__rate_interval])",
+          "editorMode": "code",
+          "expr": "reth_network_hashes_pending_fetch{instance=~\"$instance\"}",
           "fullMetaSearch": false,
-          "hide": false,
-          "includeNullMetadata": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Freq Announced Transactions Already Seen by Peer",
+          "legendFormat": "Hashes in Pending Fetch Cache",
           "range": true,
           "refId": "A",
           "useBackend": false
@@ -2409,19 +2392,32 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "disableTextWrap": false,
-          "editorMode": "builder",
-          "expr": "rate(reth_network_occurrences_of_transaction_already_seen_by_peer{instance=\"$instance\"}[$__rate_interval])",
+          "editorMode": "code",
+          "expr": "reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}",
           "fullMetaSearch": false,
           "hide": false,
-          "includeNullMetadata": false,
+          "includeNullMetadata": true,
           "instant": false,
-          "legendFormat": "Freq Received Transactions Already Seen by Peer",
+          "legendFormat": "Hashes in Inflight Requests",
           "range": true,
           "refId": "B",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "sum(reth_network_hashes_inflight_transaction_requests{instance=~\"$instance\"}) + sum(reth_network_hashes_pending_fetch{instance=~\"$instance\"})",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "Total Hashes in Transaction Fetcher",
+          "range": true,
+          "refId": "C"
         }
       ],
-      "title": "Frequency of Transactions Already Marked as Seen by Peer",
+      "title": "Transaction Fetcher Hashes",
       "type": "timeseries"
     },
     {
@@ -2442,6 +2438,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -2565,6 +2562,297 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "description": "Frequency of a peer sending a transaction that has already been marked as seen by that peer. This could for example be the case if a transaction is sent/announced to the peer at the same time that the peer sends/announces the same transaction to us.\n\nThis reflects the latency in the mempool.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "cps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      },
+      "id": 208,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_network_occurrences_hash_already_seen_by_peer{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Freq Announced Transactions Already Seen by Peer",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_network_occurrences_of_transaction_already_seen_by_peer{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Freq Received Transactions Already Seen by Peer",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        }
+      ],
+      "title": "Frequency of Transactions Already Marked as Seen by Peer",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Number of all transactions of all sub-pools by type",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 69
+      },
+      "id": 218,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_total_legacy_transactions{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Legacy",
+          "range": true,
+          "refId": "A",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_total_eip2930_transactions{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "EIP-2930",
+          "range": true,
+          "refId": "B",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_total_eip1559_transactions{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "EIP-1559",
+          "range": true,
+          "refId": "C",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_total_eip4844_transactions{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "EIP-4844",
+          "range": true,
+          "refId": "D",
+          "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_total_eip7702_transactions{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "EIP-7702",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
+        }
+      ],
+      "title": "Transactions by Type in Pool",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
       "description": "Duration of one call to `TransactionFetcher::on_fetch_pending_hashes`.\n\nFind Peer - find an idle fallback peer for a hash pending fetch.\n\nFill Request - fill `GetPooledTransactions` request, for the found peer, with more hashes from cache of hashes pending fetch. ",
       "fieldConfig": {
         "defaults": {
@@ -2578,6 +2866,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -2625,7 +2914,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 61
+        "y": 69
       },
       "id": 215,
       "options": {
@@ -2697,6 +2986,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -2743,8 +3033,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 69
+        "x": 0,
+        "y": 77
       },
       "id": 214,
       "options": {
@@ -2827,9 +3117,166 @@
           "range": true,
           "refId": "D",
           "useBackend": false
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "disableTextWrap": false,
+          "editorMode": "builder",
+          "expr": "rate(reth_network_transaction_fetcher_eip7702_sum{instance=\"$instance\"}[$__rate_interval])",
+          "fullMetaSearch": false,
+          "hide": false,
+          "includeNullMetadata": false,
+          "instant": false,
+          "legendFormat": "Eip7702",
+          "range": true,
+          "refId": "E",
+          "useBackend": false
         }
       ],
       "title": "Announced Transactions by Type",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "Number of transactions evicted in each pool",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "insertNulls": false,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 77
+      },
+      "id": 220,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "disableTextWrap": false,
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_pending_transactions_evicted{instance=\"$instance\"}",
+          "fullMetaSearch": false,
+          "includeNullMetadata": true,
+          "legendFormat": "PendingPool",
+          "range": true,
+          "refId": "A",
+          "useBackend": false,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          }
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_basefee_transactions_evicted{instance=\"$instance\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "BasefeePool",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_blob_transactions_evicted{instance=\"$instance\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "BlobPool",
+          "range": true,
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "reth_transaction_pool_queued_transactions_evicted{instance=\"$instance\"}",
+          "hide": false,
+          "instant": false,
+          "legendFormat": "QueuedPool",
+          "range": true,
+          "refId": "D"
+        }
+      ],
+      "title": "Evicted Transactions",
       "type": "timeseries"
     },
     {
@@ -2838,12 +3285,11 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 77
+        "y": 85
       },
       "id": 6,
       "panels": [],
       "repeat": "instance",
-      "repeatDirection": "h",
       "title": "Networking",
       "type": "row"
     },
@@ -2865,6 +3311,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -2911,7 +3358,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 78
+        "y": 86
       },
       "id": 18,
       "options": {
@@ -2960,6 +3407,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -3006,7 +3454,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 78
+        "y": 86
       },
       "id": 16,
       "options": {
@@ -3102,6 +3550,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -3149,7 +3598,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 78
+        "y": 86
       },
       "id": 8,
       "options": {
@@ -3232,7 +3681,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 86
+        "y": 94
       },
       "id": 54,
       "options": {
@@ -3408,6 +3857,7 @@
             "axisLabel": "",
             "axisPlacement": "auto",
             "barAlignment": 0,
+            "barWidthFactor": 0.6,
             "drawStyle": "line",
             "fillOpacity": 0,
             "gradientMode": "none",
@@ -3454,7 +3904,7 @@
         "h": 8,
         "w": 14,
         "x": 8,
-        "y": 86
+        "y": 94
       },
       "id": 103,
       "options": {
@@ -3524,6 +3974,6 @@
   "timezone": "",
   "title": "Reth - Transaction Pool",
   "uid": "bee34f59-c79c-4669-a000-198057b3703d",
-  "version": 3,
+  "version": 2,
   "weekStart": ""
 }

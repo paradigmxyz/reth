@@ -1,11 +1,10 @@
 use alloy_primitives::BlockNumber;
-use reth_db::{BlockNumberList, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
     models::ShardedKey,
     table::Table,
     transaction::DbTxMut,
-    DatabaseError,
+    BlockNumberList, DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_provider::DBProvider;
 
@@ -125,7 +124,7 @@ where
                         cursor.delete_current()?;
                         // Upsert will replace the last shard for this sharded key with
                         // the previous value.
-                        cursor.upsert(RawKey::new(key), prev_value)?;
+                        cursor.upsert(RawKey::new(key), &prev_value)?;
                         Ok(PruneShardOutcome::Updated)
                     }
                     // If there's no previous shard for this sharded key,
@@ -151,7 +150,7 @@ where
         } else {
             cursor.upsert(
                 RawKey::new(key),
-                RawValue::new(BlockNumberList::new_pre_sorted(higher_blocks)),
+                &RawValue::new(BlockNumberList::new_pre_sorted(higher_blocks)),
             )?;
             Ok(PruneShardOutcome::Updated)
         }

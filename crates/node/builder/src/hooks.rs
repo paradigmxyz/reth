@@ -37,7 +37,7 @@ where
     }
 
     /// Sets the hook that is run once the node's components are initialized.
-    #[allow(unused)]
+    #[expect(unused)]
     pub(crate) fn on_component_initialized<F>(mut self, hook: F) -> Self
     where
         F: OnComponentInitializedHook<Node> + 'static,
@@ -56,7 +56,7 @@ where
     }
 
     /// Sets the hook that is run once the node has started.
-    #[allow(unused)]
+    #[expect(unused)]
     pub(crate) fn on_node_started<F>(mut self, hook: F) -> Self
     where
         F: OnNodeStartedHook<Node, AddOns> + 'static,

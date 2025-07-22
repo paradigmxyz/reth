@@ -1,4 +1,4 @@
-//! Predicates to constraint peer lookups.
+//! Predicates to constrain peer lookups.
 
 use std::collections::HashSet;
 
@@ -89,12 +89,10 @@ impl MustNotIncludeKeys {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use crate::NetworkStackId;
     use alloy_rlp::Bytes;
     use discv5::enr::{CombinedKey, Enr};
-
-    use crate::NetworkStackId;
-
-    use super::*;
 
     #[test]
     fn must_not_include_key_filter() {

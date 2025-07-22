@@ -9,31 +9,24 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::metrics::PayloadBuilderMetrics;
-use alloy_primitives::{Bytes, B256, U256};
+use alloy_eips::merge::SLOT_DURATION;
+use alloy_primitives::{B256, U256};
 use futures_core::ready;
 use futures_util::FutureExt;
-use reth_chainspec::{ChainSpec, EthereumHardforks};
-use reth_payload_builder::{
-    database::CachedReads, KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator,
-};
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError};
-use reth_primitives::{
-    constants::{EMPTY_WITHDRAWALS, RETH_CLIENT_VERSION, SLOT_DURATION},
-    proofs, BlockNumberOrTag, SealedBlock, Withdrawals,
-};
-use reth_provider::{
-    BlockReaderIdExt, BlockSource, CanonStateNotification, ProviderError, StateProviderFactory,
-};
-use reth_revm::state_change::post_block_withdrawals_balance_increments;
+use reth_chain_state::CanonStateNotification;
+use reth_payload_builder::{KeepPayloadJobAlive, PayloadId, PayloadJob, PayloadJobGenerator};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
+use reth_primitives_traits::{HeaderTy, NodePrimitives, SealedHeader};
+use reth_revm::{cached::CachedReads, cancelled::CancelOnDrop};
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
-use revm::{Database, State};
 use std::{
     fmt,
     future::Future,
     ops::Deref,
     pin::Pin,
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -43,15 +36,21 @@ use tokio::{
 };
 use tracing::{debug, trace, warn};
 
+mod better_payload_emitter;
 mod metrics;
+mod stack;
+
+pub use better_payload_emitter::BetterPayloadEmitter;
+pub use stack::PayloadBuilderStack;
+
+/// Helper to access [`NodePrimitives::BlockHeader`] from [`PayloadBuilder::BuiltPayload`].
+pub type HeaderForPayload<P> = <<P as BuiltPayload>::Primitives as NodePrimitives>::BlockHeader;
 
 /// The [`PayloadJobGenerator`] that creates [`BasicPayloadJob`]s.
 #[derive(Debug)]
-pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
+pub struct BasicPayloadJobGenerator<Client, Tasks, Builder> {
     /// The client that can interact with the chain.
     client: Client,
-    /// The transaction pool to pull transactions from.
-    pool: Pool,
     /// The task executor to spawn payload building tasks on.
     executor: Tasks,
     /// The configuration for the job generator.
@@ -68,19 +67,17 @@ pub struct BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks, Builder> {
+impl<Client, Tasks, Builder> BasicPayloadJobGenerator<Client, Tasks, Builder> {
     /// Creates a new [`BasicPayloadJobGenerator`] with the given config and custom
     /// [`PayloadBuilder`]
     pub fn with_builder(
         client: Client,
-        pool: Pool,
         executor: Tasks,
         config: BasicPayloadJobGeneratorConfig,
         builder: Builder,
     ) -> Self {
         Self {
             client,
-            pool,
             executor,
             payload_task_guard: PayloadTaskGuard::new(config.max_payload_tasks),
             config,
@@ -92,10 +89,11 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
     /// Returns the maximum duration a job should be allowed to run.
     ///
     /// This adheres to the following specification:
-    // > Client software SHOULD stop the updating process when either a call to engine_getPayload
-    // > with the build process's payloadId is made or SECONDS_PER_SLOT (12s in the Mainnet
-    // > configuration) have passed since the point in time identified by the timestamp parameter.
-    // See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
+    /// > Client software SHOULD stop the updating process when either a call to engine_getPayload
+    /// > with the build process's payloadId is made or SECONDS_PER_SLOT (12s in the Mainnet
+    /// > configuration) have passed since the point in time identified by the timestamp parameter.
+    ///
+    /// See also <https://github.com/ethereum/execution-apis/blob/431cf72fd3403d946ca3e3afc36b973fc87e0e89/src/engine/paris.md?plain=1#L137>
     #[inline]
     fn max_job_duration(&self, unix_timestamp: u64) -> Duration {
         let duration_until_timestamp = duration_until(unix_timestamp);
@@ -118,7 +116,7 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
         &self.executor
     }
 
-    /// Returns the pre-cached reads for the given parent block if it matches the cached state's
+    /// Returns the pre-cached reads for the given parent header if it matches the cached state's
     /// block.
     fn maybe_pre_cached(&self, parent: B256) -> Option<CachedReads> {
         self.pre_cached.as_ref().filter(|pc| pc.block == parent).map(|pc| pc.cached.clone())
@@ -127,55 +125,53 @@ impl<Client, Pool, Tasks, Builder> BasicPayloadJobGenerator<Client, Pool, Tasks,
 
 // === impl BasicPayloadJobGenerator ===
 
-impl<Client, Pool, Tasks, Builder> PayloadJobGenerator
-    for BasicPayloadJobGenerator<Client, Pool, Tasks, Builder>
+impl<Client, Tasks, Builder> PayloadJobGenerator
+    for BasicPayloadJobGenerator<Client, Tasks, Builder>
 where
-    Client: StateProviderFactory + BlockReaderIdExt + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
+    Client: StateProviderFactory
+        + BlockReaderIdExt<Header = HeaderForPayload<Builder::BuiltPayload>>
+        + Clone
+        + Unpin
+        + 'static,
     Tasks: TaskSpawner + Clone + Unpin + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
-    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
+    Builder: PayloadBuilder + Unpin + 'static,
+    Builder::Attributes: Unpin + Clone,
+    Builder::BuiltPayload: Unpin + Clone,
 {
-    type Job = BasicPayloadJob<Client, Pool, Tasks, Builder>;
+    type Job = BasicPayloadJob<Tasks, Builder>;
 
     fn new_payload_job(
         &self,
         attributes: <Self::Job as PayloadJob>::PayloadAttributes,
     ) -> Result<Self::Job, PayloadBuilderError> {
-        let parent_block = if attributes.parent().is_zero() {
-            // use latest block if parent is zero: genesis block
+        let parent_header = if attributes.parent().is_zero() {
+            // Use latest header for genesis block case
             self.client
-                .block_by_number_or_tag(BlockNumberOrTag::Latest)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?
-                .seal_slow()
+                .latest_header()
+                .map_err(PayloadBuilderError::from)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(B256::ZERO))?
         } else {
-            let block = self
-                .client
-                .find_block_by_hash(attributes.parent(), BlockSource::Any)?
-                .ok_or_else(|| PayloadBuilderError::MissingParentBlock(attributes.parent()))?;
-
-            // we already know the hash, so we can seal it
-            block.seal(attributes.parent())
+            // Fetch specific header by hash
+            self.client
+                .sealed_header_by_hash(attributes.parent())
+                .map_err(PayloadBuilderError::from)?
+                .ok_or_else(|| PayloadBuilderError::MissingParentHeader(attributes.parent()))?
         };
 
-        let config =
-            PayloadConfig::new(Arc::new(parent_block), self.config.extradata.clone(), attributes);
+        let config = PayloadConfig::new(Arc::new(parent_header.clone()), attributes);
 
         let until = self.job_deadline(config.attributes.timestamp());
         let deadline = Box::pin(tokio::time::sleep_until(until));
 
-        let cached_reads = self.maybe_pre_cached(config.parent_block.hash());
+        let cached_reads = self.maybe_pre_cached(parent_header.hash());
 
         let mut job = BasicPayloadJob {
             config,
-            client: self.client.clone(),
-            pool: self.pool.clone(),
             executor: self.executor.clone(),
             deadline,
             // ticks immediately
             interval: tokio::time::interval(self.config.interval),
-            best_payload: None,
+            best_payload: PayloadState::Missing,
             pending_block: None,
             cached_reads,
             payload_task_guard: self.payload_task_guard.clone(),
@@ -189,7 +185,7 @@ where
         Ok(job)
     }
 
-    fn on_new_state(&mut self, new_state: CanonStateNotification) {
+    fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
         let mut cached = CachedReads::default();
 
         // extract the state from the notification and put it into the cache
@@ -244,8 +240,6 @@ impl PayloadTaskGuard {
 /// Settings for the [`BasicPayloadJobGenerator`].
 #[derive(Debug, Clone)]
 pub struct BasicPayloadJobGeneratorConfig {
-    /// Data to include in the block's extra data field.
-    extradata: Bytes,
     /// The interval at which the job should build a new payload after the last.
     interval: Duration,
     /// The deadline for when the payload builder job should resolve.
@@ -281,20 +275,11 @@ impl BasicPayloadJobGeneratorConfig {
         self.max_payload_tasks = max_payload_tasks;
         self
     }
-
-    /// Sets the data to include in the block's extra data field.
-    ///
-    /// Defaults to the current client version: `rlp(RETH_CLIENT_VERSION)`.
-    pub fn extradata(mut self, extradata: Bytes) -> Self {
-        self.extradata = extradata;
-        self
-    }
 }
 
 impl Default for BasicPayloadJobGeneratorConfig {
     fn default() -> Self {
         Self {
-            extradata: alloy_rlp::encode(RETH_CLIENT_VERSION.as_bytes()).into(),
             interval: Duration::from_secs(1),
             // 12s slot time
             deadline: SLOT_DURATION,
@@ -304,25 +289,30 @@ impl Default for BasicPayloadJobGeneratorConfig {
 }
 
 /// A basic payload job that continuously builds a payload with the best transactions from the pool.
+///
+/// This type is a [`PayloadJob`] and [`Future`] that terminates when the deadline is reached or
+/// when the job is resolved: [`PayloadJob::resolve`].
+///
+/// This basic job implementation will trigger new payload build task continuously until the job is
+/// resolved or the deadline is reached, or until the built payload is marked as frozen:
+/// [`BuildOutcome::Freeze`]. Once a frozen payload is returned, no additional payloads will be
+/// built and this future will wait to be resolved: [`PayloadJob::resolve`] or terminated if the
+/// deadline is reached..
 #[derive(Debug)]
-pub struct BasicPayloadJob<Client, Pool, Tasks, Builder>
+pub struct BasicPayloadJob<Tasks, Builder>
 where
-    Builder: PayloadBuilder<Pool, Client>,
+    Builder: PayloadBuilder,
 {
     /// The configuration for how the payload will be created.
-    config: PayloadConfig<Builder::Attributes>,
-    /// The client that can interact with the chain.
-    client: Client,
-    /// The transaction pool.
-    pool: Pool,
+    config: PayloadConfig<Builder::Attributes, HeaderForPayload<Builder::BuiltPayload>>,
     /// How to spawn building tasks
     executor: Tasks,
     /// The deadline when this job should resolve.
     deadline: Pin<Box<Sleep>>,
     /// The interval at which the job should build a new payload after the last.
     interval: Interval,
-    /// The best payload so far.
-    best_payload: Option<Builder::BuiltPayload>,
+    /// The best payload so far and its state.
+    best_payload: PayloadState<Builder::BuiltPayload>,
     /// Receiver for the block that is currently being built.
     pending_block: Option<PendingPayload<Builder::BuiltPayload>>,
     /// Restricts how many generator tasks can be executed at once.
@@ -340,40 +330,30 @@ where
     builder: Builder,
 }
 
-impl<Client, Pool, Tasks, Builder> BasicPayloadJob<Client, Pool, Tasks, Builder>
+impl<Tasks, Builder> BasicPayloadJob<Tasks, Builder>
 where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
-    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
+    Builder: PayloadBuilder + Unpin + 'static,
+    Builder::Attributes: Unpin + Clone,
+    Builder::BuiltPayload: Unpin + Clone,
 {
     /// Spawns a new payload build task.
     fn spawn_build_job(&mut self) {
         trace!(target: "payload_builder", id = %self.config.payload_id(), "spawn new payload build task");
         let (tx, rx) = oneshot::channel();
-        let client = self.client.clone();
-        let pool = self.pool.clone();
-        let cancel = Cancelled::default();
+        let cancel = CancelOnDrop::default();
         let _cancel = cancel.clone();
         let guard = self.payload_task_guard.clone();
         let payload_config = self.config.clone();
-        let best_payload = self.best_payload.clone();
+        let best_payload = self.best_payload.payload().cloned();
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args = BuildArguments {
-                client,
-                pool,
-                cached_reads,
-                config: payload_config,
-                cancel,
-                best_payload,
-            };
+            let args =
+                BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
             let result = builder.try_build(args);
             let _ = tx.send(result);
         }));
@@ -382,14 +362,12 @@ where
     }
 }
 
-impl<Client, Pool, Tasks, Builder> Future for BasicPayloadJob<Client, Pool, Tasks, Builder>
+impl<Tasks, Builder> Future for BasicPayloadJob<Tasks, Builder>
 where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
-    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
+    Builder: PayloadBuilder + Unpin + 'static,
+    Builder::Attributes: Unpin + Clone,
+    Builder::BuiltPayload: Unpin + Clone,
 {
     type Output = Result<(), PayloadBuilderError>;
 
@@ -404,8 +382,9 @@ where
 
         // check if the interval is reached
         while this.interval.poll_tick(cx).is_ready() {
-            // start a new job if there is no pending block and we haven't reached the deadline
-            if this.pending_block.is_none() {
+            // start a new job if there is no pending block, we haven't reached the deadline,
+            // and the payload isn't frozen
+            if this.pending_block.is_none() && !this.best_payload.is_frozen() {
                 this.spawn_build_job();
             }
         }
@@ -417,7 +396,11 @@ where
                     BuildOutcome::Better { payload, cached_reads } => {
                         this.cached_reads = Some(cached_reads);
                         debug!(target: "payload_builder", value = %payload.fees(), "built better payload");
-                        this.best_payload = Some(payload);
+                        this.best_payload = PayloadState::Best(payload);
+                    }
+                    BuildOutcome::Freeze(payload) => {
+                        debug!(target: "payload_builder", "payload frozen, no further building will occur");
+                        this.best_payload = PayloadState::Frozen(payload);
                     }
                     BuildOutcome::Aborted { fees, cached_reads } => {
                         this.cached_reads = Some(cached_reads);
@@ -442,40 +425,41 @@ where
     }
 }
 
-impl<Client, Pool, Tasks, Builder> PayloadJob for BasicPayloadJob<Client, Pool, Tasks, Builder>
+impl<Tasks, Builder> PayloadJob for BasicPayloadJob<Tasks, Builder>
 where
-    Client: StateProviderFactory + Clone + Unpin + 'static,
-    Pool: TransactionPool + Unpin + 'static,
     Tasks: TaskSpawner + Clone + 'static,
-    Builder: PayloadBuilder<Pool, Client> + Unpin + 'static,
-    <Builder as PayloadBuilder<Pool, Client>>::Attributes: Unpin + Clone,
-    <Builder as PayloadBuilder<Pool, Client>>::BuiltPayload: Unpin + Clone,
+    Builder: PayloadBuilder + Unpin + 'static,
+    Builder::Attributes: Unpin + Clone,
+    Builder::BuiltPayload: Unpin + Clone,
 {
     type PayloadAttributes = Builder::Attributes;
     type ResolvePayloadFuture = ResolveBestPayload<Self::BuiltPayload>;
     type BuiltPayload = Builder::BuiltPayload;
 
     fn best_payload(&self) -> Result<Self::BuiltPayload, PayloadBuilderError> {
-        if let Some(ref payload) = self.best_payload {
-            return Ok(payload.clone())
+        if let Some(payload) = self.best_payload.payload() {
+            Ok(payload.clone())
+        } else {
+            // No payload has been built yet, but we need to return something that the CL then
+            // can deliver, so we need to return an empty payload.
+            //
+            // Note: it is assumed that this is unlikely to happen, as the payload job is
+            // started right away and the first full block should have been
+            // built by the time CL is requesting the payload.
+            self.metrics.inc_requested_empty_payload();
+            self.builder.build_empty_payload(self.config.clone())
         }
-        // No payload has been built yet, but we need to return something that the CL then can
-        // deliver, so we need to return an empty payload.
-        //
-        // Note: it is assumed that this is unlikely to happen, as the payload job is started right
-        // away and the first full block should have been built by the time CL is requesting the
-        // payload.
-        self.metrics.inc_requested_empty_payload();
-        self.builder.build_empty_payload(&self.client, self.config.clone())
     }
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
         Ok(self.config.attributes.clone())
     }
 
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
-        let best_payload = self.best_payload.take();
-
+    fn resolve_kind(
+        &mut self,
+        kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        let best_payload = self.best_payload.payload().cloned();
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
             self.spawn_build_job();
@@ -488,11 +472,9 @@ where
             debug!(target: "payload_builder", id=%self.config.payload_id(), "no best payload yet to resolve, building empty payload");
 
             let args = BuildArguments {
-                client: self.client.clone(),
-                pool: self.pool.clone(),
                 cached_reads: self.cached_reads.take().unwrap_or_default(),
                 config: self.config.clone(),
-                cancel: Cancelled::default(),
+                cancel: CancelOnDrop::default(),
                 best_payload: None,
             };
 
@@ -507,11 +489,10 @@ where
                     self.metrics.inc_requested_empty_payload();
                     // no payload built yet, so we need to return an empty payload
                     let (tx, rx) = oneshot::channel();
-                    let client = self.client.clone();
                     let config = self.config.clone();
                     let builder = self.builder.clone();
                     self.executor.spawn_blocking(Box::pin(async move {
-                        let res = builder.build_empty_payload(&client, config);
+                        let res = builder.build_empty_payload(config);
                         let _ = tx.send(res);
                     }));
 
@@ -529,9 +510,41 @@ where
             };
         }
 
-        let fut = ResolveBestPayload { best_payload, maybe_better, empty_payload };
+        let fut = ResolveBestPayload {
+            best_payload,
+            maybe_better,
+            empty_payload: empty_payload.filter(|_| kind != PayloadKind::WaitForPending),
+        };
 
         (fut, KeepPayloadJobAlive::No)
+    }
+}
+
+/// Represents the current state of a payload being built.
+#[derive(Debug, Clone)]
+pub enum PayloadState<P> {
+    /// No payload has been built yet.
+    Missing,
+    /// The best payload built so far, which may still be improved upon.
+    Best(P),
+    /// The payload is frozen and no further building should occur.
+    ///
+    /// Contains the final payload `P` that should be used.
+    Frozen(P),
+}
+
+impl<P> PayloadState<P> {
+    /// Checks if the payload is frozen.
+    pub const fn is_frozen(&self) -> bool {
+        matches!(self, Self::Frozen(_))
+    }
+
+    /// Returns the payload if it exists (either Best or Frozen).
+    pub const fn payload(&self) -> Option<&P> {
+        match self {
+            Self::Missing => None,
+            Self::Best(p) | Self::Frozen(p) => Some(p),
+        }
     }
 }
 
@@ -573,7 +586,9 @@ where
         if let Some(fut) = Pin::new(&mut this.maybe_better).as_pin_mut() {
             if let Poll::Ready(res) = fut.poll(cx) {
                 this.maybe_better = None;
-                if let Ok(BuildOutcome::Better { payload, .. }) = res {
+                if let Ok(Some(payload)) = res.map(|out| out.into_payload())
+                    .inspect_err(|err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"))
+                {
                     debug!(target: "payload_builder", "resolving better payload");
                     return Poll::Ready(Ok(payload))
                 }
@@ -614,7 +629,7 @@ where
 #[derive(Debug)]
 pub struct PendingPayload<P> {
     /// The marker to cancel the job on drop
-    _cancel: Cancelled,
+    _cancel: CancelOnDrop,
     /// The channel to send the result to.
     payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
 }
@@ -622,7 +637,7 @@ pub struct PendingPayload<P> {
 impl<P> PendingPayload<P> {
     /// Constructs a `PendingPayload` future.
     pub const fn new(
-        cancel: Cancelled,
+        cancel: CancelOnDrop,
         payload: oneshot::Receiver<Result<BuildOutcome<P>, PayloadBuilderError>>,
     ) -> Self {
         Self { _cancel: cancel, payload }
@@ -638,56 +653,22 @@ impl<P> Future for PendingPayload<P> {
     }
 }
 
-/// A marker that can be used to cancel a job.
-///
-/// If dropped, it will set the `cancelled` flag to true.
-#[derive(Default, Clone, Debug)]
-pub struct Cancelled(Arc<AtomicBool>);
-
-// === impl Cancelled ===
-
-impl Cancelled {
-    /// Returns true if the job was cancelled.
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
-impl Drop for Cancelled {
-    fn drop(&mut self) {
-        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
-}
-
 /// Static config for how to build a payload.
 #[derive(Clone, Debug)]
-pub struct PayloadConfig<Attributes> {
-    /// The parent block.
-    pub parent_block: Arc<SealedBlock>,
-    /// Block extra data.
-    pub extra_data: Bytes,
+pub struct PayloadConfig<Attributes, Header = alloy_consensus::Header> {
+    /// The parent header.
+    pub parent_header: Arc<SealedHeader<Header>>,
     /// Requested attributes for the payload.
     pub attributes: Attributes,
 }
 
-impl<Attributes> PayloadConfig<Attributes> {
-    /// Returns an owned instance of the [`PayloadConfig`]'s `extra_data` bytes.
-    pub fn extra_data(&self) -> Bytes {
-        self.extra_data.clone()
-    }
-}
-
-impl<Attributes> PayloadConfig<Attributes>
+impl<Attributes, Header> PayloadConfig<Attributes, Header>
 where
     Attributes: PayloadBuilderAttributes,
 {
     /// Create new payload config.
-    pub const fn new(
-        parent_block: Arc<SealedBlock>,
-        extra_data: Bytes,
-        attributes: Attributes,
-    ) -> Self {
-        Self { parent_block, extra_data, attributes }
+    pub const fn new(parent_header: Arc<SealedHeader<Header>>, attributes: Attributes) -> Self {
+        Self { parent_header, attributes }
     }
 
     /// Returns the payload id.
@@ -715,13 +696,16 @@ pub enum BuildOutcome<Payload> {
     },
     /// Build job was cancelled
     Cancelled,
+
+    /// The payload is final and no further building should occur
+    Freeze(Payload),
 }
 
 impl<Payload> BuildOutcome<Payload> {
     /// Consumes the type and returns the payload if the outcome is `Better`.
     pub fn into_payload(self) -> Option<Payload> {
         match self {
-            Self::Better { payload, .. } => Some(payload),
+            Self::Better { payload, .. } | Self::Freeze(payload) => Some(payload),
             _ => None,
         }
     }
@@ -740,6 +724,52 @@ impl<Payload> BuildOutcome<Payload> {
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
     }
+
+    /// Applies a fn on the current payload.
+    pub fn map_payload<F, P>(self, f: F) -> BuildOutcome<P>
+    where
+        F: FnOnce(Payload) -> P,
+    {
+        match self {
+            Self::Better { payload, cached_reads } => {
+                BuildOutcome::Better { payload: f(payload), cached_reads }
+            }
+            Self::Aborted { fees, cached_reads } => BuildOutcome::Aborted { fees, cached_reads },
+            Self::Cancelled => BuildOutcome::Cancelled,
+            Self::Freeze(payload) => BuildOutcome::Freeze(f(payload)),
+        }
+    }
+}
+
+/// The possible outcomes of a payload building attempt without reused [`CachedReads`]
+#[derive(Debug)]
+pub enum BuildOutcomeKind<Payload> {
+    /// Successfully built a better block.
+    Better {
+        /// The new payload that was built.
+        payload: Payload,
+    },
+    /// Aborted payload building because resulted in worse block wrt. fees.
+    Aborted {
+        /// The total fees associated with the attempted payload.
+        fees: U256,
+    },
+    /// Build job was cancelled
+    Cancelled,
+    /// The payload is final and no further building should occur
+    Freeze(Payload),
+}
+
+impl<Payload> BuildOutcomeKind<Payload> {
+    /// Attaches the [`CachedReads`] to the outcome.
+    pub fn with_cached_reads(self, cached_reads: CachedReads) -> BuildOutcome<Payload> {
+        match self {
+            Self::Better { payload } => BuildOutcome::Better { payload, cached_reads },
+            Self::Aborted { fees } => BuildOutcome::Aborted { fees, cached_reads },
+            Self::Cancelled => BuildOutcome::Cancelled,
+            Self::Freeze(payload) => BuildOutcome::Freeze(payload),
+        }
+    }
 }
 
 /// A collection of arguments used for building payloads.
@@ -748,46 +778,26 @@ impl<Payload> BuildOutcome<Payload> {
 /// building process. It holds references to the Ethereum client, transaction pool, cached reads,
 /// payload configuration, cancellation status, and the best payload achieved so far.
 #[derive(Debug)]
-pub struct BuildArguments<Pool, Client, Attributes, Payload> {
-    /// How to interact with the chain.
-    pub client: Client,
-    /// The transaction pool.
-    ///
-    /// Or the type that provides the transactions to build the payload.
-    pub pool: Pool,
+pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     /// Previously cached disk reads
     pub cached_reads: CachedReads,
     /// How to configure the payload.
-    pub config: PayloadConfig<Attributes>,
+    pub config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
     /// A marker that can be used to cancel the job.
-    pub cancel: Cancelled,
+    pub cancel: CancelOnDrop,
     /// The best payload achieved so far.
     pub best_payload: Option<Payload>,
 }
 
-impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes, Payload> {
+impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
     /// Create new build arguments.
     pub const fn new(
-        client: Client,
-        pool: Pool,
         cached_reads: CachedReads,
-        config: PayloadConfig<Attributes>,
-        cancel: Cancelled,
+        config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
+        cancel: CancelOnDrop,
         best_payload: Option<Payload>,
     ) -> Self {
-        Self { client, pool, cached_reads, config, cancel, best_payload }
-    }
-
-    /// Maps the transaction pool to a new type.
-    pub fn with_pool<P>(self, pool: P) -> BuildArguments<P, Client, Attributes, Payload> {
-        BuildArguments {
-            client: self.client,
-            pool,
-            cached_reads: self.cached_reads,
-            config: self.config,
-            cancel: self.cancel,
-            best_payload: self.best_payload,
-        }
+        Self { cached_reads, config, cancel, best_payload }
     }
 }
 
@@ -799,7 +809,7 @@ impl<Pool, Client, Attributes, Payload> BuildArguments<Pool, Client, Attributes,
 ///
 /// Generic parameters `Pool` and `Client` represent the transaction pool and
 /// Ethereum client types.
-pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
+pub trait PayloadBuilder: Send + Sync + Clone {
     /// The payload attributes type to accept for building.
     type Attributes: PayloadBuilderAttributes;
     /// The type of the built payload.
@@ -819,7 +829,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// A `Result` indicating the build outcome or an error.
     fn try_build(
         &self,
-        args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+        args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError>;
 
     /// Invoked when the payload job is being resolved and there is no payload yet.
@@ -827,7 +837,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// This can happen if the CL requests a payload before the first payload has been built.
     fn on_missing_payload(
         &self,
-        _args: BuildArguments<Pool, Client, Self::Attributes, Self::BuiltPayload>,
+        _args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> MissingPayloadBehaviour<Self::BuiltPayload> {
         MissingPayloadBehaviour::RaceEmptyPayload
     }
@@ -835,8 +845,7 @@ pub trait PayloadBuilder<Pool, Client>: Send + Sync + Clone {
     /// Builds an empty payload without any transaction.
     fn build_empty_payload(
         &self,
-        client: &Client,
-        config: PayloadConfig<Self::Attributes>,
+        config: PayloadConfig<Self::Attributes, HeaderForPayload<Self::BuiltPayload>>,
     ) -> Result<Self::BuiltPayload, PayloadBuilderError>;
 }
 
@@ -870,69 +879,11 @@ impl<Payload> Default for MissingPayloadBehaviour<Payload> {
     }
 }
 
-/// Represents the outcome of committing withdrawals to the runtime database and post state.
-/// Pre-shanghai these are `None` values.
-#[derive(Default, Debug)]
-pub struct WithdrawalsOutcome {
-    /// committed withdrawals, if any.
-    pub withdrawals: Option<Withdrawals>,
-    /// withdrawals root if any.
-    pub withdrawals_root: Option<B256>,
-}
-
-impl WithdrawalsOutcome {
-    /// No withdrawals pre shanghai
-    pub const fn pre_shanghai() -> Self {
-        Self { withdrawals: None, withdrawals_root: None }
-    }
-
-    /// No withdrawals
-    pub fn empty() -> Self {
-        Self {
-            withdrawals: Some(Withdrawals::default()),
-            withdrawals_root: Some(EMPTY_WITHDRAWALS),
-        }
-    }
-}
-
-/// Executes the withdrawals and commits them to the _runtime_ Database and `BundleState`.
-///
-/// Returns the withdrawals root.
-///
-/// Returns `None` values pre shanghai
-pub fn commit_withdrawals<DB: Database<Error = ProviderError>>(
-    db: &mut State<DB>,
-    chain_spec: &ChainSpec,
-    timestamp: u64,
-    withdrawals: Withdrawals,
-) -> Result<WithdrawalsOutcome, DB::Error> {
-    if !chain_spec.is_shanghai_active_at_timestamp(timestamp) {
-        return Ok(WithdrawalsOutcome::pre_shanghai())
-    }
-
-    if withdrawals.is_empty() {
-        return Ok(WithdrawalsOutcome::empty())
-    }
-
-    let balance_increments =
-        post_block_withdrawals_balance_increments(chain_spec, timestamp, &withdrawals);
-
-    db.increment_balances(balance_increments)?;
-
-    let withdrawals_root = proofs::calculate_withdrawals_root(&withdrawals);
-
-    // calculate withdrawals root
-    Ok(WithdrawalsOutcome {
-        withdrawals: Some(withdrawals),
-        withdrawals_root: Some(withdrawals_root),
-    })
-}
-
 /// Checks if the new payload is better than the current best.
 ///
 /// This compares the total fees of the blocks, higher is better.
 #[inline(always)]
-pub fn is_better_payload(best_payload: Option<impl BuiltPayload>, new_fees: U256) -> bool {
+pub fn is_better_payload<T: BuiltPayload>(best_payload: Option<&T>, new_fees: U256) -> bool {
     if let Some(best_payload) = best_payload {
         new_fees > best_payload.fees()
     } else {

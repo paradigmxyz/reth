@@ -1,15 +1,15 @@
-use crate::db::checksum::ChecksumViewer;
+use crate::{common::CliNodeTypes, db::checksum::ChecksumViewer};
 use clap::Parser;
 use comfy_table::{Cell, Row, Table as ComfyTable};
 use eyre::WrapErr;
 use human_bytes::human_bytes;
 use itertools::Itertools;
 use reth_chainspec::EthereumHardforks;
-use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv, TableViewer, Tables};
-use reth_db_api::database::Database;
+use reth_db::{mdbx, static_file::iter_static_files, DatabaseEnv};
+use reth_db_api::{database::Database, TableViewer, Tables};
 use reth_db_common::DbTool;
 use reth_fs_util as fs;
-use reth_node_builder::{NodeTypesWithDB, NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_builder::{NodePrimitives, NodeTypesWithDB, NodeTypesWithDBAdapter};
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::providers::{ProviderNodeTypes, StaticFileProvider};
 use reth_static_file_types::SegmentRangeInclusive;
@@ -38,7 +38,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db stats` command
-    pub fn execute<N: NodeTypesWithEngine<ChainSpec: EthereumHardforks>>(
+    pub fn execute<N: CliNodeTypes<ChainSpec: EthereumHardforks>>(
         self,
         data_dir: ChainPath<DataDirPath>,
         tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
@@ -49,7 +49,7 @@ impl Command {
             println!("\n");
         }
 
-        let static_files_stats_table = self.static_files_stats_table(data_dir)?;
+        let static_files_stats_table = self.static_files_stats_table::<N::Primitives>(data_dir)?;
         println!("{static_files_stats_table}");
 
         println!("\n");
@@ -143,7 +143,7 @@ impl Command {
         Ok(table)
     }
 
-    fn static_files_stats_table(
+    fn static_files_stats_table<N: NodePrimitives>(
         &self,
         data_dir: ChainPath<DataDirPath>,
     ) -> eyre::Result<ComfyTable> {
@@ -172,8 +172,9 @@ impl Command {
             ]);
         }
 
-        let static_files = iter_static_files(data_dir.static_files())?;
-        let static_file_provider = StaticFileProvider::read_only(data_dir.static_files(), false)?;
+        let static_files = iter_static_files(&data_dir.static_files())?;
+        let static_file_provider =
+            StaticFileProvider::<N>::read_only(data_dir.static_files(), false)?;
 
         let mut total_data_size = 0;
         let mut total_index_size = 0;
@@ -342,8 +343,8 @@ impl Command {
             // add rows containing checksums to the table
             let mut row = Row::new();
             row.add_cell(Cell::new(db_table));
-            row.add_cell(Cell::new(format!("{:x}", checksum)));
-            row.add_cell(Cell::new(format!("{:?}", elapsed)));
+            row.add_cell(Cell::new(format!("{checksum:x}")));
+            row.add_cell(Cell::new(format!("{elapsed:?}")));
             table.add_row(row);
         }
 
@@ -359,7 +360,7 @@ impl Command {
         let mut row = Row::new();
         row.add_cell(Cell::new("Total elapsed"));
         row.add_cell(Cell::new(""));
-        row.add_cell(Cell::new(format!("{:?}", total_elapsed)));
+        row.add_cell(Cell::new(format!("{total_elapsed:?}")));
         table.add_row(row);
 
         Ok(table)

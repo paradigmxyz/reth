@@ -1,18 +1,3 @@
-use alloy_primitives::Bloom;
-pub use alloy_primitives::{Log, LogData};
-
-/// Calculate receipt logs bloom.
-pub fn logs_bloom<'a>(logs: impl IntoIterator<Item = &'a Log>) -> Bloom {
-    let mut bloom = Bloom::ZERO;
-    for log in logs {
-        bloom.m3_2048(log.address.as_slice());
-        for topic in log.topics() {
-            bloom.m3_2048(topic.as_slice());
-        }
-    }
-    bloom
-}
-
 #[cfg(test)]
 mod tests {
     use alloy_primitives::{Address, Bytes, Log as AlloyLog, B256};
@@ -41,7 +26,7 @@ mod tests {
     struct Log {
         /// Contract that emitted this log.
         address: Address,
-        /// Topics of the log. The number of logs depend on what `LOG` opcode is used.
+        /// Topics of the log. The number of logs depends on what `LOG` opcode is used.
         topics: Vec<B256>,
         /// Arbitrary length data.
         data: Bytes,

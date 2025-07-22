@@ -1,13 +1,13 @@
 use crate::{
+    maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     PoolSize, TransactionOrigin,
 };
+use alloy_consensus::constants::EIP4844_TX_TYPE_ID;
+use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use reth_primitives::{
-    constants::{ETHEREUM_BLOCK_GAS_LIMIT, MIN_PROTOCOL_BASE_FEE},
-    EIP4844_TX_TYPE_ID,
-};
-use std::collections::HashSet;
+use std::{collections::HashSet, ops::Mul, time::Duration};
+
 /// Guarantees max transactions for one sender, compatible with geth/erigon
 pub const TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER: usize = 16;
 
@@ -28,6 +28,9 @@ pub const DEFAULT_PRICE_BUMP: u128 = 10;
 /// This enforces that a blob transaction requires a 100% price bump to be replaced
 pub const REPLACE_BLOB_PRICE_BUMP: u128 = 100;
 
+/// Default maximum new transactions for broadcasting.
+pub const MAX_NEW_PENDING_TXS_NOTIFICATIONS: usize = 200;
+
 /// Configuration options for the Transaction pool.
 #[derive(Debug, Clone)]
 pub struct PoolConfig {
@@ -39,12 +42,16 @@ pub struct PoolConfig {
     pub queued_limit: SubPoolLimit,
     /// Max number of transactions in the blob sub-pool
     pub blob_limit: SubPoolLimit,
+    /// Blob cache size
+    pub blob_cache_size: Option<u32>,
     /// Max number of executable transaction slots guaranteed per account
     pub max_account_slots: usize,
     /// Price bump (in %) for the transaction pool underpriced check.
     pub price_bumps: PriceBumpConfig,
     /// Minimum base fee required by the protocol.
     pub minimal_protocol_basefee: u64,
+    /// Minimum priority fee required for transaction acceptance into the pool.
+    pub minimum_priority_fee: Option<u128>,
     /// The max gas limit for transactions in the pool
     pub gas_limit: u64,
     /// How to handle locally received transactions:
@@ -54,6 +61,10 @@ pub struct PoolConfig {
     pub pending_tx_listener_buffer_size: usize,
     /// Bound on number of new transactions from `reth_network::TransactionsManager` to buffer.
     pub new_tx_listener_buffer_size: usize,
+    /// How many new pending transactions to buffer and send iterators in progress.
+    pub max_new_pending_txs_notifications: usize,
+    /// Maximum lifetime for transactions in the pool
+    pub max_queued_lifetime: Duration,
 }
 
 impl PoolConfig {
@@ -74,13 +85,17 @@ impl Default for PoolConfig {
             basefee_limit: Default::default(),
             queued_limit: Default::default(),
             blob_limit: Default::default(),
+            blob_cache_size: None,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bumps: Default::default(),
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
-            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT,
+            minimum_priority_fee: None,
+            gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             local_transactions_config: Default::default(),
             pending_tx_listener_buffer_size: PENDING_TX_LISTENER_BUFFER_SIZE,
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
+            max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
+            max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
         }
     }
 }
@@ -107,6 +122,15 @@ impl SubPoolLimit {
     }
 }
 
+impl Mul<usize> for SubPoolLimit {
+    type Output = Self;
+
+    fn mul(self, rhs: usize) -> Self::Output {
+        let Self { max_txs, max_size } = self;
+        Self { max_txs: max_txs * rhs, max_size: max_size * rhs }
+    }
+}
+
 impl Default for SubPoolLimit {
     fn default() -> Self {
         // either 10k transactions or 20MB
@@ -129,7 +153,7 @@ pub struct PriceBumpConfig {
 impl PriceBumpConfig {
     /// Returns the price bump required to replace the given transaction type.
     #[inline]
-    pub(crate) const fn price_bump(&self, tx_type: u8) -> u128 {
+    pub const fn price_bump(&self, tx_type: u8) -> u128 {
         if tx_type == EIP4844_TX_TYPE_ID {
             return self.replace_blob_tx_price_bump
         }
@@ -157,7 +181,7 @@ pub struct LocalTransactionConfig {
     ///   - no price exemptions
     ///   - no eviction exemptions
     pub no_exemptions: bool,
-    /// Addresses that will be considered as local . Above exemptions apply
+    /// Addresses that will be considered as local. Above exemptions apply.
     pub local_addresses: HashSet<Address>,
     /// Flag indicating whether local transactions should be propagated.
     pub propagate_local_transactions: bool,
@@ -182,15 +206,15 @@ impl LocalTransactionConfig {
 
     /// Returns whether the local addresses vector contains the given address.
     #[inline]
-    pub fn contains_local_address(&self, address: Address) -> bool {
-        self.local_addresses.contains(&address)
+    pub fn contains_local_address(&self, address: &Address) -> bool {
+        self.local_addresses.contains(address)
     }
 
     /// Returns whether the particular transaction should be considered local.
     ///
     /// This always returns false if the local exemptions are disabled.
     #[inline]
-    pub fn is_local(&self, origin: TransactionOrigin, sender: Address) -> bool {
+    pub fn is_local(&self, origin: TransactionOrigin, sender: &Address) -> bool {
         if self.no_local_exemptions() {
             return false
         }
@@ -272,10 +296,10 @@ mod tests {
         let config = LocalTransactionConfig { local_addresses, ..Default::default() };
 
         // Should contain the inserted address
-        assert!(config.contains_local_address(address));
+        assert!(config.contains_local_address(&address));
 
         // Should not contain another random address
-        assert!(!config.contains_local_address(Address::new([2; 20])));
+        assert!(!config.contains_local_address(&Address::new([2; 20])));
     }
 
     #[test]
@@ -288,7 +312,7 @@ mod tests {
         };
 
         // Should return false as no exemptions is set to true
-        assert!(!config.is_local(TransactionOrigin::Local, address));
+        assert!(!config.is_local(TransactionOrigin::Local, &address));
     }
 
     #[test]
@@ -301,13 +325,13 @@ mod tests {
             LocalTransactionConfig { no_exemptions: false, local_addresses, ..Default::default() };
 
         // Should return true as the transaction origin is local
-        assert!(config.is_local(TransactionOrigin::Local, Address::new([2; 20])));
-        assert!(config.is_local(TransactionOrigin::Local, address));
+        assert!(config.is_local(TransactionOrigin::Local, &Address::new([2; 20])));
+        assert!(config.is_local(TransactionOrigin::Local, &address));
 
         // Should return true as the address is in the local_addresses set
-        assert!(config.is_local(TransactionOrigin::External, address));
+        assert!(config.is_local(TransactionOrigin::External, &address));
         // Should return false as the address is not in the local_addresses set
-        assert!(!config.is_local(TransactionOrigin::External, Address::new([2; 20])));
+        assert!(!config.is_local(TransactionOrigin::External, &Address::new([2; 20])));
     }
 
     #[test]
@@ -317,5 +341,15 @@ mod tests {
 
         let new_config = config.set_propagate_local_transactions(false);
         assert!(!new_config.propagate_local_transactions);
+    }
+
+    #[test]
+    fn scale_pool_limit() {
+        let limit = SubPoolLimit::default();
+        let double = limit * 2;
+        assert_eq!(
+            double,
+            SubPoolLimit { max_txs: limit.max_txs * 2, max_size: limit.max_size * 2 }
+        )
     }
 }

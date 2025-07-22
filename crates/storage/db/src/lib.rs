@@ -20,7 +20,6 @@ pub mod lockfile;
 #[cfg(feature = "mdbx")]
 mod metrics;
 pub mod static_file;
-pub mod tables;
 #[cfg(feature = "mdbx")]
 mod utils;
 pub mod version;
@@ -29,7 +28,6 @@ pub mod version;
 pub mod mdbx;
 
 pub use reth_storage_errors::db::{DatabaseError, DatabaseWriteOperation};
-pub use tables::*;
 #[cfg(feature = "mdbx")]
 pub use utils::is_database_empty;
 
@@ -44,35 +42,44 @@ pub use reth_db_api::*;
 pub mod test_utils {
     use super::*;
     use crate::mdbx::DatabaseArguments;
+    use parking_lot::RwLock;
     use reth_db_api::{
-        database::Database,
-        database_metrics::{DatabaseMetadata, DatabaseMetadataValue, DatabaseMetrics},
-        models::ClientVersion,
+        database::Database, database_metrics::DatabaseMetrics, models::ClientVersion,
     };
     use reth_fs_util;
     use reth_libmdbx::MaxReadTransactionDuration;
     use std::{
+        fmt::Formatter,
         path::{Path, PathBuf},
         sync::Arc,
     };
     use tempfile::TempDir;
 
     /// Error during database open
-    pub const ERROR_DB_OPEN: &str = "Not able to open the database file.";
+    pub const ERROR_DB_OPEN: &str = "could not open the database file";
     /// Error during database creation
-    pub const ERROR_DB_CREATION: &str = "Not able to create the database file.";
+    pub const ERROR_DB_CREATION: &str = "could not create the database file";
     /// Error during database creation
-    pub const ERROR_STATIC_FILES_CREATION: &str = "Not able to create the static file path.";
+    pub const ERROR_STATIC_FILES_CREATION: &str = "could not create the static file path";
     /// Error during table creation
-    pub const ERROR_TABLE_CREATION: &str = "Not able to create tables in the database.";
+    pub const ERROR_TABLE_CREATION: &str = "could not create tables in the database";
     /// Error during tempdir creation
-    pub const ERROR_TEMPDIR: &str = "Not able to create a temporary directory.";
+    pub const ERROR_TEMPDIR: &str = "could not create a temporary directory";
 
     /// A database will delete the db dir when dropped.
-    #[derive(Debug)]
     pub struct TempDatabase<DB> {
         db: Option<DB>,
         path: PathBuf,
+        /// Executed right before a database transaction is created.
+        pre_tx_hook: RwLock<Box<dyn Fn() + Send + Sync>>,
+        /// Executed right after a database transaction is created.
+        post_tx_hook: RwLock<Box<dyn Fn() + Send + Sync>>,
+    }
+
+    impl<DB: std::fmt::Debug> std::fmt::Debug for TempDatabase<DB> {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("TempDatabase").field("db", &self.db).field("path", &self.path).finish()
+        }
     }
 
     impl<DB> Drop for TempDatabase<DB> {
@@ -85,8 +92,18 @@ pub mod test_utils {
     }
 
     impl<DB> TempDatabase<DB> {
+        /// Create new [`TempDatabase`] instance.
+        pub fn new(db: DB, path: PathBuf) -> Self {
+            Self {
+                db: Some(db),
+                path,
+                pre_tx_hook: RwLock::new(Box::new(|| ())),
+                post_tx_hook: RwLock::new(Box::new(|| ())),
+            }
+        }
+
         /// Returns the reference to inner db.
-        pub fn db(&self) -> &DB {
+        pub const fn db(&self) -> &DB {
             self.db.as_ref().unwrap()
         }
 
@@ -99,13 +116,28 @@ pub mod test_utils {
         pub fn into_inner_db(mut self) -> DB {
             self.db.take().unwrap() // take out db to avoid clean path in drop fn
         }
+
+        /// Sets [`TempDatabase`] new pre transaction creation hook.
+        pub fn set_pre_transaction_hook(&self, hook: Box<dyn Fn() + Send + Sync>) {
+            let mut db_hook = self.pre_tx_hook.write();
+            *db_hook = hook;
+        }
+
+        /// Sets [`TempDatabase`] new post transaction creation hook.
+        pub fn set_post_transaction_hook(&self, hook: Box<dyn Fn() + Send + Sync>) {
+            let mut db_hook = self.post_tx_hook.write();
+            *db_hook = hook;
+        }
     }
 
     impl<DB: Database> Database for TempDatabase<DB> {
         type TX = <DB as Database>::TX;
         type TXMut = <DB as Database>::TXMut;
         fn tx(&self) -> Result<Self::TX, DatabaseError> {
-            self.db().tx()
+            self.pre_tx_hook.read()();
+            let tx = self.db().tx()?;
+            self.post_tx_hook.read()();
+            Ok(tx)
         }
 
         fn tx_mut(&self) -> Result<Self::TXMut, DatabaseError> {
@@ -119,13 +151,8 @@ pub mod test_utils {
         }
     }
 
-    impl<DB: DatabaseMetadata> DatabaseMetadata for TempDatabase<DB> {
-        fn metadata(&self) -> DatabaseMetadataValue {
-            self.db().metadata()
-        }
-    }
-
     /// Create `static_files` path for testing
+    #[track_caller]
     pub fn create_test_static_files_dir() -> (TempDir, PathBuf) {
         let temp_dir = TempDir::with_prefix("reth-test-static-").expect(ERROR_TEMPDIR);
         let path = temp_dir.path().to_path_buf();
@@ -135,10 +162,11 @@ pub mod test_utils {
     /// Get a temporary directory path to use for the database
     pub fn tempdir_path() -> PathBuf {
         let builder = tempfile::Builder::new().prefix("reth-test-").rand_bytes(8).tempdir();
-        builder.expect(ERROR_TEMPDIR).into_path()
+        builder.expect(ERROR_TEMPDIR).keep()
     }
 
     /// Create read/write database for testing
+    #[track_caller]
     pub fn create_test_rw_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let path = tempdir_path();
         let emsg = format!("{ERROR_DB_CREATION}: {path:?}");
@@ -150,10 +178,11 @@ pub mod test_utils {
         )
         .expect(&emsg);
 
-        Arc::new(TempDatabase { db: Some(db), path })
+        Arc::new(TempDatabase::new(db, path))
     }
 
     /// Create read/write database for testing
+    #[track_caller]
     pub fn create_test_rw_db_with_path<P: AsRef<Path>>(path: P) -> Arc<TempDatabase<DatabaseEnv>> {
         let path = path.as_ref().to_path_buf();
         let db = init_db(
@@ -162,10 +191,11 @@ pub mod test_utils {
                 .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded)),
         )
         .expect(ERROR_DB_CREATION);
-        Arc::new(TempDatabase { db: Some(db), path })
+        Arc::new(TempDatabase::new(db, path))
     }
 
     /// Create read only database for testing
+    #[track_caller]
     pub fn create_test_ro_db() -> Arc<TempDatabase<DatabaseEnv>> {
         let args = DatabaseArguments::new(ClientVersion::default())
             .with_max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
@@ -175,7 +205,7 @@ pub mod test_utils {
             init_db(path.as_path(), args.clone()).expect(ERROR_DB_CREATION);
         }
         let db = open_db_read_only(path.as_path(), args).expect(ERROR_DB_OPEN);
-        Arc::new(TempDatabase { db: Some(db), path })
+        Arc::new(TempDatabase::new(db, path))
     }
 }
 

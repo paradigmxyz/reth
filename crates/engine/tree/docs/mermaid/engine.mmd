@@ -1,0 +1,26 @@
+flowchart TD
+    subgraph EngineTask[Engine]
+        Block
+            -->|Execute transactions sequentially| Execute[Execute transaction]
+            --> CollectStateUpdates[Collect all accounts and storage slots that were modified]
+    end
+
+    subgraph TransactionThread[Prewarming thread]
+        Prewarm[Execute transaction on top of previous block]
+            --> CollectPrefetchTargets[Collect all accounts and storage slots that were modified]
+    end
+
+    subgraph StateRootTask[State Root Task thread]
+        StateRootMessage::PrefetchProofs
+        StateRootMessage::StateUpdate
+        StateRootMessage::FinishedStateUpdates
+        StateRootMessage::RootCalculated
+    end
+
+    newPayloadRequest[engine_newPayload request] --> Block
+    Block -->|Start prewarming each transaction in a separate thread| Prewarm
+    CollectPrefetchTargets --> StateRootMessage::PrefetchProofs
+    CollectStateUpdates --> StateRootMessage::StateUpdate
+    Execute -->|All transactions finished executing| StateRootMessage::FinishedStateUpdates
+    StateRootMessage::RootCalculated
+        --> newPayloadResponse[engine_newPayload response]

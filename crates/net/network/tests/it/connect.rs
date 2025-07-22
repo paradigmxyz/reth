@@ -1,29 +1,30 @@
 //! Connection tests
 
-use std::{net::SocketAddr, time::Duration};
-
-use alloy_node_bindings::Geth;
 use alloy_primitives::map::HashSet;
-use alloy_provider::{ext::AdminApi, ProviderBuilder};
 use futures::StreamExt;
-use reth_chainspec::MAINNET;
+use reth_chainspec::{MAINNET, SEPOLIA};
 use reth_discv4::Discv4Config;
-use reth_eth_wire::{DisconnectReason, HeadersDirection};
-use reth_net_banlist::BanList;
+use reth_eth_wire::{DisconnectReason, EthNetworkPrimitives, HeadersDirection};
 use reth_network::{
-    test_utils::{enr_to_peer_id, NetworkEventStream, PeerConfig, Testnet, GETH_TIMEOUT},
+    test_utils::{NetworkEventStream, PeerConfig, Testnet},
     BlockDownloaderProvider, NetworkConfigBuilder, NetworkEvent, NetworkEventListenerProvider,
     NetworkManager, PeersConfig,
 };
-use reth_network_api::{NetworkInfo, Peers, PeersInfo};
+use reth_network_api::{
+    events::{PeerEvent, SessionInfo},
+    NetworkInfo, Peers, PeersInfo,
+};
 use reth_network_p2p::{
     headers::client::{HeadersClient, HeadersRequest},
     sync::{NetworkSyncUpdater, SyncState},
 };
 use reth_network_peers::{mainnet_nodes, NodeRecord, TrustedPeer};
-use reth_provider::test_utils::NoopProvider;
+use reth_network_types::peers::config::PeerBackoffDurations;
+use reth_storage_api::noop::NoopProvider;
+use reth_tracing::init_test_tracing;
 use reth_transaction_pool::test_utils::testing_pool;
 use secp256k1::SecretKey;
+use std::time::Duration;
 use tokio::task;
 use url::Host;
 
@@ -59,13 +60,15 @@ async fn test_establish_connections() {
         let mut established = listener0.take(4);
         while let Some(ev) = established.next().await {
             match ev {
-                NetworkEvent::SessionClosed { .. } | NetworkEvent::PeerRemoved(_) => {
+                NetworkEvent::Peer(PeerEvent::SessionClosed { .. } | PeerEvent::PeerRemoved(_)) => {
                     panic!("unexpected event")
                 }
-                NetworkEvent::SessionEstablished { peer_id, .. } => {
-                    assert!(expected_connections.remove(&peer_id))
+                NetworkEvent::ActivePeerSession { info, .. } |
+                NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+                    let SessionInfo { peer_id, .. } = info;
+                    assert!(expected_connections.remove(&peer_id));
                 }
-                NetworkEvent::PeerAdded(peer_id) => {
+                NetworkEvent::Peer(PeerEvent::PeerAdded(peer_id)) => {
                     assert!(expected_peers.remove(&peer_id))
                 }
             }
@@ -89,12 +92,12 @@ async fn test_already_connected() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::default();
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
     let p1 = PeerConfig::default();
 
     // initialize two peers with the same identifier
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key);
 
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
@@ -133,12 +136,12 @@ async fn test_get_peer() {
     reth_tracing::init_test_tracing();
 
     let mut net = Testnet::default();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
 
     let p1 = PeerConfig::default();
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key_1);
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
 
@@ -167,11 +170,11 @@ async fn test_get_peer_by_id() {
     reth_tracing::init_test_tracing();
     let mut net = Testnet::default();
 
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
-    let secret_key_1 = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let secret_key_1 = SecretKey::new(&mut rand_08::thread_rng());
     let client = NoopProvider::default();
     let p1 = PeerConfig::default();
-    let p2 = PeerConfig::with_secret_key(client, secret_key);
+    let p2 = PeerConfig::with_secret_key(client.clone(), secret_key);
     let p3 = PeerConfig::with_secret_key(client, secret_key_1);
 
     net.extend_peer_with_config(vec![p1, p2, p3]).await.unwrap();
@@ -200,12 +203,12 @@ async fn test_get_peer_by_id() {
 #[ignore]
 async fn test_connect_with_boot_nodes() {
     reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
     let config =
-        NetworkConfigBuilder::new(secret_key).discovery(discv4).build(NoopProvider::default());
+        NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(NoopProvider::default());
     let network = NetworkManager::new(config).await.unwrap();
 
     let handle = network.handle().clone();
@@ -221,12 +224,12 @@ async fn test_connect_with_boot_nodes() {
 #[ignore]
 async fn test_connect_with_builder() {
     reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let mut discv4 = Discv4Config::builder();
     discv4.add_boot_nodes(mainnet_nodes());
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+    let config = NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(client.clone());
     let (handle, network, _, requests) = NetworkManager::new(config)
         .await
         .unwrap()
@@ -258,11 +261,11 @@ async fn test_connect_with_builder() {
 #[ignore]
 async fn test_connect_to_trusted_peer() {
     reth_tracing::init_test_tracing();
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let discv4 = Discv4Config::builder();
 
     let client = NoopProvider::default();
-    let config = NetworkConfigBuilder::new(secret_key).discovery(discv4).build(client);
+    let config = NetworkConfigBuilder::eth(secret_key).discovery(discv4).build(client.clone());
     let transactions_manager_config = config.transactions_manager_config.clone();
     let (handle, network, transactions, requests) = NetworkManager::new(config)
         .await
@@ -307,216 +310,6 @@ async fn test_connect_to_trusted_peer() {
     while let Some(ev) = events.next().await {
         dbg!(ev);
     }
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-#[cfg_attr(not(feature = "geth-tests"), ignore)]
-async fn test_incoming_node_id_blacklist() {
-    reth_tracing::init_test_tracing();
-    tokio::time::timeout(GETH_TIMEOUT, async move {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
-
-        // instantiate geth and add ourselves as a peer
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
-        let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-
-        let provider =
-            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
-
-        // get the peer id we should be expecting
-        let enr = provider.node_info().await.unwrap().enr;
-        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
-
-        let ban_list = BanList::new(vec![geth_peer_id], vec![]);
-        let peer_config = PeersConfig::default().with_ban_list(ban_list);
-
-        let config = NetworkConfigBuilder::new(secret_key)
-            .listener_port(0)
-            .disable_discovery()
-            .peer_config(peer_config)
-            .build(NoopProvider::default());
-
-        let network = NetworkManager::new(config).await.unwrap();
-
-        let handle = network.handle().clone();
-        let events = handle.event_listener();
-
-        tokio::task::spawn(network);
-
-        // make geth connect to us
-        let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
-
-        provider.add_peer(&our_enode.to_string()).await.unwrap();
-
-        let mut event_stream = NetworkEventStream::new(events);
-
-        // check for session to be opened
-        let incoming_peer_id = event_stream.next_session_established().await.unwrap();
-        assert_eq!(incoming_peer_id, geth_peer_id);
-
-        // check to see that the session was closed
-        let incoming_peer_id = event_stream.next_session_closed().await.unwrap().0;
-        assert_eq!(incoming_peer_id, geth_peer_id);
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-#[cfg_attr(not(feature = "geth-tests"), ignore)]
-async fn test_incoming_connect_with_single_geth() {
-    reth_tracing::init_test_tracing();
-    tokio::time::timeout(GETH_TIMEOUT, async move {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
-
-        // instantiate geth and add ourselves as a peer
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().data_dir(temp_dir).disable_discovery().authrpc_port(0).spawn();
-        let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port());
-        let provider =
-            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
-
-        // get the peer id we should be expecting
-        let enr = provider.node_info().await.unwrap().enr;
-        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
-
-        let config = NetworkConfigBuilder::new(secret_key)
-            .listener_port(0)
-            .disable_discovery()
-            .build(NoopProvider::default());
-
-        let network = NetworkManager::new(config).await.unwrap();
-
-        let handle = network.handle().clone();
-        tokio::task::spawn(network);
-
-        let events = handle.event_listener();
-        let mut event_stream = NetworkEventStream::new(events);
-
-        // make geth connect to us
-        let our_enode = NodeRecord::new(handle.local_addr(), *handle.peer_id());
-
-        provider.add_peer(&our_enode.to_string()).await.unwrap();
-
-        // check for a sessionestablished event
-        let incoming_peer_id = event_stream.next_session_established().await.unwrap();
-        assert_eq!(incoming_peer_id, geth_peer_id);
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-#[cfg_attr(not(feature = "geth-tests"), ignore)]
-async fn test_outgoing_connect_with_single_geth() {
-    reth_tracing::init_test_tracing();
-    tokio::time::timeout(GETH_TIMEOUT, async move {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
-
-        let config = NetworkConfigBuilder::new(secret_key)
-            .listener_port(0)
-            .disable_discovery()
-            .build(NoopProvider::default());
-        let network = NetworkManager::new(config).await.unwrap();
-
-        let handle = network.handle().clone();
-        tokio::task::spawn(network);
-
-        // create networkeventstream to get the next session established event easily
-        let events = handle.event_listener();
-        let mut event_stream = NetworkEventStream::new(events);
-
-        // instantiate geth and add ourselves as a peer
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().disable_discovery().data_dir(temp_dir).authrpc_port(0).spawn();
-
-        let geth_p2p_port = geth.p2p_port().unwrap();
-        let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
-        let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
-
-        let provider =
-            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
-
-        // get the peer id we should be expecting
-        let enr = provider.node_info().await.unwrap().enr;
-        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
-
-        // add geth as a peer then wait for a `SessionEstablished` event
-        handle.add_peer(geth_peer_id, geth_socket);
-
-        // check for a sessionestablished event
-        let incoming_peer_id = event_stream.next_session_established().await.unwrap();
-        assert_eq!(incoming_peer_id, geth_peer_id);
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test(flavor = "multi_thread")]
-#[serial_test::serial]
-#[cfg_attr(not(feature = "geth-tests"), ignore)]
-async fn test_geth_disconnect() {
-    reth_tracing::init_test_tracing();
-    tokio::time::timeout(GETH_TIMEOUT, async move {
-        let secret_key = SecretKey::new(&mut rand::thread_rng());
-
-        let config = NetworkConfigBuilder::new(secret_key)
-            .listener_port(0)
-            .disable_discovery()
-            .build(NoopProvider::default());
-        let network = NetworkManager::new(config).await.unwrap();
-
-        let handle = network.handle().clone();
-        tokio::task::spawn(network);
-
-        // create networkeventstream to get the next session established event easily
-        let mut events = handle.event_listener();
-
-        // instantiate geth and add ourselves as a peer
-        let temp_dir = tempfile::tempdir().unwrap().into_path();
-        let geth = Geth::new().disable_discovery().data_dir(temp_dir).authrpc_port(0).spawn();
-
-        let geth_p2p_port = geth.p2p_port().unwrap();
-        let geth_socket = SocketAddr::new([127, 0, 0, 1].into(), geth_p2p_port);
-        let geth_endpoint = SocketAddr::new([127, 0, 0, 1].into(), geth.port()).to_string();
-
-        let provider =
-            ProviderBuilder::new().on_http(format!("http://{geth_endpoint}").parse().unwrap());
-
-        // get the peer id we should be expecting
-        let enr = provider.node_info().await.unwrap().enr;
-        let geth_peer_id = enr_to_peer_id(enr.parse().unwrap());
-
-        // add geth as a peer then wait for `PeerAdded` and `SessionEstablished` events.
-        handle.add_peer(geth_peer_id, geth_socket);
-
-        match events.next().await {
-            Some(NetworkEvent::PeerAdded(peer_id)) => assert_eq!(peer_id, geth_peer_id),
-            _ => panic!("Expected a peer added event"),
-        }
-
-        if let Some(NetworkEvent::SessionEstablished { peer_id, .. }) = events.next().await {
-            assert_eq!(peer_id, geth_peer_id);
-        } else {
-            panic!("Expected a session established event");
-        }
-
-        // remove geth as a peer deliberately
-        handle.disconnect_peer(geth_peer_id);
-
-        // wait for a disconnect from geth
-        if let Some(NetworkEvent::SessionClosed { peer_id, .. }) = events.next().await {
-            assert_eq!(peer_id, geth_peer_id);
-        } else {
-            panic!("Expected a session closed event");
-        }
-    })
-    .await
-    .unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -567,12 +360,172 @@ async fn test_shutdown() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_trusted_peer_only() {
+    init_test_tracing();
+    let net = Testnet::create(2).await;
+    let mut handles = net.handles();
+
+    // handle0 is used to test that:
+    // * outgoing connections to untrusted peers are not allowed
+    // * outgoing connections to trusted peers are allowed and succeed
+    let handle0 = handles.next().unwrap();
+
+    // handle1 is used to test that:
+    // * incoming connections from untrusted peers are not allowed
+    // * incoming connections from trusted peers are allowed and succeed
+    let handle1 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let peers_config = PeersConfig::default()
+        .with_backoff_durations(PeerBackoffDurations::test())
+        .with_ban_duration(Duration::from_millis(200))
+        .with_trusted_nodes_only(true);
+
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .peer_config(peers_config)
+        .build(NoopProvider::default());
+
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // create networkeventstream to get the next session event easily.
+    let events = handle.event_listener();
+    let mut event_stream = NetworkEventStream::new(events);
+
+    // only connect to trusted peers.
+
+    // connect to an untrusted peer should fail.
+    handle.add_peer(*handle0.peer_id(), handle0.local_addr());
+
+    // wait 1 second, the number of connection is still 0.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(handle.num_connected_peers(), 0);
+
+    // add to trusted peer.
+    handle.add_trusted_peer(*handle0.peer_id(), handle0.local_addr());
+
+    let outgoing_peer_id = event_stream.next_session_established().await.unwrap();
+    assert_eq!(outgoing_peer_id, *handle0.peer_id());
+    assert_eq!(handle.num_connected_peers(), 1);
+
+    // only receive connections from trusted peers.
+    handle1.add_peer(*handle.peer_id(), handle.local_addr());
+
+    // wait 1 second, the number of connections is still 1, because peer1 is untrusted.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(handle.num_connected_peers(), 1);
+
+    handle.add_trusted_peer(*handle1.peer_id(), handle1.local_addr());
+
+    // wait for the next session established event to check the handle1 incoming connection
+    let outgoing_peer_id1 = event_stream.next_session_established().await.unwrap();
+    assert_eq!(outgoing_peer_id1, *handle1.peer_id());
+
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(handle.num_connected_peers(), 2);
+
+    // check that handle0 and handle1 both have peers.
+    assert_eq!(handle0.num_connected_peers(), 1);
+    assert_eq!(handle1.num_connected_peers(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_network_state_change() {
+    let net = Testnet::create(1).await;
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let peers_config =
+        PeersConfig::default().with_refill_slots_interval(Duration::from_millis(500));
+
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .peer_config(peers_config)
+        .build(NoopProvider::default());
+
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    // Set network state to Hibernate.
+    handle.set_network_hibernate();
+
+    handle.add_peer(*handle0.peer_id(), handle0.local_addr());
+
+    // wait 2 seconds, the number of connections is still 0, because network is Hibernate.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(handle.num_connected_peers(), 0);
+
+    // Set network state to Active.
+    handle.set_network_active();
+
+    // wait 2 seconds, the number of connections should be 1, because network is Active and outbound
+    // slot should be filled.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(handle.num_connected_peers(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_exceed_outgoing_connections() {
+    let net = Testnet::create(2).await;
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    let peers_config = PeersConfig::default().with_max_outbound(1);
+
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .peer_config(peers_config)
+        .build(NoopProvider::default());
+
+    let network = NetworkManager::new(config).await.unwrap();
+
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // create networkeventstream to get the next session event easily.
+    let events = handle.event_listener();
+    let mut event_stream = NetworkEventStream::new(events);
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    handle.add_peer(*handle0.peer_id(), handle0.local_addr());
+
+    let outgoing_peer_id = event_stream.next_session_established().await.unwrap();
+    assert_eq!(outgoing_peer_id, *handle0.peer_id());
+
+    handle.add_peer(*handle1.peer_id(), handle1.local_addr());
+
+    // wait 2 seconds, the number of connections is still 1, indicating that the max outbound is in
+    // effect.
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert_eq!(handle.num_connected_peers(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_disconnect_incoming_when_exceeded_incoming_connections() {
     let net = Testnet::create(1).await;
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let peers_config = PeersConfig::default().with_max_inbound(0);
 
-    let config = NetworkConfigBuilder::new(secret_key)
+    let config = NetworkConfigBuilder::eth(secret_key)
         .listener_port(0)
         .disable_discovery()
         .peer_config(peers_config)
@@ -681,8 +634,11 @@ async fn test_rejected_by_already_connect() {
     assert_eq!(handle.num_connected_peers(), 2);
 }
 
-async fn new_random_peer(max_in_bound: usize, trusted_nodes: Vec<TrustedPeer>) -> NetworkManager {
-    let secret_key = SecretKey::new(&mut rand::thread_rng());
+async fn new_random_peer(
+    max_in_bound: usize,
+    trusted_nodes: Vec<TrustedPeer>,
+) -> NetworkManager<EthNetworkPrimitives> {
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let peers_config =
         PeersConfig::default().with_max_inbound(max_in_bound).with_trusted_nodes(trusted_nodes);
 
@@ -741,4 +697,42 @@ async fn test_disconnect_then_connect() {
     handle0.connect_peer(*handle1.peer_id(), handle1.local_addr());
     let peer = listener0.next_session_established().await.unwrap();
     assert_eq!(peer, *handle1.peer_id());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_connect_peer_in_different_network_should_fail() {
+    reth_tracing::init_test_tracing();
+
+    // peer in mainnet.
+    let peer = new_random_peer(10, vec![]).await;
+    let peer_handle = peer.handle().clone();
+    tokio::task::spawn(peer);
+
+    // peer in sepolia.
+    let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+    // If the remote disconnect first, then we would not get a fatal protocol error. So set
+    // max_backoff_count to 0 to speed up the removal of the peer.
+    let peers_config = PeersConfig::default().with_max_backoff_count(0);
+    let config = NetworkConfigBuilder::eth(secret_key)
+        .listener_port(0)
+        .disable_discovery()
+        .peer_config(peers_config)
+        .build_with_noop_provider(SEPOLIA.clone());
+
+    let network = NetworkManager::new(config).await.unwrap();
+    let handle = network.handle().clone();
+    tokio::task::spawn(network);
+
+    // create networkeventstream to get the next session event easily.
+    let events = handle.event_listener();
+
+    let mut event_stream = NetworkEventStream::new(events);
+
+    handle.add_peer(*peer_handle.peer_id(), peer_handle.local_addr());
+
+    let added_peer_id = event_stream.peer_added().await.unwrap();
+    assert_eq!(added_peer_id, *peer_handle.peer_id());
+
+    let removed_peer_id = event_stream.peer_removed().await.unwrap();
+    assert_eq!(removed_peer_id, *peer_handle.peer_id());
 }

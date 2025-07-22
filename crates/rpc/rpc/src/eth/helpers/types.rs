@@ -1,87 +1,71 @@
 //! L1 `eth` API types.
 
-use alloy_network::{AnyNetwork, Network};
-use alloy_primitives::{Address, TxKind};
-use alloy_rpc_types::{Transaction, TransactionInfo};
-use alloy_serde::WithOtherFields;
-use reth_primitives::TransactionSignedEcRecovered;
-use reth_rpc_types_compat::{
-    transaction::{from_primitive_signature, GasPrice},
-    TransactionCompat,
-};
+use alloy_network::Ethereum;
+use reth_evm_ethereum::EthEvmConfig;
+use reth_rpc_convert::RpcConverter;
+use reth_rpc_eth_types::receipt::EthReceiptConverter;
 
-/// Builds RPC transaction response for l1.
-#[derive(Debug, Clone, Copy)]
-pub struct EthTxBuilder;
+/// An [`RpcConverter`] with its generics set to Ethereum specific.
+pub type EthRpcConverter<ChainSpec> =
+    RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>;
 
-impl TransactionCompat for EthTxBuilder
-where
-    Self: Send + Sync,
-{
-    type Transaction = <AnyNetwork as Network>::TransactionResponse;
+//tests for simulate
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::{Transaction, TxType};
+    use alloy_rpc_types_eth::TransactionRequest;
+    use reth_chainspec::MAINNET;
+    use reth_rpc_eth_types::simulate::resolve_transaction;
+    use revm::database::CacheDB;
 
-    fn fill(tx: TransactionSignedEcRecovered, tx_info: TransactionInfo) -> Self::Transaction {
-        let signer = tx.signer();
-        let signed_tx = tx.into_signed();
+    #[test]
+    fn test_resolve_transaction_empty_request() {
+        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let tx = TransactionRequest::default();
+        let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
 
-        let to: Option<Address> = match signed_tx.kind() {
-            TxKind::Create => None,
-            TxKind::Call(to) => Some(Address(*to)),
+        // For an empty request, we should get a valid transaction with defaults
+        let tx = result.into_inner();
+        assert_eq!(tx.max_fee_per_gas(), 0);
+        assert_eq!(tx.max_priority_fee_per_gas(), Some(0));
+        assert_eq!(tx.gas_price(), None);
+    }
+
+    #[test]
+    fn test_resolve_transaction_legacy() {
+        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let builder = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+
+        let tx = TransactionRequest { gas_price: Some(100), ..Default::default() };
+
+        let tx = resolve_transaction(tx, 21000, 0, 1, &mut db, &builder).unwrap();
+
+        assert_eq!(tx.tx_type(), TxType::Legacy);
+
+        let tx = tx.into_inner();
+        assert_eq!(tx.gas_price(), Some(100));
+        assert_eq!(tx.max_priority_fee_per_gas(), None);
+    }
+
+    #[test]
+    fn test_resolve_transaction_partial_eip1559() {
+        let mut db = CacheDB::<reth_revm::db::EmptyDBTyped<reth_errors::ProviderError>>::default();
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(MAINNET.clone()));
+
+        let tx = TransactionRequest {
+            max_fee_per_gas: Some(200),
+            max_priority_fee_per_gas: Some(10),
+            ..Default::default()
         };
 
-        let TransactionInfo {
-            base_fee, block_hash, block_number, index: transaction_index, ..
-        } = tx_info;
+        let result = resolve_transaction(tx, 21000, 0, 1, &mut db, &rpc_converter).unwrap();
 
-        let GasPrice { gas_price, max_fee_per_gas } =
-            Self::gas_price(&signed_tx, base_fee.map(|fee| fee as u64));
-
-        let chain_id = signed_tx.chain_id();
-        let blob_versioned_hashes = signed_tx.blob_versioned_hashes();
-        let access_list = signed_tx.access_list().cloned();
-        let authorization_list = signed_tx.authorization_list().map(|l| l.to_vec());
-
-        let signature = from_primitive_signature(
-            *signed_tx.signature(),
-            signed_tx.tx_type(),
-            signed_tx.chain_id(),
-        );
-
-        WithOtherFields {
-            inner: Transaction {
-                hash: signed_tx.hash(),
-                nonce: signed_tx.nonce(),
-                from: signer,
-                to,
-                value: signed_tx.value(),
-                gas_price,
-                max_fee_per_gas,
-                max_priority_fee_per_gas: signed_tx.max_priority_fee_per_gas(),
-                signature: Some(signature),
-                gas: signed_tx.gas_limit(),
-                input: signed_tx.input().clone(),
-                chain_id,
-                access_list,
-                transaction_type: Some(signed_tx.tx_type() as u8),
-                // These fields are set to None because they are not stored as part of the
-                // transaction
-                block_hash,
-                block_number,
-                transaction_index,
-                // EIP-4844 fields
-                max_fee_per_blob_gas: signed_tx.max_fee_per_blob_gas(),
-                blob_versioned_hashes,
-                authorization_list,
-            },
-            ..Default::default()
-        }
-    }
-
-    fn otterscan_api_truncate_input(tx: &mut Self::Transaction) {
-        tx.inner.input = tx.inner.input.slice(..4);
-    }
-
-    fn tx_type(tx: &Self::Transaction) -> u8 {
-        tx.inner.transaction_type.unwrap_or(0)
+        assert_eq!(result.tx_type(), TxType::Eip1559);
+        let tx = result.into_inner();
+        assert_eq!(tx.max_fee_per_gas(), 200);
+        assert_eq!(tx.max_priority_fee_per_gas(), Some(10));
+        assert_eq!(tx.gas_price(), None);
     }
 }

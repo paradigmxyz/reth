@@ -5,8 +5,7 @@ name: hive
 on:
   workflow_dispatch:
   schedule:
-    # every day
-    - cron: "0 0 * * *"
+    - cron: "0 */6 * * *"
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,38 +16,10 @@ concurrency:
 
 jobs:
   prepare-reth:
-    if: github.repository == 'paradigmxyz/reth'
-    timeout-minutes: 45
-    runs-on:
-      group: Reth
-    steps:
-      - uses: actions/checkout@v4
-      - run: mkdir artifacts
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: Build reth
-        run: |
-          cargo build --features asm-keccak --profile hivetests --bin reth --locked
-          mkdir dist && cp ./target/hivetests/reth ./dist/reth
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and export reth image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: .github/assets/hive/Dockerfile
-          tags: ghcr.io/paradigmxyz/reth:latest
-          outputs: type=docker,dest=./artifacts/reth_image.tar
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Upload reth image
-        uses: actions/upload-artifact@v4
-        with:
-          name: artifacts
-          path: ./artifacts
+    uses: ./.github/workflows/prepare-reth.yml
+    with:
+      image_tag: ghcr.io/paradigmxyz/reth:latest
+      binary_name: reth
 
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
@@ -61,7 +32,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: ethereum/hive
-          ref: master
           path: hivetests
 
       - uses: actions/setup-go@v5
@@ -82,7 +52,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        engine: [regular, experimental]
         # ethereum/rpc to be deprecated:
         # https://github.com/ethereum/hive/pull/1117
         scenario:
@@ -91,27 +60,24 @@ jobs:
           - sim: ethereum/sync
           - sim: devp2p
             limit: discv4
+          # started failing after https://github.com/ethereum/go-ethereum/pull/31843, no
+          # action on our side, remove from here when we get unxpected passes on these tests
+          # - sim: devp2p
+          #  limit: eth
+          #  include:
+          #    - MaliciousHandshake
+          #    # failures tracked in https://github.com/paradigmxyz/reth/issues/14825
+          #    - Status
+          #    - GetBlockHeaders
+          #    - ZeroRequestID
+          #    - GetBlockBodies
+          #    - Transaction
+          #    - NewPooledTxs
           - sim: devp2p
-            limit: eth
+            limit: discv5
             include:
-              # status
-              - TestStatus
-              # get block headers
-              - TestGetBlockHeaders
-              - TestSimultaneousRequests
-              - TestSameRequestID
-              - TestZeroRequestID
-              # get block bodies
-              - TestGetBlockBodies
-              # malicious handshakes + status
-              - TestMaliciousHandshake
-              - TestMaliciousStatus
-              # test transactions
-              - TestLargeTxRequest
-              - TestTransaction
-              - TestInvalidTxs
-              - TestNewPooledTxs
-              - TestBlobViolations
+              # failures tracked at https://github.com/paradigmxyz/reth/issues/14825
+              - PingLargeRequestID
           - sim: ethereum/engine
             limit: engine-exchange-capabilities
           - sim: ethereum/engine
@@ -144,44 +110,42 @@ jobs:
               - eth_syncing
               # debug_ rpc methods
               - debug_
-          # Pyspec cancun jobs
-          # TODO: uncomment when https://github.com/ethereum/hive/issues/1147 is fixed
-          #- sim: pyspec
-          #  include: [cancun/eip4844]
-          #- sim: pyspec
-          #  include: [cancun/eip4788]
-          #- sim: pyspec
-          #  include: [cancun/eip6780]
-          #- sim: pyspec
-          #  include: [cancun/eip5656]
-          #- sim: pyspec
-          #  include: [cancun/eip1153]
-          #- sim: pyspec
-          #  include: [cancun/eip7516]
-          # Pyspec shanghai jobs
-          #- sim: pyspec
-          #  include: [shanghai/eip3651]
-          #- sim: pyspec
-          #  include: [shanghai/eip3855]
-          #- sim: pyspec
-          #  include: [shanghai/eip3860]
-          #- sim: pyspec
-          #  include: [shanghai/eip4895]
-          # Pyspec merge and earlier jobs
-          #- sim: pyspec
-          #  include: [merge/]
-          #- sim: pyspec
-          #  include: [berlin/]
-          #- sim: pyspec
-          #  include: [istanbul/]
-          #- sim: pyspec
-          #  include: [homestead/]
-          #- sim: pyspec
-          #  include: [frontier/]
+
+          # consume-engine
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/prague.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/cancun.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/shanghai.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/berlin.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/istanbul.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/homestead.*
+          - sim: ethereum/eest/consume-engine
+            limit: .*tests/frontier.*
+
+          # consume-rlp
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/prague.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/cancun.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/shanghai.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/berlin.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/istanbul.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/homestead.*
+          - sim: ethereum/eest/consume-rlp
+            limit: .*tests/frontier.*
     needs:
       - prepare-reth
       - prepare-hive
-    name: run ${{ matrix.engine }} - ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
+    name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
     runs-on:
       group: Reth
     permissions:
@@ -218,11 +182,6 @@ jobs:
           ref: master
           path: hivetests
 
-      - name: Modify client for experimental engine
-        if: matrix.engine == 'experimental'
-        run: |
-          sed -ie 's/RUST_LOG=info $reth node $FLAGS/RUST_LOG=info $reth node --engine.experimental $FLAGS/' hivetests/clients/reth/reth.sh
-
       - name: Run simulator
         run: |
           LIMIT="${{ matrix.scenario.limit }}"
@@ -241,8 +200,7 @@ jobs:
 
       - name: Parse hive output
         run: |
-          FAILURE_FILE="${{ matrix.engine == 'experimental' && '.github/assets/hive/expected_failures_experimental.yaml' || '.github/assets/hive/expected_failures.yaml' }}"
-          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion $FAILURE_FILE
+          find hivetests/workspace/logs -type f -name "*.json" ! -name "hive.json" | xargs -I {} python .github/assets/hive/parse.py {} --exclusion .github/assets/hive/expected_failures.yaml
 
       - name: Print simulator output
         if: ${{ failure() }}
@@ -259,11 +217,6 @@ jobs:
     runs-on:
       group: Reth
     steps:
-      - name: Discord Webhook Action
-        uses: tsickert/discord-webhook@v6.0.0
-        with:
-          webhook-url: ${{ secrets.RETH_ALERTS_WEBHOOK }}
-          content: "Failed run: https://github.com/paradigmxyz/reth/actions/runs/${{ github.run_id }}"
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2
         env:

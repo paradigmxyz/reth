@@ -1,6 +1,7 @@
 //! Bootnodes for the network
 
 use crate::NodeRecord;
+use alloc::vec::Vec;
 
 mod ethereum;
 pub use ethereum::*;
@@ -21,6 +22,11 @@ pub fn sepolia_nodes() -> Vec<NodeRecord> {
 /// Returns parsed holesky nodes
 pub fn holesky_nodes() -> Vec<NodeRecord> {
     parse_nodes(&HOLESKY_BOOTNODES[..])
+}
+
+/// Returns parsed hoodi nodes
+pub fn hoodi_nodes() -> Vec<NodeRecord> {
+    parse_nodes(&HOODI_BOOTNODES[..])
 }
 
 /// Returns parsed op-stack mainnet nodes

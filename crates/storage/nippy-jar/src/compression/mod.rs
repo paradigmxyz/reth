@@ -44,7 +44,9 @@ pub trait Compression: Serialize + for<'a> Deserialize<'a> {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub enum Compressors {
+    /// Zstandard compression algorithm with custom settings.
     Zstd(Zstd),
+    /// LZ4 compression algorithm with custom settings.
     Lz4(Lz4),
 }
 

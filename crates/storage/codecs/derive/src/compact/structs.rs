@@ -44,7 +44,8 @@ impl<'a> StructHandler<'a> {
 
     /// Generates `to_compact` code for a struct field.
     fn to(&mut self, field_descriptor: &StructFieldDescriptor) {
-        let (name, ftype, is_compact, use_alt_impl) = field_descriptor;
+        let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl, is_reference: _ } =
+            field_descriptor;
 
         let to_compact_ident = if *use_alt_impl {
             format_ident!("specialized_to_compact")
@@ -97,7 +98,7 @@ impl<'a> StructHandler<'a> {
 
     /// Generates `from_compact` code for a struct field.
     fn from(&mut self, field_descriptor: &StructFieldDescriptor, known_types: &[&str]) {
-        let (name, ftype, is_compact, use_alt_impl) = field_descriptor;
+        let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl, .. } = field_descriptor;
 
         let (name, len) = if name.is_empty() {
             self.is_wrapper = true;

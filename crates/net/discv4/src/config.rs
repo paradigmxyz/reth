@@ -8,8 +8,6 @@ use alloy_rlp::Encodable;
 use reth_net_banlist::BanList;
 use reth_net_nat::{NatResolver, ResolveNatInterval};
 use reth_network_peers::NodeRecord;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
@@ -17,7 +15,7 @@ use std::{
 
 /// Configuration parameters that define the performance of the discovery network.
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Discv4Config {
     /// Whether to enable the incoming packet filter. Default: false.
     pub enable_packet_filter: bool,
@@ -25,7 +23,7 @@ pub struct Discv4Config {
     pub udp_egress_message_buffer: usize,
     /// Size of the channel buffer for incoming messages.
     pub udp_ingress_message_buffer: usize,
-    /// The number of allowed failures for `FindNode` requests. Default: 5.
+    /// The number of allowed consecutive failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
     /// 10min.
@@ -118,7 +116,7 @@ impl Default for Discv4Config {
             // Every outgoing request will eventually lead to an incoming response
             udp_ingress_message_buffer: 1024,
             max_find_node_failures: 5,
-            ping_interval: Duration::from_secs(60 * 10),
+            ping_interval: Duration::from_secs(10),
             // Unified expiration and timeout durations, mirrors geth's `expiration` duration
             ping_expiration: Duration::from_secs(20),
             bond_expiration: Duration::from_secs(60 * 60),
@@ -144,92 +142,98 @@ impl Default for Discv4Config {
 
 /// Builder type for [`Discv4Config`]
 #[derive(Clone, Debug, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Discv4ConfigBuilder {
     config: Discv4Config,
 }
 
 impl Discv4ConfigBuilder {
     /// Whether to enable the incoming packet filter.
-    pub fn enable_packet_filter(&mut self) -> &mut Self {
+    pub const fn enable_packet_filter(&mut self) -> &mut Self {
         self.config.enable_packet_filter = true;
         self
     }
 
     /// Sets the channel size for incoming messages
-    pub fn udp_ingress_message_buffer(&mut self, udp_ingress_message_buffer: usize) -> &mut Self {
+    pub const fn udp_ingress_message_buffer(
+        &mut self,
+        udp_ingress_message_buffer: usize,
+    ) -> &mut Self {
         self.config.udp_ingress_message_buffer = udp_ingress_message_buffer;
         self
     }
 
     /// Sets the channel size for outgoing messages
-    pub fn udp_egress_message_buffer(&mut self, udp_egress_message_buffer: usize) -> &mut Self {
+    pub const fn udp_egress_message_buffer(
+        &mut self,
+        udp_egress_message_buffer: usize,
+    ) -> &mut Self {
         self.config.udp_egress_message_buffer = udp_egress_message_buffer;
         self
     }
 
     /// The number of allowed request failures for `findNode` requests.
-    pub fn max_find_node_failures(&mut self, max_find_node_failures: u8) -> &mut Self {
+    pub const fn max_find_node_failures(&mut self, max_find_node_failures: u8) -> &mut Self {
         self.config.max_find_node_failures = max_find_node_failures;
         self
     }
 
     /// The time between pings to ensure connectivity amongst connected nodes.
-    pub fn ping_interval(&mut self, interval: Duration) -> &mut Self {
+    pub const fn ping_interval(&mut self, interval: Duration) -> &mut Self {
         self.config.ping_interval = interval;
         self
     }
 
     /// Sets the timeout after which requests are considered timed out
-    pub fn request_timeout(&mut self, duration: Duration) -> &mut Self {
+    pub const fn request_timeout(&mut self, duration: Duration) -> &mut Self {
         self.config.request_timeout = duration;
         self
     }
 
     /// Sets the expiration duration for pings
-    pub fn ping_expiration(&mut self, duration: Duration) -> &mut Self {
+    pub const fn ping_expiration(&mut self, duration: Duration) -> &mut Self {
         self.config.ping_expiration = duration;
         self
     }
 
     /// Sets the expiration duration for enr requests
-    pub fn enr_request_expiration(&mut self, duration: Duration) -> &mut Self {
+    pub const fn enr_request_expiration(&mut self, duration: Duration) -> &mut Self {
         self.config.enr_expiration = duration;
         self
     }
 
     /// Sets the expiration duration for lookup neighbor requests
-    pub fn lookup_neighbours_expiration(&mut self, duration: Duration) -> &mut Self {
+    pub const fn lookup_neighbours_expiration(&mut self, duration: Duration) -> &mut Self {
         self.config.neighbours_expiration = duration;
         self
     }
 
     /// Sets the expiration duration for a bond with a peer
-    pub fn bond_expiration(&mut self, duration: Duration) -> &mut Self {
+    pub const fn bond_expiration(&mut self, duration: Duration) -> &mut Self {
         self.config.bond_expiration = duration;
         self
     }
 
     /// Whether to discover random nodes in the DHT.
-    pub fn enable_dht_random_walk(&mut self, enable_dht_random_walk: bool) -> &mut Self {
+    pub const fn enable_dht_random_walk(&mut self, enable_dht_random_walk: bool) -> &mut Self {
         self.config.enable_dht_random_walk = enable_dht_random_walk;
         self
     }
 
     /// Whether to automatically lookup
-    pub fn enable_lookup(&mut self, enable_lookup: bool) -> &mut Self {
+    pub const fn enable_lookup(&mut self, enable_lookup: bool) -> &mut Self {
         self.config.enable_lookup = enable_lookup;
         self
     }
 
     /// Whether to enforce expiration timestamps in messages.
-    pub fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
+    pub const fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
         self.config.enable_eip868 = enable_eip868;
         self
     }
 
     /// Whether to enable EIP-868
-    pub fn enforce_expiration_timestamps(
+    pub const fn enforce_expiration_timestamps(
         &mut self,
         enforce_expiration_timestamps: bool,
     ) -> &mut Self {
@@ -267,7 +271,7 @@ impl Discv4ConfigBuilder {
     }
 
     /// Sets the lookup interval duration.
-    pub fn lookup_interval(&mut self, lookup_interval: Duration) -> &mut Self {
+    pub const fn lookup_interval(&mut self, lookup_interval: Duration) -> &mut Self {
         self.config.lookup_interval = lookup_interval;
         self
     }
@@ -275,7 +279,7 @@ impl Discv4ConfigBuilder {
     /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
     /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
     /// the filter will last indefinitely. Default is 1 hour.
-    pub fn ban_duration(&mut self, ban_duration: Option<Duration>) -> &mut Self {
+    pub const fn ban_duration(&mut self, ban_duration: Option<Duration>) -> &mut Self {
         self.config.ban_duration = ban_duration;
         self
     }
@@ -293,13 +297,16 @@ impl Discv4ConfigBuilder {
     }
 
     /// Configures if and how the external IP of the node should be resolved.
-    pub fn external_ip_resolver(&mut self, external_ip_resolver: Option<NatResolver>) -> &mut Self {
+    pub const fn external_ip_resolver(
+        &mut self,
+        external_ip_resolver: Option<NatResolver>,
+    ) -> &mut Self {
         self.config.external_ip_resolver = external_ip_resolver;
         self
     }
 
     /// Sets the interval at which the external IP is to be resolved.
-    pub fn resolve_external_ip_interval(
+    pub const fn resolve_external_ip_interval(
         &mut self,
         resolve_external_ip_interval: Option<Duration>,
     ) -> &mut Self {

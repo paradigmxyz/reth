@@ -1,7 +1,9 @@
 //! Trait abstractions used by the payload crate.
 
-use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadBuilderError};
-use reth_provider::CanonStateNotification;
+use reth_chain_state::CanonStateNotification;
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes, PayloadKind};
+use reth_primitives_traits::NodePrimitives;
 use std::future::Future;
 
 /// A type that can build a payload.
@@ -53,7 +55,23 @@ pub trait PayloadJob: Future<Output = Result<(), PayloadBuilderError>> + Send + 
     /// If this returns [`KeepPayloadJobAlive::Yes`], then the [`PayloadJob`] will be polled
     /// once more. If this returns [`KeepPayloadJobAlive::No`] then the [`PayloadJob`] will be
     /// dropped after this call.
-    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+    ///
+    /// The [`PayloadKind`] determines how the payload should be resolved in the
+    /// `ResolvePayloadFuture`. [`PayloadKind::Earliest`] should return the earliest available
+    /// payload (as fast as possible), e.g. racing an empty payload job against a pending job if
+    /// there's no payload available yet. [`PayloadKind::WaitForPending`] is allowed to wait
+    /// until a built payload is available.
+    fn resolve_kind(
+        &mut self,
+        kind: PayloadKind,
+    ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive);
+
+    /// Resolves the payload as fast as possible.
+    ///
+    /// See also [`PayloadJob::resolve_kind`]
+    fn resolve(&mut self) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        self.resolve_kind(PayloadKind::Earliest)
+    }
 }
 
 /// Whether the payload job should be kept alive or terminated after the payload was requested by
@@ -90,7 +108,7 @@ pub trait PayloadJobGenerator: Send + Sync {
     ///
     /// This is intended for any logic that needs to be run when the chain state changes or used to
     /// use the in memory state for the head block.
-    fn on_new_state(&mut self, new_state: CanonStateNotification) {
+    fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
         let _ = new_state;
     }
 }

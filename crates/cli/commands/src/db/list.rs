@@ -3,10 +3,10 @@ use alloy_primitives::hex;
 use clap::Parser;
 use eyre::WrapErr;
 use reth_chainspec::EthereumHardforks;
-use reth_db::{DatabaseEnv, RawValue, TableViewer, Tables};
-use reth_db_api::{database::Database, table::Table};
+use reth_db::DatabaseEnv;
+use reth_db_api::{database::Database, table::Table, RawValue, TableViewer, Tables};
 use reth_db_common::{DbTool, ListFilter};
-use reth_node_builder::{NodeTypesWithDBAdapter, NodeTypesWithEngine};
+use reth_node_builder::{NodeTypes, NodeTypesWithDBAdapter};
 use std::{cell::RefCell, sync::Arc};
 use tracing::error;
 
@@ -53,7 +53,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db list` command
-    pub fn execute<N: NodeTypesWithEngine<ChainSpec: EthereumHardforks>>(
+    pub fn execute<N: NodeTypes<ChainSpec: EthereumHardforks>>(
         self,
         tool: &DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
     ) -> eyre::Result<()> {
@@ -86,12 +86,12 @@ impl Command {
     }
 }
 
-struct ListTableViewer<'a, N: NodeTypesWithEngine> {
+struct ListTableViewer<'a, N: NodeTypes> {
     tool: &'a DbTool<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>,
     args: &'a Command,
 }
 
-impl<N: NodeTypesWithEngine> TableViewer<()> for ListTableViewer<'_, N> {
+impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
     type Error = eyre::Report;
 
     fn view<T: Table>(&self) -> Result<(), Self::Error> {

@@ -1,16 +1,16 @@
 //! Helpers for testing trace calls.
 
+use alloy_eips::BlockId;
 use alloy_primitives::{map::HashSet, Bytes, TxHash, B256};
-use alloy_rpc_types::Index;
-use alloy_rpc_types_eth::transaction::TransactionRequest;
+use alloy_rpc_types_eth::{transaction::TransactionRequest, Index};
 use alloy_rpc_types_trace::{
     filter::TraceFilter,
+    opcode::BlockOpcodeGas,
     parity::{LocalizedTransactionTrace, TraceResults, TraceType},
     tracerequest::TraceCallRequest,
 };
 use futures::{Stream, StreamExt};
 use jsonrpsee::core::client::Error as RpcError;
-use reth_primitives::BlockId;
 use reth_rpc_api::clients::TraceApiClient;
 use std::{
     pin::Pin,
@@ -23,6 +23,9 @@ type RawTransactionTraceResult<'a> =
 
 /// A result type for the `trace_block` method that also captures the requested block.
 pub type TraceBlockResult = Result<(Vec<LocalizedTransactionTrace>, BlockId), (RpcError, BlockId)>;
+
+/// A result type for the `trace_blockOpcodeGas` method that also captures the requested block.
+pub type TraceBlockOpCodeGasResult = Result<(BlockOpcodeGas, BlockId), (RpcError, BlockId)>;
 
 /// Type alias representing the result of replaying a transaction.
 pub type ReplayTransactionResult = Result<(TraceResults, TxHash), (RpcError, TxHash)>;
@@ -62,6 +65,18 @@ pub trait TraceApiExt {
     ///
     /// See also [`StreamExt::buffer_unordered`].
     fn trace_block_buffered_unordered<I, B>(&self, params: I, n: usize) -> TraceBlockStream<'_>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<BlockId>;
+
+    /// Returns a new stream that yields the traces the opcodes for the given blocks.
+    ///
+    /// See also [`StreamExt::buffered`].
+    fn trace_block_opcode_gas_unordered<I, B>(
+        &self,
+        params: I,
+        n: usize,
+    ) -> TraceBlockOpcodeGasStream<'_>
     where
         I: IntoIterator<Item = B>,
         B: Into<BlockId>;
@@ -114,7 +129,7 @@ pub struct TraceCallStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceCallResult> + 'a>>,
 }
 
-impl<'a> Stream for TraceCallStream<'a> {
+impl Stream for TraceCallStream<'_> {
     type Item = TraceCallResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -122,7 +137,7 @@ impl<'a> Stream for TraceCallStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TraceCallStream<'a> {
+impl std::fmt::Debug for TraceCallStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceCallStream").finish()
     }
@@ -134,7 +149,7 @@ pub struct TraceFilterStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceFilterResult> + 'a>>,
 }
 
-impl<'a> Stream for TraceFilterStream<'a> {
+impl Stream for TraceFilterStream<'_> {
     type Item = TraceFilterResult;
 
     /// Attempts to pull out the next value of the stream.
@@ -143,7 +158,7 @@ impl<'a> Stream for TraceFilterStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TraceFilterStream<'a> {
+impl std::fmt::Debug for TraceFilterStream<'_> {
     /// Provides a debug representation of the `TraceFilterStream`.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceFilterStream").finish_non_exhaustive()
@@ -157,7 +172,7 @@ pub struct TraceGetStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceGetResult> + 'a>>,
 }
 
-impl<'a> Stream for TraceGetStream<'a> {
+impl Stream for TraceGetStream<'_> {
     type Item = TraceGetResult;
 
     /// Attempts to pull out the next item of the stream
@@ -166,7 +181,7 @@ impl<'a> Stream for TraceGetStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TraceGetStream<'a> {
+impl std::fmt::Debug for TraceGetStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceGetStream").finish_non_exhaustive()
     }
@@ -180,7 +195,7 @@ pub struct CallManyTraceStream<'a> {
     stream: Pin<Box<dyn Stream<Item = CallManyTraceResult> + 'a>>,
 }
 
-impl<'a> Stream for CallManyTraceStream<'a> {
+impl Stream for CallManyTraceStream<'_> {
     type Item = CallManyTraceResult;
 
     /// Polls for the next item from the stream.
@@ -189,7 +204,7 @@ impl<'a> Stream for CallManyTraceStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for CallManyTraceStream<'a> {
+impl std::fmt::Debug for CallManyTraceStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CallManyTraceStream").finish()
     }
@@ -201,7 +216,7 @@ pub struct RawTransactionTraceStream<'a> {
     stream: RawTransactionTraceResult<'a>,
 }
 
-impl<'a> Stream for RawTransactionTraceStream<'a> {
+impl Stream for RawTransactionTraceStream<'_> {
     type Item = Result<(TraceResults, Bytes), (RpcError, Bytes)>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -209,7 +224,7 @@ impl<'a> Stream for RawTransactionTraceStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for RawTransactionTraceStream<'a> {
+impl std::fmt::Debug for RawTransactionTraceStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RawTransactionTraceStream").finish()
     }
@@ -221,7 +236,7 @@ pub struct ReplayTransactionStream<'a> {
     stream: Pin<Box<dyn Stream<Item = ReplayTransactionResult> + 'a>>,
 }
 
-impl<'a> Stream for ReplayTransactionStream<'a> {
+impl Stream for ReplayTransactionStream<'_> {
     type Item = ReplayTransactionResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -229,13 +244,13 @@ impl<'a> Stream for ReplayTransactionStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for ReplayTransactionStream<'a> {
+impl std::fmt::Debug for ReplayTransactionStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ReplayTransactionStream").finish()
     }
 }
 
-impl<T: TraceApiClient + Sync> TraceApiExt for T {
+impl<T: TraceApiClient<TransactionRequest> + Sync> TraceApiExt for T {
     type Provider = T;
 
     fn trace_block_buffered<I, B>(&self, params: I, n: usize) -> TraceBlockStream<'_>
@@ -268,6 +283,26 @@ impl<T: TraceApiClient + Sync> TraceApiExt for T {
         }))
         .buffer_unordered(n);
         TraceBlockStream { stream: Box::pin(stream) }
+    }
+
+    fn trace_block_opcode_gas_unordered<I, B>(
+        &self,
+        params: I,
+        n: usize,
+    ) -> TraceBlockOpcodeGasStream<'_>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<BlockId>,
+    {
+        let blocks = params.into_iter().map(|b| b.into()).collect::<Vec<_>>();
+        let stream = futures::stream::iter(blocks.into_iter().map(move |block| async move {
+            match self.trace_block_opcode_gas(block).await {
+                Ok(result) => Ok((result.unwrap(), block)),
+                Err(err) => Err((err, block)),
+            }
+        }))
+        .buffered(n);
+        TraceBlockOpcodeGasStream { stream: Box::pin(stream) }
     }
 
     fn replay_transactions<I>(
@@ -381,19 +416,19 @@ pub struct TraceBlockStream<'a> {
     stream: Pin<Box<dyn Stream<Item = TraceBlockResult> + 'a>>,
 }
 
-impl<'a> TraceBlockStream<'a> {
+impl TraceBlockStream<'_> {
     /// Returns the next error result of the stream.
     pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
         loop {
             match self.next().await? {
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(err) => return Some(err),
             }
         }
     }
 }
 
-impl<'a> Stream for TraceBlockStream<'a> {
+impl Stream for TraceBlockStream<'_> {
     type Item = TraceBlockResult;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -401,9 +436,41 @@ impl<'a> Stream for TraceBlockStream<'a> {
     }
 }
 
-impl<'a> std::fmt::Debug for TraceBlockStream<'a> {
+impl std::fmt::Debug for TraceBlockStream<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TraceBlockStream").finish_non_exhaustive()
+    }
+}
+
+/// A stream that yields the opcodes for the requested blocks.
+#[must_use = "streams do nothing unless polled"]
+pub struct TraceBlockOpcodeGasStream<'a> {
+    stream: Pin<Box<dyn Stream<Item = TraceBlockOpCodeGasResult> + 'a>>,
+}
+
+impl TraceBlockOpcodeGasStream<'_> {
+    /// Returns the next error result of the stream.
+    pub async fn next_err(&mut self) -> Option<(RpcError, BlockId)> {
+        loop {
+            match self.next().await? {
+                Ok(_) => {}
+                Err(err) => return Some(err),
+            }
+        }
+    }
+}
+
+impl Stream for TraceBlockOpcodeGasStream<'_> {
+    type Item = TraceBlockOpCodeGasResult;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.stream.as_mut().poll_next(cx)
+    }
+}
+
+impl std::fmt::Debug for TraceBlockOpcodeGasStream<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceBlockOpcodeGasStream").finish_non_exhaustive()
     }
 }
 
@@ -514,9 +581,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::BlockNumberOrTag;
     use alloy_rpc_types_trace::filter::TraceFilterMode;
     use jsonrpsee::http_client::HttpClientBuilder;
-    use reth_primitives::BlockNumberOrTag;
 
     const fn assert_is_stream<St: Stream>(_: &St) {}
 
@@ -670,5 +737,15 @@ mod tests {
 
         println!("Total successes: {successes}");
         println!("Total failures: {failures}");
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn block_opcode_gas_stream() {
+        let client = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let block = vec![BlockNumberOrTag::Latest];
+        let mut stream = client.trace_block_opcode_gas_unordered(block, 2);
+        assert_is_stream(&stream);
+        let _opcodes = stream.next().await.unwrap();
     }
 }

@@ -1,97 +1,61 @@
 //! Loads OP pending block for a RPC response.
 
-use alloy_primitives::{BlockNumber, B256};
-use reth_chainspec::EthereumHardforks;
-use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, NodeTypes};
-use reth_optimism_consensus::calculate_receipt_root_no_memo_optimism;
-use reth_primitives::{
-    revm_primitives::BlockEnv, BlockNumberOrTag, Header, Receipt, SealedBlockWithSenders,
-};
-use reth_provider::{
-    BlockReader, BlockReaderIdExt, ChainSpecProvider, EvmEnvProvider, ExecutionOutcome,
-    ReceiptProvider, StateProviderFactory,
-};
+use std::sync::Arc;
+
+use crate::{OpEthApi, OpEthApiError};
+use alloy_eips::BlockNumberOrTag;
+use reth_primitives_traits::RecoveredBlock;
 use reth_rpc_eth_api::{
-    helpers::{LoadPendingBlock, SpawnBlocking},
-    FromEthApiError,
+    helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
+    FromEvmError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
-use reth_transaction_pool::TransactionPool;
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ReceiptProvider,
+};
 
-use crate::OpEthApi;
-
-impl<N> LoadPendingBlock for OpEthApi<N>
+impl<N, Rpc> LoadPendingBlock for OpEthApi<N, Rpc>
 where
-    Self: SpawnBlocking,
-    N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
+    N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     #[inline]
-    fn provider(
-        &self,
-    ) -> impl BlockReaderIdExt
-           + EvmEnvProvider
-           + ChainSpecProvider<ChainSpec: EthereumHardforks>
-           + StateProviderFactory {
-        self.inner.provider()
+    fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock<N::Primitives>>> {
+        self.inner.eth_api.pending_block()
     }
 
     #[inline]
-    fn pool(&self) -> impl TransactionPool {
-        self.inner.pool()
-    }
-
-    #[inline]
-    fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock>> {
-        self.inner.pending_block()
-    }
-
-    #[inline]
-    fn evm_config(&self) -> &impl ConfigureEvm<Header = Header> {
-        self.inner.evm_config()
+    fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
+        self.inner.eth_api.pending_env_builder()
     }
 
     /// Returns the locally built pending block
     async fn local_pending_block(
         &self,
-    ) -> Result<Option<(SealedBlockWithSenders, Vec<Receipt>)>, Self::Error> {
+    ) -> Result<
+        Option<(
+            Arc<RecoveredBlock<ProviderBlock<Self::Provider>>>,
+            Arc<Vec<ProviderReceipt<Self::Provider>>>,
+        )>,
+        Self::Error,
+    > {
         // See: <https://github.com/ethereum-optimism/op-geth/blob/f2e69450c6eec9c35d56af91389a1c47737206ca/miner/worker.go#L367-L375>
         let latest = self
             .provider()
-            .latest_header()
-            .map_err(Self::Error::from_eth_err)?
+            .latest_header()?
             .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
         let block_id = latest.hash().into();
         let block = self
             .provider()
-            .block_with_senders(block_id, Default::default())
-            .map_err(Self::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?
-            .seal(latest.hash());
+            .recovered_block(block_id, Default::default())?
+            .ok_or(EthApiError::HeaderNotFound(block_id.into()))?;
 
         let receipts = self
             .provider()
-            .receipts_by_block(block_id)
-            .map_err(Self::Error::from_eth_err)?
+            .receipts_by_block(block_id)?
             .ok_or(EthApiError::ReceiptsNotFound(block_id.into()))?;
 
-        Ok(Some((block, receipts)))
-    }
-
-    fn receipts_root(
-        &self,
-        block_env: &BlockEnv,
-        execution_outcome: &ExecutionOutcome,
-        block_number: BlockNumber,
-    ) -> B256 {
-        execution_outcome
-            .generic_receipts_root_slow(block_number, |receipts| {
-                calculate_receipt_root_no_memo_optimism(
-                    receipts,
-                    self.provider().chain_spec().as_ref(),
-                    block_env.timestamp.to::<u64>(),
-                )
-            })
-            .expect("Block is present")
+        Ok(Some((Arc::new(block), Arc::new(receipts))))
     }
 }

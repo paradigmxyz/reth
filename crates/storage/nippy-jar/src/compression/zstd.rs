@@ -12,10 +12,13 @@ pub use zstd::{bulk::Decompressor, dict::DecoderDictionary};
 
 type RawDictionary = Vec<u8>;
 
+/// Represents the state of a Zstandard compression operation.
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ZstdState {
+    /// The compressor is pending a dictionary.
     #[default]
     PendingDictionary,
+    /// The compressor is ready to perform compression.
     Ready,
 }
 
@@ -51,6 +54,7 @@ impl Zstd {
         }
     }
 
+    /// Sets the compression level for the Zstd compression instance.
     pub const fn with_level(mut self, level: i32) -> Self {
         self.level = level;
         self
@@ -209,7 +213,7 @@ impl Compression for Zstd {
             return Err(NippyJarError::ColumnLenMismatch(self.columns, columns.len()))
         }
 
-        let mut dictionaries = vec![];
+        let mut dictionaries = Vec::with_capacity(columns.len());
         for column in columns {
             // ZSTD requires all training data to be continuous in memory, alongside the size of
             // each entry
@@ -316,7 +320,7 @@ impl ZstdDictionaries<'_> {
 /// A Zstd dictionary. It's created and serialized with [`ZstdDictionary::Raw`], and deserialized as
 /// [`ZstdDictionary::Loaded`].
 pub(crate) enum ZstdDictionary<'a> {
-    #[allow(dead_code)]
+    #[cfg_attr(not(test), expect(dead_code))]
     Raw(RawDictionary),
     Loaded(DecoderDictionary<'a>),
 }
@@ -367,6 +371,8 @@ impl PartialEq for ZstdDictionary<'_> {
         if let (Self::Raw(a), Self::Raw(b)) = (self, &other) {
             return a == b
         }
-        unimplemented!("`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value.");
+        unimplemented!(
+            "`DecoderDictionary` can't be compared. So comparison should be done after decompressing a value."
+        );
     }
 }

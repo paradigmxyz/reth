@@ -2,23 +2,26 @@
 //!
 //! Run with
 //!
-//! ```not_rust
+//! ```sh
 //! cargo run --release -p txpool-tracing -- node --http --ws --recipients 0x....,0x....
 //! ```
 //!
 //! If no recipients are specified, all transactions will be traced.
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use alloy_primitives::Address;
 use alloy_rpc_types_trace::{parity::TraceType, tracerequest::TraceCallRequest};
 use clap::Parser;
 use futures_util::StreamExt;
-use reth::{
-    args::utils::EthereumChainSpecParser, builder::NodeHandle, cli::Cli,
-    rpc::compat::transaction::transaction_to_call_request, transaction_pool::TransactionPool,
+use reth_ethereum::{
+    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
+    node::{builder::NodeHandle, EthereumNode},
+    pool::TransactionPool,
+    rpc::eth::primitives::TransactionRequest,
 };
-use reth_node_ethereum::node::EthereumNode;
+
+mod submit;
 
 fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
@@ -45,7 +48,7 @@ fn main() {
                         if args.is_match(&recipient) {
                             // trace the transaction with `trace_call`
                             let callrequest =
-                                transaction_to_call_request(tx.to_recovered_transaction());
+                                TransactionRequest::from_recovered_transaction(tx.to_consensus());
                             let tracerequest = TraceCallRequest::new(callrequest)
                                 .with_trace_type(TraceType::Trace);
                             if let Ok(trace_result) = traceapi.trace_call(tracerequest).await {

@@ -6,14 +6,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reth.workspace = true
-reth-chainspec.workspace = true
-reth-evm-ethereum.workspace = true
-reth-node-api.workspace = true
-reth-node-core.workspace = true
-reth-primitives.workspace = true
-reth-node-ethereum = { workspace = true, features = ["test-utils"] }
+reth-ethereum = { workspace = true, features = ["test-utils", "node", "evm", "pool"] }
 reth-tracing.workspace = true
+alloy-evm.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 

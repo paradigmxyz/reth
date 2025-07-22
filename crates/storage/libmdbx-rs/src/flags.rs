@@ -56,7 +56,7 @@ pub enum SyncMode {
     /// flag could be used with [`Environment::sync()`](crate::Environment::sync) as alternatively
     /// for batch committing or nested transaction (in some cases).
     ///
-    /// The number and volume of of disk IOPs with [`SyncMode::SafeNoSync`] flag will exactly the
+    /// The number and volume of disk IOPs with [`SyncMode::SafeNoSync`] flag will exactly the
     /// as without any no-sync flags. However, you should expect a larger process's work set
     /// and significantly worse a locality of reference, due to the more intensive allocation
     /// of previously unused pages and increase the size of the database.

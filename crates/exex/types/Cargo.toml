@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-chain-state.workspace = true
 reth-execution-types.workspace = true
+reth-primitives-traits.workspace = true
 
 # reth
 alloy-primitives.workspace = true
@@ -25,13 +26,28 @@ serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 
 [dev-dependencies]
-reth-primitives = { workspace = true, features = ["arbitrary"] }
-
+reth-primitives-traits = { workspace = true, features = ["arbitrary"] }
+reth-ethereum-primitives = { workspace = true, features = ["arbitrary", "std"] }
 arbitrary.workspace = true
 bincode.workspace = true
 rand.workspace = true
 
 [features]
 default = []
-serde = ["dep:serde", "reth-execution-types/serde"]
-serde-bincode-compat = ["reth-execution-types/serde-bincode-compat", "serde_with"]
+serde = [
+    "dep:serde",
+    "reth-execution-types/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "rand/serde",
+    "reth-primitives-traits/serde",
+    "reth-ethereum-primitives/serde",
+    "reth-chain-state/serde",
+]
+serde-bincode-compat = [
+    "reth-execution-types/serde-bincode-compat",
+    "serde_with",
+    "alloy-eips/serde-bincode-compat",
+    "reth-primitives-traits/serde-bincode-compat",
+    "reth-ethereum-primitives/serde-bincode-compat",
+]

@@ -6,9 +6,10 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reth.workspace = true
-reth-node-ethereum.workspace = true
-alloy-rpc-types.workspace = true
+reth-ethereum = { workspace = true, features = ["node", "evm", "pool", "cli"] }
+alloy-rpc-types-eth.workspace = true
 clap = { workspace = true, features = ["derive"] }
 futures-util.workspace = true
+alloy-evm.workspace = true
 alloy-primitives.workspace = true
+alloy-eips.workspace = true

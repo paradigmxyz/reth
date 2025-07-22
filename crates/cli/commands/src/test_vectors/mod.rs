@@ -2,7 +2,8 @@
 
 use clap::{Parser, Subcommand};
 
-mod tables;
+pub mod compact;
+pub mod tables;
 
 /// Generate test-vectors for different data types.
 #[derive(Debug, Parser)]
@@ -19,6 +20,22 @@ pub enum Subcommands {
         /// List of table names. Case-sensitive.
         names: Vec<String>,
     },
+    /// Randomly generate test vectors for each `Compact` type using the `--write` flag.
+    ///
+    /// The generated vectors are serialized in both `json` and `Compact` formats and saved to a
+    /// file.
+    ///
+    /// Use the `--read` flag to read and validate the previously generated vectors from a file.
+    #[group(multiple = false, required = true)]
+    Compact {
+        /// Write test vectors to a file.
+        #[arg(long)]
+        write: bool,
+
+        /// Read test vectors from a file.
+        #[arg(long)]
+        read: bool,
+    },
 }
 
 impl Command {
@@ -27,6 +44,13 @@ impl Command {
         match self.command {
             Subcommands::Tables { names } => {
                 tables::generate_vectors(names)?;
+            }
+            Subcommands::Compact { write, .. } => {
+                if write {
+                    compact::generate_vectors()?;
+                } else {
+                    compact::read_vectors()?;
+                }
             }
         }
         Ok(())

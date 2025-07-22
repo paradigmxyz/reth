@@ -11,7 +11,7 @@ fn decode_new_block_network() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/new_block_network_rlp");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
-    let _txs = NewBlock::decode(&mut &hex_data[..]).unwrap();
+    let _txs: NewBlock = NewBlock::decode(&mut &hex_data[..]).unwrap();
 }
 
 #[test]
@@ -20,7 +20,7 @@ fn decode_new_block_network_bsc_one() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/bsc_new_block_network_one");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
-    let _txs = NewBlock::decode(&mut &hex_data[..]).unwrap();
+    let _txs: NewBlock = NewBlock::decode(&mut &hex_data[..]).unwrap();
 }
 
 #[test]
@@ -29,5 +29,5 @@ fn decode_new_block_network_bsc_two() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("testdata/bsc_new_block_network_two");
     let data = fs::read_to_string(network_data_path).expect("Unable to read file");
     let hex_data = hex::decode(data.trim()).unwrap();
-    let _txs = NewBlock::decode(&mut &hex_data[..]).unwrap();
+    let _txs: NewBlock = NewBlock::decode(&mut &hex_data[..]).unwrap();
 }

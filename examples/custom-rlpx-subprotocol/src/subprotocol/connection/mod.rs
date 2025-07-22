@@ -1,7 +1,7 @@
 use super::protocol::proto::{CustomRlpxProtoMessage, CustomRlpxProtoMessageKind};
 use alloy_primitives::bytes::BytesMut;
 use futures::{Stream, StreamExt};
-use reth_eth_wire::multiplex::ProtocolConnection;
+use reth_ethereum::network::eth_wire::multiplex::ProtocolConnection;
 use std::{
     pin::Pin,
     task::{ready, Context, Poll},

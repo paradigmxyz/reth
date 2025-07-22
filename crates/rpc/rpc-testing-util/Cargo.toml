@@ -13,14 +13,14 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-rpc-api = { workspace = true, features = ["client"] }
 
 # ethereum
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
-alloy-rpc-types.workspace = true
 alloy-rpc-types-trace.workspace = true
+alloy-eips.workspace = true
 
 # async
 futures.workspace = true

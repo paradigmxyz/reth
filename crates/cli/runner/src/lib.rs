@@ -17,9 +17,26 @@ use tracing::{debug, error, trace};
 /// Executes CLI commands.
 ///
 /// Provides utilities for running a cli command to completion.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug)]
 #[non_exhaustive]
-pub struct CliRunner;
+pub struct CliRunner {
+    tokio_runtime: tokio::runtime::Runtime,
+}
+
+impl CliRunner {
+    /// Attempts to create a new [`CliRunner`] using the default tokio
+    /// [`Runtime`](tokio::runtime::Runtime).
+    ///
+    /// The default tokio runtime is multi-threaded, with both I/O and time drivers enabled.
+    pub fn try_default_runtime() -> Result<Self, std::io::Error> {
+        Ok(Self { tokio_runtime: tokio_runtime()? })
+    }
+
+    /// Create a new [`CliRunner`] from a provided tokio [`Runtime`](tokio::runtime::Runtime).
+    pub const fn from_runtime(tokio_runtime: tokio::runtime::Runtime) -> Self {
+        Self { tokio_runtime }
+    }
+}
 
 // === impl CliRunner ===
 
@@ -37,7 +54,8 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
     {
-        let AsyncCliRunner { context, mut task_manager, tokio_runtime } = AsyncCliRunner::new()?;
+        let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
+            AsyncCliRunner::new(self.tokio_runtime);
 
         // Executes the command until it finished or ctrl-c was fired
         let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
@@ -123,13 +141,12 @@ struct AsyncCliRunner {
 // === impl AsyncCliRunner ===
 
 impl AsyncCliRunner {
-    /// Attempts to create a tokio Runtime and additional context required to execute commands
-    /// asynchronously.
-    fn new() -> Result<Self, std::io::Error> {
-        let tokio_runtime = tokio_runtime()?;
+    /// Given a tokio [`Runtime`](tokio::runtime::Runtime), creates additional context required to
+    /// execute commands asynchronously.
+    fn new(tokio_runtime: tokio::runtime::Runtime) -> Self {
         let task_manager = TaskManager::new(tokio_runtime.handle().clone());
         let task_executor = task_manager.executor();
-        Ok(Self { context: CliContext { task_executor }, task_manager, tokio_runtime })
+        Self { context: CliContext { task_executor }, task_manager, tokio_runtime }
     }
 }
 
@@ -157,8 +174,10 @@ where
     {
         let fut = pin!(fut);
         tokio::select! {
-            err = tasks => {
-                return Err(err.into())
+            task_manager_result = tasks => {
+                if let Err(panicked_error) = task_manager_result {
+                    return Err(panicked_error.into());
+                }
             },
             res = fut => res?,
         }

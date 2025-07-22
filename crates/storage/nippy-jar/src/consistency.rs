@@ -28,6 +28,11 @@ pub struct NippyJarChecker<H: NippyJarHeader = ()> {
 }
 
 impl<H: NippyJarHeader> NippyJarChecker<H> {
+    /// Creates a new instance of [`NippyJarChecker`] with the provided [`NippyJar`].
+    ///
+    /// This method initializes the checker without any associated file handles for
+    /// the data or offsets files. The [`NippyJar`] passed in contains all necessary
+    /// configurations for handling data.
     pub const fn new(jar: NippyJar<H>) -> Self {
         Self { jar, data_file: None, offsets_file: None }
     }
@@ -163,14 +168,14 @@ impl<H: NippyJarHeader> NippyJarChecker<H> {
     /// Returns a mutable reference to offsets file.
     ///
     /// **Panics** if it does not exist.
-    fn offsets_file(&mut self) -> &mut BufWriter<File> {
+    const fn offsets_file(&mut self) -> &mut BufWriter<File> {
         self.offsets_file.as_mut().expect("should exist")
     }
 
     /// Returns a mutable reference to data file.
     ///
     /// **Panics** if it does not exist.
-    fn data_file(&mut self) -> &mut BufWriter<File> {
+    const fn data_file(&mut self) -> &mut BufWriter<File> {
         self.data_file.as_mut().expect("should exist")
     }
 }

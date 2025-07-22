@@ -1,0 +1,49 @@
+[package]
+name = "reth-ethereum-forks"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "Ethereum fork types used in reth."
+
+[lints]
+workspace = true
+
+[dependencies]
+# ethereum
+alloy-hardforks.workspace = true
+alloy-eip2124.workspace = true
+alloy-primitives = { workspace = true, features = ["serde", "rlp"] }
+
+# misc
+once_cell.workspace = true
+rustc-hash = { workspace = true, optional = true }
+
+# arbitrary utils
+arbitrary = { workspace = true, features = ["derive"], optional = true }
+auto_impl.workspace = true
+
+[dev-dependencies]
+arbitrary = { workspace = true, features = ["derive"] }
+
+[features]
+default = ["std", "serde", "rustc-hash"]
+arbitrary = [
+    "dep:arbitrary",
+    "alloy-primitives/arbitrary",
+    "alloy-eip2124/arbitrary",
+]
+serde = [
+    "alloy-primitives/serde",
+    "alloy-eip2124/serde",
+    "alloy-hardforks/serde",
+]
+std = [
+    "alloy-primitives/std",
+    "rustc-hash/std",
+    "alloy-eip2124/std",
+    "once_cell/std",
+]
+rustc-hash = ["dep:rustc-hash"]

@@ -1,7 +1,5 @@
 //! Errors interfacing with [`discv5::Discv5`].
 
-use discv5::IpMode;
-
 /// Errors interfacing with [`discv5::Discv5`].
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -23,12 +21,6 @@ pub enum Error {
     /// Peer is unreachable over discovery.
     #[error("discovery socket missing")]
     UnreachableDiscovery,
-    /// Peer is unreachable over rlpx.
-    #[error("RLPx TCP socket missing")]
-    UnreachableRlpx,
-    /// Peer is not using same IP version as local node in rlpx.
-    #[error("RLPx TCP socket is unsupported IP version, local ip mode: {0:?}")]
-    IpVersionMismatchRlpx(IpMode),
     /// Failed to initialize [`discv5::Discv5`].
     #[error("init failed, {0}")]
     InitFailure(&'static str),

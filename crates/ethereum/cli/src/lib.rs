@@ -10,9 +10,12 @@
 
 /// Chain specification parser.
 pub mod chainspec;
+pub mod interface;
+pub use interface::Cli;
 
 #[cfg(test)]
 mod test {
+    use crate::chainspec::EthereumChainSpecParser;
     use clap::Parser;
     use reth_chainspec::DEV;
     use reth_cli_commands::NodeCommand;
@@ -20,10 +23,10 @@ mod test {
     #[test]
     #[ignore = "reth cmd will print op-reth output if optimism feature enabled"]
     fn parse_dev() {
-        let cmd: NodeCommand = NodeCommand::parse_from(["reth", "--dev"]);
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth", "--dev"]);
         let chain = DEV.clone();
         assert_eq!(cmd.chain.chain, chain.chain);
-        assert_eq!(cmd.chain.genesis_hash, chain.genesis_hash);
+        assert_eq!(cmd.chain.genesis_hash(), chain.genesis_hash());
         assert_eq!(
             cmd.chain.paris_block_and_final_difficulty,
             chain.paris_block_and_final_difficulty

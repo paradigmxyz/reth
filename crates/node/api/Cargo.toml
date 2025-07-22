@@ -12,14 +12,22 @@ workspace = true
 
 [dependencies]
 # reth
+reth-basic-payload-builder.workspace = true
+reth-db-api.workspace = true
+reth-consensus.workspace = true
 reth-evm.workspace = true
 reth-provider.workspace = true
 reth-engine-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-payload-builder.workspace = true
+reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
-reth-rpc-eth-api.workspace = true
 reth-network-api.workspace = true
 reth-node-types.workspace = true
-reth-primitives.workspace = true
+reth-node-core.workspace = true
+reth-tokio-util.workspace = true
+
+alloy-rpc-types-engine.workspace = true
+
+eyre.workspace = true

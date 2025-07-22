@@ -1,14 +1,14 @@
 //! `NodeRecord` type that uses a domain instead of an IP.
 
 use crate::{NodeRecord, PeerId};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
-use std::{
+use alloc::string::{String, ToString};
+use core::{
     fmt::{self, Write},
-    io::Error,
     net::IpAddr,
     num::ParseIntError,
     str::FromStr,
 };
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use url::Host;
 
 /// Represents the node record of a trusted peer. The only difference between this and a
@@ -45,11 +45,13 @@ impl TrustedPeer {
         Self { host, tcp_port: port, udp_port: port, id }
     }
 
+    #[cfg(any(test, feature = "std"))]
     const fn to_node_record(&self, ip: IpAddr) -> NodeRecord {
         NodeRecord { address: ip, id: self.id, tcp_port: self.tcp_port, udp_port: self.udp_port }
     }
 
     /// Tries to resolve directly to a [`NodeRecord`] if the host is an IP address.
+    #[cfg(any(test, feature = "std"))]
     fn try_node_record(&self) -> Result<NodeRecord, &str> {
         match &self.host {
             Host::Ipv4(ip) => Ok(self.to_node_record((*ip).into())),
@@ -61,23 +63,24 @@ impl TrustedPeer {
     /// Resolves the host in a [`TrustedPeer`] to an IP address, returning a [`NodeRecord`].
     ///
     /// This use [`ToSocketAddr`](std::net::ToSocketAddrs) to resolve the host to an IP address.
-    pub fn resolve_blocking(&self) -> Result<NodeRecord, Error> {
+    #[cfg(any(test, feature = "std"))]
+    pub fn resolve_blocking(&self) -> Result<NodeRecord, std::io::Error> {
         let domain = match self.try_node_record() {
             Ok(record) => return Ok(record),
             Err(domain) => domain,
         };
         // Resolve the domain to an IP address
         let mut ips = std::net::ToSocketAddrs::to_socket_addrs(&(domain, 0))?;
-        let ip = ips
-            .next()
-            .ok_or_else(|| Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found"))?;
+        let ip = ips.next().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found")
+        })?;
 
         Ok(self.to_node_record(ip.ip()))
     }
 
     /// Resolves the host in a [`TrustedPeer`] to an IP address, returning a [`NodeRecord`].
     #[cfg(any(test, feature = "net"))]
-    pub async fn resolve(&self) -> Result<NodeRecord, Error> {
+    pub async fn resolve(&self) -> Result<NodeRecord, std::io::Error> {
         let domain = match self.try_node_record() {
             Ok(record) => return Ok(record),
             Err(domain) => domain,
@@ -85,9 +88,9 @@ impl TrustedPeer {
 
         // Resolve the domain to an IP address
         let mut ips = tokio::net::lookup_host(format!("{domain}:0")).await?;
-        let ip = ips
-            .next()
-            .ok_or_else(|| Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found"))?;
+        let ip = ips.next().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "No IP found")
+        })?;
 
         Ok(self.to_node_record(ip.ip()))
     }

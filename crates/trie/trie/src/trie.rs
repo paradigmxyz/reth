@@ -7,13 +7,13 @@ use crate::{
     trie_cursor::TrieCursorFactory,
     updates::{StorageTrieUpdates, TrieUpdates},
     walker::TrieWalker,
-    HashBuilder, Nibbles, TrieAccount,
+    HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
+use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
-use reth_primitives::constants::EMPTY_ROOT_HASH;
-use tracing::trace;
+use tracing::{trace, trace_span};
 
 #[cfg(feature = "metrics")]
 use crate::metrics::{StateRootMetrics, TrieRootMetrics};
@@ -159,26 +159,27 @@ where
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
-                let walker = TrieWalker::from_stack(
+                let walker = TrieWalker::state_trie_from_stack(
                     trie_cursor,
                     state.walker_stack,
                     self.prefix_sets.account_prefix_set,
                 )
                 .with_deletions_retained(retain_updates);
-                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor)
+                let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor)
                     .with_last_hashed_key(state.last_account_key);
                 (hash_builder, node_iter)
             }
             None => {
                 let hash_builder = HashBuilder::default().with_updates(retain_updates);
-                let walker = TrieWalker::new(trie_cursor, self.prefix_sets.account_prefix_set)
-                    .with_deletions_retained(retain_updates);
-                let node_iter = TrieNodeIter::new(walker, hashed_account_cursor);
+                let walker =
+                    TrieWalker::state_trie(trie_cursor, self.prefix_sets.account_prefix_set)
+                        .with_deletions_retained(retain_updates);
+                let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
                 (hash_builder, node_iter)
             }
         };
 
-        let mut account_rlp = Vec::with_capacity(128);
+        let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut hashed_entries_walked = 0;
         let mut updated_storage_nodes = 0;
         while let Some(node) = account_node_iter.try_next()? {
@@ -202,15 +203,13 @@ where
                         self.trie_cursor_factory.clone(),
                         self.hashed_cursor_factory.clone(),
                         hashed_address,
-                        #[cfg(feature = "metrics")]
-                        self.metrics.storage_trie.clone(),
-                    )
-                    .with_prefix_set(
                         self.prefix_sets
                             .storage_prefix_sets
                             .get(&hashed_address)
                             .cloned()
                             .unwrap_or_default(),
+                        #[cfg(feature = "metrics")]
+                        self.metrics.storage_trie.clone(),
                     );
 
                     let storage_root = if retain_updates {
@@ -226,7 +225,7 @@ where
                     };
 
                     account_rlp.clear();
-                    let account = TrieAccount::from((account, storage_root));
+                    let account = account.into_trie_account(storage_root);
                     account.encode(&mut account_rlp as &mut dyn BufMut);
                     hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
@@ -258,11 +257,8 @@ where
 
         let root = hash_builder.root();
 
-        trie_updates.finalize(
-            account_node_iter.walker,
-            hash_builder,
-            self.prefix_sets.destroyed_accounts,
-        );
+        let removed_keys = account_node_iter.walker.take_removed_keys();
+        trie_updates.finalize(hash_builder, removed_keys, self.prefix_sets.destroyed_accounts);
 
         let stats = tracker.finish();
 
@@ -304,29 +300,32 @@ impl<T, H> StorageRoot<T, H> {
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         address: Address,
+        prefix_set: PrefixSet,
         #[cfg(feature = "metrics")] metrics: TrieRootMetrics,
     ) -> Self {
         Self::new_hashed(
             trie_cursor_factory,
             hashed_cursor_factory,
             keccak256(address),
+            prefix_set,
             #[cfg(feature = "metrics")]
             metrics,
         )
     }
 
     /// Creates a new storage root calculator given a hashed address.
-    pub fn new_hashed(
+    pub const fn new_hashed(
         trie_cursor_factory: T,
         hashed_cursor_factory: H,
         hashed_address: B256,
+        prefix_set: PrefixSet,
         #[cfg(feature = "metrics")] metrics: TrieRootMetrics,
     ) -> Self {
         Self {
             trie_cursor_factory,
             hashed_cursor_factory,
             hashed_address,
-            prefix_set: PrefixSet::default(),
+            prefix_set,
             #[cfg(feature = "metrics")]
             metrics,
         }
@@ -397,7 +396,10 @@ where
         self,
         retain_updates: bool,
     ) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
-        trace!(target: "trie::storage_root", hashed_address = ?self.hashed_address, "calculating storage root");
+        let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_address = ?self.hashed_address);
+        let _enter = span.enter();
+
+        trace!(target: "trie::storage_root", "calculating storage root");
 
         let mut hashed_storage_cursor =
             self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
@@ -409,12 +411,12 @@ where
 
         let mut tracker = TrieTracker::default();
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-        let walker =
-            TrieWalker::new(trie_cursor, self.prefix_set).with_deletions_retained(retain_updates);
+        let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set)
+            .with_deletions_retained(retain_updates);
 
         let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
 
-        let mut storage_node_iter = TrieNodeIter::new(walker, hashed_storage_cursor);
+        let mut storage_node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
@@ -434,7 +436,8 @@ where
         let root = hash_builder.root();
 
         let mut trie_updates = StorageTrieUpdates::default();
-        trie_updates.finalize(storage_node_iter.walker, hash_builder);
+        let removed_keys = storage_node_iter.walker.take_removed_keys();
+        trie_updates.finalize(hash_builder, removed_keys);
 
         let stats = tracker.finish();
 
@@ -453,5 +456,24 @@ where
 
         let storage_slots_walked = stats.leaves_added() as usize;
         Ok((root, storage_slots_walked, trie_updates))
+    }
+}
+
+/// Trie type for differentiating between various trie calculations.
+#[derive(Clone, Copy, Debug)]
+pub enum TrieType {
+    /// State trie type.
+    State,
+    /// Storage trie type.
+    Storage,
+}
+
+impl TrieType {
+    #[cfg(feature = "metrics")]
+    pub(crate) const fn as_str(&self) -> &'static str {
+        match self {
+            Self::State => "state",
+            Self::Storage => "storage",
+        }
     }
 }

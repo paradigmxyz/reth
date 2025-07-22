@@ -1,23 +1,28 @@
 //! clap [Args](clap::Args) for RPC related arguments.
 
 use std::{
+    collections::HashSet,
     ffi::OsStr,
     net::{IpAddr, Ipv4Addr},
     path::PathBuf,
 };
 
+use alloy_primitives::Address;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
     builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
     Arg, Args, Command,
 };
 use rand::Rng;
+use reth_cli_util::parse_ether_value;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
     GasPriceOracleArgs, RpcStateCacheArgs,
 };
+
+use super::types::MaxOr;
 
 /// Default max number of subscriptions per connection.
 pub(crate) const RPC_DEFAULT_MAX_SUBS_PER_CONN: u32 = 1024;
@@ -49,6 +54,10 @@ pub struct RpcServerArgs {
     #[arg(long = "http.port", default_value_t = constants::DEFAULT_HTTP_RPC_PORT)]
     pub http_port: u16,
 
+    /// Disable compression for HTTP responses
+    #[arg(long = "http.disable-compression", default_value_t = false)]
+    pub http_disable_compression: bool,
+
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub http_api: Option<RpcModuleSelection>,
@@ -70,7 +79,7 @@ pub struct RpcServerArgs {
     pub ws_port: u16,
 
     /// Origins from which to accept `WebSocket` requests
-    #[arg(id = "ws.origins", long = "ws.origins")]
+    #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain")]
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
@@ -110,6 +119,13 @@ pub struct RpcServerArgs {
     #[arg(long = "auth-ipc.path", default_value_t = constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string())]
     pub auth_ipc_path: String,
 
+    /// Disable the auth/engine API server.
+    ///
+    /// This will prevent the authenticated engine-API server from starting. Use this if you're
+    /// running a node that doesn't need to serve engine API requests.
+    #[arg(long = "disable-auth-server", alias = "disable-engine-api")]
+    pub disable_auth_server: bool,
+
     /// Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and
     /// `--ws.api`.
     ///
@@ -135,8 +151,17 @@ pub struct RpcServerArgs {
     pub rpc_max_connections: MaxU32,
 
     /// Maximum number of concurrent tracing requests.
+    ///
+    /// By default this chooses a sensible value based on the number of available cores.
+    /// Tracing requests are generally CPU bound.
+    /// Choosing a value that is higher than the available CPU cores can have a negative impact on
+    /// the performance of the node and affect the node's ability to maintain sync.
     #[arg(long = "rpc.max-tracing-requests", alias = "rpc-max-tracing-requests", value_name = "COUNT", default_value_t = constants::default_max_tracing_requests())]
     pub rpc_max_tracing_requests: usize,
+
+    /// Maximum number of blocks for `trace_filter` requests.
+    #[arg(long = "rpc.max-trace-filter-blocks", alias = "rpc-max-trace-filter-blocks", value_name = "COUNT", default_value_t = constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS)]
+    pub rpc_max_trace_filter_blocks: u64,
 
     /// Maximum number of blocks that could be scanned per filter request. (0 = entire chain)
     #[arg(long = "rpc.max-blocks-per-filter", alias = "rpc-max-blocks-per-filter", value_name = "COUNT", default_value_t = ZeroAsNoneU64::new(constants::DEFAULT_MAX_BLOCKS_PER_FILTER))]
@@ -151,10 +176,20 @@ pub struct RpcServerArgs {
         long = "rpc.gascap",
         alias = "rpc-gascap",
         value_name = "GAS_CAP",
-        value_parser = RangedU64ValueParser::<u64>::new().range(1..),
+        value_parser = MaxOr::new(RangedU64ValueParser::<u64>::new().range(1..)),
         default_value_t = constants::gas_oracle::RPC_DEFAULT_GAS_CAP
     )]
     pub rpc_gas_cap: u64,
+
+    /// Maximum eth transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap)
+    #[arg(
+        long = "rpc.txfeecap",
+        alias = "rpc-txfeecap",
+        value_name = "TX_FEE_CAP",
+        value_parser = parse_ether_value,
+        default_value = "1.0"
+    )]
+    pub rpc_tx_fee_cap: u128,
 
     /// Maximum number of blocks for `eth_simulateV1` call.
     #[arg(
@@ -178,6 +213,11 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
     pub rpc_proof_permits: usize,
 
+    /// Path to file containing disallowed addresses, json-encoded list of strings. Block
+    /// validation API will reject blocks containing transactions from these addresses.
+    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
+    pub builder_disallow: Option<HashSet<Address>>,
+
     /// State cache configuration.
     #[command(flatten)]
     pub rpc_state_cache: RpcStateCacheArgs,
@@ -194,6 +234,12 @@ impl RpcServerArgs {
         self
     }
 
+    /// Configures modules for the HTTP-RPC server.
+    pub fn with_http_api(mut self, http_api: RpcModuleSelection) -> Self {
+        self.http_api = Some(http_api);
+        self
+    }
+
     /// Enables the WS-RPC server.
     pub const fn with_ws(mut self) -> Self {
         self.ws = true;
@@ -206,7 +252,7 @@ impl RpcServerArgs {
         self
     }
 
-    /// Change rpc port numbers based on the instance number.
+    /// Change rpc port numbers based on the instance number, if provided.
     /// * The `auth_port` is scaled by a factor of `instance * 100`
     /// * The `http_port` is scaled by a factor of `-instance`
     /// * The `ws_port` is scaled by a factor of `instance * 2`
@@ -220,17 +266,16 @@ impl RpcServerArgs {
     /// * `self.auth_port / 100 + (instance - 1)` would overflow `u16`
     ///
     /// In release mode, this will silently wrap around.
-    pub fn adjust_instance_ports(&mut self, instance: u16) {
-        debug_assert_ne!(instance, 0, "instance must be non-zero");
-        // auth port is scaled by a factor of instance * 100
-        self.auth_port += instance * 100 - 100;
-        // http port is scaled by a factor of -instance
-        self.http_port -= instance - 1;
-        // ws port is scaled by a factor of instance * 2
-        self.ws_port += instance * 2 - 2;
-
-        // if multiple instances are being run, append the instance number to the ipc path
-        if instance > 1 {
+    pub fn adjust_instance_ports(&mut self, instance: Option<u16>) {
+        if let Some(instance) = instance {
+            debug_assert_ne!(instance, 0, "instance must be non-zero");
+            // auth port is scaled by a factor of instance * 100
+            self.auth_port += instance * 100 - 100;
+            // http port is scaled by a factor of -instance
+            self.http_port -= instance - 1;
+            // ws port is scaled by a factor of instance * 2
+            self.ws_port += instance * 2 - 2;
+            // append instance file to ipc path
             self.ipcpath = format!("{}-{}", self.ipcpath, instance);
         }
     }
@@ -259,11 +304,8 @@ impl RpcServerArgs {
     /// Append a random string to the ipc path, to prevent possible collisions when multiple nodes
     /// are being run on the same machine.
     pub fn with_ipc_random_path(mut self) -> Self {
-        let random_string: String = rand::thread_rng()
-            .sample_iter(rand::distributions::Alphanumeric)
-            .take(8)
-            .map(char::from)
-            .collect();
+        let random_string: String =
+            rand::rng().sample_iter(rand::distr::Alphanumeric).take(8).map(char::from).collect();
         self.ipcpath = format!("{}-{}", self.ipcpath, random_string);
         self
     }
@@ -285,6 +327,7 @@ impl Default for RpcServerArgs {
             http: false,
             http_addr: Ipv4Addr::LOCALHOST.into(),
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
+            http_disable_compression: false,
             http_api: None,
             http_corsdomain: None,
             ws: false,
@@ -299,20 +342,24 @@ impl Default for RpcServerArgs {
             auth_jwtsecret: None,
             auth_ipc: false,
             auth_ipc_path: constants::DEFAULT_ENGINE_API_IPC_ENDPOINT.to_string(),
+            disable_auth_server: false,
             rpc_jwtsecret: None,
             rpc_max_request_size: RPC_DEFAULT_MAX_REQUEST_SIZE_MB.into(),
             rpc_max_response_size: RPC_DEFAULT_MAX_RESPONSE_SIZE_MB.into(),
             rpc_max_subscriptions_per_connection: RPC_DEFAULT_MAX_SUBS_PER_CONN.into(),
             rpc_max_connections: RPC_DEFAULT_MAX_CONNECTIONS.into(),
             rpc_max_tracing_requests: constants::default_max_tracing_requests(),
+            rpc_max_trace_filter_blocks: constants::DEFAULT_MAX_TRACE_FILTER_BLOCKS,
             rpc_max_blocks_per_filter: constants::DEFAULT_MAX_BLOCKS_PER_FILTER.into(),
             rpc_max_logs_per_response: (constants::DEFAULT_MAX_LOGS_PER_RESPONSE as u64).into(),
             rpc_gas_cap: constants::gas_oracle::RPC_DEFAULT_GAS_CAP,
+            rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
+            builder_disallow: Default::default(),
         }
     }
 }
@@ -399,5 +446,33 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
 
         assert_eq!(args, default_args);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_integer() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "2"]).args;
+        let expected = 2_000_000_000_000_000_000u128; // 2 ETH in wei
+        assert_eq!(args.rpc_tx_fee_cap, expected);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_decimal() {
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "1.5"]).args;
+        let expected = 1_500_000_000_000_000_000u128; // 1.5 ETH in wei
+        assert_eq!(args.rpc_tx_fee_cap, expected);
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_zero() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--rpc.txfeecap", "0"]).args;
+        assert_eq!(args.rpc_tx_fee_cap, 0); // 0 = no cap
+    }
+
+    #[test]
+    fn test_rpc_tx_fee_cap_parse_none() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        let expected = 1_000_000_000_000_000_000u128;
+        assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
     }
 }

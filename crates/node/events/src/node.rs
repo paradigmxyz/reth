@@ -1,19 +1,18 @@
 //! Support for handling events emitted by node components.
 
 use crate::cl::ConsensusLayerHealthEvent;
+use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader};
 use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
-use reth_beacon_consensus::{
+use reth_engine_primitives::{
     BeaconConsensusEngineEvent, ConsensusEngineLiveSyncProgress, ForkchoiceStatus,
 };
-use reth_network::NetworkEvent;
 use reth_network_api::PeersInfo;
-use reth_primitives::constants;
-use reth_primitives_traits::{format_gas, format_gas_throughput};
-use reth_prune::PrunerEvent;
+use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
+use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
-use reth_static_file::StaticFileProducerEvent;
+use reth_static_file_types::StaticFileProducerEvent;
 use std::{
     fmt::{Display, Formatter},
     future::Future,
@@ -213,13 +212,10 @@ impl NodeState {
         }
     }
 
-    fn handle_network_event(&self, _: NetworkEvent) {
-        // NOTE(onbjerg): This used to log established/disconnecting sessions, but this is already
-        // logged in the networking component. I kept this stub in case we want to catch other
-        // networking events later on.
-    }
-
-    fn handle_consensus_engine_event(&mut self, event: BeaconConsensusEngineEvent) {
+    fn handle_consensus_engine_event<N: NodePrimitives>(
+        &mut self,
+        event: BeaconConsensusEngineEvent<N>,
+    ) {
         match event {
             BeaconConsensusEngineEvent::ForkchoiceUpdated(state, status) => {
                 let ForkchoiceState { head_block_hash, safe_block_hash, finalized_block_hash } =
@@ -254,30 +250,39 @@ impl NodeState {
                     }
                 }
             }
-            BeaconConsensusEngineEvent::CanonicalBlockAdded(block, elapsed) => {
+            BeaconConsensusEngineEvent::CanonicalBlockAdded(executed, elapsed) => {
+                let block = executed.sealed_block();
                 info!(
-                    number=block.number,
+                    number=block.number(),
                     hash=?block.hash(),
                     peers=self.num_connected_peers(),
-                    txs=block.body.transactions.len(),
-                    gas=%format_gas(block.header.gas_used),
-                    gas_throughput=%format_gas_throughput(block.header.gas_used, elapsed),
-                    full=%format!("{:.1}%", block.header.gas_used as f64 * 100.0 / block.header.gas_limit as f64),
-                    base_fee=%format!("{:.2}gwei", block.header.base_fee_per_gas.unwrap_or(0) as f64 / constants::GWEI_TO_WEI as f64),
-                    blobs=block.header.blob_gas_used.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
-                    excess_blobs=block.header.excess_blob_gas.unwrap_or(0) / constants::eip4844::DATA_GAS_PER_BLOB,
+                    txs=block.body().transactions().len(),
+                    gas=%format_gas(block.gas_used()),
+                    gas_throughput=%format_gas_throughput(block.gas_used(), elapsed),
+                    gas_limit=%format_gas(block.gas_limit()),
+                    full=%format!("{:.1}%", block.gas_used() as f64 * 100.0 / block.gas_limit() as f64),
+                    base_fee=%format!("{:.2}gwei", block.base_fee_per_gas().unwrap_or(0) as f64 / GWEI_TO_WEI as f64),
+                    blobs=block.blob_gas_used().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
+                    excess_blobs=block.excess_blob_gas().unwrap_or(0) / alloy_eips::eip4844::DATA_GAS_PER_BLOB,
                     ?elapsed,
                     "Block added to canonical chain"
                 );
             }
             BeaconConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
-                self.latest_block = Some(head.number);
-                self.latest_block_time = Some(head.timestamp);
+                self.latest_block = Some(head.number());
+                self.latest_block_time = Some(head.timestamp());
 
-                info!(number=head.number, hash=?head.hash(), ?elapsed, "Canonical chain committed");
+                info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
-            BeaconConsensusEngineEvent::ForkBlockAdded(block, elapsed) => {
-                info!(number=block.number, hash=?block.hash(), ?elapsed, "Block added to fork chain");
+            BeaconConsensusEngineEvent::ForkBlockAdded(executed, elapsed) => {
+                let block = executed.sealed_block();
+                info!(number=block.number(), hash=?block.hash(), ?elapsed, "Block added to fork chain");
+            }
+            BeaconConsensusEngineEvent::InvalidBlock(block) => {
+                warn!(number=block.number(), hash=?block.hash(), "Encountered invalid block");
+            }
+            BeaconConsensusEngineEvent::BlockReceived(num_hash) => {
+                info!(number=num_hash.number, hash=?num_hash.hash, "Received block from consensus engine");
             }
         }
     }
@@ -288,16 +293,26 @@ impl NodeState {
         if self.current_stage.is_none() {
             match event {
                 ConsensusLayerHealthEvent::NeverSeen => {
-                    warn!("Post-merge network, but never seen beacon client. Please launch one to follow the chain!")
+                    warn!(
+                        "Post-merge network, but never seen beacon client. Please launch one to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
-                    warn!(?period, "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!")
+                    warn!(
+                        ?period,
+                        "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::NeverReceivedUpdates => {
-                    warn!("Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!")
+                    warn!(
+                        "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!"
+                    )
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(?period, "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!")
+                    warn!(
+                        ?period,
+                        "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!"
+                    )
                 }
             }
         }
@@ -306,10 +321,14 @@ impl NodeState {
     fn handle_pruner_event(&self, event: PrunerEvent) {
         match event {
             PrunerEvent::Started { tip_block_number } => {
-                info!(tip_block_number, "Pruner started");
+                debug!(tip_block_number, "Pruner started");
             }
             PrunerEvent::Finished { tip_block_number, elapsed, stats } => {
-                info!(tip_block_number, ?elapsed, ?stats, "Pruner finished");
+                let stats = format!(
+                    "[{}]",
+                    stats.iter().map(|item| item.to_string()).collect::<Vec<_>>().join(", ")
+                );
+                debug!(tip_block_number, ?elapsed, pruned_segments = %stats, "Pruner finished");
             }
         }
     }
@@ -317,10 +336,10 @@ impl NodeState {
     fn handle_static_file_producer_event(&self, event: StaticFileProducerEvent) {
         match event {
             StaticFileProducerEvent::Started { targets } => {
-                info!(?targets, "Static File Producer started");
+                debug!(?targets, "Static File Producer started");
             }
             StaticFileProducerEvent::Finished { targets, elapsed } => {
-                info!(?targets, ?elapsed, "Static File Producer finished");
+                debug!(?targets, ?elapsed, "Static File Producer finished");
             }
         }
     }
@@ -354,14 +373,12 @@ struct CurrentStage {
 }
 
 /// A node event.
-#[derive(Debug)]
-pub enum NodeEvent {
-    /// A network event.
-    Network(NetworkEvent),
+#[derive(Debug, derive_more::From)]
+pub enum NodeEvent<N: NodePrimitives> {
     /// A sync pipeline event.
     Pipeline(PipelineEvent),
     /// A consensus engine event.
-    ConsensusEngine(BeaconConsensusEngineEvent),
+    ConsensusEngine(BeaconConsensusEngineEvent<N>),
     /// A Consensus Layer health event.
     ConsensusLayerHealth(ConsensusLayerHealthEvent),
     /// A pruner event
@@ -373,50 +390,14 @@ pub enum NodeEvent {
     Other(String),
 }
 
-impl From<NetworkEvent> for NodeEvent {
-    fn from(event: NetworkEvent) -> Self {
-        Self::Network(event)
-    }
-}
-
-impl From<PipelineEvent> for NodeEvent {
-    fn from(event: PipelineEvent) -> Self {
-        Self::Pipeline(event)
-    }
-}
-
-impl From<BeaconConsensusEngineEvent> for NodeEvent {
-    fn from(event: BeaconConsensusEngineEvent) -> Self {
-        Self::ConsensusEngine(event)
-    }
-}
-
-impl From<ConsensusLayerHealthEvent> for NodeEvent {
-    fn from(event: ConsensusLayerHealthEvent) -> Self {
-        Self::ConsensusLayerHealth(event)
-    }
-}
-
-impl From<PrunerEvent> for NodeEvent {
-    fn from(event: PrunerEvent) -> Self {
-        Self::Pruner(event)
-    }
-}
-
-impl From<StaticFileProducerEvent> for NodeEvent {
-    fn from(event: StaticFileProducerEvent) -> Self {
-        Self::StaticFileProducer(event)
-    }
-}
-
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
-pub async fn handle_events<E>(
+pub async fn handle_events<E, N: NodePrimitives>(
     peers_info: Option<Box<dyn PeersInfo>>,
     latest_block_number: Option<BlockNumber>,
     events: E,
 ) where
-    E: Stream<Item = NodeEvent> + Unpin,
+    E: Stream<Item = NodeEvent<N>> + Unpin,
 {
     let state = NodeState::new(peers_info, latest_block_number);
 
@@ -438,9 +419,9 @@ struct EventHandler<E> {
     info_interval: Interval,
 }
 
-impl<E> Future for EventHandler<E>
+impl<E, N: NodePrimitives> Future for EventHandler<E>
 where
-    E: Stream<Item = NodeEvent> + Unpin,
+    E: Stream<Item = NodeEvent<N>> + Unpin,
 {
     type Output = ();
 
@@ -504,7 +485,7 @@ where
             } else if let Some(latest_block) = this.state.latest_block {
                 let now =
                     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-                if now - this.state.latest_block_time.unwrap_or(0) > 60 {
+                if now.saturating_sub(this.state.latest_block_time.unwrap_or(0)) > 60 {
                     // Once we start receiving consensus nodes, don't emit status unless stalled for
                     // 1 minute
                     info!(
@@ -525,9 +506,6 @@ where
 
         while let Poll::Ready(Some(event)) = this.events.as_mut().poll_next(cx) {
             match event {
-                NodeEvent::Network(event) => {
-                    this.state.handle_network_event(event);
-                }
                 NodeEvent::Pipeline(event) => {
                     this.state.handle_pipeline_event(event);
                 }

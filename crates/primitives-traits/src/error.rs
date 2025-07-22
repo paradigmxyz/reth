@@ -1,25 +1,15 @@
 use alloc::boxed::Box;
-use core::{
-    fmt,
-    ops::{Deref, DerefMut},
-};
+use core::ops::{Deref, DerefMut};
 
 /// A pair of values, one of which is expected and one of which is actual.
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, thiserror::Error)]
+#[error("got {got}, expected {expected}")]
 pub struct GotExpected<T> {
     /// The actual value.
     pub got: T,
     /// The expected value.
     pub expected: T,
 }
-
-impl<T: fmt::Display> fmt::Display for GotExpected<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "got {}, expected {}", self.got, self.expected)
-    }
-}
-
-impl<T: fmt::Debug + fmt::Display> core::error::Error for GotExpected<T> {}
 
 impl<T> From<(T, T)> for GotExpected<T> {
     #[inline]
@@ -41,22 +31,9 @@ impl<T> GotExpected<T> {
 /// Same as [`GotExpected`], but [`Box`]ed for smaller size.
 ///
 /// Prefer instantiating using [`GotExpected`], and then using `.into()` to convert to this type.
-#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, thiserror::Error, Debug)]
+#[error(transparent)]
 pub struct GotExpectedBoxed<T>(pub Box<GotExpected<T>>);
-
-impl<T: fmt::Debug> fmt::Debug for GotExpectedBoxed<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl<T: fmt::Display> fmt::Display for GotExpectedBoxed<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl<T: fmt::Debug + fmt::Display> core::error::Error for GotExpectedBoxed<T> {}
 
 impl<T> Deref for GotExpectedBoxed<T> {
     type Target = GotExpected<T>;

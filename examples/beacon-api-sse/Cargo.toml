@@ -6,13 +6,12 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reth.workspace = true
-reth-node-ethereum.workspace = true
+reth-ethereum = { workspace = true, features = ["node", "cli"] }
 
 alloy-rpc-types-beacon.workspace = true
 
 clap.workspace = true
 futures-util.workspace = true
-mev-share-sse = { version = "0.4.0", default-features = false }
+mev-share-sse.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true

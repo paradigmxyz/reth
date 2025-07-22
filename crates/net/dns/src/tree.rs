@@ -203,7 +203,7 @@ impl BranchEntry {
                 n * 5 / 8
             }
 
-            let decoded_len = base32_no_padding_decoded_len(hash.bytes().len());
+            let decoded_len = base32_no_padding_decoded_len(hash.len());
             if !(12..=32).contains(&decoded_len) || hash.chars().any(|c| c.is_whitespace()) {
                 return Err(ParseDnsEntryError::InvalidChildHash(hash.to_string()))
             }

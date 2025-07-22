@@ -35,9 +35,13 @@ for test in report['testCases'].values():
 # Check if there are any unexpected failures or passes and exit with error
 if unexpected_failures or unexpected_passes:
     if unexpected_failures:
-        print("Unexpected Failures:", unexpected_failures)
+        print("Unexpected Failures:")
+        for test in unexpected_failures:
+            print(f"  {test}")
     if unexpected_passes:
-        print("Unexpected Passes:", unexpected_passes)
+        print("Unexpected Passes:")
+        for test in unexpected_passes:
+            print(f"  {test}")
     sys.exit(1)
 
 print("Success.")

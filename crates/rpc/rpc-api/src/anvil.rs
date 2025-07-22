@@ -1,8 +1,8 @@
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 
 use alloy_primitives::{Address, Bytes, B256, U256};
-use alloy_rpc_types::Block;
 use alloy_rpc_types_anvil::{Forking, Metadata, MineOptions, NodeInfo};
+use alloy_rpc_types_eth::Block;
 
 /// Anvil rpc interface.
 /// https://book.getfoundry.sh/reference/anvil/#custom-methods
@@ -102,7 +102,7 @@ pub trait AnvilApi {
     #[method(name = "dumpState")]
     async fn anvil_dump_state(&self) -> RpcResult<Bytes>;
 
-    /// Append chain state buffer to current chain.Will overwrite any conflicting addresses or
+    /// Append chain state buffer to current chain. Will overwrite any conflicting addresses or
     /// storage.
     #[method(name = "loadState")]
     async fn anvil_load_state(&self, state: Bytes) -> RpcResult<bool>;

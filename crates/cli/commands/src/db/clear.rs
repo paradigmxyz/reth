@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
-use reth_db::{static_file::iter_static_files, TableViewer, Tables};
+use reth_db::static_file::iter_static_files;
 use reth_db_api::{
     database::Database,
     table::Table,
     transaction::{DbTx, DbTxMut},
+    TableViewer, Tables,
 };
 use reth_node_builder::NodeTypesWithDB;
 use reth_provider::{ProviderFactory, StaticFileProviderFactory};
@@ -12,7 +13,7 @@ use reth_static_file_types::StaticFileSegment;
 /// The arguments for the `reth db clear` command
 #[derive(Parser, Debug)]
 pub struct Command {
-    #[clap(subcommand)]
+    #[command(subcommand)]
     subcommand: Subcommands,
 }
 

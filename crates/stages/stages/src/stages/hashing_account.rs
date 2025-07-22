@@ -1,13 +1,14 @@
 use alloy_primitives::{keccak256, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
-use reth_db::{tables, RawKey, RawTable, RawValue};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
+    tables,
     transaction::{DbTx, DbTxMut},
+    RawKey, RawTable, RawValue,
 };
 use reth_etl::Collector;
-use reth_primitives::Account;
+use reth_primitives_traits::Account;
 use reth_provider::{AccountExtReader, DBProvider, HashingWriter, StatsReader};
 use reth_stages_api::{
     AccountHashingCheckpoint, EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint,
@@ -58,13 +59,16 @@ impl AccountHashingStage {
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSets` table.
-    pub fn seed<
-        Tx: DbTx + DbTxMut + 'static,
-        Spec: Send + Sync + 'static + reth_chainspec::EthereumHardforks,
-    >(
-        provider: &reth_provider::DatabaseProvider<Tx, Spec>,
+    pub fn seed<Tx: DbTx + DbTxMut + 'static, N: reth_provider::providers::ProviderNodeTypes>(
+        provider: &reth_provider::DatabaseProvider<Tx, N>,
         opts: SeedOpts,
-    ) -> Result<Vec<(alloy_primitives::Address, reth_primitives::Account)>, StageError> {
+    ) -> Result<Vec<(alloy_primitives::Address, Account)>, StageError>
+    where
+        N::Primitives: reth_primitives_traits::FullNodePrimitives<
+            Block = reth_ethereum_primitives::Block,
+            BlockHeader = reth_primitives_traits::Header,
+        >,
+    {
         use alloy_primitives::U256;
         use reth_db_api::models::AccountBeforeTx;
         use reth_provider::{StaticFileProviderFactory, StaticFileWriter};
@@ -82,11 +86,11 @@ impl AccountHashingStage {
         );
 
         for block in blocks {
-            provider.insert_historical_block(block.try_seal_with_senders().unwrap()).unwrap();
+            provider.insert_historical_block(block.try_recover().unwrap()).unwrap();
         }
         provider
             .static_file_provider()
-            .latest_writer(reth_primitives::StaticFileSegment::Headers)
+            .latest_writer(reth_static_file_types::StaticFileSegment::Headers)
             .unwrap()
             .commit()
             .unwrap();
@@ -97,7 +101,7 @@ impl AccountHashingStage {
                 provider.tx_ref().cursor_write::<tables::PlainAccountState>()?;
             accounts.sort_by(|a, b| a.0.cmp(&b.0));
             for (addr, acc) in &accounts {
-                account_cursor.append(*addr, *acc)?;
+                account_cursor.append(*addr, acc)?;
             }
 
             let mut acc_changeset_cursor =
@@ -110,7 +114,7 @@ impl AccountHashingStage {
                     bytecode_hash: None,
                 };
                 let acc_before_tx = AccountBeforeTx { address: *addr, info: Some(prev_acc) };
-                acc_changeset_cursor.append(t, acc_before_tx)?;
+                acc_changeset_cursor.append(t, &acc_before_tx)?;
             }
         }
 
@@ -199,7 +203,7 @@ where
 
                 let (key, value) = item?;
                 hashed_account_cursor
-                    .append(RawKey::<B256>::from_vec(key), RawValue::<Account>::from_vec(value))?;
+                    .append(RawKey::<B256>::from_vec(key), &RawValue::<Account>::from_vec(value))?;
             }
         } else {
             // Aggregate all transition changesets and make a list of accounts that have been
@@ -234,7 +238,7 @@ where
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
         // Aggregate all transition changesets and make a list of accounts that have been changed.
-        provider.unwind_account_hashing(range)?;
+        provider.unwind_account_hashing_range(range)?;
 
         let mut stage_checkpoint =
             input.checkpoint.account_hashing_stage_checkpoint().unwrap_or_default();
@@ -300,7 +304,7 @@ mod tests {
     };
     use alloy_primitives::U256;
     use assert_matches::assert_matches;
-    use reth_primitives::Account;
+    use reth_primitives_traits::Account;
     use reth_provider::providers::StaticFileWriter;
     use reth_stages_api::StageUnitCheckpoint;
     use test_utils::*;
@@ -365,7 +369,7 @@ mod tests {
                 self.clean_threshold = threshold;
             }
 
-            #[allow(dead_code)]
+            #[expect(dead_code)]
             pub(crate) fn set_commit_threshold(&mut self, threshold: u64) {
                 self.commit_threshold = threshold;
             }

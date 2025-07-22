@@ -1,25 +1,26 @@
 //! An implementation of the eth gas price oracle, used for providing gas price estimates based on
 //! previous blocks.
 
-use std::fmt::{self, Debug, Formatter};
-
+use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
+use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction, TxReceipt};
+use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{B256, U256};
-use alloy_rpc_types::BlockId;
+use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
-use reth_primitives::{constants::GWEI_TO_WEI, BlockNumberOrTag};
-use reth_rpc_server_types::constants;
-use reth_storage_api::BlockReaderIdExt;
+use itertools::Itertools;
+use reth_rpc_server_types::{
+    constants,
+    constants::gas_oracle::{
+        DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
+        DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
+    },
+};
+use reth_storage_api::{BlockReaderIdExt, NodePrimitivesProvider};
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
+use std::fmt::{self, Debug, Formatter};
 use tokio::sync::Mutex;
 use tracing::warn;
-
-use reth_rpc_server_types::constants::gas_oracle::{
-    DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-    DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, SAMPLE_NUMBER,
-};
-
-use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
 
 /// The default gas limit for `eth_call` and adjacent calls. See
 /// [`RPC_DEFAULT_GAS_CAP`](constants::gas_oracle::RPC_DEFAULT_GAS_CAP).
@@ -41,6 +42,12 @@ pub struct GasPriceOracleConfig {
     /// The maximum number of blocks for estimating gas price
     pub max_block_history: u64,
 
+    /// The maximum number for reward percentiles.
+    ///
+    /// This effectively limits how many transactions and receipts are fetched to compute the
+    /// reward percentile.
+    pub max_reward_percentile_count: u64,
+
     /// The default gas price to use if there are no blocks to use
     pub default: Option<U256>,
 
@@ -58,6 +65,7 @@ impl Default for GasPriceOracleConfig {
             percentile: DEFAULT_GAS_PRICE_PERCENTILE,
             max_header_history: MAX_HEADER_HISTORY,
             max_block_history: MAX_HEADER_HISTORY,
+            max_reward_percentile_count: MAX_REWARD_PERCENTILE_COUNT,
             default: None,
             max_price: Some(DEFAULT_MAX_GAS_PRICE),
             ignore_price: Some(DEFAULT_IGNORE_GAS_PRICE),
@@ -67,11 +75,14 @@ impl Default for GasPriceOracleConfig {
 
 /// Calculates a gas price depending on recent blocks.
 #[derive(Debug)]
-pub struct GasPriceOracle<Provider> {
+pub struct GasPriceOracle<Provider>
+where
+    Provider: NodePrimitivesProvider,
+{
     /// The type used to subscribe to block events and get block info
     provider: Provider,
     /// The cache for blocks
-    cache: EthStateCache,
+    cache: EthStateCache<Provider::Primitives>,
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
     /// The price under which the sample will be ignored.
@@ -83,13 +94,13 @@ pub struct GasPriceOracle<Provider> {
 
 impl<Provider> GasPriceOracle<Provider>
 where
-    Provider: BlockReaderIdExt,
+    Provider: BlockReaderIdExt + NodePrimitivesProvider,
 {
     /// Creates and returns the [`GasPriceOracle`].
     pub fn new(
         provider: Provider,
         mut oracle_config: GasPriceOracleConfig,
-        cache: EthStateCache,
+        cache: EthStateCache<Provider::Primitives>,
     ) -> Self {
         // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {
@@ -139,8 +150,8 @@ where
         let mut populated_blocks = 0;
 
         // we only check a maximum of 2 * max_block_history, or the number of blocks in the chain
-        let max_blocks = if self.oracle_config.max_block_history * 2 > header.number {
-            header.number
+        let max_blocks = if self.oracle_config.max_block_history * 2 > header.number() {
+            header.number()
         } else {
             self.oracle_config.max_block_history * 2
         };
@@ -212,44 +223,46 @@ where
         limit: usize,
     ) -> EthResult<Option<(B256, Vec<U256>)>> {
         // check the cache (this will hit the disk if the block is not cached)
-        let mut block = match self.cache.get_block(block_hash).await? {
-            Some(block) => block,
-            None => return Ok(None),
+        let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
+            return Ok(None)
         };
 
-        let base_fee_per_gas = block.base_fee_per_gas;
-        let parent_hash = block.parent_hash;
+        let base_fee_per_gas = block.base_fee_per_gas();
+        let parent_hash = block.parent_hash();
 
         // sort the functions by ascending effective tip first
-        block.body.transactions.sort_by_cached_key(|tx| tx.effective_tip_per_gas(base_fee_per_gas));
+        let sorted_transactions = block.transactions_recovered().sorted_by_cached_key(|tx| {
+            if let Some(base_fee) = base_fee_per_gas {
+                (*tx).effective_tip_per_gas(base_fee)
+            } else {
+                Some((*tx).priority_fee_or_price())
+            }
+        });
 
         let mut prices = Vec::with_capacity(limit);
 
-        for tx in block.body.transactions() {
-            let mut effective_gas_tip = None;
+        for tx in sorted_transactions {
+            let effective_tip = if let Some(base_fee) = base_fee_per_gas {
+                tx.effective_tip_per_gas(base_fee)
+            } else {
+                Some(tx.priority_fee_or_price())
+            };
+
             // ignore transactions with a tip under the configured threshold
             if let Some(ignore_under) = self.ignore_price {
-                let tip = tx.effective_tip_per_gas(base_fee_per_gas);
-                effective_gas_tip = Some(tip);
-                if tip < Some(ignore_under) {
+                if effective_tip < Some(ignore_under) {
                     continue
                 }
             }
 
             // check if the sender was the coinbase, if so, ignore
-            if let Some(sender) = tx.recover_signer() {
-                if sender == block.beneficiary {
-                    continue
-                }
+            if tx.signer() == block.beneficiary() {
+                continue
             }
 
             // a `None` effective_gas_tip represents a transaction where the max_fee_per_gas is
             // less than the base fee which would be invalid
-            let effective_gas_tip = effective_gas_tip
-                .unwrap_or_else(|| tx.effective_tip_per_gas(base_fee_per_gas))
-                .ok_or(RpcInvalidTransactionError::FeeCapTooLow)?;
-
-            prices.push(U256::from(effective_gas_tip));
+            prices.push(U256::from(effective_tip.ok_or(RpcInvalidTransactionError::FeeCapTooLow)?));
 
             // we have enough entries
             if prices.len() >= limit {
@@ -259,8 +272,116 @@ where
 
         Ok(Some((parent_hash, prices)))
     }
-}
 
+    /// Suggests a max priority fee value using a simplified and more predictable algorithm
+    /// appropriate for chains like Optimism with a single known block builder.
+    ///
+    /// It returns either:
+    /// - The minimum suggested priority fee when blocks have capacity
+    /// - 10% above the median effective priority fee from the last block when at capacity
+    ///
+    /// A block is considered at capacity if its total gas used plus the maximum single transaction
+    /// gas would exceed the block's gas limit.
+    pub async fn op_suggest_tip_cap(&self, min_suggested_priority_fee: U256) -> EthResult<U256> {
+        let header = self
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+
+        let mut inner = self.inner.lock().await;
+
+        // if we have stored a last price, then we check whether or not it was for the same head
+        if inner.last_price.block_hash == header.hash() {
+            return Ok(inner.last_price.price);
+        }
+
+        let mut suggestion = min_suggested_priority_fee;
+
+        // find the maximum gas used by any of the transactions in the block to use as the
+        // capacity margin for the block, if no receipts are found return the
+        // suggested_min_priority_fee
+        let Some(max_tx_gas_used) = self
+            .cache
+            .get_receipts(header.hash())
+            .await?
+            .ok_or(EthApiError::ReceiptsNotFound(BlockId::latest()))?
+            // get the gas used by each transaction in the block, by subtracting the
+            // cumulative gas used of the previous transaction from the cumulative gas used of the
+            // current transaction. This is because there is no gas_used() method on the Receipt
+            // trait.
+            .windows(2)
+            .map(|window| {
+                let prev = window[0].cumulative_gas_used();
+                let curr = window[1].cumulative_gas_used();
+                curr - prev
+            })
+            .max()
+        else {
+            return Ok(suggestion);
+        };
+
+        // if the block is at capacity, the suggestion must be increased
+        if header.gas_used() + max_tx_gas_used > header.gas_limit() {
+            let Some(median_tip) = self.get_block_median_tip(header.hash()).await? else {
+                return Ok(suggestion);
+            };
+
+            let new_suggestion = median_tip + median_tip / U256::from(10);
+
+            if new_suggestion > suggestion {
+                suggestion = new_suggestion;
+            }
+        }
+
+        // constrain to the max price
+        if let Some(max_price) = self.oracle_config.max_price {
+            if suggestion > max_price {
+                suggestion = max_price;
+            }
+        }
+
+        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };
+
+        Ok(suggestion)
+    }
+
+    /// Get the median tip value for the given block. This is useful for determining
+    /// tips when a block is at capacity.
+    ///
+    /// If the block cannot be found or has no transactions, this will return `None`.
+    pub async fn get_block_median_tip(&self, block_hash: B256) -> EthResult<Option<U256>> {
+        // check the cache (this will hit the disk if the block is not cached)
+        let Some(block) = self.cache.get_recovered_block(block_hash).await? else {
+            return Ok(None)
+        };
+
+        let base_fee_per_gas = block.base_fee_per_gas();
+
+        // Filter, sort and collect the prices
+        let prices = block
+            .transactions_recovered()
+            .filter_map(|tx| {
+                if let Some(base_fee) = base_fee_per_gas {
+                    (*tx).effective_tip_per_gas(base_fee)
+                } else {
+                    Some((*tx).priority_fee_or_price())
+                }
+            })
+            .sorted()
+            .collect::<Vec<_>>();
+
+        let median = if prices.is_empty() {
+            // if there are no prices, return `None`
+            None
+        } else if prices.len() % 2 == 1 {
+            Some(U256::from(prices[prices.len() / 2]))
+        } else {
+            Some(U256::from((prices[prices.len() / 2 - 1] + prices[prices.len() / 2]) / 2))
+        };
+
+        Ok(median)
+    }
+}
 /// Container type for mutable inner state of the [`GasPriceOracle`]
 #[derive(Debug)]
 struct GasPriceOracleInner {

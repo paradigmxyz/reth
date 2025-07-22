@@ -7,11 +7,10 @@ use alloy_rpc_types_admin::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{EthChainSpec, EthereumHardforks, ForkCondition};
+use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks, ForkCondition};
 use reth_network_api::{NetworkInfo, Peers};
 use reth_network_peers::{id2pk, AnyNode, NodeRecord};
 use reth_network_types::PeerKind;
-use reth_primitives::EthereumHardfork;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
 
@@ -112,9 +111,13 @@ where
             chain_id: self.chain_spec.chain().id(),
             terminal_total_difficulty_passed: self
                 .chain_spec
-                .get_final_paris_total_difficulty()
+                .final_paris_total_difficulty()
                 .is_some(),
-            terminal_total_difficulty: self.chain_spec.fork(EthereumHardfork::Paris).ttd(),
+            terminal_total_difficulty: self
+                .chain_spec
+                .ethereum_fork_activation(EthereumHardfork::Paris)
+                .ttd(),
+            deposit_contract_address: self.chain_spec.deposit_contract().map(|dc| dc.address),
             ..self.chain_spec.genesis().config.clone()
         };
 
@@ -124,7 +127,7 @@ where
                 $(
                     // don't overwrite if already set
                     if $config.$field.is_none() {
-                        $config.$field = match self.chain_spec.fork(EthereumHardfork::$fork) {
+                        $config.$field = match self.chain_spec.ethereum_fork_activation(EthereumHardfork::$fork) {
                             ForkCondition::Block(block) => Some(block),
                             ForkCondition::TTD { fork_block, .. } => fork_block,
                             ForkCondition::Timestamp(ts) => Some(ts),
@@ -165,13 +168,14 @@ where
             ip: enode.address,
             ports: Ports { discovery: enode.udp_port, listener: enode.tcp_port },
             listen_addr: enode.tcp_addr(),
+            #[expect(deprecated)]
             protocols: ProtocolInfo {
                 eth: Some(EthProtocolInfo {
                     network: status.eth_protocol_info.network,
-                    difficulty: status.eth_protocol_info.difficulty,
                     genesis: status.eth_protocol_info.genesis,
                     config,
                     head: status.eth_protocol_info.head,
+                    difficulty: None,
                 }),
                 snap: None,
             },

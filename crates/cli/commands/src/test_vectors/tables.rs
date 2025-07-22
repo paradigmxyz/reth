@@ -1,4 +1,5 @@
-use alloy_primitives::private::getrandom::getrandom;
+use alloy_consensus::Header;
+use alloy_primitives::{hex, B256};
 use arbitrary::Arbitrary;
 use eyre::Result;
 use proptest::{
@@ -7,8 +8,11 @@ use proptest::{
     test_runner::{TestRng, TestRunner},
 };
 use proptest_arbitrary_interop::arb;
-use reth_db::tables;
-use reth_db_api::table::{DupSort, Table, TableRow};
+use reth_db_api::{
+    table::{DupSort, Table, TableRow},
+    tables,
+};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_fs_util as fs;
 use std::collections::HashSet;
 use tracing::error;
@@ -17,30 +21,29 @@ const VECTORS_FOLDER: &str = "testdata/micro/db";
 const PER_TABLE: usize = 1000;
 
 /// Generates test vectors for specified `tables`. If list is empty, then generate for all tables.
-pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
+pub fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
     // Prepare random seed for test (same method as used by proptest)
-    let mut seed = [0u8; 32];
-    getrandom(&mut seed)?;
-    println!("Seed for test vectors: {:?}", seed);
+    let seed = B256::random();
+    println!("Seed for table test vectors: {:?}", hex::encode_prefixed(seed));
 
     // Start the runner with the seed
     let config = ProptestConfig::default();
-    let rng = TestRng::from_seed(config.rng_algorithm, &seed);
+    let rng = TestRng::from_seed(config.rng_algorithm, &seed.0);
     let mut runner = TestRunner::new_with_rng(config, rng);
 
     fs::create_dir_all(VECTORS_FOLDER)?;
 
     macro_rules! generate_vector {
-        ($table_type:ident, $per_table:expr, TABLE) => {
-            generate_table_vector::<tables::$table_type>(&mut runner, $per_table)?;
+        ($table_type:ident$(<$($generic:ident),+>)?, $per_table:expr, TABLE) => {
+            generate_table_vector::<tables::$table_type$(<$($generic),+>)?>(&mut runner, $per_table)?;
         };
-        ($table_type:ident, $per_table:expr, DUPSORT) => {
-            generate_dupsort_vector::<tables::$table_type>(&mut runner, $per_table)?;
+        ($table_type:ident$(<$($generic:ident),+>)?, $per_table:expr, DUPSORT) => {
+            generate_dupsort_vector::<tables::$table_type$(<$($generic),+>)?>(&mut runner, $per_table)?;
         };
     }
 
     macro_rules! generate {
-        ([$(($table_type:ident, $per_table:expr, $table_or_dup:tt)),*]) => {
+        ([$(($table_type:ident$(<$($generic:ident),+>)?, $per_table:expr, $table_or_dup:tt)),*]) => {
             let all_tables = vec![$(stringify!($table_type).to_string(),)*];
 
             if tables.is_empty() {
@@ -51,9 +54,9 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
                 match table.as_str() {
                     $(
                         stringify!($table_type) => {
-                            println!("Generating test vectors for {} <{}>.", stringify!($table_or_dup), tables::$table_type::NAME);
+                            println!("Generating test vectors for {} <{}>.", stringify!($table_or_dup), tables::$table_type$(::<$($generic),+>)?::NAME);
 
-                            generate_vector!($table_type, $per_table, $table_or_dup);
+                            generate_vector!($table_type$(<$($generic),+>)?, $per_table, $table_or_dup);
                         },
                     )*
                     _ => {
@@ -68,11 +71,11 @@ pub(crate) fn generate_vectors(mut tables: Vec<String>) -> Result<()> {
         (CanonicalHeaders, PER_TABLE, TABLE),
         (HeaderTerminalDifficulties, PER_TABLE, TABLE),
         (HeaderNumbers, PER_TABLE, TABLE),
-        (Headers, PER_TABLE, TABLE),
+        (Headers<Header>, PER_TABLE, TABLE),
         (BlockBodyIndices, PER_TABLE, TABLE),
-        (BlockOmmers, 100, TABLE),
+        (BlockOmmers<Header>, 100, TABLE),
         (TransactionHashNumbers, PER_TABLE, TABLE),
-        (Transactions, 100, TABLE),
+        (Transactions<TransactionSigned>, 100, TABLE),
         (PlainStorageState, PER_TABLE, DUPSORT),
         (PlainAccountState, PER_TABLE, TABLE)
     ]);
@@ -122,19 +125,19 @@ where
     // We want to control our repeated keys
     let mut seen_keys = HashSet::new();
 
-    let strat_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
+    let start_values = proptest::collection::vec(arb::<T::Value>(), 100..300).no_shrink().boxed();
 
-    let strat_keys = arb::<T::Key>().no_shrink().boxed();
+    let start_keys = arb::<T::Key>().no_shrink().boxed();
 
     while rows.len() < per_table {
-        let key: T::Key = strat_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+        let key: T::Key = start_keys.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
 
         if !seen_keys.insert(key.clone()) {
             continue
         }
 
         let mut values: Vec<T::Value> =
-            strat_values.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
+            start_values.new_tree(runner).map_err(|e| eyre::eyre!("{e}"))?.current();
 
         values.sort();
 

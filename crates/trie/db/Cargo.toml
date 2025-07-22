@@ -13,67 +13,59 @@ workspace = true
 
 [dependencies]
 # reth
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
-reth-db.workspace = true
 reth-db-api.workspace = true
-reth-stages-types.workspace = true
-reth-storage-errors.workspace = true
-reth-trie-common.workspace = true
 reth-trie.workspace = true
 
-revm.workspace = true
-
 # alloy
-alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 
 # tracing
 tracing.workspace = true
 
-# misc
-rayon.workspace = true
-derive_more.workspace = true
-auto_impl.workspace = true
-itertools.workspace = true
-
-# `metrics` feature
-reth-metrics = { workspace = true, optional = true }
-metrics = { workspace = true, optional = true }
-
-# `test-utils` feature
-triehash = { version = "0.8", optional = true }
-
-# `serde` feature
-serde = { workspace = true, optional = true }
-
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
-reth-primitives = { workspace = true, features = ["test-utils", "arbitrary"] }
+reth-primitives-traits = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-errors.workspace = true
 reth-trie-common = { workspace = true, features = ["test-utils", "arbitrary"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
-reth-node-types.workspace = true
+
+alloy-consensus.workspace = true
+alloy-rlp.workspace = true
+revm.workspace = true
+revm-database.workspace = true
 
 # trie
-triehash = "0.8"
+triehash.workspace = true
 
 # misc
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
-tokio = { workspace = true, default-features = false, features = [
-    "sync",
-    "rt",
-    "macros",
-] }
-tokio-stream.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
 
 [features]
-metrics = ["reth-metrics", "reth-trie/metrics", "dep:metrics"]
-serde = ["dep:serde"]
-test-utils = ["triehash", "reth-trie-common/test-utils"]
+metrics = ["reth-trie/metrics"]
+serde = [
+    "similar-asserts/serde",
+    "alloy-consensus/serde",
+    "alloy-primitives/serde",
+    "reth-trie/serde",
+    "reth-trie-common/serde",
+    "reth-primitives-traits/serde",
+    "revm-database/serde",
+    "revm/serde",
+]
+test-utils = [
+    "reth-trie-common/test-utils",
+    "reth-primitives-traits/test-utils",
+    "reth-chainspec/test-utils",
+    "reth-db/test-utils",
+    "reth-db-api/test-utils",
+    "reth-provider/test-utils",
+    "reth-trie/test-utils",
+]

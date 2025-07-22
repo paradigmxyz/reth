@@ -1,4 +1,7 @@
-use crate::{providers::StaticFileProvider, HashingWriter, ProviderFactory, TrieWriter};
+use crate::{
+    providers::{ProviderNodeTypes, StaticFileProvider},
+    HashingWriter, ProviderFactory, TrieWriter,
+};
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
@@ -6,8 +9,9 @@ use reth_db::{
     DatabaseEnv,
 };
 use reth_errors::ProviderResult;
-use reth_node_types::{NodeTypesWithDB, NodeTypesWithDBAdapter};
-use reth_primitives::{Account, StorageEntry};
+use reth_ethereum_engine_primitives::EthEngineTypes;
+use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
+use reth_primitives_traits::{Account, StorageEntry};
 use reth_trie::StateRoot;
 use reth_trie_db::DatabaseStateRoot;
 use std::sync::Arc;
@@ -22,9 +26,12 @@ pub use reth_chain_state::test_utils::TestCanonStateSubscriptions;
 
 /// Mock [`reth_node_types::NodeTypes`] for testing.
 pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
-    (),
+    reth_ethereum_primitives::EthPrimitives,
     reth_ethereum_engine_primitives::EthEngineTypes,
     reth_chainspec::ChainSpec,
+    reth_trie_db::MerklePatriciaTrie,
+    crate::EthStorage,
+    EthEngineTypes,
 >;
 
 /// Mock [`reth_node_types::NodeTypesWithDB`] for testing.
@@ -40,17 +47,24 @@ pub fn create_test_provider_factory() -> ProviderFactory<MockNodeTypesWithDB> {
 pub fn create_test_provider_factory_with_chain_spec(
     chain_spec: Arc<ChainSpec>,
 ) -> ProviderFactory<MockNodeTypesWithDB> {
+    create_test_provider_factory_with_node_types::<MockNodeTypes>(chain_spec)
+}
+
+/// Creates test provider factory with provided chain spec.
+pub fn create_test_provider_factory_with_node_types<N: NodeTypes>(
+    chain_spec: Arc<N::ChainSpec>,
+) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     let (static_dir, _) = create_test_static_files_dir();
     let db = create_test_rw_db();
     ProviderFactory::new(
         db,
         chain_spec,
-        StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
+        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
     )
 }
 
 /// Inserts the genesis alloc from the provided chain spec into the trie.
-pub fn insert_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
+pub fn insert_genesis<N: ProviderNodeTypes<ChainSpec = ChainSpec>>(
     provider_factory: &ProviderFactory<N>,
     chain_spec: Arc<N::ChainSpec>,
 ) -> ProviderResult<B256> {
@@ -75,7 +89,7 @@ pub fn insert_genesis<N: NodeTypesWithDB<ChainSpec = ChainSpec>>(
 
     let (root, updates) = StateRoot::from_tx(provider.tx_ref())
         .root_with_updates()
-        .map_err(Into::<reth_db::DatabaseError>::into)?;
+        .map_err(reth_db::DatabaseError::from)?;
     provider.write_trie_updates(&updates).unwrap();
 
     provider.commit()?;

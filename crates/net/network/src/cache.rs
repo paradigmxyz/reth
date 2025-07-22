@@ -1,11 +1,10 @@
 //! Network cache support
 
 use core::hash::BuildHasher;
-use std::{fmt, hash::Hash};
-
 use derive_more::{Deref, DerefMut};
 use itertools::Itertools;
 use schnellru::{ByLength, Limiter, RandomState, Unlimited};
+use std::{fmt, hash::Hash};
 
 /// A minimal LRU cache based on a [`LruMap`](schnellru::LruMap) with limited capacity.
 ///
@@ -26,15 +25,21 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
 
     /// Insert an element into the set.
     ///
-    /// If the element is new (did not exist before [`insert`](Self::insert)) was called, then the
-    /// given length will be enforced and the oldest element will be removed if the limit was
-    /// exceeded.
+    /// This operation uses `get_or_insert` from the underlying `schnellru::LruMap` which:
+    /// - Automatically evicts the least recently used item if capacity is exceeded
+    ///
+    /// This method is more efficient than [`insert_and_get_evicted`](Self::insert_and_get_evicted)
+    /// as it performs fewer checks. Use this method when you don't need information about
+    /// evicted values.
     ///
     /// If the set did not have this value present, true is returned.
     /// If the set did have this value present, false is returned.
     pub fn insert(&mut self, entry: T) -> bool {
-        let (new_entry, _evicted_val) = self.insert_and_get_evicted(entry);
-        new_entry
+        let mut is_new = false;
+        self.inner.get_or_insert(entry, || {
+            is_new = true;
+        });
+        is_new
     }
 
     /// Same as [`insert`](Self::insert) but returns a tuple, where the second index is the evicted
@@ -42,7 +47,7 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     pub fn insert_and_get_evicted(&mut self, entry: T) -> (bool, Option<T>) {
         let new = self.inner.peek(&entry).is_none();
         let evicted =
-            if new && (self.limit as usize) <= self.inner.len() { self.remove_lru() } else { None };
+            (new && (self.limit as usize) <= self.inner.len()).then(|| self.remove_lru()).flatten();
         _ = self.inner.get_or_insert(entry, || ());
 
         (new, evicted)
@@ -89,13 +94,11 @@ impl<T: Hash + Eq + fmt::Debug> LruCache<T> {
     }
 
     /// Returns number of elements currently in cache.
-    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.len()
     }
 
     /// Returns `true` if there are currently no elements in the cache.
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
@@ -228,7 +231,7 @@ mod test {
 
     #[test]
     fn test_cache_should_remove_oldest_element_when_exceeding_limit() {
-        let mut cache = LruCache::new(2);
+        let mut cache = LruCache::new(1); // LruCache limit will be 2, check LruCache::new
         let old_entry = "old_entry";
         let new_entry = "new_entry";
         cache.insert(old_entry);
@@ -249,7 +252,7 @@ mod test {
     }
 
     #[test]
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn test_debug_impl_lru_map() {
         #[derive(Debug)]
         struct Value(i8);
@@ -262,11 +265,13 @@ mod test {
         let value_2 = Value(22);
         cache.insert(key_2, value_2);
 
-        assert_eq!("LruMap { limiter: ByLength { max_length: 2 }, ret %iter: Iter: { 2: Value(22), 1: Value(11) } }", format!("{cache:?}"))
+        assert_eq!(
+            "LruMap { limiter: ByLength { max_length: 2 }, ret %iter: Iter: { 2: Value(22), 1: Value(11) } }",
+            format!("{cache:?}")
+        )
     }
 
     #[test]
-    #[allow(dead_code)]
     fn test_debug_impl_lru_cache() {
         let mut cache = LruCache::new(2);
         let key_1 = Key(1);
@@ -338,5 +343,29 @@ mod test {
         let key = cache.find(&key_1);
 
         assert_eq!(key_1.other, key.unwrap().other)
+    }
+
+    #[test]
+    fn test_insert_methods() {
+        let mut cache = LruCache::new(2);
+
+        // Test basic insert
+        assert!(cache.insert("first")); // new entry
+        assert!(!cache.insert("first")); // existing entry
+        assert!(cache.insert("second")); // new entry
+
+        // Test insert_and_get_evicted
+        let (is_new, evicted) = cache.insert_and_get_evicted("third");
+        assert!(is_new); // should be new entry
+        assert_eq!(evicted, Some("first")); // should evict
+
+        assert!(cache.contains(&"second"));
+        assert!(cache.contains(&"third"));
+        assert!(!cache.contains(&"first"));
+
+        // Test insert_and_get_evicted with existing entry
+        let (is_new, evicted) = cache.insert_and_get_evicted("second");
+        assert!(!is_new); // should not be new
+        assert_eq!(evicted, None); // should not evict anything
     }
 }

@@ -28,7 +28,7 @@ where
 /// Default, Clone, or Serialize, and fuzz the wrapper type instead.
 fn roundtrip_fuzz<T>(thing: T)
 where
-    T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq + Default,
+    T: Encodable + Decodable + Clone + Serialize + Debug + PartialEq + Eq,
 {
     roundtrip_encoding::<T>(thing)
 }
@@ -37,7 +37,7 @@ where
 macro_rules! fuzz_type_and_name {
     ( $x:ty, $fuzzname:ident ) => {
         /// Fuzzes the round-trip encoding of the type.
-        #[allow(non_snake_case)]
+        #[expect(non_snake_case)]
         #[test_fuzz]
         fn $fuzzname(thing: $x) {
             crate::roundtrip_fuzz::<$x>(thing)
@@ -46,7 +46,7 @@ macro_rules! fuzz_type_and_name {
 }
 
 #[cfg(test)]
-#[allow(missing_docs)]
+#[expect(missing_docs)]
 pub mod fuzz_rlp {
     use crate::roundtrip_encoding;
     use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
@@ -57,7 +57,6 @@ pub mod fuzz_rlp {
         NewPooledTransactionHashes66, NewPooledTransactionHashes68, NodeData, P2PMessage,
         PooledTransactions, Receipts, Status, Transactions,
     };
-    use reth_primitives::TransactionSigned;
     use serde::{Deserialize, Serialize};
     use test_fuzz::test_fuzz;
 
@@ -161,5 +160,4 @@ pub mod fuzz_rlp {
     fuzz_type_and_name!(NodeData, fuzz_NodeData);
     fuzz_type_and_name!(GetReceipts, fuzz_GetReceipts);
     fuzz_type_and_name!(Receipts, fuzz_Receipts);
-    fuzz_type_and_name!(TransactionSigned, fuzz_TransactionSigned);
 }

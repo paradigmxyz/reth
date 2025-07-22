@@ -3,7 +3,7 @@
 
 use alloy_genesis::GenesisAccount;
 use alloy_primitives::{Address, Bytes, B256, U256};
-use reth_primitives::public_key_to_address;
+use reth_primitives_traits::crypto::secp256k1::public_key_to_address;
 use secp256k1::{
     rand::{thread_rng, RngCore},
     Keypair, Secp256k1,

@@ -1,9 +1,14 @@
 use alloy_primitives::{B256, U256};
+use alloy_rpc_types_engine::{
+    ForkchoiceUpdateError, INVALID_FORK_CHOICE_STATE_ERROR, INVALID_FORK_CHOICE_STATE_ERROR_MSG,
+    INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+};
 use jsonrpsee_types::error::{
     INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE, INVALID_PARAMS_MSG, SERVER_ERROR_MSG,
 };
-use reth_beacon_consensus::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
-use reth_payload_primitives::{EngineObjectValidationError, PayloadBuilderError};
+use reth_engine_primitives::{BeaconForkChoiceUpdateError, BeaconOnNewPayloadError};
+use reth_payload_builder_primitives::PayloadBuilderError;
+use reth_payload_primitives::EngineObjectValidationError;
 use thiserror::Error;
 
 /// The Engine API result type
@@ -91,6 +96,9 @@ pub enum EngineApiError {
     /// The payload or attributes are known to be malformed before processing.
     #[error(transparent)]
     EngineObjectValidationError(#[from] EngineObjectValidationError),
+    /// Requests hash provided, but can't be accepted by the API.
+    #[error("requests hash cannot be accepted by the API without `--engine.accept-execution-requests-hash` flag")]
+    UnexpectedRequestsHash,
     /// Any other rpc error
     #[error("{0}")]
     Other(jsonrpsee_types::ErrorObject<'static>),
@@ -124,7 +132,8 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EngineApiError::EngineObjectValidationError(
                 EngineObjectValidationError::Payload(_) |
                 EngineObjectValidationError::InvalidParams(_),
-            ) => {
+            ) |
+            EngineApiError::UnexpectedRequestsHash => {
                 // Note: the data field is not required by the spec, but is also included by other
                 // clients
                 jsonrpsee_types::error::ErrorObject::owned(
@@ -166,7 +175,23 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             ),
             // Error responses from the consensus engine
             EngineApiError::ForkChoiceUpdate(ref err) => match err {
-                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => (*err).into(),
+                BeaconForkChoiceUpdateError::ForkchoiceUpdateError(err) => match err {
+                    ForkchoiceUpdateError::UpdatedInvalidPayloadAttributes => {
+                        jsonrpsee_types::error::ErrorObject::owned(
+                            INVALID_PAYLOAD_ATTRIBUTES_ERROR,
+                            INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
+                            None::<()>,
+                        )
+                    }
+                    ForkchoiceUpdateError::InvalidState |
+                    ForkchoiceUpdateError::UnknownFinalBlock => {
+                        jsonrpsee_types::error::ErrorObject::owned(
+                            INVALID_FORK_CHOICE_STATE_ERROR,
+                            INVALID_FORK_CHOICE_STATE_ERROR_MSG,
+                            None::<()>,
+                        )
+                    }
+                },
                 BeaconForkChoiceUpdateError::EngineUnavailable |
                 BeaconForkChoiceUpdateError::Internal(_) => {
                     jsonrpsee_types::error::ErrorObject::owned(

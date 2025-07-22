@@ -1,7 +1,7 @@
 //! Contains various benchmark output formats, either for logging or for
 //! serialization to / from files.
 
-use reth_primitives::constants::gas_units::GIGAGAS;
+use reth_primitives_traits::constants::GIGAGAS;
 use serde::{ser::SerializeStruct, Serialize};
 use std::time::Duration;
 
@@ -123,7 +123,6 @@ impl Serialize for CombinedResult {
 #[derive(Debug)]
 pub(crate) struct TotalGasRow {
     /// The block number of the block being processed.
-    #[allow(dead_code)]
     pub(crate) block_number: u64,
     /// The total gas used in the block.
     pub(crate) gas_used: u64,

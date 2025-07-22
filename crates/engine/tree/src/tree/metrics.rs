@@ -1,9 +1,9 @@
-use reth_blockchain_tree::metrics::TreeMetrics;
 use reth_evm::metrics::ExecutorMetrics;
 use reth_metrics::{
     metrics::{Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_trie::updates::TrieUpdates;
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -16,6 +16,18 @@ pub(crate) struct EngineApiMetrics {
     pub(crate) block_validation: BlockValidationMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
     pub(crate) tree: TreeMetrics,
+}
+
+/// Metrics for the entire blockchain tree
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree")]
+pub(super) struct TreeMetrics {
+    /// The highest block number in the canonical chain
+    pub canonical_chain_height: Gauge,
+    /// The number of reorgs
+    pub reorgs: Counter,
+    /// The latest reorg depth
+    pub latest_reorg_depth: Gauge,
 }
 
 /// Metrics for the `EngineApi`.
@@ -49,16 +61,43 @@ pub(crate) struct EngineMetrics {
 #[derive(Metrics)]
 #[metrics(scope = "sync.block_validation")]
 pub(crate) struct BlockValidationMetrics {
+    /// Total number of storage tries updated in the state root calculation
+    pub(crate) state_root_storage_tries_updated_total: Counter,
+    /// Total number of times the parallel state root computation fell back to regular.
+    pub(crate) state_root_parallel_fallback_total: Counter,
     /// Histogram of state root duration
     pub(crate) state_root_histogram: Histogram,
     /// Latest state root duration
     pub(crate) state_root_duration: Gauge,
+    /// Trie input computation duration
+    pub(crate) trie_input_duration: Histogram,
+    /// Payload conversion and validation latency
+    pub(crate) payload_validation_duration: Gauge,
+    /// Histogram of payload validation latency
+    pub(crate) payload_validation_histogram: Histogram,
 }
 
 impl BlockValidationMetrics {
     /// Records a new state root time, updating both the histogram and state root gauge
-    pub(crate) fn record_state_root(&self, elapsed_as_secs: f64) {
+    pub(crate) fn record_state_root(&self, trie_output: &TrieUpdates, elapsed_as_secs: f64) {
+        self.state_root_storage_tries_updated_total
+            .increment(trie_output.storage_tries_ref().len() as u64);
         self.state_root_duration.set(elapsed_as_secs);
         self.state_root_histogram.record(elapsed_as_secs);
     }
+
+    /// Records a new payload validation time, updating both the histogram and the payload
+    /// validation gauge
+    pub(crate) fn record_payload_validation(&self, elapsed_as_secs: f64) {
+        self.payload_validation_duration.set(elapsed_as_secs);
+        self.payload_validation_histogram.record(elapsed_as_secs);
+    }
+}
+
+/// Metrics for the blockchain tree block buffer
+#[derive(Metrics)]
+#[metrics(scope = "blockchain_tree.block_buffer")]
+pub(crate) struct BlockBufferMetrics {
+    /// Total blocks in the block buffer
+    pub blocks: Gauge,
 }

@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package exex;
+
+service RemoteExEx {
+  rpc Subscribe(SubscribeRequest) returns (stream ExExNotification) {}
+}
+
+message SubscribeRequest {}
+
+message ExExNotification {
+  bytes data = 1;
+}

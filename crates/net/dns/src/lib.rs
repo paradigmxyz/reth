@@ -90,7 +90,7 @@ impl DnsDiscoveryHandle {
 
 /// A client that discovers nodes via DNS.
 #[must_use = "Service does nothing unless polled"]
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct DnsDiscoveryService<R: Resolver = DnsResolver> {
     /// Copy of the sender half, so new [`DnsDiscoveryHandle`] can be created on demand.
     command_tx: UnboundedSender<DnsDiscoveryCommand>,

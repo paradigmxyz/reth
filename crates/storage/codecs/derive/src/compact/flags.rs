@@ -1,9 +1,11 @@
 use super::*;
+use syn::Attribute;
 
 /// Generates the flag fieldset struct that is going to be used to store the length of fields and
 /// their potential presence.
 pub(crate) fn generate_flag_struct(
     ident: &Ident,
+    attrs: &[Attribute],
     has_lifetime: bool,
     fields: &FieldList,
     is_zstd: bool,
@@ -12,6 +14,8 @@ pub(crate) fn generate_flag_struct(
 
     let flags_ident = format_ident!("{ident}Flags");
     let mod_flags_ident = format_ident!("{ident}_flags");
+
+    let reth_codecs = parse_reth_codecs_path(attrs).unwrap();
 
     let mut field_flags = vec![];
 
@@ -50,8 +54,9 @@ pub(crate) fn generate_flag_struct(
         total_bytes.into()
     ];
 
-    let docs =
-        format!("Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}");
+    let docs = format!(
+        "Fieldset that facilitates compacting the parent type. Used bytes: {total_bytes} | Unused bits: {unused_bits}"
+    );
     let bitflag_encoded_bytes = format!("Used bytes by [`{flags_ident}`]");
     let bitflag_unused_bits = format!("Unused bits for new fields by [`{flags_ident}`]");
     let impl_bitflag_encoded_bytes = if has_lifetime {
@@ -86,10 +91,11 @@ pub(crate) fn generate_flag_struct(
     quote! {
         #impl_bitflag_encoded_bytes
         pub use #mod_flags_ident::#flags_ident;
-        #[allow(non_snake_case)]
+        #[expect(non_snake_case)]
         mod #mod_flags_ident {
-            use bytes::Buf;
-            use modular_bitfield::prelude::*;
+            use #reth_codecs::__private::Buf;
+            use #reth_codecs::__private::modular_bitfield;
+            use #reth_codecs::__private::modular_bitfield::prelude::*;
 
             #[doc = #docs]
             #[bitfield]
@@ -121,7 +127,9 @@ fn build_struct_field_flags(
     let mut total_bits = 0;
 
     // Find out the adequate bit size for the length of each field, if applicable.
-    for (name, ftype, is_compact, _) in fields {
+    for field in fields {
+        let StructFieldDescriptor { name, ftype, is_compact, use_alt_impl: _, is_reference: _ } =
+            field;
         // This happens when dealing with a wrapper struct eg. Struct(pub U256).
         let name = if name.is_empty() { "placeholder" } else { name };
 

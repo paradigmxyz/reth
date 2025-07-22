@@ -1,12 +1,13 @@
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
-use reth_node_builder::NodeTypesWithEngine;
-use std::io::{self, Write};
-
+use std::{
+    io::{self, Write},
+    sync::Arc,
+};
 mod checksum;
 mod clear;
 mod diff;
@@ -65,12 +66,11 @@ macro_rules! db_ro_exec {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
+        let exex_wal_path = data_dir.exex_wal();
 
         // ensure the provided datadir exist
         eyre::ensure!(
@@ -112,7 +112,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::Drop { force } => {
                 if !force {
                     // Ask for confirmation
-                    print!("Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): ");
+                    print!(
+                        "Are you sure you want to drop the database at {data_dir}? This cannot be undone. (y/N): "
+                    );
                     // Flush the buffer to ensure the message is printed immediately
                     io::stdout().flush().unwrap();
 
@@ -127,7 +129,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                 let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
                 let tool = DbTool::new(provider_factory)?;
-                tool.drop(db_path, static_files_path)?;
+                tool.drop(db_path, static_files_path, exex_wal_path)?;
             }
             Subcommands::Clear(command) => {
                 let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
@@ -157,10 +159,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     }
 }
 
+impl<C: ChainSpecParser> Command<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_node_core::args::utils::{EthereumChainSpecParser, SUPPORTED_CHAINS};
+    use reth_ethereum_cli::chainspec::{EthereumChainSpecParser, SUPPORTED_CHAINS};
     use std::path::Path;
 
     #[test]

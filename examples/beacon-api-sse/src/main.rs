@@ -4,8 +4,8 @@
 //!
 //! Run with
 //!
-//! ```not_rust
-//! cargo run -p beacon-api-sse -- node
+//! ```sh
+//! cargo run -p example-beacon-api-sse -- node
 //! ```
 //!
 //! This launches a regular reth instance and subscribes to payload attributes event stream.
@@ -13,16 +13,18 @@
 //! **NOTE**: This expects that the CL client is running an http server on `localhost:5052` and is
 //! configured to emit payload attributes events.
 //!
-//! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api-bn.html#beacon-node-api>
+//! See lighthouse beacon Node API: <https://lighthouse-book.sigmaprime.io/api_bn.html#beacon-node-api>
 
-#![cfg_attr(not(test), warn(unused_crate_dependencies))]
+#![warn(unused_crate_dependencies)]
 
 use alloy_rpc_types_beacon::events::PayloadAttributesEvent;
 use clap::Parser;
 use futures_util::stream::StreamExt;
 use mev_share_sse::{client::EventStream, EventClient};
-use reth::{args::utils::EthereumChainSpecParser, cli::Cli};
-use reth_node_ethereum::EthereumNode;
+use reth_ethereum::{
+    cli::{chainspec::EthereumChainSpecParser, interface::Cli},
+    node::EthereumNode,
+};
 use std::net::{IpAddr, Ipv4Addr};
 use tracing::{info, warn};
 
@@ -81,7 +83,10 @@ impl BeaconEventsConfig {
             match client.subscribe(&payloads_url).await {
                 Ok(subscription) => return subscription,
                 Err(err) => {
-                    warn!("Failed to subscribe to payload attributes events: {:?}\nRetrying in 5 seconds...", err);
+                    warn!(
+                        "Failed to subscribe to payload attributes events: {:?}\nRetrying in 5 seconds...",
+                        err
+                    );
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             }

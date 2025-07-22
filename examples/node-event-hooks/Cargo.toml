@@ -6,5 +6,4 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-reth.workspace = true
-reth-node-ethereum.workspace = true
+reth-ethereum = { workspace = true, features = ["node", "cli"] }

@@ -13,18 +13,74 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
 reth-db-models.workspace = true
-reth-db-api.workspace = true
+reth-chainspec.workspace = true
+reth-db-api = { workspace = true, optional = true }
 reth-execution-types.workspace = true
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-storage-errors.workspace = true
-reth-trie.workspace = true
+reth-trie-common.workspace = true
+reth-trie-db = { workspace = true, optional = true }
+revm-database.workspace = true
+reth-ethereum-primitives.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
+alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
+
+[features]
+default = ["std"]
+std = [
+    "reth-chainspec/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "reth-primitives-traits/std",
+    "reth-stages-types/std",
+    "revm-database/std",
+    "reth-ethereum-primitives/std",
+    "reth-execution-types/std",
+    "reth-prune-types/std",
+    "reth-storage-errors/std",
+    "reth-db-models/std",
+    "reth-trie-common/std",
+]
+
+db-api = [
+    "dep:reth-db-api",
+    "dep:reth-trie-db",
+]
+
+serde = [
+    "reth-ethereum-primitives/serde",
+    "reth-db-models/serde",
+    "reth-execution-types/serde",
+    "reth-primitives-traits/serde",
+    "reth-prune-types/serde",
+    "reth-stages-types/serde",
+    "reth-trie-common/serde",
+    "reth-trie-db?/serde",
+    "revm-database/serde",
+    "reth-ethereum-primitives/serde",
+    "alloy-eips/serde",
+    "alloy-primitives/serde",
+    "alloy-consensus/serde",
+    "alloy-rpc-types-engine/serde",
+]
+
+serde-bincode-compat = [
+    "reth-ethereum-primitives/serde-bincode-compat",
+    "reth-execution-types/serde-bincode-compat",
+    "reth-primitives-traits/serde-bincode-compat",
+    "reth-trie-common/serde-bincode-compat",
+    "reth-ethereum-primitives/serde-bincode-compat",
+    "alloy-eips/serde-bincode-compat",
+    "alloy-consensus/serde-bincode-compat",
+]

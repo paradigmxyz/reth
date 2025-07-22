@@ -2,24 +2,23 @@
 //!
 //! Stage debugging tool
 
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeComponents, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_eips::BlockHashOrNumber;
+use alloy_primitives::Sealable;
 use clap::Parser;
-use reth_beacon_consensus::EthBeaconConsensus;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_runner::CliContext;
 use reth_cli_util::get_secret_key;
 use reth_config::config::{HashingConfig, SenderRecoveryConfig, TransactionLookupConfig};
+use reth_db_api::database_metrics::DatabaseMetrics;
 use reth_downloaders::{
     bodies::bodies::BodiesDownloaderBuilder,
     headers::reverse_headers::ReverseHeadersDownloaderBuilder,
 };
-use reth_evm::execute::BlockExecutorProvider;
 use reth_exex::ExExManagerHandle;
 use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
-use reth_node_builder::NodeTypesWithEngine;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
     version::{
@@ -43,8 +42,7 @@ use reth_stages::{
         IndexStorageHistoryStage, MerkleStage, SenderRecoveryStage, StorageHashingStage,
         TransactionLookupStage,
     },
-    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageError, StageExt, UnwindInput,
-    UnwindOutput,
+    ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::watch;
@@ -102,13 +100,13 @@ pub struct Command<C: ChainSpecParser> {
     network: NetworkArgs,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>> Command<C> {
     /// Execute `stage` command
-    pub async fn execute<N, E, F>(self, ctx: CliContext, executor: F) -> eyre::Result<()>
+    pub async fn execute<N, Comp, F>(self, ctx: CliContext, components: F) -> eyre::Result<()>
     where
-        N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>,
-        E: BlockExecutorProvider,
-        F: FnOnce(Arc<C::ChainSpec>) -> E,
+        N: CliNodeTypes<ChainSpec = C::ChainSpec>,
+        Comp: CliNodeComponents<N>,
+        F: FnOnce(Arc<C::ChainSpec>) -> Comp,
     {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
@@ -118,6 +116,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             self.env.init::<N>(AccessRights::RW)?;
 
         let mut provider_rw = provider_factory.database_provider_rw()?;
+        let components = components(provider_factory.chain_spec());
 
         if let Some(listen_addr) = self.metrics {
             info!(target: "reth::cli", "Starting metrics endpoint at {}", listen_addr);
@@ -133,10 +132,20 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 },
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
                 ctx.task_executor,
-                Hooks::new(
-                    provider_factory.db_ref().clone(),
-                    provider_factory.static_file_provider(),
-                ),
+                Hooks::builder()
+                    .with_hook({
+                        let db = provider_factory.db_ref().clone();
+                        move || db.report_metrics()
+                    })
+                    .with_hook({
+                        let sfp = provider_factory.static_file_provider();
+                        move || {
+                            if let Err(error) = sfp.report_metrics() {
+                                error!(%error, "Failed to report metrics from static file provider");
+                            }
+                        }
+                    })
+                    .build(),
             );
 
             MetricServer::new(config).serve().await?;
@@ -150,8 +159,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         let (mut exec_stage, mut unwind_stage): (Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>) =
             match self.stage {
                 StageEnum::Headers => {
-                    let consensus =
-                        Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
+                    let consensus = Arc::new(components.consensus().clone());
 
                     let network_secret_path = self
                         .network
@@ -164,7 +172,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                     let network = self
                         .network
-                        .network_config(
+                        .network_config::<N::NetworkPrimitives>(
                             &config,
                             provider_factory.chain_spec(),
                             p2p_secret_key,
@@ -176,28 +184,33 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     let fetch_client = Arc::new(network.fetch_client().await?);
 
                     // Use `to` as the tip for the stage
-                    let tip = fetch_client
-                        .get_header(BlockHashOrNumber::Number(self.to))
-                        .await?
-                        .into_data()
-                        .ok_or(StageError::MissingSyncGap)?;
+                    let tip = loop {
+                        match fetch_client.get_header(BlockHashOrNumber::Number(self.to)).await {
+                            Ok(header) => {
+                                if let Some(header) = header.into_data() {
+                                    break header
+                                }
+                            }
+                            Err(error) if error.is_retryable() => {
+                                warn!(target: "reth::cli", "Error requesting header: {error}. Retrying...")
+                            }
+                            Err(error) => return Err(error.into()),
+                        }
+                    };
                     let (_, rx) = watch::channel(tip.hash_slow());
-
                     (
                         Box::new(HeaderStage::new(
                             provider_factory.clone(),
                             ReverseHeadersDownloaderBuilder::new(config.stages.headers)
                                 .build(fetch_client, consensus.clone()),
                             rx,
-                            consensus,
                             etl_config,
                         )),
                         None,
                     )
                 }
                 StageEnum::Bodies => {
-                    let consensus =
-                        Arc::new(EthBeaconConsensus::new(provider_factory.chain_spec()));
+                    let consensus = Arc::new(components.consensus().clone());
 
                     let mut config = config;
                     config.peers.trusted_nodes_only = self.network.trusted_only;
@@ -214,7 +227,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
                     let network = self
                         .network
-                        .network_config(
+                        .network_config::<N::NetworkPrimitives>(
                             &config,
                             provider_factory.chain_spec(),
                             p2p_secret_key,
@@ -248,15 +261,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 ),
                 StageEnum::Execution => (
                     Box::new(ExecutionStage::new(
-                        executor(provider_factory.chain_spec()),
+                        components.evm_config().clone(),
+                        Arc::new(components.consensus().clone()),
                         ExecutionStageThresholds {
                             max_blocks: Some(batch_size),
                             max_changes: None,
                             max_cumulative_gas: None,
                             max_duration: None,
                         },
-                        config.stages.merkle.clean_threshold,
-                        prune_modes,
+                        config.stages.merkle.incremental_threshold,
                         ExExManagerHandle::empty(),
                     )),
                     None,
@@ -284,7 +297,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                     None,
                 ),
                 StageEnum::Merkle => (
-                    Box::new(MerkleStage::new_execution(config.stages.merkle.clean_threshold)),
+                    Box::new(MerkleStage::new_execution(
+                        config.stages.merkle.rebuild_threshold,
+                        config.stages.merkle.incremental_threshold,
+                    )),
                     Some(Box::new(MerkleStage::default_unwind())),
                 ),
                 StageEnum::AccountHistory => (
@@ -329,10 +345,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 }
 
                 if self.commit {
-                    UnifiedStorageWriter::commit_unwind(
-                        provider_rw,
-                        provider_factory.static_file_provider(),
-                    )?;
+                    UnifiedStorageWriter::commit_unwind(provider_rw)?;
                     provider_rw = provider_factory.database_provider_rw()?;
                 }
             }
@@ -355,7 +368,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 provider_rw.save_stage_checkpoint(exec_stage.id(), checkpoint)?;
             }
             if self.commit {
-                UnifiedStorageWriter::commit(provider_rw, provider_factory.static_file_provider())?;
+                UnifiedStorageWriter::commit(provider_rw)?;
                 provider_rw = provider_factory.database_provider_rw()?;
             }
 
@@ -366,5 +379,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         info!(target: "reth::cli", stage = %self.stage, time = ?start.elapsed(), "Finished stage");
 
         Ok(())
+    }
+}
+
+impl<C: ChainSpecParser> Command<C> {
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
     }
 }

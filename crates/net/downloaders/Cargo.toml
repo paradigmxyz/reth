@@ -17,16 +17,18 @@ reth-config.workspace = true
 reth-consensus.workspace = true
 reth-network-p2p.workspace = true
 reth-network-peers.workspace = true
-reth-primitives.workspace = true
+reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 
 # optional deps for the test-utils feature
 reth-db = { workspace = true, optional = true }
 reth-db-api = { workspace = true, optional = true }
+reth-ethereum-primitives = { workspace = true, optional = true }
 reth-testing-utils = { workspace = true, optional = true }
 
 # ethereum
+alloy-consensus.workspace = true
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
@@ -44,14 +46,15 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
-tracing.workspace = true
 rayon.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 tempfile = { workspace = true, optional = true }
 itertools.workspace = true
 
 [dev-dependencies]
+reth-ethereum-primitives.workspace = true
 reth-chainspec.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
@@ -71,10 +74,16 @@ tempfile.workspace = true
 
 [features]
 test-utils = [
-    "dep:tempfile",
-    "dep:reth-db-api",
+    "tempfile",
+    "reth-db-api",
     "reth-db/test-utils",
     "reth-consensus/test-utils",
     "reth-network-p2p/test-utils",
     "reth-testing-utils",
+    "reth-chainspec/test-utils",
+    "reth-db-api?/test-utils",
+    "reth-provider/test-utils",
+    "reth-primitives-traits/test-utils",
+    "dep:reth-ethereum-primitives",
+    "reth-ethereum-primitives?/test-utils",
 ]

@@ -1,21 +1,27 @@
 //! Database debugging tool
-use crate::common::{AccessRights, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::Parser;
 use itertools::Itertools;
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::EthChainSpec;
 use reth_cli::chainspec::ChainSpecParser;
-use reth_db::{static_file::iter_static_files, tables};
-use reth_db_api::transaction::{DbTx, DbTxMut};
+use reth_db::{mdbx::tx::Tx, static_file::iter_static_files, DatabaseError};
+use reth_db_api::{
+    tables,
+    transaction::{DbTx, DbTxMut},
+};
 use reth_db_common::{
     init::{insert_genesis_header, insert_genesis_history, insert_genesis_state},
     DbTool,
 };
-use reth_node_builder::NodeTypesWithEngine;
+use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
-use reth_provider::{writer::UnifiedStorageWriter, StaticFileProviderFactory};
+use reth_provider::{
+    writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory,
+};
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
+use std::sync::Arc;
 
 /// `reth drop-stage` command
 #[derive(Debug, Parser)]
@@ -26,14 +32,13 @@ pub struct Command<C: ChainSpecParser> {
     stage: StageEnum,
 }
 
-impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
+impl<C: ChainSpecParser> Command<C> {
     /// Execute `db` command
-    pub async fn execute<N: NodeTypesWithEngine<ChainSpec = C::ChainSpec>>(
-        self,
-    ) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes>(self) -> eyre::Result<()>
+    where
+        C: ChainSpecParser<ChainSpec = N::ChainSpec>,
+    {
         let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RW)?;
-
-        let static_file_provider = provider_factory.static_file_provider();
 
         let tool = DbTool::new(provider_factory)?;
 
@@ -60,51 +65,36 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
         }
 
-        let provider_rw = tool.provider_factory.provider_rw()?;
+        let provider_rw = tool.provider_factory.database_provider_rw()?;
         let tx = provider_rw.tx_ref();
 
         match self.stage {
             StageEnum::Headers => {
                 tx.clear::<tables::CanonicalHeaders>()?;
-                tx.clear::<tables::Headers>()?;
+                tx.clear::<tables::Headers<HeaderTy<N>>>()?;
                 tx.clear::<tables::HeaderTerminalDifficulties>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::Headers.to_string(),
-                    Default::default(),
-                )?;
-                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
+                reset_stage_checkpoint(tx, StageId::Headers)?;
+
+                insert_genesis_header(&provider_rw, &self.env.chain)?;
             }
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
-                tx.clear::<tables::Transactions>()?;
+                tx.clear::<tables::Transactions<TxTy<N>>>()?;
+                reset_prune_checkpoint(tx, PruneSegment::Transactions)?;
+
                 tx.clear::<tables::TransactionBlocks>()?;
-                tx.clear::<tables::BlockOmmers>()?;
+                tx.clear::<tables::BlockOmmers<HeaderTy<N>>>()?;
                 tx.clear::<tables::BlockWithdrawals>()?;
-                tx.clear::<tables::BlockRequests>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::Bodies.to_string(),
-                    Default::default(),
-                )?;
-                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
+                reset_stage_checkpoint(tx, StageId::Bodies)?;
+
+                insert_genesis_header(&provider_rw, &self.env.chain)?;
             }
             StageEnum::Senders => {
                 tx.clear::<tables::TransactionSenders>()?;
                 // Reset pruned numbers to not count them in the next rerun's stage progress
-                if let Some(mut prune_checkpoint) =
-                    tx.get::<tables::PruneCheckpoints>(PruneSegment::SenderRecovery)?
-                {
-                    prune_checkpoint.block_number = None;
-                    prune_checkpoint.tx_number = None;
-                    tx.put::<tables::PruneCheckpoints>(
-                        PruneSegment::SenderRecovery,
-                        prune_checkpoint,
-                    )?;
-                }
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::SenderRecovery.to_string(),
-                    Default::default(),
-                )?;
+                reset_prune_checkpoint(tx, PruneSegment::SenderRecovery)?;
+                reset_stage_checkpoint(tx, StageId::SenderRecovery)?;
             }
             StageEnum::Execution => {
                 tx.clear::<tables::PlainAccountState>()?;
@@ -112,54 +102,39 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 tx.clear::<tables::AccountChangeSets>()?;
                 tx.clear::<tables::StorageChangeSets>()?;
                 tx.clear::<tables::Bytecodes>()?;
-                tx.clear::<tables::Receipts>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::Execution.to_string(),
-                    Default::default(),
-                )?;
+                tx.clear::<tables::Receipts<ReceiptTy<N>>>()?;
+
+                reset_prune_checkpoint(tx, PruneSegment::Receipts)?;
+                reset_prune_checkpoint(tx, PruneSegment::ContractLogs)?;
+                reset_stage_checkpoint(tx, StageId::Execution)?;
+
                 let alloc = &self.env.chain.genesis().alloc;
-                insert_genesis_state(&provider_rw.0, alloc.iter())?;
+                insert_genesis_state(&provider_rw, alloc.iter())?;
             }
             StageEnum::AccountHashing => {
                 tx.clear::<tables::HashedAccounts>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::AccountHashing.to_string(),
-                    Default::default(),
-                )?;
+                reset_stage_checkpoint(tx, StageId::AccountHashing)?;
             }
             StageEnum::StorageHashing => {
                 tx.clear::<tables::HashedStorages>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::StorageHashing.to_string(),
-                    Default::default(),
-                )?;
+                reset_stage_checkpoint(tx, StageId::StorageHashing)?;
             }
             StageEnum::Hashing => {
                 // Clear hashed accounts
                 tx.clear::<tables::HashedAccounts>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::AccountHashing.to_string(),
-                    Default::default(),
-                )?;
+                reset_stage_checkpoint(tx, StageId::AccountHashing)?;
 
                 // Clear hashed storages
                 tx.clear::<tables::HashedStorages>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::StorageHashing.to_string(),
-                    Default::default(),
-                )?;
+                reset_stage_checkpoint(tx, StageId::StorageHashing)?;
             }
             StageEnum::Merkle => {
                 tx.clear::<tables::AccountsTrie>()?;
                 tx.clear::<tables::StoragesTrie>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::MerkleExecute.to_string(),
-                    Default::default(),
-                )?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::MerkleUnwind.to_string(),
-                    Default::default(),
-                )?;
+
+                reset_stage_checkpoint(tx, StageId::MerkleExecute)?;
+                reset_stage_checkpoint(tx, StageId::MerkleUnwind)?;
+
                 tx.delete::<tables::StageCheckpointProgresses>(
                     StageId::MerkleExecute.to_string(),
                     None,
@@ -168,30 +143,51 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             StageEnum::AccountHistory | StageEnum::StorageHistory => {
                 tx.clear::<tables::AccountsHistory>()?;
                 tx.clear::<tables::StoragesHistory>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::IndexAccountHistory.to_string(),
-                    Default::default(),
-                )?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::IndexStorageHistory.to_string(),
-                    Default::default(),
-                )?;
-                insert_genesis_history(&provider_rw.0, self.env.chain.genesis().alloc.iter())?;
+
+                reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
+                reset_stage_checkpoint(tx, StageId::IndexStorageHistory)?;
+
+                insert_genesis_history(&provider_rw, self.env.chain.genesis().alloc.iter())?;
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
-                tx.put::<tables::StageCheckpoints>(
-                    StageId::TransactionLookup.to_string(),
-                    Default::default(),
-                )?;
-                insert_genesis_header(&provider_rw.0, &static_file_provider, &self.env.chain)?;
+                reset_prune_checkpoint(tx, PruneSegment::TransactionLookup)?;
+
+                reset_stage_checkpoint(tx, StageId::TransactionLookup)?;
+                insert_genesis_header(&provider_rw, &self.env.chain)?;
             }
         }
 
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
 
-        UnifiedStorageWriter::commit_unwind(provider_rw, static_file_provider)?;
+        UnifiedStorageWriter::commit_unwind(provider_rw)?;
 
         Ok(())
     }
+    /// Returns the underlying chain being used to run this command
+    pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
+        Some(&self.env.chain)
+    }
+}
+
+fn reset_prune_checkpoint(
+    tx: &Tx<reth_db::mdbx::RW>,
+    prune_segment: PruneSegment,
+) -> Result<(), DatabaseError> {
+    if let Some(mut prune_checkpoint) = tx.get::<tables::PruneCheckpoints>(prune_segment)? {
+        prune_checkpoint.block_number = None;
+        prune_checkpoint.tx_number = None;
+        tx.put::<tables::PruneCheckpoints>(prune_segment, prune_checkpoint)?;
+    }
+
+    Ok(())
+}
+
+fn reset_stage_checkpoint(
+    tx: &Tx<reth_db::mdbx::RW>,
+    stage_id: StageId,
+) -> Result<(), DatabaseError> {
+    tx.put::<tables::StageCheckpoints>(stage_id.to_string(), Default::default())?;
+
+    Ok(())
 }

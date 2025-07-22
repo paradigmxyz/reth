@@ -1,38 +1,5 @@
 use reth_db_api::table::Decompress;
 
-/// Generic Mask helper struct for selecting specific column values to read and decompress.
-///
-/// #### Explanation:
-///
-/// A `NippyJar` static file row can contain multiple column values. To specify the column values
-/// to be read, a mask is utilized.
-///
-/// For example, a static file with three columns, if the first and last columns are queried, the
-/// mask `0b101` would be passed. To select only the second column, the mask `0b010` would be used.
-///
-/// Since each static file has its own column distribution, different wrapper types are necessary.
-/// For instance, `B256` might be the third column in the `Header` segment, while being the second
-/// column in another segment. Hence, `Mask<B256>` would only be applicable to one of these
-/// scenarios.
-///
-/// Alongside, the column selector traits (eg. [`ColumnSelectorOne`]) this provides a structured way
-/// to tie the types to be decoded to the mask necessary to query them.
-#[derive(Debug)]
-pub struct Mask<FIRST, SECOND = (), THIRD = ()>(std::marker::PhantomData<(FIRST, SECOND, THIRD)>);
-
-macro_rules! add_segments {
-    ($($segment:tt),+) => {
-        paste::paste! {
-            $(
-                #[doc = concat!("Mask for ", stringify!($segment), " static file segment. See [`Mask`] for more.")]
-                #[derive(Debug)]
-                pub struct [<$segment Mask>]<FIRST, SECOND = (), THIRD = ()>(Mask<FIRST, SECOND, THIRD>);
-            )+
-        }
-    };
-}
-add_segments!(Header, Receipt, Transaction);
-
 ///  Trait for specifying a mask to select one column value.
 pub trait ColumnSelectorOne {
     /// First desired column value
@@ -66,21 +33,45 @@ pub trait ColumnSelectorThree {
 #[macro_export]
 /// Add mask to select `N` column values from a specific static file segment row.
 macro_rules! add_static_file_mask {
-    ($mask_struct:tt, $type1:ty, $mask:expr) => {
-        impl ColumnSelectorOne for $mask_struct<$type1> {
+    ($(#[$attr:meta])* $mask_struct:ident $(<$generic:ident>)?, $type1:ty, $mask:expr) => {
+        $(#[$attr])*
+        #[derive(Debug)]
+        pub struct $mask_struct$(<$generic>)?$((std::marker::PhantomData<$generic>))?;
+
+        impl$(<$generic>)? ColumnSelectorOne for $mask_struct$(<$generic>)?
+        where
+            $type1: Send + Sync + std::fmt::Debug + reth_db_api::table::Decompress,
+        {
             type FIRST = $type1;
             const MASK: usize = $mask;
         }
     };
-    ($mask_struct:tt, $type1:ty, $type2:ty, $mask:expr) => {
-        impl ColumnSelectorTwo for $mask_struct<$type1, $type2> {
+    ($(#[$attr:meta])* $mask_struct:ident $(<$generic:ident>)?, $type1:ty, $type2:ty, $mask:expr) => {
+        $(#[$attr])*
+        #[derive(Debug)]
+        pub struct $mask_struct$(<$generic>)?$((std::marker::PhantomData<$generic>))?;
+
+        impl$(<$generic>)? ColumnSelectorTwo for $mask_struct$(<$generic>)?
+        where
+            $type1: Send + Sync + std::fmt::Debug + reth_db_api::table::Decompress,
+            $type2: Send + Sync + std::fmt::Debug + reth_db_api::table::Decompress,
+        {
             type FIRST = $type1;
             type SECOND = $type2;
             const MASK: usize = $mask;
         }
     };
-    ($mask_struct:tt, $type1:ty, $type2:ty, $type3:ty, $mask:expr) => {
-        impl ColumnSelectorThree for $mask_struct<$type1, $type2, $type3> {
+    ($(#[$attr:meta])* $mask_struct:ident $(<$generic:ident>)?, $type1:ty, $type2:ty, $type3:ty, $mask:expr) => {
+        $(#[$attr])*
+        #[derive(Debug)]
+        pub struct $mask_struct$(<$generic>)?$((std::marker::PhantomData<$generic>))?;
+
+        impl$(<$generic>)? ColumnSelectorThree for $mask_struct$(<$generic>)?
+        where
+            $type1: Send + Sync + std::fmt::Debug + reth_db_api::table::Decompress,
+            $type2: Send + Sync + std::fmt::Debug + reth_db_api::table::Decompress,
+            $type3: Send + Sync + std::fmt::Debug + reth_db_api::table::Decompress,
+        {
             type FIRST = $type1;
             type SECOND = $type2;
             type THIRD = $type3;

@@ -8,8 +8,6 @@ Reth's P2P networking consists primarily of 4 ongoing tasks:
 - **ETH Requests**: Responds to incoming requests for headers and bodies
 - **Network Management**: Handles incoming & outgoing connections with peers, and routes requests between peers and the other tasks
 
-We'll leave most of the discussion of the discovery task for the [discv4](./discv4.md) chapter, and will focus on the other three here.
-
 Let's take a look at how the main Reth CLI (i.e., a default-configured full node) makes use of the P2P layer to explore the primary interfaces and entrypoints into the `network` crate.
 
 ---
@@ -168,8 +166,6 @@ The `Swarm` struct glues together incoming connections from peers, managing sess
 
 We'll touch more on the `NetworkManager` shortly! It's perhaps the most important struct in this crate.
 
-More information about the discovery task can be found in the [discv4](./discv4.md) chapter.
-
 The ETH requests and transactions task will be explained in their own sections, following this one.
 
 The variable `network` returned from `start_network` and the variable `fetch_client` returned from `network.fetch_client` are of types `NetworkHandle` and `FetchClient`, respectively. These are the two main interfaces for interacting with the P2P network, and are currently used in the `HeaderStage` and `BodyStage`.
@@ -219,7 +215,7 @@ pub struct NetworkManager<C> {
     /// Sender half to send events to the
     /// [`EthRequestHandler`](crate::eth_requests::EthRequestHandler) task, if configured.
     to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
-    /// Tracks the number of active session (connected peers).
+    /// Tracks the number of active sessions (connected peers).
     ///
     /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
@@ -404,7 +400,7 @@ pub struct BodiesDownloader<Client, Consensus> {
 }
 ```
 
-Here, similarly, a `FetchClient` is passed in to the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `BodiesDownloader` in the `execute` method of the `BodyStage`.
+Here, similarly, a `FetchClient` is passed into the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `BodiesDownloader` in the `execute` method of the `BodyStage`.
 
 [File: crates/net/downloaders/src/bodies/bodies.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/downloaders/src/bodies/bodies.rs)
 ```rust,ignore
@@ -461,7 +457,7 @@ pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
     client: Arc<C>,
     /// Used for reporting peers.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     peers: PeersHandle,
     /// Incoming request from the [NetworkManager](crate::NetworkManager).
     incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
@@ -498,6 +494,7 @@ fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
                 }
                 IncomingEthRequest::GetNodeData { .. } => {}
                 IncomingEthRequest::GetReceipts { .. } => {}
+                IncomingEthRequest::GetReceipts69 { .. } => {}
             },
         }
     }
@@ -660,9 +657,9 @@ pub struct TransactionsManager<Pool> {
     pool: Pool,
     /// Network access.
     network: NetworkHandle,
-    /// Subscriptions to all network related events.
+    /// Subscriptions to all network-related events.
     ///
-    /// From which we get all new incoming transaction related messages.
+    /// From which we get all new incoming transaction-related messages.
     network_events: UnboundedReceiverStream<NetworkEvent>,
     /// All currently active requests for pooled transactions.
     inflight_requests: Vec<GetPooledTxRequest>,
@@ -699,7 +696,7 @@ pub struct TransactionsHandle {
 ### Input Streams to the Transactions Task
 
 We'll touch on most of the fields in the `TransactionsManager` as the chapter continues, but some worth noting now are the 4 streams from which inputs to the task are fed:
-- `transaction_events`: A listener for `NetworkTransactionEvent`s sent from the `NetworkManager`, which consist solely of events related to transactions emitted by the network.
+- `transaction_events`: A listener for `NetworkTransactionEvent`s sent from the `NetworkManager`, which consists solely of events related to transactions emitted by the network.
 - `network_events`: A listener for `NetworkEvent`s sent from the `NetworkManager`, which consist of other "meta" events such as sessions with peers being established or closed.
 - `command_rx`: A listener for `TransactionsCommand`s sent from the `TransactionsHandle`
 - `pending`: A listener for new pending transactions added to the `TransactionPool`
@@ -787,8 +784,24 @@ The `TransactionsManager.network_events` stream is the first to have all of its 
 The events received in this channel are of type `NetworkEvent`:
 
 [File: crates/net/network/src/manager.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/manager.rs)
+
 ```rust,ignore
-pub enum NetworkEvent {
+pub enum NetworkEvent<R = PeerRequest> {
+    /// Basic peer lifecycle event.
+    Peer(PeerEvent),
+    /// Session established with requests.
+    ActivePeerSession {
+        /// Session information
+        info: SessionInfo,
+        /// A request channel to the session task.
+        messages: PeerRequestSender<R>,
+    },
+}
+```
+
+and with  
+```rust,ignore
+pub enum PeerEvent {
     /// Closed the peer session.
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
@@ -797,29 +810,29 @@ pub enum NetworkEvent {
         reason: Option<DisconnectReason>,
     },
     /// Established a new session with the given peer.
-    SessionEstablished {
-        /// The identifier of the peer to which a session was established.
-        peer_id: PeerId,
-        /// Capabilities the peer announced
-        capabilities: Arc<Capabilities>,
-        /// A request channel to the session task.
-        messages: PeerRequestSender,
-        /// The status of the peer to which a session was established.
-        status: Status,
-    },
+    SessionEstablished(SessionInfo),
     /// Event emitted when a new peer is added
     PeerAdded(PeerId),
     /// Event emitted when a new peer is removed
     PeerRemoved(PeerId),
 }
 ```
+[File: crates/net/network-api/src/events.rs](https://github.com/paradigmxyz/reth/blob/c46b5fc1157d12184d1dceb4dc45e26cf74b2bc6/crates/net/network-api/src/events.rs)
 
-They're handled with the `on_network_event` method, which responds to the two variants of the `NetworkEvent` enum in the following ways:
+They're handled with the `on_network_event` method, which processes session events through both `NetworkEvent::Peer(PeerEvent::SessionClosed)`, `NetworkEvent::Peer(PeerEvent::SessionEstablished)`, and `NetworkEvent::ActivePeerSession` for initializing peer connections and transaction broadcasting.
 
-**`NetworkEvent::SessionClosed`**
+Variants of the `PeerEvent` enum are defined in the following ways:
+
+**`PeerEvent::PeerAdded`**
+Adds a peer to the network node via network handle
+
+**`PeerEvent::PeerRemoved`**
 Removes the peer given by `NetworkEvent::SessionClosed.peer_id` from the `TransactionsManager.peers` map.
 
-**`NetworkEvent::SessionEstablished`**
+**`PeerEvent::SessionClosed`**
+Closes the peer session after disconnection
+
+**`PeerEvent::SessionEstablished`**
 Begins by inserting a `Peer` into `TransactionsManager.peers` by `peer_id`, which is a struct of the following form:
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
@@ -840,33 +853,30 @@ After the `Peer` is added to `TransactionsManager.peers`, the hashes of all of t
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
-fn on_network_event(&mut self, event: NetworkEvent) {
-    match event {
-        NetworkEvent::SessionClosed { peer_id, .. } => {
+fn on_network_event(&mut self, event_result: NetworkEvent) {
+    match event_result {
+        NetworkEvent::Peer(PeerEvent::SessionClosed { peer_id, .. }) => {
             // remove the peer
             self.peers.remove(&peer_id);
+            self.transaction_fetcher.remove_peer(&peer_id);
         }
-        NetworkEvent::SessionEstablished { peer_id, messages, .. } => {
-            // insert a new peer
-            self.peers.insert(
-                peer_id,
-                Peer {
-                    transactions: LruCache::new(
-                        NonZeroUsize::new(PEER_TRANSACTION_CACHE_LIMIT).unwrap(),
-                    ),
-                    request_tx: messages,
-                },
-            );
-
-            // Send a `NewPooledTransactionHashes` to the peer with _all_ transactions in the
-            // pool
-            let msg = NewPooledTransactionHashes(self.pool.pooled_transactions());
-            self.network.send_message(NetworkHandleMessage::SendPooledTransactionHashes {
-                peer_id,
-                msg,
-            })
+        NetworkEvent::ActivePeerSession { info, messages } => {
+            // process active peer session and broadcast available transaction from the pool
+            self.handle_peer_session(info, messages);
         }
-        _ => {}
+        NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
+            let peer_id = info.peer_id;
+            // get messages from existing peer
+             let messages = match self.peers.get(&peer_id) {
+                Some(p) => p.request_tx.clone(),
+                None => {
+                    debug!(target: "net::tx", ?peer_id, "No peer request sender found");
+                    return;
+                }
+            };
+            self.handle_peer_session(info, messages);
+        }
+         _ => {}
     }
 }
 ```
@@ -896,7 +906,7 @@ fn on_new_transactions(&mut self, hashes: impl IntoIterator<Item = TxHash>) {
             .get_all(hashes)
             .into_iter()
             .map(|tx| {
-                (*tx.hash(), Arc::new(tx.transaction.to_recovered_transaction().into_signed()))
+                (*tx.hash(), Arc::new(tx.transaction.to_recovered_transaction().into_tx()))
             })
             .collect(),
     );
@@ -991,9 +1001,9 @@ fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<Transaction
             };
 
             // track that the peer knows this transaction
-            peer.transactions.insert(tx.hash);
+            peer.transactions.insert(tx.hash());
 
-            match self.transactions_by_peers.entry(tx.hash) {
+            match self.transactions_by_peers.entry(tx.hash()) {
                 Entry::Occupied(mut entry) => {
                     // transaction was already inserted
                     entry.get_mut().push(peer_id);
@@ -1085,7 +1095,7 @@ fn on_get_pooled_transactions(
             .pool
             .get_all(request.0)
             .into_iter()
-            .map(|tx| tx.transaction.to_recovered_transaction().into_signed())
+            .map(|tx| tx.transaction.to_recovered_transaction().into_tx())
             .collect::<Vec<_>>();
 
         // we sent a response at which point we assume that the peer is aware of the transaction
@@ -1111,7 +1121,7 @@ It iterates over `TransactionsManager.pool_imports`, polling each one, and if it
 
 `on_good_import`, called when the transaction was successfully imported into the transaction pool, removes the entry for the given transaction hash from `TransactionsManager.transactions_by_peers`.
 
-`on_bad_import` also removes the entry for the given transaction hash from `TransactionsManager.transactions_by_peers`, but also calls `report_bad_message` for each peer in the entry, decreasing all of their reputation scores as they were propagating a transaction that could not validated.
+`on_bad_import` also removes the entry for the given transaction hash from `TransactionsManager.transactions_by_peers`, but also calls `report_bad_message` for each peer in the entry, decreasing all of their reputation scores as they were propagating a transaction that could not be validated.
 
 #### Checking on `pending_transactions`
 

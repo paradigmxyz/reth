@@ -1,9 +1,9 @@
 //! Pruning and full node arguments
 
-use crate::args::error::ReceiptsLogError;
+use crate::{args::error::ReceiptsLogError, primitives::EthereumHardfork};
 use alloy_primitives::{Address, BlockNumber};
-use clap::Args;
-use reth_chainspec::EthChainSpec;
+use clap::{builder::RangedU64ValueParser, Args};
+use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
 use std::collections::BTreeMap;
@@ -17,8 +17,8 @@ pub struct PruningArgs {
     pub full: bool,
 
     /// Minimum pruning interval measured in blocks.
-    #[arg(long, default_value_t = 0)]
-    pub block_interval: u64,
+    #[arg(long, value_parser = RangedU64ValueParser::<u64>::new().range(1..),)]
+    pub block_interval: Option<u64>,
 
     // Sender Recovery
     /// Prunes all sender recovery data.
@@ -48,14 +48,23 @@ pub struct PruningArgs {
 
     // Receipts
     /// Prunes all receipt data.
-    #[arg(long = "prune.receipts.full", conflicts_with_all = &["receipts_distance", "receipts_before"])]
+    #[arg(long = "prune.receipts.full", conflicts_with_all = &["receipts_pre_merge", "receipts_distance", "receipts_before"])]
     pub receipts_full: bool,
+    /// Prune receipts before the merge block.
+    #[arg(long = "prune.receipts.pre-merge", conflicts_with_all = &["receipts_full", "receipts_distance", "receipts_before"])]
+    pub receipts_pre_merge: bool,
     /// Prune receipts before the `head-N` block number. In other words, keep last N + 1 blocks.
-    #[arg(long = "prune.receipts.distance", value_name = "BLOCKS", conflicts_with_all = &["receipts_full", "receipts_before"])]
+    #[arg(long = "prune.receipts.distance", value_name = "BLOCKS", conflicts_with_all = &["receipts_full", "receipts_pre_merge", "receipts_before"])]
     pub receipts_distance: Option<u64>,
     /// Prune receipts before the specified block number. The specified block number is not pruned.
-    #[arg(long = "prune.receipts.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["receipts_full", "receipts_distance"])]
+    #[arg(long = "prune.receipts.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["receipts_full", "receipts_pre_merge", "receipts_distance"])]
     pub receipts_before: Option<BlockNumber>,
+    // Receipts Log Filter
+    /// Configure receipts log filter. Format:
+    /// <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be
+    /// 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
+    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", conflicts_with_all = &["receipts_full", "receipts_pre_merge", "receipts_distance",  "receipts_before"], value_parser = parse_receipts_log_filter)]
+    pub receipts_log_filter: Option<ReceiptsLogPruneConfig>,
 
     // Account History
     /// Prunes all account history.
@@ -82,65 +91,96 @@ pub struct PruningArgs {
     #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["storage_history_full", "storage_history_distance"])]
     pub storage_history_before: Option<BlockNumber>,
 
-    // Receipts Log Filter
-    /// Configure receipts log filter. Format:
-    /// <`address`>:<`prune_mode`>[,<`address`>:<`prune_mode`>...] Where <`prune_mode`> can be
-    /// 'full', 'distance:<`blocks`>', or 'before:<`block_number`>'
-    #[arg(long = "prune.receiptslogfilter", value_name = "FILTER_CONFIG", value_delimiter = ',', value_parser = parse_receipts_log_filter)]
-    pub receipts_log_filter: Vec<String>,
+    // Bodies
+    /// Prune bodies before the merge block.
+    #[arg(long = "prune.bodies.pre-merge", value_name = "BLOCKS", conflicts_with_all = &["bodies_distance", "bodies_before"])]
+    pub bodies_pre_merge: bool,
+    /// Prune bodies before the `head-N` block number. In other words, keep last N + 1
+    /// blocks.
+    #[arg(long = "prune.bodies.distance", value_name = "BLOCKS", conflicts_with_all = &["bodies_pre_merge", "bodies_before"])]
+    pub bodies_distance: Option<u64>,
+    /// Prune storage history before the specified block number. The specified block number is not
+    /// pruned.
+    #[arg(long = "prune.bodies.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["bodies_distance", "bodies_pre_merge"])]
+    pub bodies_before: Option<BlockNumber>,
 }
 
 impl PruningArgs {
     /// Returns pruning configuration.
-    pub fn prune_config(&self, chain_spec: &impl EthChainSpec) -> Option<PruneConfig> {
+    pub fn prune_config<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneConfig>
+    where
+        ChainSpec: EthereumHardforks,
+    {
         // Initialise with a default prune configuration.
         let mut config = PruneConfig::default();
 
         // If --full is set, use full node defaults.
         if self.full {
             config = PruneConfig {
-                block_interval: 5,
+                block_interval: config.block_interval,
                 segments: PruneModes {
                     sender_recovery: Some(PruneMode::Full),
                     transaction_lookup: None,
-                    // prune all receipts if chain doesn't have deposit contract specified in chain
-                    // spec
-                    receipts: chain_spec
-                        .deposit_contract()
-                        .map(|contract| PruneMode::Before(contract.block))
-                        .or(Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE))),
+                    receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    receipts_log_filter: ReceiptsLogPruneConfig(
-                        chain_spec
-                            .deposit_contract()
-                            .map(|contract| (contract.address, PruneMode::Before(contract.block)))
-                            .into_iter()
-                            .collect(),
-                    ),
+                    // TODO: set default to pre-merge block if available
+                    bodies_history: None,
+                    receipts_log_filter: Default::default(),
                 },
             }
         }
 
         // Override with any explicitly set prune.* flags.
+        if let Some(block_interval) = self.block_interval {
+            config.block_interval = block_interval as usize;
+        }
         if let Some(mode) = self.sender_recovery_prune_mode() {
             config.segments.sender_recovery = Some(mode);
         }
         if let Some(mode) = self.transaction_lookup_prune_mode() {
             config.segments.transaction_lookup = Some(mode);
         }
-        if let Some(mode) = self.receipts_prune_mode() {
+        if let Some(mode) = self.receipts_prune_mode(chain_spec) {
             config.segments.receipts = Some(mode);
         }
         if let Some(mode) = self.account_history_prune_mode() {
             config.segments.account_history = Some(mode);
         }
+        if let Some(mode) = self.bodies_prune_mode(chain_spec) {
+            config.segments.bodies_history = Some(mode);
+        }
         if let Some(mode) = self.storage_history_prune_mode() {
             config.segments.storage_history = Some(mode);
+        }
+        if let Some(receipt_logs) =
+            self.receipts_log_filter.as_ref().filter(|c| !c.is_empty()).cloned()
+        {
+            config.segments.receipts_log_filter = receipt_logs;
+            // need to remove the receipts segment filter entirely because that takes precedence
+            // over the logs filter
+            config.segments.receipts.take();
         }
 
         Some(config)
     }
+
+    fn bodies_prune_mode<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneMode>
+    where
+        ChainSpec: EthereumHardforks,
+    {
+        if self.bodies_pre_merge {
+            chain_spec
+                .ethereum_fork_activation(EthereumHardfork::Paris)
+                .block_number()
+                .map(PruneMode::Before)
+        } else if let Some(distance) = self.bodies_distance {
+            Some(PruneMode::Distance(distance))
+        } else {
+            self.bodies_before.map(PruneMode::Before)
+        }
+    }
+
     const fn sender_recovery_prune_mode(&self) -> Option<PruneMode> {
         if self.sender_recovery_full {
             Some(PruneMode::Full)
@@ -165,15 +205,21 @@ impl PruningArgs {
         }
     }
 
-    const fn receipts_prune_mode(&self) -> Option<PruneMode> {
-        if self.receipts_full {
+    fn receipts_prune_mode<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneMode>
+    where
+        ChainSpec: EthereumHardforks,
+    {
+        if self.receipts_pre_merge {
+            chain_spec
+                .ethereum_fork_activation(EthereumHardfork::Paris)
+                .block_number()
+                .map(PruneMode::Before)
+        } else if self.receipts_full {
             Some(PruneMode::Full)
         } else if let Some(distance) = self.receipts_distance {
             Some(PruneMode::Distance(distance))
-        } else if let Some(block_number) = self.receipts_before {
-            Some(PruneMode::Before(block_number))
         } else {
-            None
+            self.receipts_before.map(PruneMode::Before)
         }
     }
 
@@ -202,6 +248,7 @@ impl PruningArgs {
     }
 }
 
+/// Parses `,` separated pruning info into [`ReceiptsLogPruneConfig`].
 pub(crate) fn parse_receipts_log_filter(
     value: &str,
 ) -> Result<ReceiptsLogPruneConfig, ReceiptsLogError> {
@@ -233,9 +280,8 @@ pub(crate) fn parse_receipts_log_filter(
                 if parts.len() < 3 {
                     return Err(ReceiptsLogError::InvalidFilterFormat(filter.to_string()));
                 }
-                let block_number = parts[2]
-                    .parse::<BlockNumber>()
-                    .map_err(ReceiptsLogError::InvalidBlockNumber)?;
+                let block_number =
+                    parts[2].parse::<u64>().map_err(ReceiptsLogError::InvalidBlockNumber)?;
                 PruneMode::Before(block_number)
             }
             _ => return Err(ReceiptsLogError::InvalidPruneMode(parts[1].to_string())),
@@ -248,6 +294,7 @@ pub(crate) fn parse_receipts_log_filter(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::address;
     use clap::Parser;
 
     /// A helper type to parse Args more easily
@@ -259,6 +306,22 @@ mod tests {
 
     #[test]
     fn pruning_args_sanity_check() {
+        let args = CommandParser::<PruningArgs>::parse_from([
+            "reth",
+            "--prune.receiptslogfilter",
+            "0x0000000000000000000000000000000000000003:before:5000000",
+        ])
+        .args;
+        let mut config = ReceiptsLogPruneConfig::default();
+        config.0.insert(
+            address!("0x0000000000000000000000000000000000000003"),
+            PruneMode::Before(5000000),
+        );
+        assert_eq!(args.receipts_log_filter, Some(config));
+    }
+
+    #[test]
+    fn parse_receiptslogfilter() {
         let default_args = PruningArgs::default();
         let args = CommandParser::<PruningArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);

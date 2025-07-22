@@ -51,9 +51,16 @@ where
                 }
                 PayloadServiceCommand::BestPayload(_, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::PayloadAttributes(_, tx) => tx.send(None).ok(),
-                PayloadServiceCommand::Resolve(_, tx) => tx.send(None).ok(),
+                PayloadServiceCommand::Resolve(_, _, tx) => tx.send(None).ok(),
                 PayloadServiceCommand::Subscribe(_) => None,
             };
         }
+    }
+}
+
+impl<T: PayloadTypes> Default for NoopPayloadBuilderService<T> {
+    fn default() -> Self {
+        let (service, _) = Self::new();
+        service
     }
 }
