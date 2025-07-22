@@ -52,7 +52,7 @@
 
 use crate::{
     blobstore::BlobStoreError,
-    error::{InvalidPoolTransactionError, PoolResult},
+    error::{InvalidPoolTransactionError, PoolError, PoolResult},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
         TransactionListenerKind,
@@ -175,6 +175,42 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
     ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send;
+
+    /// Submit a consensus transaction directly to the pool
+    fn add_consensus_transaction(
+        &self,
+        tx: Recovered<<Self::Transaction as PoolTransaction>::Consensus>,
+        origin: TransactionOrigin,
+    ) -> impl Future<Output = PoolResult<TxHash>> + Send {
+        async move {
+            let tx_hash = *tx.tx_hash();
+
+            let pool_transaction = match Self::Transaction::try_from_consensus(tx) {
+                Ok(tx) => tx,
+                Err(e) => return Err(PoolError::other(tx_hash, e.to_string())),
+            };
+
+            self.add_transaction(origin, pool_transaction).await
+        }
+    }
+
+    /// Submit a consensus transaction and subscribe to event stream
+    fn add_consensus_transaction_and_subscribe(
+        &self,
+        tx: Recovered<<Self::Transaction as PoolTransaction>::Consensus>,
+        origin: TransactionOrigin,
+    ) -> impl Future<Output = PoolResult<TransactionEvents>> + Send {
+        async move {
+            let tx_hash = *tx.tx_hash();
+
+            let pool_transaction = match Self::Transaction::try_from_consensus(tx) {
+                Ok(tx) => tx,
+                Err(e) => return Err(PoolError::other(tx_hash, e.to_string())),
+            };
+
+            self.add_transaction_and_subscribe(origin, pool_transaction).await
+        }
+    }
 
     /// Returns a new transaction change event stream for the given transaction.
     ///
@@ -354,6 +390,10 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ///
     /// Consumer: RPC
     fn queued_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
+
+    /// Returns the number of transactions that are ready for inclusion in the next block and the
+    /// number of transactions that are ready for inclusion in future blocks: `(pending, queued)`.
+    fn pending_and_queued_txn_count(&self) -> (usize, usize);
 
     /// Returns all transactions that are currently in the pool grouped by whether they are ready
     /// for inclusion in the next block or not.

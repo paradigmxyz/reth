@@ -340,9 +340,9 @@ where
                 num.into(),
                 None,
                 TracingInspectorConfig::default_parity(),
-                |tx_info, ctx| {
+                |tx_info, mut ctx| {
                     Ok(ctx
-                        .inspector
+                        .take_inspector()
                         .into_parity_builder()
                         .into_localized_transaction_traces(tx_info))
                 },

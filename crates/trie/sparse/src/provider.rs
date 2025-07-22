@@ -4,13 +4,13 @@ use alloy_primitives::{Bytes, B256};
 use reth_execution_errors::SparseTrieError;
 use reth_trie_common::{Nibbles, TrieMask};
 
-/// Factory for instantiating blinded node providers.
+/// Factory for instantiating trie node providers.
 #[auto_impl::auto_impl(&)]
-pub trait BlindedProviderFactory {
+pub trait TrieNodeProviderFactory {
     /// Type capable of fetching blinded account nodes.
-    type AccountNodeProvider: BlindedProvider;
+    type AccountNodeProvider: TrieNodeProvider;
     /// Type capable of fetching blinded storage nodes.
-    type StorageNodeProvider: BlindedProvider;
+    type StorageNodeProvider: TrieNodeProvider;
 
     /// Returns blinded account node provider.
     fn account_node_provider(&self) -> Self::AccountNodeProvider;
@@ -30,36 +30,36 @@ pub struct RevealedNode {
     pub hash_mask: Option<TrieMask>,
 }
 
-/// Trie node provider for retrieving blinded nodes.
+/// Trie node provider for retrieving trie nodes.
 #[auto_impl::auto_impl(&)]
-pub trait BlindedProvider {
-    /// Retrieve blinded node by path.
-    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError>;
+pub trait TrieNodeProvider {
+    /// Retrieve trie node by path.
+    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError>;
 }
 
-/// Default blinded node provider factory that creates [`DefaultBlindedProvider`].
+/// Default trie node provider factory that creates [`DefaultTrieNodeProviderFactory`].
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
-pub struct DefaultBlindedProviderFactory;
+pub struct DefaultTrieNodeProviderFactory;
 
-impl BlindedProviderFactory for DefaultBlindedProviderFactory {
-    type AccountNodeProvider = DefaultBlindedProvider;
-    type StorageNodeProvider = DefaultBlindedProvider;
+impl TrieNodeProviderFactory for DefaultTrieNodeProviderFactory {
+    type AccountNodeProvider = DefaultTrieNodeProvider;
+    type StorageNodeProvider = DefaultTrieNodeProvider;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
-        DefaultBlindedProvider
+        DefaultTrieNodeProvider
     }
 
     fn storage_node_provider(&self, _account: B256) -> Self::StorageNodeProvider {
-        DefaultBlindedProvider
+        DefaultTrieNodeProvider
     }
 }
 
-/// Default blinded node provider that always returns `Ok(None)`.
+/// Default trie node provider that always returns `Ok(None)`.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
-pub struct DefaultBlindedProvider;
+pub struct DefaultTrieNodeProvider;
 
-impl BlindedProvider for DefaultBlindedProvider {
-    fn blinded_node(&self, _path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+impl TrieNodeProvider for DefaultTrieNodeProvider {
+    fn trie_node(&self, _path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
         Ok(None)
     }
 }

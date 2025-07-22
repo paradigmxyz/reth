@@ -1,7 +1,7 @@
 use crate::{
     hashed_cursor::{HashedCursor, HashedCursorFactory},
     prefix_set::TriePrefixSetsMut,
-    proof::{Proof, ProofBlindedProviderFactory},
+    proof::{Proof, ProofTrieNodeProviderFactory},
     trie_cursor::TrieCursorFactory,
 };
 use alloy_rlp::EMPTY_STRING_CODE;
@@ -21,7 +21,7 @@ use reth_execution_errors::{
 };
 use reth_trie_common::{MultiProofTargets, Nibbles};
 use reth_trie_sparse::{
-    blinded::{BlindedProvider, BlindedProviderFactory, RevealedNode},
+    provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseStateTrie,
 };
 use std::sync::{mpsc, Arc};
@@ -146,8 +146,8 @@ where
         }
 
         let (tx, rx) = mpsc::channel();
-        let blinded_provider_factory = WitnessBlindedProviderFactory::new(
-            ProofBlindedProviderFactory::new(
+        let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
+            ProofTrieNodeProviderFactory::new(
                 self.trie_cursor_factory,
                 self.hashed_cursor_factory,
                 Arc::new(self.prefix_sets),
@@ -237,56 +237,56 @@ where
 }
 
 #[derive(Debug, Clone)]
-struct WitnessBlindedProviderFactory<F> {
-    /// Blinded node provider factory.
+struct WitnessTrieNodeProviderFactory<F> {
+    /// Trie node provider factory.
     provider_factory: F,
-    /// Sender for forwarding fetched blinded node.
+    /// Sender for forwarding fetched trie node.
     tx: mpsc::Sender<Bytes>,
 }
 
-impl<F> WitnessBlindedProviderFactory<F> {
+impl<F> WitnessTrieNodeProviderFactory<F> {
     const fn new(provider_factory: F, tx: mpsc::Sender<Bytes>) -> Self {
         Self { provider_factory, tx }
     }
 }
 
-impl<F> BlindedProviderFactory for WitnessBlindedProviderFactory<F>
+impl<F> TrieNodeProviderFactory for WitnessTrieNodeProviderFactory<F>
 where
-    F: BlindedProviderFactory,
-    F::AccountNodeProvider: BlindedProvider,
-    F::StorageNodeProvider: BlindedProvider,
+    F: TrieNodeProviderFactory,
+    F::AccountNodeProvider: TrieNodeProvider,
+    F::StorageNodeProvider: TrieNodeProvider,
 {
-    type AccountNodeProvider = WitnessBlindedProvider<F::AccountNodeProvider>;
-    type StorageNodeProvider = WitnessBlindedProvider<F::StorageNodeProvider>;
+    type AccountNodeProvider = WitnessTrieNodeProvider<F::AccountNodeProvider>;
+    type StorageNodeProvider = WitnessTrieNodeProvider<F::StorageNodeProvider>;
 
     fn account_node_provider(&self) -> Self::AccountNodeProvider {
         let provider = self.provider_factory.account_node_provider();
-        WitnessBlindedProvider::new(provider, self.tx.clone())
+        WitnessTrieNodeProvider::new(provider, self.tx.clone())
     }
 
     fn storage_node_provider(&self, account: B256) -> Self::StorageNodeProvider {
         let provider = self.provider_factory.storage_node_provider(account);
-        WitnessBlindedProvider::new(provider, self.tx.clone())
+        WitnessTrieNodeProvider::new(provider, self.tx.clone())
     }
 }
 
 #[derive(Debug)]
-struct WitnessBlindedProvider<P> {
+struct WitnessTrieNodeProvider<P> {
     /// Proof-based blinded.
     provider: P,
     /// Sender for forwarding fetched blinded node.
     tx: mpsc::Sender<Bytes>,
 }
 
-impl<P> WitnessBlindedProvider<P> {
+impl<P> WitnessTrieNodeProvider<P> {
     const fn new(provider: P, tx: mpsc::Sender<Bytes>) -> Self {
         Self { provider, tx }
     }
 }
 
-impl<P: BlindedProvider> BlindedProvider for WitnessBlindedProvider<P> {
-    fn blinded_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
-        let maybe_node = self.provider.blinded_node(path)?;
+impl<P: TrieNodeProvider> TrieNodeProvider for WitnessTrieNodeProvider<P> {
+    fn trie_node(&self, path: &Nibbles) -> Result<Option<RevealedNode>, SparseTrieError> {
+        let maybe_node = self.provider.trie_node(path)?;
         if let Some(node) = &maybe_node {
             self.tx
                 .send(node.node.clone())

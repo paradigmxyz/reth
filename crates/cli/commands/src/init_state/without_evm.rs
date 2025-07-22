@@ -1,4 +1,4 @@
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256, U256};
 use alloy_rlp::Decodable;
 use reth_codecs::Compact;
@@ -12,14 +12,16 @@ use reth_stages::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use std::{fs::File, io::Read, path::PathBuf};
 use tracing::info;
-
 /// Reads the header RLP from a file and returns the Header.
-pub(crate) fn read_header_from_file(path: PathBuf) -> Result<Header, eyre::Error> {
+pub(crate) fn read_header_from_file<H>(path: PathBuf) -> Result<H, eyre::Error>
+where
+    H: Decodable,
+{
     let mut file = File::open(path)?;
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)?;
 
-    let header = Header::decode(&mut &buf[..])?;
+    let header = H::decode(&mut &buf[..])?;
     Ok(header)
 }
 

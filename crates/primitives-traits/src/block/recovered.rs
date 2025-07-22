@@ -559,7 +559,7 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
         self.block.header_mut()
     }
 
-    /// Returns a mutable reference to the header.
+    /// Returns a mutable reference to the body.
     pub const fn block_mut(&mut self) -> &mut B::Body {
         self.block.body_mut()
     }
@@ -590,15 +590,12 @@ mod rpc_compat {
     use super::{
         Block as BlockTrait, BlockBody as BlockBodyTrait, RecoveredBlock, SignedTransaction,
     };
-    use crate::block::error::BlockRecoveryError;
+    use crate::{block::error::BlockRecoveryError, SealedHeader};
     use alloc::vec::Vec;
     use alloy_consensus::{
         transaction::Recovered, Block as CBlock, BlockBody, BlockHeader, Sealable,
     };
-    use alloy_primitives::U256;
-    use alloy_rpc_types_eth::{
-        Block, BlockTransactions, BlockTransactionsKind, Header, TransactionInfo,
-    };
+    use alloy_rpc_types_eth::{Block, BlockTransactions, BlockTransactionsKind, TransactionInfo};
 
     impl<B> RecoveredBlock<B>
     where
@@ -608,11 +605,16 @@ mod rpc_compat {
         ///
         /// The `tx_resp_builder` closure transforms each transaction into the desired response
         /// type.
-        pub fn into_rpc_block<T, F, E>(
+        ///
+        /// `header_builder` transforms the block header into RPC representation. It takes the
+        /// consensus header and RLP length of the block which is a common dependency of RPC
+        /// headers.
+        pub fn into_rpc_block<T, RpcH, F, E>(
             self,
             kind: BlockTransactionsKind,
             tx_resp_builder: F,
-        ) -> Result<Block<T, Header<B::Header>>, E>
+            header_builder: impl FnOnce(SealedHeader<B::Header>, usize) -> Result<RpcH, E>,
+        ) -> Result<Block<T, RpcH>, E>
         where
             F: Fn(
                 Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
@@ -620,8 +622,10 @@ mod rpc_compat {
             ) -> Result<T, E>,
         {
             match kind {
-                BlockTransactionsKind::Hashes => Ok(self.into_rpc_block_with_tx_hashes()),
-                BlockTransactionsKind::Full => self.into_rpc_block_full(tx_resp_builder),
+                BlockTransactionsKind::Hashes => self.into_rpc_block_with_tx_hashes(header_builder),
+                BlockTransactionsKind::Full => {
+                    self.into_rpc_block_full(tx_resp_builder, header_builder)
+                }
             }
         }
 
@@ -632,11 +636,16 @@ mod rpc_compat {
         ///
         /// The `tx_resp_builder` closure transforms each transaction into the desired response
         /// type.
-        pub fn clone_into_rpc_block<T, F, E>(
+        ///
+        /// `header_builder` transforms the block header into RPC representation. It takes the
+        /// consensus header and RLP length of the block which is a common dependency of RPC
+        /// headers.
+        pub fn clone_into_rpc_block<T, RpcH, F, E>(
             &self,
             kind: BlockTransactionsKind,
             tx_resp_builder: F,
-        ) -> Result<Block<T, Header<B::Header>>, E>
+            header_builder: impl FnOnce(SealedHeader<B::Header>, usize) -> Result<RpcH, E>,
+        ) -> Result<Block<T, RpcH>, E>
         where
             F: Fn(
                 Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
@@ -644,8 +653,10 @@ mod rpc_compat {
             ) -> Result<T, E>,
         {
             match kind {
-                BlockTransactionsKind::Hashes => Ok(self.to_rpc_block_with_tx_hashes()),
-                BlockTransactionsKind::Full => self.clone().into_rpc_block_full(tx_resp_builder),
+                BlockTransactionsKind::Hashes => self.to_rpc_block_with_tx_hashes(header_builder),
+                BlockTransactionsKind::Full => {
+                    self.clone().into_rpc_block_full(tx_resp_builder, header_builder)
+                }
             }
         }
 
@@ -653,7 +664,10 @@ mod rpc_compat {
         ///
         /// Returns [`BlockTransactions::Hashes`] containing only transaction hashes.
         /// Efficiently clones only necessary parts, not the entire block.
-        pub fn to_rpc_block_with_tx_hashes<T>(&self) -> Block<T, Header<B::Header>> {
+        pub fn to_rpc_block_with_tx_hashes<T, RpcH, E>(
+            &self,
+            header_builder: impl FnOnce(SealedHeader<B::Header>, usize) -> Result<RpcH, E>,
+        ) -> Result<Block<T, RpcH>, E> {
             let transactions = self.body().transaction_hashes_iter().copied().collect();
             let rlp_length = self.rlp_length();
             let header = self.clone_sealed_header();
@@ -662,16 +676,19 @@ mod rpc_compat {
             let transactions = BlockTransactions::Hashes(transactions);
             let uncles =
                 self.body().ommers().unwrap_or(&[]).iter().map(|h| h.hash_slow()).collect();
-            let header = Header::from_consensus(header.into(), None, Some(U256::from(rlp_length)));
+            let header = header_builder(header, rlp_length)?;
 
-            Block { header, uncles, transactions, withdrawals }
+            Ok(Block { header, uncles, transactions, withdrawals })
         }
 
         /// Converts the block into an RPC [`Block`] with transaction hashes.
         ///
         /// Consumes self and returns [`BlockTransactions::Hashes`] containing only transaction
         /// hashes.
-        pub fn into_rpc_block_with_tx_hashes<T>(self) -> Block<T, Header<B::Header>> {
+        pub fn into_rpc_block_with_tx_hashes<T, E, RpcHeader>(
+            self,
+            f: impl FnOnce(SealedHeader<B::Header>, usize) -> Result<RpcHeader, E>,
+        ) -> Result<Block<T, RpcHeader>, E> {
             let transactions = self.body().transaction_hashes_iter().copied().collect();
             let rlp_length = self.rlp_length();
             let (header, body) = self.into_sealed_block().split_sealed_header_body();
@@ -679,19 +696,20 @@ mod rpc_compat {
 
             let transactions = BlockTransactions::Hashes(transactions);
             let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
-            let header = Header::from_consensus(header.into(), None, Some(U256::from(rlp_length)));
+            let header = f(header, rlp_length)?;
 
-            Block { header, uncles, transactions, withdrawals }
+            Ok(Block { header, uncles, transactions, withdrawals })
         }
 
         /// Converts the block into an RPC [`Block`] with full transaction objects.
         ///
         /// Returns [`BlockTransactions::Full`] with complete transaction data.
         /// The `tx_resp_builder` closure transforms each transaction with its metadata.
-        pub fn into_rpc_block_full<T, F, E>(
+        pub fn into_rpc_block_full<T, RpcHeader, F, E>(
             self,
             tx_resp_builder: F,
-        ) -> Result<Block<T, Header<B::Header>>, E>
+            header_builder: impl FnOnce(SealedHeader<B::Header>, usize) -> Result<RpcHeader, E>,
+        ) -> Result<Block<T, RpcHeader>, E>
         where
             F: Fn(
                 Recovered<<<B as BlockTrait>::Body as BlockBodyTrait>::Transaction>,
@@ -726,8 +744,7 @@ mod rpc_compat {
 
             let transactions = BlockTransactions::Full(transactions);
             let uncles = ommers.into_iter().map(|h| h.hash_slow()).collect();
-            let header =
-                Header::from_consensus(header.into(), None, Some(U256::from(block_length)));
+            let header = header_builder(header, block_length)?;
 
             let block = Block { header, uncles, transactions, withdrawals };
 
