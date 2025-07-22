@@ -598,11 +598,11 @@ mod tests {
                 ),
                 (
                     Head { number: 4740239, timestamp: 1741852800, ..Default::default() },
-                    ForkId { hash: ForkHash([0x51, 0x7e, 0x0f, 0x1c]), next: 18446744073709551615 },
+                    ForkId { hash: ForkHash([0x51, 0x7e, 0x0f, 0x1c]), next: 1753167600 },
                 ),
                 (
-                    Head { number: 4740239, timestamp: 18446744073709551615, ..Default::default() },
-                    ForkId { hash: ForkHash([0xc8, 0x43, 0x01, 0x5b]), next: 0 },
+                    Head { number: 4740239, timestamp: 1753167600, ..Default::default() },
+                    ForkId { hash: ForkHash([0x19, 0xbb, 0x92, 0xc6]), next: 0 },
                 ),
             ],
         );
