@@ -453,7 +453,7 @@ pub struct RpcModuleConfigBuilder {
 
 impl RpcModuleConfigBuilder {
     /// Configures a custom eth namespace config
-    pub const fn eth(mut self, eth: EthConfig) -> Self {
+    pub fn eth(mut self, eth: EthConfig) -> Self {
         self.eth = Some(eth);
         self
     }
@@ -547,7 +547,7 @@ where
     {
         let blocking_pool_guard = BlockingTaskGuard::new(config.eth.max_tracing_requests);
 
-        let eth = EthHandlers::bootstrap(config.eth, executor.clone(), eth_api);
+        let eth = EthHandlers::bootstrap(config.eth.clone(), executor.clone(), eth_api);
 
         Self {
             provider,
@@ -786,7 +786,11 @@ where
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn trace_api(&self) -> TraceApi<EthApi> {
-        TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone(), self.eth_config)
+        TraceApi::new(
+            self.eth_api().clone(),
+            self.blocking_pool_guard.clone(),
+            self.eth_config.clone(),
+        )
     }
 
     /// Instantiates [`EthBundle`] Api
@@ -953,7 +957,7 @@ where
                         RethRpcModule::Trace => TraceApi::new(
                             eth_api.clone(),
                             self.blocking_pool_guard.clone(),
-                            self.eth_config,
+                            self.eth_config.clone(),
                         )
                         .into_rpc()
                         .into(),

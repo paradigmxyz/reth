@@ -2,6 +2,7 @@
 
 use crate::{eth::core::EthApiInner, EthApi};
 use alloy_network::Ethereum;
+use alloy_rpc_client::RpcClient;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::HeaderTy;
@@ -40,6 +41,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
+    raw_tx_forwarder: Option<RpcClient>,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -80,6 +82,7 @@ where
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
+            raw_tx_forwarder: None,
         }
     }
 }
@@ -114,6 +117,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -130,6 +134,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            raw_tx_forwarder,
         }
     }
 
@@ -153,6 +158,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env: _,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -169,6 +175,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            raw_tx_forwarder,
         }
     }
 
@@ -240,6 +247,15 @@ where
         self
     }
 
+    /// Sets the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<String>) -> Self {
+        if let Some(tx_forwarder) = tx_forwarder {
+            self.raw_tx_forwarder =
+                Some(RpcClient::new_http(reqwest::Url::parse(&tx_forwarder).unwrap()));
+        }
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -268,6 +284,7 @@ where
             proof_permits,
             task_spawner,
             next_env,
+            raw_tx_forwarder,
         } = self;
 
         let provider = components.provider().clone();
@@ -304,6 +321,7 @@ where
             proof_permits,
             rpc_converter,
             next_env,
+            raw_tx_forwarder,
         )
     }
 
