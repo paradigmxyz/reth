@@ -4,6 +4,7 @@ use crate::{
     updates::{StorageTrieUpdates, TrieUpdates},
 };
 use alloy_primitives::B256;
+use reth_primitives_traits::Account;
 use reth_stages_types::MerkleCheckpoint;
 
 /// The progress of the state root computation.
@@ -24,8 +25,17 @@ pub enum StateRootProgress {
 pub struct IntermediateStateRootState {
     /// The intermediate account root state.
     pub account_root_state: IntermediateRootState,
-    /// The intermediate storage root state.
-    pub storage_root_state: Option<IntermediateRootState>,
+    /// The intermediate storage root state with account data.
+    pub storage_root_state: Option<IntermediateStorageRootState>,
+}
+
+/// The intermediate state of a storage root computation along with the account.
+#[derive(Debug)]
+pub struct IntermediateStorageRootState {
+    /// The intermediate storage trie state.
+    pub state: IntermediateRootState,
+    /// The account for which the storage root is being computed.
+    pub account: Account,
 }
 
 impl From<MerkleCheckpoint> for IntermediateStateRootState {
@@ -37,14 +47,21 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
                 last_hashed_key: value.last_account_key,
             },
             storage_root_state: value.storage_root_checkpoint.map(|checkpoint| {
-                IntermediateRootState {
-                    hash_builder: HashBuilder::from(checkpoint.state),
-                    walker_stack: checkpoint
-                        .walker_stack
-                        .into_iter()
-                        .map(CursorSubNode::from)
-                        .collect(),
-                    last_hashed_key: checkpoint.last_storage_key,
+                IntermediateStorageRootState {
+                    state: IntermediateRootState {
+                        hash_builder: HashBuilder::from(checkpoint.state),
+                        walker_stack: checkpoint
+                            .walker_stack
+                            .into_iter()
+                            .map(CursorSubNode::from)
+                            .collect(),
+                        last_hashed_key: checkpoint.last_storage_key,
+                    },
+                    account: Account {
+                        nonce: checkpoint.account_nonce,
+                        balance: checkpoint.account_balance,
+                        bytecode_hash: Some(checkpoint.account_bytecode_hash),
+                    },
                 }
             }),
         }

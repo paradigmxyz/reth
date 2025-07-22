@@ -1,6 +1,6 @@
 use super::StageId;
 use alloc::{format, string::String, vec::Vec};
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
@@ -109,7 +109,7 @@ impl reth_codecs::Compact for MerkleCheckpoint {
 /// Saves the progress of a storage root computation.
 ///
 /// This contains the walker stack, hash builder state, and the last storage key processed.
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorageRootMerkleCheckpoint {
     /// The last storage key processed.
     pub last_storage_key: B256,
@@ -117,6 +117,12 @@ pub struct StorageRootMerkleCheckpoint {
     pub walker_stack: Vec<StoredSubNode>,
     /// The hash builder state.
     pub state: HashBuilderState,
+    /// The account nonce.
+    pub account_nonce: u64,
+    /// The account balance.
+    pub account_balance: U256,
+    /// The account bytecode hash.
+    pub account_bytecode_hash: B256,
 }
 
 impl StorageRootMerkleCheckpoint {
@@ -125,8 +131,18 @@ impl StorageRootMerkleCheckpoint {
         last_storage_key: B256,
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
+        account_nonce: u64,
+        account_balance: U256,
+        account_bytecode_hash: B256,
     ) -> Self {
-        Self { last_storage_key, walker_stack, state }
+        Self {
+            last_storage_key,
+            walker_stack,
+            state,
+            account_nonce,
+            account_balance,
+            account_bytecode_hash,
+        }
     }
 }
 
@@ -148,6 +164,14 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         }
 
         len += self.state.to_compact(buf);
+
+        // Encode account fields
+        buf.put_u64(self.account_nonce);
+        len += 8;
+        len += self.account_balance.to_compact(buf);
+        buf.put_slice(self.account_bytecode_hash.as_slice());
+        len += 32;
+
         len
     }
 
@@ -165,8 +189,25 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
             buf = rest;
         }
 
-        let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (Self { last_storage_key, walker_stack, state }, buf)
+        let (state, mut buf) = HashBuilderState::from_compact(buf, 0);
+
+        // Decode account fields
+        let account_nonce = buf.get_u64();
+        let (account_balance, mut buf) = U256::from_compact(buf, 0);
+        let account_bytecode_hash = B256::from_slice(&buf[..32]);
+        buf.advance(32);
+
+        (
+            Self {
+                last_storage_key,
+                walker_stack,
+                state,
+                account_nonce,
+                account_balance,
+                account_bytecode_hash,
+            },
+            buf,
+        )
     }
 }
 
