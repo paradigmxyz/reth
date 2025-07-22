@@ -72,6 +72,7 @@ mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
+pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
@@ -85,6 +86,7 @@ pub use block_buffer::BlockBuffer;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
+pub use payload_validator::TreePayloadValidator;
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
