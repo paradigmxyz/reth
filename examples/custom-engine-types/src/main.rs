@@ -17,6 +17,7 @@
 
 #![warn(unused_crate_dependencies)]
 
+use alloy_consensus::BlockHeader;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
@@ -29,14 +30,15 @@ use alloy_rpc_types::{
     Withdrawal,
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
+use reth_engine_tree::tree::EngineValidator;
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec, ChainSpecProvider},
     node::{
         api::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-            validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
-            FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError,
-            NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
+            validate_version_specific_fields, AddOnsContext, EngineTypes, FullNodeComponents,
+            FullNodeTypes, NewPayloadError, NodeTypes, PayloadAttributes, PayloadBuilderAttributes,
+            PayloadTypes, PayloadValidator,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
@@ -211,7 +213,7 @@ where
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, T::PayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, ExecutionData, T::PayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
@@ -224,7 +226,7 @@ where
         validate_version_specific_fields(
             self.chain_spec(),
             version,
-            PayloadOrAttributes::<Self::ExecutionData, T::PayloadAttributes>::PayloadAttributes(
+            PayloadOrAttributes::<ExecutionData, T::PayloadAttributes>::PayloadAttributes(
                 attributes,
             ),
         )?;
@@ -242,8 +244,8 @@ where
     fn validate_payload_attributes_against_header(
         &self,
         _attr: &<T as PayloadTypes>::PayloadAttributes,
-        _header: &<Self::Block as reth_ethereum::primitives::Block>::Header,
-    ) -> Result<(), InvalidPayloadAttributesError> {
+        _header: &impl BlockHeader,
+    ) -> Result<(), EngineObjectValidationError> {
         // skip default timestamp validation
         Ok(())
     }

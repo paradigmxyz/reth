@@ -8,16 +8,20 @@ use crate::tree::{
     ConsistentDbView, EngineApiMetrics, EngineApiTreeState, InvalidHeaderCache, PersistingKind,
     StateProviderDatabase, TreeConfig,
 };
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_evm::{block::BlockExecutor, Evm};
 use alloy_primitives::B256;
 use reth_chain_state::CanonicalInMemoryState;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::InvalidBlockHook;
+use reth_engine_primitives::{InvalidBlockHook, PayloadValidator};
 use reth_evm::{ConfigureEvm, SpecFor};
-use reth_payload_primitives::NewPayloadError;
+use reth_payload_primitives::{
+    EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
+    NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
+};
 use reth_primitives_traits::{
-    AlloyBlockHeader, Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -963,5 +967,51 @@ where
         );
 
         Ok(input)
+    }
+}
+
+/// Type that validates the payloads processed by the engine.
+pub trait EngineValidator<Types: PayloadTypes>:
+    PayloadValidator<ExecutionData = Types::ExecutionData>
+{
+    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+    /// and the message version.
+    fn validate_version_specific_fields(
+        &self,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<
+            '_,
+            Types::ExecutionData,
+            <Types as PayloadTypes>::PayloadAttributes,
+        >,
+    ) -> Result<(), EngineObjectValidationError>;
+
+    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &<Types as PayloadTypes>::PayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError>;
+
+    /// Validates the payload attributes with respect to the header.
+    ///
+    /// By default, this enforces that the payload attributes timestamp is greater than the
+    /// timestamp according to:
+    ///   > 7. Client software MUST ensure that payloadAttributes.timestamp is greater than
+    ///   > timestamp
+    ///   > of a block referenced by forkchoiceState.headBlockHash.
+    ///
+    /// See also: <https://github.com/ethereum/execution-apis/blob/647a677b7b97e09145b8d306c0eaf51c32dae256/src/engine/common.md#specification-1>
+    fn validate_payload_attributes_against_header(
+        &self,
+        attr: &<Types as PayloadTypes>::PayloadAttributes,
+        header: &impl BlockHeader,
+    ) -> Result<(), EngineObjectValidationError> {
+        if attr.timestamp() <= header.timestamp() {
+            return Err(EngineObjectValidationError::InvalidParams(
+                InvalidPayloadAttributesError::InvalidTimestamp.into(),
+            ))
+        }
+        Ok(())
     }
 }
