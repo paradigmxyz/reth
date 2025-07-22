@@ -1189,16 +1189,24 @@ impl<T: PoolTransaction> AddedTransaction<T> {
 }
 
 /// The state of a transaction when is was added to the pool
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AddedTransactionState {
-    /// Ready for execution
+    /// Transaction added to the pending pool, ready for execution.
     Pending,
     /// Not ready for execution due to a nonce gap or insufficient balance
     Queued, // TODO: Break it down to missing nonce, insufficient balance, etc.
 }
 
+impl AddedTransactionState {
+
+    /// Returns true if the transaction is ready for execution in the pending pool.
+    pub const fn is_pending(&self) -> bool {
+        matches!(self, Self::Pending)
+    }
+}
+
 /// The outcome of a successful transaction addition
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AddedTransactionOutcome {
     /// The hash of the transaction
     pub hash: TxHash,
