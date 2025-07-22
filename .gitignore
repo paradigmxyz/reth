@@ -64,6 +64,11 @@ _
 # broken links report
 links-report.json
 
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
 # direnv
 .envrc
 .direnv/
