@@ -4,6 +4,7 @@ use alloy_primitives::{Address, BlockNumber, B256};
 use core::ops::RangeInclusive;
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
+// TODO: add storage root progress
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct MerkleCheckpoint {

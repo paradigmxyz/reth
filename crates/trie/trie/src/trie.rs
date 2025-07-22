@@ -2,7 +2,7 @@ use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, TriePrefixSets},
-    progress::{IntermediateStateRootState, StateRootProgress},
+    progress::{IntermediateRootState, IntermediateStateRootState, StateRootProgress},
     stats::TrieTracker,
     trie_cursor::TrieCursorFactory,
     updates::{StorageTrieUpdates, TrieUpdates},
@@ -158,6 +158,7 @@ where
         let hashed_account_cursor = self.hashed_cursor_factory.hashed_account_cursor()?;
         let (mut hash_builder, mut account_node_iter) = match self.previous_state {
             Some(state) => {
+                let state = state.account_root_state;
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
                 let walker = TrieWalker::state_trie_from_stack(
                     trie_cursor,
@@ -239,10 +240,15 @@ where
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
                         trie_updates.account_nodes.extend(hash_builder_updates);
 
-                        let state = IntermediateStateRootState {
+                        let state = IntermediateRootState {
                             hash_builder,
                             walker_stack,
                             last_account_key: hashed_address,
+                        };
+
+                        let state = IntermediateStateRootState {
+                            account_root_state: state,
+                            storage_root_state: None,
                         };
 
                         return Ok(StateRootProgress::Progress(

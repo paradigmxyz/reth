@@ -250,9 +250,14 @@ where
 
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
-                        state.last_account_key,
-                        state.walker_stack.into_iter().map(StoredSubNode::from).collect(),
-                        state.hash_builder.into(),
+                        state.account_root_state.last_account_key,
+                        state
+                            .account_root_state
+                            .walker_stack
+                            .into_iter()
+                            .map(StoredSubNode::from)
+                            .collect(),
+                        state.account_root_state.hash_builder.into(),
                     );
                     self.save_execution_checkpoint(provider, Some(checkpoint))?;
 
