@@ -6056,7 +6056,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "auto_impl",
  "once_cell",
@@ -10648,7 +10648,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "27.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -10666,7 +10666,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "6.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "bitvec",
  "once_cell",
@@ -10678,7 +10678,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "cfg-if",
  "derive-where",
@@ -10693,7 +10693,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "8.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -10708,7 +10708,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "7.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -10721,7 +10721,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "7.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "auto_impl",
  "either",
@@ -10733,7 +10733,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -10751,7 +10751,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "8.0.3"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "auto_impl",
  "either",
@@ -10788,7 +10788,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "23.0.2"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -10799,7 +10799,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "24.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -10825,7 +10825,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "20.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -10835,7 +10835,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "7.0.1"
-source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#7e98625d1391b11b0f5fb2fa88dae2735959994b"
+source = "git+https://github.com/bluealloy/revm?branch=fusaka-devnet-3#d5292dda70a21784d1cf9fcfca957445376e91f0"
 dependencies = [
  "bitflags 2.9.1",
  "revm-bytecode",
