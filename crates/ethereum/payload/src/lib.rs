@@ -26,17 +26,43 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_payload_builder::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
-use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
-    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError, PoolTransactionError},
     BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
-use std::sync::Arc;
+use std::{any::Any, sync::Arc};
 use tracing::{debug, trace, warn};
+
+/// Wrapper for execution errors to implement PoolTransactionError
+#[derive(Debug)]
+struct ExecutionError(Box<dyn std::error::Error + Send + Sync>);
+
+impl std::fmt::Display for ExecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "transaction execution failed: {}", self.0)
+    }
+}
+
+impl std::error::Error for ExecutionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(&*self.0)
+    }
+}
+
+impl PoolTransactionError for ExecutionError {
+    fn is_bad_transaction(&self) -> bool {
+        // Execution errors typically indicate bad transactions
+        true
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 mod config;
 pub use config::*;
@@ -286,9 +312,7 @@ where
                     trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::Consensus(
-                            InvalidTransactionError::TxTypeNotSupported,
-                        ),
+                        InvalidPoolTransactionError::Other(Box::new(ExecutionError(error))),
                     );
                 }
                 continue
@@ -341,4 +365,54 @@ where
         .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::U256;
+    use std::error::Error;
+    use reth_primitives_traits::transaction::error::InvalidTransactionError;
+
+    #[test]
+    fn test_execution_error_preserves_original_error() {
+        // Create an insufficient funds error
+        let insufficient_funds = InvalidTransactionError::InsufficientFunds(
+            reth_primitives_traits::GotExpected::new(
+                U256::from(500000),
+                U256::from(1000000)
+            ).into()
+        );
+        
+        // Wrap it with our ExecutionError
+        let execution_error = ExecutionError(Box::new(insufficient_funds));
+        
+        // Check that error details are preserved
+        let error_string = execution_error.to_string();
+        assert!(error_string.contains("transaction execution failed"));
+        assert!(error_string.contains("does not have enough funds"));
+        
+        // Verify PoolTransactionError implementation
+        assert!(execution_error.is_bad_transaction());
+    }
+
+    #[test]
+    fn test_execution_error_with_nonce_error() {
+        // Create a nonce inconsistency error
+        let nonce_error = InvalidTransactionError::NonceNotConsistent {
+            tx: 10,
+            state: 5,
+        };
+        
+        // Wrap it with our ExecutionError
+        let execution_error = ExecutionError(Box::new(nonce_error));
+        
+        // Check that error details are preserved
+        let error_string = execution_error.to_string();
+        assert!(error_string.contains("transaction execution failed"));
+        assert!(error_string.contains("nonce is not consistent"));
+        
+        // Original error should be accessible via source()
+        assert!(execution_error.source().is_some());
+    }
 }
