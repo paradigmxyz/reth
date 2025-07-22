@@ -1,17 +1,16 @@
 //! Trait for specifying `eth` network dependent API types.
 
 use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
-use alloy_rpc_types_eth::{Block, TransactionRequest};
+use alloy_rpc_types_eth::Block;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc_convert::RpcConvert;
+pub use reth_rpc_convert::{RpcTransaction, RpcTxReq, RpcTypes};
 use reth_storage_api::{ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{
     error::Error,
     fmt::{self},
 };
-
-pub use reth_rpc_convert::{RpcTransaction, RpcTxReq, RpcTypes};
 
 /// Network specific `eth` API types.
 ///
@@ -60,11 +59,10 @@ where
             >,
         > + EthApiTypes<
             RpcConvert: RpcConvert<
-                Primitives = <Self as RpcNodeCore>::Primitives,
+                Primitives = Self::Primitives,
                 Network = Self::NetworkTypes,
                 Error = RpcError<Self>,
             >,
-            NetworkTypes: RpcTypes<TransactionRequest: From<TransactionRequest>>,
         >,
 {
 }
@@ -81,7 +79,6 @@ impl<T> FullEthApiTypes for T where
                 Network = Self::NetworkTypes,
                 Error = RpcError<T>,
             >,
-            NetworkTypes: RpcTypes<TransactionRequest: From<TransactionRequest>>,
         >
 {
 }

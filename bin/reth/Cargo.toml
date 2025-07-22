@@ -64,7 +64,6 @@ eyre.workspace = true
 
 [dev-dependencies]
 backon.workspace = true
-similar-asserts.workspace = true
 tempfile.workspace = true
 
 [features]
@@ -76,6 +75,7 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-primitives/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
+    "reth-node-ethereum/asm-keccak",
 ]
 
 jemalloc = [

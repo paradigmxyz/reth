@@ -13,7 +13,7 @@ reth-network-peers.workspace = true
 reth-node-builder.workspace = true
 reth-optimism-forks.workspace = true
 reth-db-api.workspace = true
-reth-op = { workspace = true, features = ["node", "pool"] }
+reth-op = { workspace = true, features = ["node", "pool", "rpc"] }
 reth-payload-builder.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-engine-api.workspace = true
@@ -32,9 +32,12 @@ alloy-op-evm.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-serde.workspace = true
+alloy-network.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-rpc-types-eth.workspace = true
 op-alloy-consensus.workspace = true
 op-alloy-rpc-types-engine.workspace = true
+op-alloy-rpc-types.workspace = true
 op-revm.workspace = true
 
 # misc
@@ -64,5 +67,7 @@ arbitrary = [
     "reth-ethereum/arbitrary",
     "alloy-rpc-types-engine/arbitrary",
     "reth-db-api/arbitrary",
+    "alloy-rpc-types-eth/arbitrary",
+    "op-alloy-rpc-types/arbitrary",
 ]
 default = []

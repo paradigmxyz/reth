@@ -11,14 +11,15 @@ use reth_primitives_traits::{AlloyBlockHeader, Block, SealedBlock};
 /// - doesn't contain EIP-4844 transactions unless Cancun is active
 /// - checks blob versioned hashes in block and sidecar match
 #[inline]
-pub fn ensure_well_formed_fields<T, B>(
+pub fn ensure_well_formed_fields<T, B, H>(
     block: &SealedBlock<B>,
     cancun_sidecar_fields: Option<&CancunPayloadFields>,
     is_cancun_active: bool,
 ) -> Result<(), PayloadError>
 where
     T: Transaction + Typed2718,
-    B: Block<Body = BlockBody<T>>,
+    H: AlloyBlockHeader,
+    B: Block<Header = H, Body = BlockBody<T, H>>,
 {
     ensure_well_formed_header_and_sidecar_fields(block, cancun_sidecar_fields, is_cancun_active)?;
     ensure_well_formed_transactions_field_with_sidecar(
@@ -72,8 +73,8 @@ pub fn ensure_well_formed_header_and_sidecar_fields<T: Block>(
 /// - doesn't contain EIP-4844 transactions unless Cancun is active
 /// - checks blob versioned hashes in block and sidecar match
 #[inline]
-pub fn ensure_well_formed_transactions_field_with_sidecar<T: Transaction + Typed2718>(
-    block_body: &BlockBody<T>,
+pub fn ensure_well_formed_transactions_field_with_sidecar<T: Transaction + Typed2718, H>(
+    block_body: &BlockBody<T, H>,
     cancun_sidecar_fields: Option<&CancunPayloadFields>,
     is_cancun_active: bool,
 ) -> Result<(), PayloadError> {
@@ -89,8 +90,8 @@ pub fn ensure_well_formed_transactions_field_with_sidecar<T: Transaction + Typed
 /// Ensures that the number of blob versioned hashes of a EIP-4844 transactions in block, matches
 /// the number hashes included in the _separate_ `block_versioned_hashes` of the cancun payload
 /// fields on the sidecar.
-pub fn ensure_matching_blob_versioned_hashes<T: Transaction + Typed2718>(
-    block_body: &BlockBody<T>,
+pub fn ensure_matching_blob_versioned_hashes<T: Transaction + Typed2718, H>(
+    block_body: &BlockBody<T, H>,
     cancun_sidecar_fields: Option<&CancunPayloadFields>,
 ) -> Result<(), PayloadError> {
     let num_blob_versioned_hashes = block_body.blob_versioned_hashes_iter().count();

@@ -10,7 +10,7 @@ use crate::{
     hooks::NodeHooks,
     launch::LaunchNode,
     rpc::{RethRpcAddOns, RethRpcServerHandles, RpcContext},
-    AddOns, FullNode,
+    AddOns, ComponentsFor, FullNode,
 };
 
 use reth_exex::ExExContext;
@@ -74,7 +74,7 @@ impl<T: FullNodeTypes> fmt::Debug for NodeTypesAdapter<T> {
 /// Container for the node's types and the components and other internals that can be used by
 /// addons of the node.
 #[derive(Debug)]
-pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T>> {
+pub struct NodeAdapter<T: FullNodeTypes, C: NodeComponents<T> = ComponentsFor<T>> {
     /// The components of the node.
     pub components: C,
     /// The task executor for the node.

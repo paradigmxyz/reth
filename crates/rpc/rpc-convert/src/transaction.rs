@@ -2,9 +2,12 @@
 
 use crate::{
     fees::{CallFees, CallFeesError},
-    RpcTransaction, RpcTxReq, RpcTypes,
+    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq, RpcTypes,
 };
-use alloy_consensus::{error::ValueError, transaction::Recovered, EthereumTxEnvelope, TxEip4844};
+use alloy_consensus::{
+    error::ValueError, transaction::Recovered, EthereumTxEnvelope, Sealable, TxEip4844,
+};
+use alloy_network::Network;
 use alloy_primitives::{Address, TxKind, U256};
 use alloy_rpc_types_eth::{
     request::{TransactionInputError, TransactionRequest},
@@ -15,10 +18,72 @@ use reth_evm::{
     revm::context_interface::{either::Either, Block},
     ConfigureEvm, TxEnvFor,
 };
-use reth_primitives_traits::{NodePrimitives, TxTy};
+use reth_primitives_traits::{
+    HeaderTy, NodePrimitives, SealedHeader, SealedHeaderFor, TransactionMeta, TxTy,
+};
 use revm_context::{BlockEnv, CfgEnv, TxEnv};
-use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
+use std::{borrow::Cow, convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
 use thiserror::Error;
+
+/// Input for [`RpcConvert::convert_receipts`].
+#[derive(Debug, Clone)]
+pub struct ConvertReceiptInput<'a, N: NodePrimitives> {
+    /// Primitive receipt.
+    pub receipt: Cow<'a, N::Receipt>,
+    /// Transaction the receipt corresponds to.
+    pub tx: Recovered<&'a N::SignedTx>,
+    /// Gas used by the transaction.
+    pub gas_used: u64,
+    /// Number of logs emitted before this transaction.
+    pub next_log_index: usize,
+    /// Metadata for the transaction.
+    pub meta: TransactionMeta,
+}
+
+/// A type that knows how to convert primitive receipts to RPC representations.
+pub trait ReceiptConverter<N: NodePrimitives>: Debug + 'static {
+    /// RPC representation.
+    type RpcReceipt;
+
+    /// Error that may occur during conversion.
+    type Error;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from the same block.
+    fn convert_receipts(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, N>>,
+    ) -> Result<Vec<Self::RpcReceipt>, Self::Error>;
+}
+
+/// A type that knows how to convert a consensus header into an RPC header.
+pub trait HeaderConverter<Consensus, Rpc>: Debug + Send + Sync + Unpin + Clone + 'static {
+    /// Converts a consensus header into an RPC header.
+    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc;
+}
+
+/// Default implementation of [`HeaderConverter`] that uses [`FromConsensusHeader`] to convert
+/// headers.
+impl<Consensus, Rpc> HeaderConverter<Consensus, Rpc> for ()
+where
+    Rpc: FromConsensusHeader<Consensus>,
+{
+    fn convert_header(&self, header: SealedHeader<Consensus>, block_size: usize) -> Rpc {
+        Rpc::from_consensus_header(header, block_size)
+    }
+}
+
+/// Conversion trait for obtaining RPC header from a consensus header.
+pub trait FromConsensusHeader<T> {
+    /// Takes a consensus header and converts it into `self`.
+    fn from_consensus_header(header: SealedHeader<T>, block_size: usize) -> Self;
+}
+
+impl<T: Sealable> FromConsensusHeader<T> for alloy_rpc_types_eth::Header<T> {
+    fn from_consensus_header(header: SealedHeader<T>, block_size: usize) -> Self {
+        Self::from_consensus(header.into(), None, Some(U256::from(block_size)))
+    }
+}
 
 /// Responsible for the conversions from and into RPC requests and responses.
 ///
@@ -28,7 +93,7 @@ use thiserror::Error;
 /// A generic implementation [`RpcConverter`] should be preferred over a manual implementation. As
 /// long as its trait bound requirements are met, the implementation is created automatically and
 /// can be used in RPC method handlers for all the conversions.
-pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
+pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug + 'static {
     /// Associated lower layer consensus types to convert from and into types of [`Self::Network`].
     type Primitives: NodePrimitives;
 
@@ -78,6 +143,20 @@ pub trait RpcConvert: Send + Sync + Unpin + Clone + Debug {
         cfg_env: &CfgEnv<Spec>,
         block_env: &BlockEnv,
     ) -> Result<Self::TxEnv, Self::Error>;
+
+    /// Converts a set of primitive receipts to RPC representations. It is guaranteed that all
+    /// receipts are from the same block.
+    fn convert_receipts(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error>;
+
+    /// Converts a primitive header to an RPC header.
+    fn convert_header(
+        &self,
+        header: SealedHeaderFor<Self::Primitives>,
+        block_size: usize,
+    ) -> Result<RpcHeader<Self::Network>, Self::Error>;
 }
 
 /// Converts `self` into `T`. The opposite of [`FromConsensusTx`].
@@ -642,8 +721,8 @@ impl<E, Evm, Err, Map> LegacyRpcConverter<E, Evm, Err, Map> {
         LegacyRpcConverter::with_mapper(mapper)
     }
 
-    /// Converts the generic types and swaps the inner `mapper`.
-    pub fn convert_map<E2, Evm2, Err2, Map2>(
+    /// Configures the mapper.
+    pub fn with_mapper<MapNew>(
         self,
         mapper: Map2,
     ) -> LegacyRpcConverter<E2, Evm2, Err2, Map2> {
@@ -664,20 +743,30 @@ impl<E, Evm, Err> Default for LegacyRpcConverter<E, Evm, Err> {
 }
 
 impl<N, E, Evm, Err, Map> RpcConvert for LegacyRpcConverter<E, Evm, Err, Map>
+
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
     TxTy<N>: IntoRpcTx<E::TransactionResponse> + Clone + Debug,
     RpcTxReq<E>: TryIntoSimTx<TxTy<N>> + TryIntoTxEnv<TxEnvFor<Evm>>,
-    Err: From<TransactionConversionError>
-        + From<<RpcTxReq<E> as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
-        + for<'a> From<<Map as TxInfoMapper<&'a TxTy<N>>>::Err>
-        + Error
-        + Unpin
+    Receipt: ReceiptConverter<
+            N,
+            RpcReceipt = RpcReceipt<E>,
+            Error: From<TransactionConversionError>
+                       + From<<RpcTxReq<E> as TryIntoTxEnv<TxEnvFor<Evm>>>::Err>
+                       + for<'a> From<<Map as TxInfoMapper<&'a TxTy<N>>>::Err>
+                       + Error
+                       + Unpin
+                       + Sync
+                       + Send
+                       + Into<jsonrpsee_types::ErrorObject<'static>>,
+        > + Send
         + Sync
-        + Send
-        + Into<jsonrpsee_types::ErrorObject<'static>>,
+        + Unpin
+        + Clone
+        + Debug,
+    Header: HeaderConverter<HeaderTy<N>, RpcHeader<E>>,
     Map: for<'a> TxInfoMapper<
             &'a TxTy<N>,
             Out = <TxTy<N> as IntoRpcTx<E::TransactionResponse>>::TxInfo,
@@ -685,12 +774,13 @@ where
         + Debug
         + Unpin
         + Send
-        + Sync,
+        + Sync
+        + 'static,
 {
     type Primitives = N;
     type Network = E;
     type TxEnv = TxEnvFor<Evm>;
-    type Error = Err;
+    type Error = Receipt::Error;
 
     fn fill(
         &self,
@@ -715,6 +805,21 @@ where
     ) -> Result<Self::TxEnv, Self::Error> {
         Ok(request.try_into_tx_env(cfg_env, block_env)?)
     }
+
+    fn convert_receipts(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.receipt_converter.convert_receipts(receipts)
+    }
+
+    fn convert_header(
+        &self,
+        header: SealedHeaderFor<Self::Primitives>,
+        block_size: usize,
+    ) -> Result<RpcHeader<Self::Network>, Self::Error> {
+        Ok(self.header_converter.convert_header(header, block_size))
+    }
 }
 
 /// Optimism specific RPC transaction compatibility implementations.
@@ -730,17 +835,22 @@ pub mod op {
     use op_alloy_rpc_types::OpTransactionRequest;
     use op_revm::OpTransaction;
     use reth_optimism_primitives::DepositReceipt;
+    use reth_primitives_traits::SignedTransaction;
     use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 
     /// Creates [`OpTransactionInfo`] by adding [`OpDepositInfo`] to [`TransactionInfo`] if `tx` is
     /// a deposit.
-    pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
+    pub fn try_into_op_tx_info<Tx, T>(
         provider: &T,
-        tx: &OpTxEnvelope,
+        tx: &Tx,
         tx_info: TransactionInfo,
-    ) -> Result<OpTransactionInfo, ProviderError> {
+    ) -> Result<OpTransactionInfo, ProviderError>
+    where
+        Tx: op_alloy_consensus::OpTransaction + SignedTransaction,
+        T: ReceiptProvider<Receipt: DepositReceipt>,
+    {
         let deposit_meta = if tx.is_deposit() {
-            provider.receipt_by_hash(tx.tx_hash())?.and_then(|receipt| {
+            provider.receipt_by_hash(*tx.tx_hash())?.and_then(|receipt| {
                 receipt.as_deposit_receipt().map(|receipt| OpDepositInfo {
                     deposit_receipt_version: receipt.deposit_receipt_version,
                     deposit_nonce: receipt.deposit_nonce,

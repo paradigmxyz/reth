@@ -7,9 +7,11 @@ use alloy_primitives::BlockNumber;
 use itertools::Itertools;
 use reth_db_api::{
     cursor::{DbCursorRO, RangeWalker},
+    table::Value,
     tables,
     transaction::DbTxMut,
 };
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{providers::StaticFileProvider, DBProvider, StaticFileProviderFactory};
 use reth_prune_types::{
     PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
@@ -32,8 +34,10 @@ impl<N> Headers<N> {
     }
 }
 
-impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Provider>
-    for Headers<Provider::Primitives>
+impl<Provider> Segment<Provider> for Headers<Provider::Primitives>
+where
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Value>>
+        + DBProvider<Tx: DbTxMut>,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Headers
@@ -63,7 +67,12 @@ impl<Provider: StaticFileProviderFactory + DBProvider<Tx: DbTxMut>> Segment<Prov
 
         let range = last_pruned_block.map_or(0, |block| block + 1)..=block_range_end;
 
-        let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
+        // let mut headers_cursor = provider.tx_ref().cursor_write::<tables::Headers>()?;
+        let mut headers_cursor = provider
+            .tx_ref()
+            .cursor_write::<tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>>(
+            )?;
+
         let mut header_tds_cursor =
             provider.tx_ref().cursor_write::<tables::HeaderTerminalDifficulties>()?;
         let mut canonical_headers_cursor =
@@ -108,11 +117,16 @@ type Walker<'a, Provider, T> =
 #[allow(missing_debug_implementations)]
 struct HeaderTablesIter<'a, Provider>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Value>>
+        + DBProvider<Tx: DbTxMut>,
 {
     provider: &'a Provider,
     limiter: &'a mut PruneLimiter,
-    headers_walker: Walker<'a, Provider, tables::Headers>,
+    headers_walker: Walker<
+        'a,
+        Provider,
+        tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>,
+    >,
     header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
     canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
 }
@@ -124,12 +138,17 @@ struct HeaderTablesIterItem {
 
 impl<'a, Provider> HeaderTablesIter<'a, Provider>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Value>>
+        + DBProvider<Tx: DbTxMut>,
 {
     const fn new(
         provider: &'a Provider,
         limiter: &'a mut PruneLimiter,
-        headers_walker: Walker<'a, Provider, tables::Headers>,
+        headers_walker: Walker<
+            'a,
+            Provider,
+            tables::Headers<<Provider::Primitives as NodePrimitives>::BlockHeader>,
+        >,
         header_tds_walker: Walker<'a, Provider, tables::HeaderTerminalDifficulties>,
         canonical_headers_walker: Walker<'a, Provider, tables::CanonicalHeaders>,
     ) -> Self {
@@ -139,7 +158,8 @@ where
 
 impl<Provider> Iterator for HeaderTablesIter<'_, Provider>
 where
-    Provider: DBProvider<Tx: DbTxMut>,
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Value>>
+        + DBProvider<Tx: DbTxMut>,
 {
     type Item = Result<HeaderTablesIterItem, PrunerError>;
     fn next(&mut self) -> Option<Self::Item> {

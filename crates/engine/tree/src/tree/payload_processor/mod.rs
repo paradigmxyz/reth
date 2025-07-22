@@ -13,7 +13,7 @@ use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
-use multiproof::*;
+use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use reth_evm::{ConfigureEvm, OnStateHook, SpecFor};
@@ -28,7 +28,10 @@ use reth_trie_parallel::{
     proof_task::{ProofTaskCtx, ProofTaskManager},
     root::ParallelStateRootError,
 };
-use reth_trie_sparse::{SerialSparseTrie, SparseTrie};
+use reth_trie_sparse::{
+    provider::{TrieNodeProvider, TrieNodeProviderFactory},
+    ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
+};
 use std::{
     collections::VecDeque,
     sync::{
@@ -40,10 +43,13 @@ use std::{
 
 use super::precompile_cache::PrecompileCacheMap;
 
+mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
 pub mod prewarm;
 pub mod sparse_trie;
+
+use configured_sparse_trie::ConfiguredSparseTrie;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -68,9 +74,13 @@ where
     precompile_cache_disabled: bool,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// A cleared sparse trie, kept around to be reused for the state root computation so that
-    /// allocations can be minimized.
-    sparse_trie: Option<SparseTrie>,
+    /// A cleared `SparseStateTrie`, kept around to be reused for the state root computation so
+    /// that allocations can be minimized.
+    sparse_state_trie: Arc<
+        parking_lot::Mutex<Option<ClearedSparseStateTrie<ConfiguredSparseTrie, SerialSparseTrie>>>,
+    >,
+    /// Whether to use the parallel sparse trie.
+    use_parallel_sparse_trie: bool,
     _marker: std::marker::PhantomData<N>,
 }
 
@@ -95,7 +105,8 @@ where
             evm_config,
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
-            sparse_trie: None,
+            sparse_state_trie: Arc::default(),
+            use_parallel_sparse_trie: config.enable_parallel_sparse_trie(),
             _marker: Default::default(),
         }
     }
@@ -196,24 +207,11 @@ where
             multi_proof_task.run();
         });
 
-        // take the sparse trie if it was set
-        let sparse_trie = self.sparse_trie.take();
-
-        let mut sparse_trie_task =
-            SparseTrieTask::<_, SerialSparseTrie, SerialSparseTrie>::new_with_stored_trie(
-                self.executor.clone(),
-                sparse_trie_rx,
-                proof_task.handle(),
-                self.trie_metrics.clone(),
-                sparse_trie,
-            );
-
         // wire the sparse trie to the state root response receiver
         let (state_root_tx, state_root_rx) = channel();
-        self.executor.spawn_blocking(move || {
-            let res = sparse_trie_task.run();
-            let _ = state_root_tx.send(res);
-        });
+
+        // Spawn the sparse trie task using any stored trie and parallel trie configuration.
+        self.spawn_sparse_trie_task(sparse_trie_rx, proof_task.handle(), state_root_tx);
 
         // spawn the proof task
         self.executor.spawn_blocking(move || {
@@ -249,11 +247,6 @@ where
     {
         let prewarm_handle = self.spawn_caching_with(header, transactions, provider_builder, None);
         PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
-    }
-
-    /// Sets the sparse trie to be kept around for the state root computation.
-    pub(super) fn set_sparse_trie(&mut self, sparse_trie: SparseTrie) {
-        self.sparse_trie = Some(sparse_trie);
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -317,6 +310,53 @@ where
             let cache = ProviderCacheBuilder::default().build_caches(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
         })
+    }
+
+    /// Spawns the [`SparseTrieTask`] for this payload processor.
+    fn spawn_sparse_trie_task<BPF>(
+        &self,
+        sparse_trie_rx: mpsc::Receiver<SparseTrieUpdate>,
+        proof_task_handle: BPF,
+        state_root_tx: mpsc::Sender<Result<StateRootComputeOutcome, ParallelStateRootError>>,
+    ) where
+        BPF: TrieNodeProviderFactory + Clone + Send + Sync + 'static,
+        BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
+        BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
+    {
+        // Reuse a stored SparseStateTrie, or create a new one using the desired configuration if
+        // there's none to reuse.
+        let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
+        let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
+            let accounts_trie = if self.use_parallel_sparse_trie {
+                ConfiguredSparseTrie::Parallel(Default::default())
+            } else {
+                ConfiguredSparseTrie::Serial(Default::default())
+            };
+            ClearedSparseStateTrie::from_state_trie(
+                SparseStateTrie::new()
+                    .with_accounts_trie(SparseTrie::Blind(Some(Box::new(accounts_trie))))
+                    .with_updates(true),
+            )
+        });
+
+        let task =
+            SparseTrieTask::<_, ConfiguredSparseTrie, SerialSparseTrie>::new_with_cleared_trie(
+                self.executor.clone(),
+                sparse_trie_rx,
+                proof_task_handle,
+                self.trie_metrics.clone(),
+                sparse_state_trie,
+            );
+
+        self.executor.spawn_blocking(move || {
+            let (result, trie) = task.run();
+            // Send state root computation result
+            let _ = state_root_tx.send(result);
+
+            // Clear the SparseStateTrie and replace it back into the mutex _after_ sending results
+            // to the next step, so that time spent clearing doesn't block the step after this one.
+            cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
+        });
     }
 }
 
