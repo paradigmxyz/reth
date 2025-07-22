@@ -85,6 +85,11 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-node-ethereum.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = []
