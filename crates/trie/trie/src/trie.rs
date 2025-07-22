@@ -302,6 +302,8 @@ pub struct StorageRoot<T, H> {
     pub hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
     pub prefix_set: PrefixSet,
+    /// Previous intermediate state.
+    previous_state: Option<IntermediateRootState>,
     /// The number of updates after which the intermediate progress should be returned.
     threshold: u64,
     /// Storage root metrics.
@@ -341,6 +343,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory,
             hashed_address,
             prefix_set,
+            previous_state: None,
             // TODO: should we have a constructor that accepts the threshold, so the higher level
             // state root can share its remaining threshold with storage root computation? For
             // example, if we want to stop after 100k, we could run to 99k in the state root part,
@@ -369,6 +372,12 @@ impl<T, H> StorageRoot<T, H> {
         self
     }
 
+    /// Set the previously recorded intermediate state.
+    pub fn with_intermediate_state(mut self, state: Option<IntermediateRootState>) -> Self {
+        self.previous_state = state;
+        self
+    }
+
     /// Set the hashed cursor factory.
     pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StorageRoot<T, HF> {
         StorageRoot {
@@ -376,6 +385,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
+            previous_state: self.previous_state,
             threshold: self.threshold,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
@@ -389,6 +399,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
+            previous_state: self.previous_state,
             threshold: self.threshold,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
