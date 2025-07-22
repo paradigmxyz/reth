@@ -63,3 +63,7 @@ recipe.json
 _
 # broken links report
 links-report.json
+
+# direnv
+.envrc
+.direnv/
