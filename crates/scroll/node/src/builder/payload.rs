@@ -69,7 +69,11 @@ impl<Txs> ScrollPayloadBuilderBuilder<Txs> {
             pool,
             evm_config,
             ctx.provider().clone(),
-            ScrollBuilderConfig::new(gas_limit, self.payload_building_time_limit, self.block_da_size_limit),
+            ScrollBuilderConfig::new(
+                gas_limit,
+                self.payload_building_time_limit,
+                self.block_da_size_limit,
+            ),
         )
         .with_transactions(self.best_transactions);
 

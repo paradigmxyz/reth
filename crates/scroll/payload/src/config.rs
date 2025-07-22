@@ -57,10 +57,16 @@ impl PayloadBuildingBreaker {
     }
 
     /// Returns whether the payload building should stop.
-    pub(super) fn should_break(&self, cumulative_gas_used: u64, cumulative_da_size_used: u64) -> bool {
+    pub(super) fn should_break(
+        &self,
+        cumulative_gas_used: u64,
+        cumulative_da_size_used: u64,
+    ) -> bool {
         self.start.elapsed() >= self.time_limit ||
-            cumulative_gas_used > self.gas_limit.saturating_sub(MIN_TRANSACTION_GAS) || 
-            (self.max_da_block_size != 0 && cumulative_da_size_used > self.max_da_block_size.saturating_sub(MIN_TRANSACTION_DATA_SIZE))
+            cumulative_gas_used > self.gas_limit.saturating_sub(MIN_TRANSACTION_GAS) ||
+            (self.max_da_block_size != 0 &&
+                cumulative_da_size_used >
+                    self.max_da_block_size.saturating_sub(MIN_TRANSACTION_DATA_SIZE))
     }
 }
 
@@ -70,8 +76,11 @@ mod tests {
 
     #[test]
     fn test_should_break_on_time_limit() {
-        let breaker =
-            PayloadBuildingBreaker::new(Duration::from_millis(200), 2 * MIN_TRANSACTION_GAS, MIN_TRANSACTION_DATA_SIZE);
+        let breaker = PayloadBuildingBreaker::new(
+            Duration::from_millis(200),
+            2 * MIN_TRANSACTION_GAS,
+            MIN_TRANSACTION_DATA_SIZE,
+        );
         assert!(!breaker.should_break(MIN_TRANSACTION_GAS, MIN_TRANSACTION_DATA_SIZE));
         std::thread::sleep(Duration::from_millis(201));
         assert!(breaker.should_break(MIN_TRANSACTION_GAS, MIN_TRANSACTION_DATA_SIZE));
@@ -79,14 +88,22 @@ mod tests {
 
     #[test]
     fn test_should_break_on_gas_limit() {
-        let breaker = PayloadBuildingBreaker::new(Duration::from_secs(1), 2 * MIN_TRANSACTION_GAS, MIN_TRANSACTION_DATA_SIZE);
+        let breaker = PayloadBuildingBreaker::new(
+            Duration::from_secs(1),
+            2 * MIN_TRANSACTION_GAS,
+            MIN_TRANSACTION_DATA_SIZE,
+        );
         assert!(!breaker.should_break(MIN_TRANSACTION_GAS, MIN_TRANSACTION_DATA_SIZE));
         assert!(breaker.should_break(MIN_TRANSACTION_GAS + 1, MIN_TRANSACTION_DATA_SIZE));
     }
 
     #[test]
     fn test_should_break_on_data_size_limit() {
-        let breaker = PayloadBuildingBreaker::new(Duration::from_secs(1), MIN_TRANSACTION_GAS, 2 * MIN_TRANSACTION_DATA_SIZE);
+        let breaker = PayloadBuildingBreaker::new(
+            Duration::from_secs(1),
+            MIN_TRANSACTION_GAS,
+            2 * MIN_TRANSACTION_DATA_SIZE,
+        );
         assert!(!breaker.should_break(MIN_TRANSACTION_GAS, MIN_TRANSACTION_DATA_SIZE));
         assert!(breaker.should_break(MIN_TRANSACTION_GAS, MIN_TRANSACTION_DATA_SIZE + 1));
     }

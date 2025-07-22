@@ -259,7 +259,15 @@ impl<Txs> ScrollBuilder<'_, Txs> {
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            if ctx.execute_best_transactions(&mut info, &mut builder, best_txs, builder_config, breaker)?.is_some()
+            if ctx
+                .execute_best_transactions(
+                    &mut info,
+                    &mut builder,
+                    best_txs,
+                    builder_config,
+                    breaker,
+                )?
+                .is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
             }
