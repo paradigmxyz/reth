@@ -4,8 +4,7 @@
 
 use crate::{
     consensus_types::{CompressedBeaconState, CompressedSignedBeaconBlock},
-    e2s_types::{Entry, SLOT_INDEX},
-    E2sError,
+    e2s_types::{Entry, IndexEntry, SLOT_INDEX},
 };
 
 /// Era file content group
@@ -103,80 +102,22 @@ impl SlotIndex {
     pub fn has_data_at_slot(&self, slot_index: usize) -> bool {
         self.get_offset(slot_index).is_some_and(|offset| offset != 0)
     }
+}
 
-    /// Convert to an [`Entry`] for writing to `e2store` format
-    /// Format: starting-slot | offset1 | offset2 | ... | count
-    /// so we encore the starting slot, each offset, and the count of offsets.
-    pub fn to_entry(&self) -> Entry {
-        let mut data = Vec::new();
-
-        // Encode starting slot - 8 bytes
-        data.extend_from_slice(&self.starting_slot.to_le_bytes());
-
-        // Encode each offset - 8 bytes each
-        data.extend(self.offsets.iter().flat_map(|offset| offset.to_le_bytes()));
-
-        // Encode count - 8 bytes again
-        let count = self.offsets.len() as u64;
-        data.extend_from_slice(&count.to_le_bytes());
-
-        Entry::new(SLOT_INDEX, data)
+impl IndexEntry for SlotIndex {
+    fn new(starting_number: u64, offsets: Vec<u64>) -> Self {
+        Self::new(starting_number, offsets)
     }
 
-    /// Create from an [`Entry`]
-    pub fn from_entry(entry: &Entry) -> Result<Self, E2sError> {
-        if !entry.is_slot_index() {
-            return Err(E2sError::Ssz(format!(
-                "Invalid entry type for SlotIndex: expected {:02x}{:02x}, got {:02x}{:02x}",
-                SLOT_INDEX[0], SLOT_INDEX[1], entry.entry_type[0], entry.entry_type[1]
-            )));
-        }
+    fn entry_type() -> [u8; 2] {
+        SLOT_INDEX
+    }
 
-        if entry.data.len() < 16 {
-            return Err(E2sError::Ssz(
-                "SlotIndex entry too short: need at least 16 bytes for starting_slot and count"
-                    .to_string(),
-            ));
-        }
+    fn starting_number(&self) -> u64 {
+        self.starting_slot
+    }
 
-        // Read count from the last 8 bytes
-        let count_bytes = &entry.data[entry.data.len() - 8..];
-        let count = u64::from_le_bytes(
-            count_bytes
-                .try_into()
-                .map_err(|_| E2sError::Ssz("Failed to read count bytes".to_string()))?,
-        );
-
-        // Total length should be: starting_slot + offsets + count
-        let expected_len = 8 + (count as usize * 8) + 8;
-        if entry.data.len() != expected_len {
-            return Err(E2sError::Ssz(format!(
-                "SlotIndex entry has incorrect length: expected {expected_len}, got {}",
-                entry.data.len()
-            )));
-        }
-
-        // Read starting slot from first 8 bytes
-        let starting_slot = u64::from_le_bytes(
-            entry.data[0..8]
-                .try_into()
-                .map_err(|_| E2sError::Ssz("Failed to read starting_slot bytes".to_string()))?,
-        );
-
-        // Extract all offsets
-        let mut offsets = Vec::with_capacity(count as usize);
-        for i in 0..count as usize {
-            let start = 8 + (i * 8);
-            let end = start + 8;
-            let offset_bytes = &entry.data[start..end];
-            let offset = u64::from_le_bytes(
-                offset_bytes
-                    .try_into()
-                    .map_err(|_| E2sError::Ssz(format!("Failed to read offset {i} bytes")))?,
-            );
-            offsets.push(offset);
-        }
-
-        Ok(Self { starting_slot, offsets })
+    fn offsets(&self) -> &[u64] {
+        &self.offsets
     }
 }
