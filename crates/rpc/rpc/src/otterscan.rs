@@ -342,7 +342,7 @@ where
                 TracingInspectorConfig::default_parity(),
                 |tx_info, ctx| {
                     Ok(ctx
-                        .inspector
+                        .inspector.clone()
                         .into_parity_builder()
                         .into_localized_transaction_traces(tx_info))
                 },
