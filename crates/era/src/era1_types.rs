@@ -56,17 +56,17 @@ pub struct BlockIndex {
     pub starting_number: BlockNumber,
 
     /// Offsets to data at each block number
-    pub offsets: Vec<i64>,
+    pub offsets: Vec<u64>,
 }
 
 impl BlockIndex {
     /// Create a new [`BlockIndex`]
-    pub const fn new(starting_number: BlockNumber, offsets: Vec<i64>) -> Self {
+    pub const fn new(starting_number: BlockNumber, offsets: Vec<u64>) -> Self {
         Self { starting_number, offsets }
     }
 
     /// Get the offset for a specific block number
-    pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<i64> {
+    pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<u64> {
         if block_number < self.starting_number {
             return None;
         }
@@ -89,7 +89,7 @@ impl BlockIndex {
         }
 
         // Add count
-        data.extend_from_slice(&(self.offsets.len() as i64).to_le_bytes());
+        data.extend_from_slice(&(self.offsets.len()).to_le_bytes());
 
         Entry::new(BLOCK_INDEX, data)
     }
@@ -136,7 +136,7 @@ impl BlockIndex {
             let end = start + 8;
             let mut offset_bytes = [0u8; 8];
             offset_bytes.copy_from_slice(&entry.data[start..end]);
-            offsets.push(i64::from_le_bytes(offset_bytes));
+            offsets.push(u64::from_le_bytes(offset_bytes));
         }
 
         Ok(Self { starting_number, offsets })
