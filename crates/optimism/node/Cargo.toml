@@ -117,6 +117,7 @@ test-utils = [
     "reth-optimism-primitives/arbitrary",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
+    "reth-engine-tree/test-utils",
 ]
 reth-codec = ["reth-optimism-primitives/reth-codec"]
 

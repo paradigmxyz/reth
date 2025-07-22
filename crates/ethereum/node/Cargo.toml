@@ -101,4 +101,5 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-engine-tree/test-utils",
 ]
