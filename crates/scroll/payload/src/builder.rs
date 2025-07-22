@@ -247,7 +247,7 @@ impl<Txs> ScrollBuilder<'_, Txs> {
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            if ctx.execute_best_transactions(&mut info, &mut builder, best_txs, breaker)?.is_some()
+            if ctx.execute_best_transactions(&mut info, &mut builder, best_txs, builder_config, breaker)?.is_some()
             {
                 return Ok(BuildOutcomeKind::Cancelled);
             }
@@ -467,14 +467,16 @@ where
         mut best_txs: impl PayloadTransactions<
             Transaction: PoolTransaction<Consensus = TxTy<Evm::Primitives>>,
         >,
+        builder_config: &ScrollBuilderConfig,
         breaker: PayloadBuildingBreaker,
     ) -> Result<Option<()>, PayloadBuilderError> {
         let block_gas_limit = builder.evm_mut().block().gas_limit;
+        let block_da_limit = builder_config.max_da_block_size();
         let base_fee = builder.evm_mut().block().basefee;
 
         while let Some(tx) = best_txs.next(()) {
             let tx = tx.into_consensus();
-            if info.is_tx_over_limits(tx.inner(), block_gas_limit) {
+            if info.is_tx_over_limits(tx.inner(), block_gas_limit, block_da_limit) {
                 // we can't fit this transaction into the block, so we need to mark it as
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
@@ -494,7 +496,7 @@ where
             }
 
             // check if the execution needs to be halted.
-            if breaker.should_break(info.cumulative_gas_used) {
+            if breaker.should_break(info.cumulative_gas_used, info.cumulative_da_bytes_used) {
                 tracing::trace!(target: "scroll::payload_builder", ?info, "breaking execution loop");
                 return Ok(None);
             }
@@ -574,7 +576,14 @@ impl ExecutionInfo {
         &self,
         tx: &(impl Encodable + Transaction),
         block_gas_limit: u64,
+        block_data_limit: Option<u64>,
     ) -> bool {
+        if block_data_limit
+            .is_some_and(|da_limit| self.cumulative_da_bytes_used + tx.length() as u64 > da_limit)
+        {
+            return true;
+        }
+
         self.cumulative_gas_used + tx.gas_limit() > block_gas_limit
     }
 }
