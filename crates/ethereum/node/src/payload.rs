@@ -20,7 +20,7 @@ pub struct EthereumPayloadBuilder;
 
 impl<Types, Node, Pool, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for EthereumPayloadBuilder
 where
-    Types: NodeTypes<ChainSpec: EthereumHardforks, Primitives = EthPrimitives>,
+    Types: NodeTypes<ChainSpec: EthereumHardforks>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
         + Unpin
