@@ -57,7 +57,7 @@ impl EraGroup {
     }
 
     /// Check if this is a genesis era - no blocks yet
-    pub const fn is_genesis(&self) -> bool {
+    pub fn is_genesis(&self) -> bool {
         self.blocks.is_empty() && self.slot_index.is_none()
     }
 
@@ -90,7 +90,7 @@ impl SlotIndex {
     }
 
     /// Get the number of slots covered by this index
-    pub const fn slot_count(&self) -> usize {
+    pub fn slot_count(&self) -> usize {
         self.offsets.len()
     }
 
