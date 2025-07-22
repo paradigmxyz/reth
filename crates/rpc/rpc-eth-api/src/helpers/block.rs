@@ -7,16 +7,14 @@ use crate::{
 };
 use alloy_consensus::TxReceipt;
 use alloy_eips::BlockId;
-use alloy_primitives::{Sealable, U256};
 use alloy_rlp::Encodable;
-use alloy_rpc_types_eth::{Block, BlockTransactions, Header, Index};
+use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
 use futures::Future;
-use reth_evm::ConfigureEvm;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{
-    AlloyBlockHeader, NodePrimitives, RecoveredBlock, SignedTransaction, TransactionMeta,
+    AlloyBlockHeader, RecoveredBlock, SealedHeader, SignedTransaction, TransactionMeta,
 };
-use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert};
+use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
 use std::{borrow::Cow, sync::Arc};
@@ -38,11 +36,10 @@ pub trait EthBlocks:
     LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primitives, Error = Self::Error>>
 {
     /// Returns the block header for the given block id.
-    #[expect(clippy::type_complexity)]
     fn rpc_block_header(
         &self,
         block_id: BlockId,
-    ) -> impl Future<Output = Result<Option<Header<ProviderHeader<Self::Provider>>>, Self::Error>> + Send
+    ) -> impl Future<Output = Result<Option<RpcHeader<Self::NetworkTypes>>, Self::Error>> + Send
     where
         Self: FullEthApiTypes,
     {
@@ -64,9 +61,11 @@ pub trait EthBlocks:
         async move {
             let Some(block) = self.recovered_block(block_id).await? else { return Ok(None) };
 
-            let block = block.clone_into_rpc_block(full.into(), |tx, tx_info| {
-                self.tx_resp_builder().fill(tx, tx_info)
-            })?;
+            let block = block.clone_into_rpc_block(
+                full.into(),
+                |tx, tx_info| self.tx_resp_builder().fill(tx, tx_info),
+                |header, size| self.tx_resp_builder().convert_header(header, size),
+            )?;
             Ok(Some(block))
         }
     }
@@ -150,7 +149,7 @@ pub trait EthBlocks:
                         };
 
                         gas_used = receipt.cumulative_gas_used();
-                        next_log_index = receipt.logs().len();
+                        next_log_index += receipt.logs().len();
 
                         input
                     })
@@ -249,16 +248,24 @@ pub trait EthBlocks:
             }
             .unwrap_or_default();
 
-            Ok(uncles.into_iter().nth(index.into()).map(|header| {
-                let block = alloy_consensus::Block::<alloy_consensus::TxEnvelope, _>::uncle(header);
-                let size = U256::from(block.length());
-                Block {
-                    uncles: vec![],
-                    header: Header::from_consensus(block.header.seal_slow(), None, Some(size)),
-                    transactions: BlockTransactions::Uncle,
-                    withdrawals: None,
-                }
-            }))
+            uncles
+                .into_iter()
+                .nth(index.into())
+                .map(|header| {
+                    let block =
+                        alloy_consensus::Block::<alloy_consensus::TxEnvelope, _>::uncle(header);
+                    let size = block.length();
+                    let header = self
+                        .tx_resp_builder()
+                        .convert_header(SealedHeader::new_unhashed(block.header), size)?;
+                    Ok(Block {
+                        uncles: vec![],
+                        header,
+                        transactions: BlockTransactions::Uncle,
+                        withdrawals: None,
+                    })
+                })
+                .transpose()
         }
     }
 }
@@ -266,15 +273,7 @@ pub trait EthBlocks:
 /// Loads a block from database.
 ///
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
-pub trait LoadBlock:
-    LoadPendingBlock
-    + SpawnBlocking
-    + RpcNodeCoreExt<
-        Pool: TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
-        Primitives: NodePrimitives<SignedTx = ProviderTx<Self::Provider>>,
-        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
-    >
-{
+pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
     /// Returns the block object for the given block id.
     #[expect(clippy::type_complexity)]
     fn recovered_block(

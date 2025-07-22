@@ -1,29 +1,26 @@
 //! Loads and formats OP transaction RPC response.
 
-use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError, SequencerClient};
+use crate::{OpEthApi, OpEthApiError, SequencerClient};
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::TransactionInfo;
-use op_alloy_consensus::{transaction::OpTransactionInfo, OpTxEnvelope};
+use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
 use reth_optimism_primitives::DepositReceipt;
+use reth_primitives_traits::SignedTransaction;
 use reth_rpc_eth_api::{
-    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction, SpawnBlocking},
-    try_into_op_tx_info, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcConvert, RpcNodeCore,
-    RpcNodeCoreExt, TxInfoMapper,
+    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
+    try_into_op_tx_info, FromEthApiError, RpcConvert, RpcNodeCore, TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_storage_api::{
-    errors::ProviderError, BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider,
-    TransactionsProvider,
+use reth_storage_api::{errors::ProviderError, ReceiptProvider};
+use reth_transaction_pool::{
+    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 use std::fmt::{Debug, Formatter};
 
 impl<N, Rpc> EthTransactions for OpEthApi<N, Rpc>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>
-        + EthApiTypes<Error = OpEthApiError, NetworkTypes = Rpc::Network>,
-    N: OpNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
     fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.eth_api.signers()
@@ -60,7 +57,7 @@ where
         }
 
         // submit the transaction to the pool with a `Local` origin
-        let hash = self
+        let AddedTransactionOutcome { hash, .. } = self
             .pool()
             .add_transaction(TransactionOrigin::Local, pool_transaction)
             .await
@@ -72,17 +69,15 @@ where
 
 impl<N, Rpc> LoadTransaction for OpEthApi<N, Rpc>
 where
-    Self: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt,
-    N: OpNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
-    Self::Pool: TransactionPool,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
 }
 
 impl<N, Rpc> OpEthApi<N, Rpc>
 where
-    N: OpNodeCore,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     /// Returns the [`SequencerClient`] if one is set.
     pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
@@ -117,18 +112,15 @@ impl<Provider> OpTxInfoMapper<Provider> {
     }
 }
 
-impl<Provider> TxInfoMapper<&OpTxEnvelope> for OpTxInfoMapper<Provider>
+impl<T, Provider> TxInfoMapper<&T> for OpTxInfoMapper<Provider>
 where
+    T: OpTransaction + SignedTransaction,
     Provider: ReceiptProvider<Receipt: DepositReceipt>,
 {
     type Out = OpTransactionInfo;
     type Err = ProviderError;
 
-    fn try_map(
-        &self,
-        tx: &OpTxEnvelope,
-        tx_info: TransactionInfo,
-    ) -> Result<Self::Out, ProviderError> {
+    fn try_map(&self, tx: &T, tx_info: TransactionInfo) -> Result<Self::Out, ProviderError> {
         try_into_op_tx_info(&self.provider, tx, tx_info)
     }
 }

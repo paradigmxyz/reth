@@ -15,7 +15,7 @@ use reth_rpc_server_types::{
         DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
-use reth_storage_api::{BlockReader, BlockReaderIdExt};
+use reth_storage_api::{BlockReaderIdExt, NodePrimitivesProvider};
 use schnellru::{ByLength, LruMap};
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug, Formatter};
@@ -77,12 +77,12 @@ impl Default for GasPriceOracleConfig {
 #[derive(Debug)]
 pub struct GasPriceOracle<Provider>
 where
-    Provider: BlockReader,
+    Provider: NodePrimitivesProvider,
 {
     /// The type used to subscribe to block events and get block info
     provider: Provider,
     /// The cache for blocks
-    cache: EthStateCache<Provider::Block, Provider::Receipt>,
+    cache: EthStateCache<Provider::Primitives>,
     /// The config for the oracle
     oracle_config: GasPriceOracleConfig,
     /// The price under which the sample will be ignored.
@@ -94,13 +94,13 @@ where
 
 impl<Provider> GasPriceOracle<Provider>
 where
-    Provider: BlockReaderIdExt,
+    Provider: BlockReaderIdExt + NodePrimitivesProvider,
 {
     /// Creates and returns the [`GasPriceOracle`].
     pub fn new(
         provider: Provider,
         mut oracle_config: GasPriceOracleConfig,
-        cache: EthStateCache<Provider::Block, Provider::Receipt>,
+        cache: EthStateCache<Provider::Primitives>,
     ) -> Self {
         // sanitize the percentile to be less than 100
         if oracle_config.percentile > 100 {

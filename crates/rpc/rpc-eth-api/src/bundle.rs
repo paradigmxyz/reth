@@ -4,8 +4,8 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_mev::{
-    CancelPrivateTransactionRequest, EthBundleHash, EthCallBundle, EthCallBundleResponse,
-    EthCancelBundle, EthSendBundle, PrivateTransactionRequest,
+    EthBundleHash, EthCallBundle, EthCallBundleResponse, EthCancelBundle,
+    EthCancelPrivateTransaction, EthSendBundle, EthSendPrivateTransaction,
 };
 use jsonrpsee::proc_macros::rpc;
 
@@ -49,7 +49,7 @@ pub trait EthBundleApi {
     #[method(name = "sendPrivateTransaction")]
     async fn send_private_transaction(
         &self,
-        request: PrivateTransactionRequest,
+        request: EthSendPrivateTransaction,
     ) -> jsonrpsee::core::RpcResult<B256>;
 
     /// The `eth_sendPrivateRawTransaction` method can be used to send private transactions to
@@ -67,6 +67,6 @@ pub trait EthBundleApi {
     #[method(name = "cancelPrivateTransaction")]
     async fn cancel_private_transaction(
         &self,
-        request: CancelPrivateTransactionRequest,
+        request: EthCancelPrivateTransaction,
     ) -> jsonrpsee::core::RpcResult<bool>;
 }

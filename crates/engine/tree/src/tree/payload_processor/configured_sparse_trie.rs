@@ -34,6 +34,12 @@ impl From<ParallelSparseTrie> for ConfiguredSparseTrie {
     }
 }
 
+impl Default for ConfiguredSparseTrie {
+    fn default() -> Self {
+        Self::Serial(Default::default())
+    }
+}
+
 impl SparseTrieInterface for ConfiguredSparseTrie {
     fn with_root(
         self,

@@ -1,6 +1,6 @@
 //! Loads and formats OP receipt RPC response.
 
-use crate::{eth::OpNodeCore, OpEthApi, OpEthApiError};
+use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::{
@@ -16,29 +16,16 @@ use reth_primitives_traits::Block;
 use reth_rpc_eth_api::{
     helpers::LoadReceipt,
     transaction::{ConvertReceiptInput, ReceiptConverter},
-    EthApiTypes, RpcConvert, RpcNodeCoreExt,
+    RpcConvert,
 };
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
-use reth_storage_api::{BlockReader, ProviderReceipt, ProviderTx};
+use reth_storage_api::BlockReader;
 use std::fmt::Debug;
 
 impl<N, Rpc> LoadReceipt for OpEthApi<N, Rpc>
 where
-    Self: RpcNodeCoreExt<
-            Primitives: NodePrimitives<
-                SignedTx = ProviderTx<Self::Provider>,
-                Receipt = ProviderReceipt<Self::Provider>,
-            >,
-        > + EthApiTypes<
-            NetworkTypes = Rpc::Network,
-            RpcConvert: RpcConvert<
-                Network = Rpc::Network,
-                Primitives = Self::Primitives,
-                Error = Self::Error,
-            >,
-        >,
-    N: OpNodeCore,
-    Rpc: RpcConvert,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
 }
 
@@ -58,7 +45,7 @@ impl<Provider> OpReceiptConverter<Provider> {
 impl<Provider, N> ReceiptConverter<N> for OpReceiptConverter<Provider>
 where
     N: NodePrimitives<SignedTx: OpTransaction, Receipt = OpReceipt>,
-    Provider: BlockReader + ChainSpecProvider<ChainSpec: OpHardforks> + Debug,
+    Provider: BlockReader + ChainSpecProvider<ChainSpec: OpHardforks> + Debug + 'static,
 {
     type RpcReceipt = OpTransactionReceipt;
     type Error = OpEthApiError;
@@ -308,7 +295,7 @@ impl OpReceiptBuilder {
         Ok(Self { core_receipt, op_receipt_fields })
     }
 
-    /// Builds [`OpTransactionReceipt`] by combing core (l1) receipt fields and additional OP
+    /// Builds [`OpTransactionReceipt`] by combining core (l1) receipt fields and additional OP
     /// receipt fields.
     pub fn build(self) -> OpTransactionReceipt {
         let Self { core_receipt: inner, op_receipt_fields } = self;

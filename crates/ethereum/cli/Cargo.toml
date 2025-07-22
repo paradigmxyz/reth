@@ -46,6 +46,7 @@ dev = ["reth-cli-commands/arbitrary"]
 
 asm-keccak = [
     "reth-node-core/asm-keccak",
+    "reth-node-ethereum/asm-keccak",
 ]
 
 jemalloc = [
