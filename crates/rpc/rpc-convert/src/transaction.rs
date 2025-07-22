@@ -308,71 +308,362 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
 #[error("Failed to convert transaction into RPC response: {0}")]
 pub struct TransactionConversionError(String);
 
-/// Generic RPC response object converter for `Evm` and network `E`.
-///
-/// The main purpose of this struct is to provide an implementation of [`RpcConvert`] for generic
-/// associated types. This struct can then be used for conversions in RPC method handlers.
-///
-/// An [`RpcConvert`] implementation is generated if the following traits are implemented for the
-/// network and EVM associated primitives:
-/// * [`FromConsensusTx`]: from signed transaction into RPC response object.
-/// * [`TryIntoSimTx`]: from RPC transaction request into a simulated transaction.
-/// * [`TryIntoTxEnv`]: from RPC transaction request into an executable transaction.
-/// * [`TxInfoMapper`]: from [`TransactionInfo`] into [`FromConsensusTx::TxInfo`]. Should be
-///   implemented for a dedicated struct that is assigned to `Map`. If [`FromConsensusTx::TxInfo`]
-///   is [`TransactionInfo`] then `()` can be used as `Map` which trivially passes over the input
-///   object.
+/// Trait for converting primitive transactions to RPC transactions.
+pub trait RpcTxConverter<PrimitiveTx, RpcTx> {
+    /// The error type that can be returned during conversion.
+    type Error: std::error::Error;
+
+    /// Convert a primitive transaction to an RPC transaction.
+    fn convert(
+        &self,
+        tx: PrimitiveTx,
+        signer: Address,
+        info: TransactionInfo,
+    ) -> Result<RpcTx, Self::Error>;
+}
+
+/// Trait for converting primitive receipts to RPC receipts.
+pub trait RpcReceiptConverter<PrimitiveReceipt, RpcReceipt> {
+    /// The error type that can be returned during conversion.
+    type Error: std::error::Error;
+
+    /// Convert a primitive receipt to an RPC receipt.
+    fn convert(&self, receipt: PrimitiveReceipt) -> Result<RpcReceipt, Self::Error>;
+}
+
+/// Trait for converting primitive headers to RPC headers.
+pub trait RpcHeaderConverter<PrimitiveHeader, RpcHeader> {
+    /// The error type that can be returned during conversion.
+    type Error: std::error::Error;
+
+    /// Convert a primitive header to an RPC header.
+    fn convert(&self, header: PrimitiveHeader) -> Result<RpcHeader, Self::Error>;
+}
+
+/// Trait for converting transaction requests to transaction environments.
+pub trait RpcTxEnvConverter<Request, TxEnv> {
+    /// The error type that can be returned during conversion.
+    type Error: std::error::Error;
+
+    /// Convert a transaction request to a transaction environment.
+    fn convert<Spec>(
+        &self,
+        request: Request,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<TxEnv, Self::Error>;
+}
+
+/// Trait for converting transaction requests to simulation transactions.
+pub trait RpcSimTxConverter<Request, SimTx> {
+    /// The error type that can be returned during conversion.
+    type Error: std::error::Error;
+
+    /// Convert a transaction request to a simulation transaction.
+    fn convert(&self, request: Request) -> Result<SimTx, Self::Error>;
+}
+
+/// Default implementation for unit type - uses `FromConsensusTx` trait.
+impl<PrimitiveTx, RpcTx> RpcTxConverter<PrimitiveTx, RpcTx> for ()
+where
+    RpcTx: FromConsensusTx<PrimitiveTx, TxInfo = TransactionInfo>,
+{
+    type Error = std::convert::Infallible;
+
+    fn convert(
+        &self,
+        tx: PrimitiveTx,
+        signer: Address,
+        info: TransactionInfo,
+    ) -> Result<RpcTx, Self::Error> {
+        Ok(RpcTx::from_consensus_tx(tx, signer, info))
+    }
+}
+
+/// Implementation for function types.
+impl<F, PrimitiveTx, RpcTx, E> RpcTxConverter<PrimitiveTx, RpcTx> for F
+where
+    F: Fn(PrimitiveTx, Address, TransactionInfo) -> Result<RpcTx, E>,
+    E: std::error::Error,
+{
+    type Error = E;
+
+    fn convert(
+        &self,
+        tx: PrimitiveTx,
+        signer: Address,
+        info: TransactionInfo,
+    ) -> Result<RpcTx, Self::Error> {
+        self(tx, signer, info)
+    }
+}
+
+/// Default implementation for unit type - uses `TryIntoTxEnv` trait.
+impl<Request, TxEnv> RpcTxEnvConverter<Request, TxEnv> for ()
+where
+    Request: TryIntoTxEnv<TxEnv>,
+    Request::Err: std::error::Error,
+{
+    type Error = Request::Err;
+
+    fn convert<Spec>(
+        &self,
+        request: Request,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<TxEnv, Self::Error> {
+        request.try_into_tx_env(cfg_env, block_env)
+    }
+}
+
+/// A helper type for function-based `TxEnv` converters that handles the generic Spec parameter.
 #[derive(Debug)]
-pub struct RpcConverter<E, Evm, Err, Map = ()> {
+pub struct TxEnvConverterFn<F> {
+    f: F,
+}
+
+impl<F, Request, TxEnv, E> RpcTxEnvConverter<Request, TxEnv> for TxEnvConverterFn<F>
+where
+    F: for<'a> Fn(Request, &'a BlockEnv) -> Result<TxEnv, E>,
+    E: std::error::Error,
+{
+    type Error = E;
+
+    fn convert<Spec>(
+        &self,
+        request: Request,
+        _cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<TxEnv, Self::Error> {
+        (self.f)(request, block_env)
+    }
+}
+
+/// Default implementation for unit type - uses `TryIntoSimTx` trait.
+impl<Request, SimTx> RpcSimTxConverter<Request, SimTx> for ()
+where
+    Request: TryIntoSimTx<SimTx>,
+{
+    type Error = TransactionConversionError;
+
+    fn convert(&self, request: Request) -> Result<SimTx, Self::Error> {
+        request.try_into_sim_tx().map_err(|e| TransactionConversionError(e.to_string()))
+    }
+}
+
+/// Implementation for function types.
+impl<F, Request, SimTx, E> RpcSimTxConverter<Request, SimTx> for F
+where
+    F: Fn(Request) -> Result<SimTx, E>,
+    E: std::error::Error,
+{
+    type Error = E;
+
+    fn convert(&self, request: Request) -> Result<SimTx, Self::Error> {
+        self(request)
+    }
+}
+
+/// Generic RPC response object converter with flexible converters for each conversion type.
+///
+/// This struct provides a flexible way to define converters for different RPC-related
+/// transformations. Each converter can be customized independently using the builder pattern.
+///
+/// # Type Parameters
+/// - `Tx`: Transaction converter type (default: `()`)
+/// - `TxEnv`: Transaction environment converter type (default: `()`)
+/// - `SimTx`: Simulation transaction converter type (default: `()`)
+/// - `Receipt`: Receipt converter type (default: `()`)
+/// - `Header`: Header converter type (default: `()`)
+///
+/// # Example
+/// ```ignore
+/// let converter = RpcConverter::new()
+///     .with_tx_converter(|tx, signer, info| {
+///         // Custom transaction conversion logic
+///         Ok(MyRpcTx::from(tx))
+///     });
+/// ```
+#[derive(Debug)]
+pub struct RpcConverter<Tx = (), TxEnv = (), SimTx = (), Receipt = (), Header = ()> {
+    /// Transaction converter
+    pub tx_converter: Tx,
+    /// Transaction environment converter
+    pub tx_env_converter: TxEnv,
+    /// Simulation transaction converter
+    pub sim_tx_converter: SimTx,
+    /// Receipt converter
+    pub receipt_converter: Receipt,
+    /// Header converter
+    pub header_converter: Header,
+}
+
+/// Legacy RPC converter for backward compatibility.
+///
+/// This type maintains compatibility with existing code that uses the old `RpcConverter` API.
+#[derive(Debug)]
+pub struct LegacyRpcConverter<E, Evm, Err, Map = ()> {
     phantom: PhantomData<(E, Evm, Err)>,
     mapper: Map,
 }
 
-impl<E, Evm, Err> RpcConverter<E, Evm, Err, ()> {
-    /// Creates a new [`RpcConverter`] with the default mapper.
+impl RpcConverter {
+    /// Creates a new [`RpcConverter`] with default converters.
+    pub const fn new() -> Self {
+        Self {
+            tx_converter: (),
+            tx_env_converter: (),
+            sim_tx_converter: (),
+            receipt_converter: (),
+            header_converter: (),
+        }
+    }
+}
+
+impl<Tx, TxEnv, SimTx, Receipt, Header> RpcConverter<Tx, TxEnv, SimTx, Receipt, Header> {
+    /// Sets a custom transaction converter.
+    pub fn with_tx_converter<NewTx>(
+        self,
+        tx_converter: NewTx,
+    ) -> RpcConverter<NewTx, TxEnv, SimTx, Receipt, Header> {
+        RpcConverter {
+            tx_converter,
+            tx_env_converter: self.tx_env_converter,
+            sim_tx_converter: self.sim_tx_converter,
+            receipt_converter: self.receipt_converter,
+            header_converter: self.header_converter,
+        }
+    }
+
+    /// Sets a custom transaction environment converter.
+    pub fn with_tx_env_converter<NewTxEnv>(
+        self,
+        tx_env_converter: NewTxEnv,
+    ) -> RpcConverter<Tx, NewTxEnv, SimTx, Receipt, Header> {
+        RpcConverter {
+            tx_converter: self.tx_converter,
+            tx_env_converter,
+            sim_tx_converter: self.sim_tx_converter,
+            receipt_converter: self.receipt_converter,
+            header_converter: self.header_converter,
+        }
+    }
+
+    /// Sets a custom simulation transaction converter.
+    pub fn with_sim_tx_converter<NewSimTx>(
+        self,
+        sim_tx_converter: NewSimTx,
+    ) -> RpcConverter<Tx, TxEnv, NewSimTx, Receipt, Header> {
+        RpcConverter {
+            tx_converter: self.tx_converter,
+            tx_env_converter: self.tx_env_converter,
+            sim_tx_converter,
+            receipt_converter: self.receipt_converter,
+            header_converter: self.header_converter,
+        }
+    }
+
+    /// Sets a custom receipt converter.
+    pub fn with_receipt_converter<NewReceipt>(
+        self,
+        receipt_converter: NewReceipt,
+    ) -> RpcConverter<Tx, TxEnv, SimTx, NewReceipt, Header> {
+        RpcConverter {
+            tx_converter: self.tx_converter,
+            tx_env_converter: self.tx_env_converter,
+            sim_tx_converter: self.sim_tx_converter,
+            receipt_converter,
+            header_converter: self.header_converter,
+        }
+    }
+
+    /// Sets a custom header converter.
+    pub fn with_header_converter<NewHeader>(
+        self,
+        header_converter: NewHeader,
+    ) -> RpcConverter<Tx, TxEnv, SimTx, Receipt, NewHeader> {
+        RpcConverter {
+            tx_converter: self.tx_converter,
+            tx_env_converter: self.tx_env_converter,
+            sim_tx_converter: self.sim_tx_converter,
+            receipt_converter: self.receipt_converter,
+            header_converter,
+        }
+    }
+}
+
+impl<Tx: Clone, TxEnv: Clone, SimTx: Clone, Receipt: Clone, Header: Clone> Clone
+    for RpcConverter<Tx, TxEnv, SimTx, Receipt, Header>
+{
+    fn clone(&self) -> Self {
+        Self {
+            tx_converter: self.tx_converter.clone(),
+            tx_env_converter: self.tx_env_converter.clone(),
+            sim_tx_converter: self.sim_tx_converter.clone(),
+            receipt_converter: self.receipt_converter.clone(),
+            header_converter: self.header_converter.clone(),
+        }
+    }
+}
+
+impl Default for RpcConverter {
+    fn default() -> Self {
+        Self {
+            tx_converter: (),
+            tx_env_converter: (),
+            sim_tx_converter: (),
+            receipt_converter: (),
+            header_converter: (),
+        }
+    }
+}
+
+// Legacy implementations for backward compatibility
+impl<E, Evm, Err> LegacyRpcConverter<E, Evm, Err, ()> {
+    /// Creates a new [`LegacyRpcConverter`] with the default mapper.
     pub const fn new() -> Self {
         Self::with_mapper(())
     }
 }
 
-impl<E, Evm, Err, Map> RpcConverter<E, Evm, Err, Map> {
-    /// Creates a new [`RpcConverter`] with `mapper`.
+impl<E, Evm, Err, Map> LegacyRpcConverter<E, Evm, Err, Map> {
+    /// Creates a new [`LegacyRpcConverter`] with `mapper`.
     pub const fn with_mapper(mapper: Map) -> Self {
         Self { phantom: PhantomData, mapper }
     }
 
     /// Converts the generic types.
-    pub fn convert<E2, Evm2, Err2>(self) -> RpcConverter<E2, Evm2, Err2, Map> {
-        RpcConverter::with_mapper(self.mapper)
+    pub fn convert<E2, Evm2, Err2>(self) -> LegacyRpcConverter<E2, Evm2, Err2, Map> {
+        LegacyRpcConverter::with_mapper(self.mapper)
     }
 
     /// Swaps the inner `mapper`.
-    pub fn map<Map2>(self, mapper: Map2) -> RpcConverter<E, Evm, Err, Map2> {
-        RpcConverter::with_mapper(mapper)
+    pub fn map<Map2>(self, mapper: Map2) -> LegacyRpcConverter<E, Evm, Err, Map2> {
+        LegacyRpcConverter::with_mapper(mapper)
     }
 
     /// Converts the generic types and swaps the inner `mapper`.
     pub fn convert_map<E2, Evm2, Err2, Map2>(
         self,
         mapper: Map2,
-    ) -> RpcConverter<E2, Evm2, Err2, Map2> {
+    ) -> LegacyRpcConverter<E2, Evm2, Err2, Map2> {
         self.convert().map(mapper)
     }
 }
 
-impl<E, Evm, Err, Map: Clone> Clone for RpcConverter<E, Evm, Err, Map> {
+impl<E, Evm, Err, Map: Clone> Clone for LegacyRpcConverter<E, Evm, Err, Map> {
     fn clone(&self) -> Self {
         Self::with_mapper(self.mapper.clone())
     }
 }
 
-impl<E, Evm, Err> Default for RpcConverter<E, Evm, Err> {
+impl<E, Evm, Err> Default for LegacyRpcConverter<E, Evm, Err> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<N, E, Evm, Err, Map> RpcConvert for RpcConverter<E, Evm, Err, Map>
+impl<N, E, Evm, Err, Map> RpcConvert for LegacyRpcConverter<E, Evm, Err, Map>
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,
@@ -536,103 +827,10 @@ mod tests {
         }
     }
 
-    mod new_converter_design {
-        use super::*;
-
-        // New trait for transaction conversion
-        pub(super) trait RpcTxConverter<PrimitiveTx, RpcTx> {
-            type Error: std::error::Error;
-
-            fn convert(
-                &self,
-                tx: PrimitiveTx,
-                signer: Address,
-                info: TransactionInfo,
-            ) -> Result<RpcTx, Self::Error>;
-        }
-
-        // New RpcConverter with explicit generic parameters
-        pub(super) struct RpcConverter<Tx = (), TxEnv = (), SimTx = (), Receipt = (), Header = ()> {
-            pub(super) tx_converter: Tx,
-            pub(super) tx_env_converter: TxEnv,
-            pub(super) sim_tx_converter: SimTx,
-            pub(super) receipt_converter: Receipt,
-            pub(super) header_converter: Header,
-        }
-
-        impl RpcConverter {
-            pub(super) fn new() -> Self {
-                Self::default()
-            }
-        }
-
-        impl<Tx, TxEnv, SimTx, Receipt, Header> RpcConverter<Tx, TxEnv, SimTx, Receipt, Header> {
-            pub(super) fn with_tx_converter<NewTx>(
-                self,
-                tx_converter: NewTx,
-            ) -> RpcConverter<NewTx, TxEnv, SimTx, Receipt, Header> {
-                RpcConverter {
-                    tx_converter,
-                    tx_env_converter: self.tx_env_converter,
-                    sim_tx_converter: self.sim_tx_converter,
-                    receipt_converter: self.receipt_converter,
-                    header_converter: self.header_converter,
-                }
-            }
-        }
-
-        impl Default for RpcConverter {
-            fn default() -> Self {
-                Self {
-                    tx_converter: (),
-                    tx_env_converter: (),
-                    sim_tx_converter: (),
-                    receipt_converter: (),
-                    header_converter: (),
-                }
-            }
-        }
-
-        // Implementation for unit type (default converter)
-        impl<PrimitiveTx, RpcTx> RpcTxConverter<PrimitiveTx, RpcTx> for ()
-        where
-            RpcTx: super::FromConsensusTx<PrimitiveTx, TxInfo = TransactionInfo>,
-        {
-            type Error = std::convert::Infallible;
-
-            fn convert(
-                &self,
-                tx: PrimitiveTx,
-                signer: Address,
-                info: TransactionInfo,
-            ) -> Result<RpcTx, Self::Error> {
-                Ok(RpcTx::from_consensus_tx(tx, signer, info))
-            }
-        }
-
-        // Implementation for function types
-        impl<F, PrimitiveTx, RpcTx, E> RpcTxConverter<PrimitiveTx, RpcTx> for F
-        where
-            F: Fn(PrimitiveTx, Address, TransactionInfo) -> Result<RpcTx, E>,
-            E: std::error::Error,
-        {
-            type Error = E;
-
-            fn convert(
-                &self,
-                tx: PrimitiveTx,
-                signer: Address,
-                info: TransactionInfo,
-            ) -> Result<RpcTx, Self::Error> {
-                self(tx, signer, info)
-            }
-        }
-    }
+    // Test module using the new converter design from the main implementation
 
     #[test]
     fn test_default_converter_construction() {
-        use new_converter_design::RpcConverter;
-
         // Test that default converter can be created
         let converter = RpcConverter::default();
 
@@ -647,8 +845,6 @@ mod tests {
 
     #[test]
     fn test_converter_with_custom_tx_converter() {
-        use new_converter_design::{RpcConverter, RpcTxConverter};
-
         // Test that we can set a custom tx converter
         let converter = RpcConverter::new().with_tx_converter(
             |tx: MockTx,
@@ -680,8 +876,6 @@ mod tests {
 
     #[test]
     fn test_trait_based_conversion() {
-        use new_converter_design::RpcTxConverter;
-
         // Test that the blanket implementation works
         let converter = ();
         let tx = MockTx {
@@ -696,7 +890,8 @@ mod tests {
         let info = TransactionInfo::default();
 
         // This should work via the blanket implementation
-        let result: Result<MockRpcTx, _> = converter.convert(tx.clone(), signer, info);
+        let result: Result<MockRpcTx, _> =
+            RpcTxConverter::convert(&converter, tx.clone(), signer, info);
         assert!(result.is_ok());
 
         let rpc_tx = result.unwrap();
@@ -706,9 +901,118 @@ mod tests {
     }
 
     #[test]
-    fn test_closure_based_conversion() {
-        use new_converter_design::RpcTxConverter;
+    fn test_multiple_custom_converters() {
+        #[derive(Debug, Clone, PartialEq)]
+        struct CustomError(&'static str);
+        impl std::fmt::Display for CustomError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "Custom error: {}", self.0)
+            }
+        }
+        impl std::error::Error for CustomError {}
 
+        // Create a converter with multiple custom converters
+        let converter = RpcConverter::new()
+            .with_tx_converter(
+                |tx: MockTx,
+                 signer: Address,
+                 info: TransactionInfo|
+                 -> Result<MockRpcTx, CustomError> {
+                    // Custom validation logic
+                    if tx.gas_price < 1_000_000_000 {
+                        return Err(CustomError("Gas price too low"));
+                    }
+                    Ok(MockRpcTx { inner: tx, signer, info })
+                },
+            )
+            .with_tx_env_converter(
+                |_req: TransactionRequest,
+                 _cfg_env: &CfgEnv<()>,
+                 _block_env: &BlockEnv|
+                 -> Result<TxEnv, CustomError> {
+                    // Custom tx env conversion
+                    Ok(TxEnv::default())
+                },
+            );
+
+        // Test successful conversion
+        let tx = MockTx {
+            hash: B256::default(),
+            value: U256::from(100),
+            nonce: 0,
+            gas_limit: 21000,
+            gas_price: 20_000_000_000,
+            input: Bytes::default(),
+        };
+        let result = converter.tx_converter.convert(
+            tx.clone(),
+            Address::default(),
+            TransactionInfo::default(),
+        );
+        assert!(result.is_ok());
+
+        // Test failed conversion
+        let low_gas_tx = MockTx {
+            hash: B256::default(),
+            value: U256::from(100),
+            nonce: 0,
+            gas_limit: 21000,
+            gas_price: 500_000_000, // Too low
+            input: Bytes::default(),
+        };
+        let result = converter.tx_converter.convert(
+            low_gas_tx,
+            Address::default(),
+            TransactionInfo::default(),
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().0, "Gas price too low");
+    }
+
+    #[test]
+    fn test_converter_builder_pattern() {
+        // Test that the builder pattern works correctly
+        let converter = RpcConverter::new()
+            .with_tx_converter(|tx: MockTx, signer, info| {
+                Ok::<_, std::convert::Infallible>(MockRpcTx { inner: tx, signer, info })
+            })
+            .with_receipt_converter(|_receipt: ()| Ok::<(), std::convert::Infallible>(()))
+            .with_header_converter(|_header: ()| Ok::<(), std::convert::Infallible>(()));
+
+        // Verify that converters work
+        let tx = MockTx {
+            hash: B256::default(),
+            value: U256::from(100),
+            nonce: 0,
+            gas_limit: 21000,
+            gas_price: 20_000_000_000,
+            input: Bytes::default(),
+        };
+        let result = RpcTxConverter::convert(
+            &converter.tx_converter,
+            tx,
+            Address::default(),
+            TransactionInfo::default(),
+        );
+        assert!(result.is_ok());
+
+        // Verify we can chain builder calls
+        let _ = RpcConverter::new()
+            .with_tx_converter(|tx: MockTx, signer, info| {
+                Ok::<_, std::convert::Infallible>(MockRpcTx { inner: tx, signer, info })
+            })
+            .with_tx_env_converter(TxEnvConverterFn {
+                f: |_req: TransactionRequest, _block: &BlockEnv| {
+                    Ok::<_, std::convert::Infallible>(TxEnv::default())
+                },
+            })
+            .with_sim_tx_converter(|_req: ()| Ok::<_, std::convert::Infallible>(()))
+            .with_receipt_converter(|_receipt: ()| Ok::<_, std::convert::Infallible>(()))
+            .with_header_converter(|_header: ()| Ok::<_, std::convert::Infallible>(()));
+    }
+
+    #[test]
+    fn test_closure_based_conversion() {
         // Test using a closure for conversion
         let custom_converter = |tx: MockTx,
                                 signer: Address,
@@ -737,8 +1041,6 @@ mod tests {
 
     #[test]
     fn test_converter_with_captured_context() {
-        use new_converter_design::RpcTxConverter;
-
         // Test closure with captured variables
         let multiplier = 2u64;
         let converter_with_context = move |tx: MockTx,
@@ -768,8 +1070,6 @@ mod tests {
 
     #[test]
     fn test_rpc_convert_trait_with_new_converter() {
-        use new_converter_design::RpcConverter;
-
         // Test that RpcConvert trait works with the new converter design
         // This ensures backward compatibility
         let _converter = RpcConverter::new();
@@ -779,8 +1079,6 @@ mod tests {
 
     #[test]
     fn test_error_propagation() {
-        use new_converter_design::RpcTxConverter;
-
         #[derive(Debug)]
         struct CustomError;
         impl std::fmt::Display for CustomError {
@@ -810,8 +1108,6 @@ mod tests {
 
     #[test]
     fn test_multiple_converter_types() {
-        use new_converter_design::{RpcConverter, RpcTxConverter};
-
         // Test setting multiple converter types
         let converter = RpcConverter::new().with_tx_converter(
             |tx: MockTx, signer, info| -> Result<MockRpcTx, std::convert::Infallible> {
@@ -830,11 +1126,8 @@ mod tests {
             gas_price: 20_000_000_000,
             input: Bytes::default(),
         };
-        let result = converter.tx_converter.convert(
-            tx,
-            Address::default(),
-            TransactionInfo::default(),
-        );
+        let result =
+            converter.tx_converter.convert(tx, Address::default(), TransactionInfo::default());
         assert!(result.is_ok());
         assert_eq!(result.unwrap().inner.value, U256::from(300));
 

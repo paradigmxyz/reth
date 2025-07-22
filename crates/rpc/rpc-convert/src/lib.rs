@@ -19,8 +19,9 @@ pub use block::TryFromBlockResponse;
 pub use fees::{CallFees, CallFeesError};
 pub use rpc::*;
 pub use transaction::{
-    EthTxEnvError, IntoRpcTx, RpcConvert, RpcConverter, TransactionConversionError, TryIntoSimTx,
-    TxInfoMapper,
+    EthTxEnvError, IntoRpcTx, LegacyRpcConverter, RpcConvert, RpcConverter, RpcHeaderConverter,
+    RpcReceiptConverter, RpcSimTxConverter, RpcTxConverter, RpcTxEnvConverter,
+    TransactionConversionError, TryIntoSimTx, TxInfoMapper,
 };
 
 #[cfg(feature = "op")]
