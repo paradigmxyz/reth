@@ -103,6 +103,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
             .proof_permits(self.rpc_proof_permits)
+            .pending_block_mode(self.rpc_pending_block_mode)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
@@ -384,5 +385,45 @@ mod tests {
         let config = args.eth_config().filter_config();
         assert_eq!(config.max_blocks_per_filter, Some(100));
         assert_eq!(config.max_logs_per_response, Some(200));
+    }
+
+    #[test]
+    fn test_pending_block_mode() {
+        use reth_rpc_eth_types::PendingBlockMode;
+
+        // Test default mode
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        let config = args.eth_config();
+        assert_eq!(config.pending_block_mode, PendingBlockMode::Full);
+
+        // Test empty mode
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc.pending-block-mode",
+            "empty",
+        ])
+        .args;
+        let config = args.eth_config();
+        assert_eq!(config.pending_block_mode, PendingBlockMode::Empty);
+
+        // Test none mode
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc.pending-block-mode",
+            "none",
+        ])
+        .args;
+        let config = args.eth_config();
+        assert_eq!(config.pending_block_mode, PendingBlockMode::None);
+
+        // Test full mode explicitly
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--rpc.pending-block-mode",
+            "full",
+        ])
+        .args;
+        let config = args.eth_config();
+        assert_eq!(config.pending_block_mode, PendingBlockMode::Full);
     }
 }

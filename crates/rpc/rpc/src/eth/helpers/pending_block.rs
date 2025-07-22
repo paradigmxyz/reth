@@ -20,7 +20,22 @@ where
     }
 
     #[inline]
-    fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
-        self.inner.pending_env_builder()
+    fn pending_block_mode(&self) -> reth_rpc_eth_types::PendingBlockMode {
+        self.inner.pending_block_mode()
+    }
+
+    fn next_env_attributes(
+        &self,
+        parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+    ) -> Result<<Self::Evm as reth_evm::ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
+        Ok(NextBlockEnvAttributes {
+            timestamp: parent.timestamp().saturating_add(12),
+            suggested_fee_recipient: parent.beneficiary(),
+            prev_randao: B256::random(),
+            gas_limit: parent.gas_limit(),
+            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
+            withdrawals: parent.withdrawals_root().map(|_| Default::default()),
+        }
+        .into())
     }
 }

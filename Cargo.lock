@@ -10079,6 +10079,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "alloy-sol-types",
+ "clap",
  "derive_more",
  "futures",
  "itertools 0.14.0",

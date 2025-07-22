@@ -59,7 +59,13 @@ mod tests {
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::NoopProvider;
     use reth_rpc_eth_api::helpers::EthTransactions;
-    use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
+    use reth_rpc_eth_types::{
+        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle, PendingBlockMode,
+    };
+    use reth_rpc_server_types::constants::{
+        DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
+    };
+    use reth_tasks::pool::BlockingTaskPool;
 
     #[tokio::test]
     async fn send_raw_transaction() {
@@ -69,9 +75,23 @@ mod tests {
         let pool = testing_pool();
 
         let evm_config = EthEvmConfig::new(noop_provider.chain_spec());
-        let eth_api =
-            EthApi::builder(noop_provider.clone(), pool.clone(), noop_network_provider, evm_config)
-                .build();
+        let cache = EthStateCache::spawn(noop_provider.clone(), Default::default());
+        let fee_history_cache = FeeHistoryCache::new(FeeHistoryCacheConfig::default());
+        let eth_api = EthApi::new(
+            noop_provider.clone(),
+            pool.clone(),
+            noop_network_provider,
+            cache.clone(),
+            GasPriceOracle::new(noop_provider, Default::default(), cache.clone()),
+            ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            DEFAULT_MAX_SIMULATE_BLOCKS,
+            DEFAULT_ETH_PROOF_WINDOW,
+            BlockingTaskPool::build().expect("failed to build tracing pool"),
+            fee_history_cache,
+            evm_config,
+            DEFAULT_PROOF_PERMITS,
+            PendingBlockMode::default(),
+        );
 
         // https://etherscan.io/tx/0xa694b71e6c128a2ed8e2e0f6770bddbe52e3bb8f10e8472f9a79ab81497a8b5d
         let tx_1 = Bytes::from(hex!(

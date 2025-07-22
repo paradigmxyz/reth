@@ -10,9 +10,9 @@ use reth_rpc_eth_api::{
     helpers::pending_block::PendingEnvBuilder, node::RpcNodeCoreAdapter, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    fee_history::fee_history_cache_new_blocks_task, receipt::EthReceiptConverter, EthStateCache,
-    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
-    GasPriceOracleConfig,
+    fee_history::fee_history_cache_new_blocks_task, EthStateCache, EthStateCacheConfig,
+    FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
+    PendingBlockMode,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -39,7 +39,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     gas_oracle: Option<GasPriceOracle<N::Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
-    next_env: NextEnv,
+    pending_block_mode: PendingBlockMode,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -79,7 +79,7 @@ where
             task_spawner: TokioTaskExecutor::default().boxed(),
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
-            next_env: Default::default(),
+            pending_block_mode: PendingBlockMode::default(),
         }
     }
 }
@@ -240,6 +240,12 @@ where
         self
     }
 
+    /// Sets the pending block mode.
+    pub const fn pending_block_mode(mut self, pending_block_mode: PendingBlockMode) -> Self {
+        self.pending_block_mode = pending_block_mode;
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -267,7 +273,7 @@ where
             fee_history_cache_config,
             proof_permits,
             task_spawner,
-            next_env,
+            pending_block_mode,
         } = self;
 
         let provider = components.provider().clone();
@@ -302,8 +308,7 @@ where
             fee_history_cache,
             task_spawner,
             proof_permits,
-            rpc_converter,
-            next_env,
+            pending_block_mode,
         )
     }
 

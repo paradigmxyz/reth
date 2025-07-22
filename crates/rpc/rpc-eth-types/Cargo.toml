@@ -59,6 +59,7 @@ schnellru.workspace = true
 rand.workspace = true
 tracing.workspace = true
 itertools.workspace = true
+clap = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 serde_json.workspace = true

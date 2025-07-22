@@ -20,8 +20,12 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasCap,
-    GasPriceOracle, PendingBlock,
+    EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    PendingBlockMode,
+};
+use reth_storage_api::{
+    BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderHeader,
+    ProviderReceipt,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -145,7 +149,7 @@ where
         blocking_task_pool: BlockingTaskPool,
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         proof_permits: usize,
-        rpc_converter: Rpc,
+        pending_block_mode: PendingBlockMode,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -158,8 +162,7 @@ where
             fee_history_cache,
             TokioTaskExecutor::default().boxed(),
             proof_permits,
-            rpc_converter,
-            (),
+            pending_block_mode,
         );
 
         Self { inner: Arc::new(inner) }
@@ -283,12 +286,8 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Transaction broadcast channel
     raw_tx_sender: broadcast::Sender<Bytes>,
-
-    /// Converter for RPC types.
-    tx_resp_builder: Rpc,
-
-    /// Builder for pending block environment.
-    next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
+    /// The mode for handling pending blocks.
+    pending_block_mode: PendingBlockMode,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -309,8 +308,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
-        tx_resp_builder: Rpc,
-        next_env: impl PendingEnvBuilder<N::Evm>,
+        pending_block_mode: PendingBlockMode,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -341,8 +339,7 @@ where
             fee_history_cache,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
             raw_tx_sender,
-            tx_resp_builder,
-            next_env_builder: Box::new(next_env),
+            pending_block_mode,
         }
     }
 }
@@ -471,6 +468,12 @@ where
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
         let _ = self.raw_tx_sender.send(raw_tx);
+    }
+
+    /// Returns the pending block mode.
+    #[inline]
+    pub const fn pending_block_mode(&self) -> PendingBlockMode {
+        self.pending_block_mode
     }
 }
 
