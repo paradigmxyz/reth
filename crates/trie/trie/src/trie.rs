@@ -173,7 +173,7 @@ where
                 )
                 .with_deletions_retained(retain_updates);
                 let node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor)
-                    .with_last_hashed_key(state.last_account_key);
+                    .with_last_hashed_key(state.last_hashed_key);
                 (hash_builder, node_iter)
             }
             None => {
@@ -249,7 +249,7 @@ where
                         let state = IntermediateRootState {
                             hash_builder,
                             walker_stack,
-                            last_account_key: hashed_address,
+                            last_hashed_key: hashed_address,
                         };
 
                         let state = IntermediateStateRootState {

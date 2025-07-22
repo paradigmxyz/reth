@@ -250,7 +250,7 @@ where
 
                     let checkpoint = MerkleCheckpoint::new(
                         to_block,
-                        state.account_root_state.last_account_key,
+                        state.account_root_state.last_hashed_key,
                         state
                             .account_root_state
                             .walker_stack

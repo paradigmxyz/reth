@@ -33,10 +33,19 @@ impl From<MerkleCheckpoint> for IntermediateStateRootState {
             account_root_state: IntermediateRootState {
                 hash_builder: HashBuilder::from(value.state),
                 walker_stack: value.walker_stack.into_iter().map(CursorSubNode::from).collect(),
-                last_account_key: value.last_account_key,
+                last_hashed_key: value.last_account_key,
             },
-            // TODO: update with intermediate storage state from checkpoint
-            storage_root_state: None,
+            storage_root_state: value.storage_root_checkpoint.map(|checkpoint| {
+                IntermediateRootState {
+                    hash_builder: HashBuilder::from(checkpoint.state),
+                    walker_stack: checkpoint
+                        .walker_stack
+                        .into_iter()
+                        .map(CursorSubNode::from)
+                        .collect(),
+                    last_hashed_key: checkpoint.last_storage_key,
+                }
+            }),
         }
     }
 }
@@ -48,8 +57,8 @@ pub struct IntermediateRootState {
     pub hash_builder: HashBuilder,
     /// Previously recorded walker stack.
     pub walker_stack: Vec<CursorSubNode>,
-    /// The last hashed account key processed.
-    pub last_account_key: B256,
+    /// The last hashed key processed.
+    pub last_hashed_key: B256,
 }
 
 /// The progress of a storage root calculation.
