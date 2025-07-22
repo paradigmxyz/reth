@@ -471,13 +471,33 @@ where
         }
 
         let mut tracker = TrieTracker::default();
+        let mut trie_updates = StorageTrieUpdates::default();
+
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
-        let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set)
-            .with_deletions_retained(retain_updates);
 
-        let mut hash_builder = HashBuilder::default().with_updates(retain_updates);
+        let (mut hash_builder, mut storage_node_iter) = match self.previous_state {
+            Some(state) => {
+                let hash_builder = state.hash_builder.with_updates(retain_updates);
+                let walker = TrieWalker::storage_trie_from_stack(
+                    trie_cursor,
+                    state.walker_stack,
+                    self.prefix_set,
+                )
+                .with_deletions_retained(retain_updates);
+                let node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor)
+                    .with_last_hashed_key(state.last_hashed_key);
+                (hash_builder, node_iter)
+            }
+            None => {
+                let hash_builder = HashBuilder::default().with_updates(retain_updates);
+                let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set)
+                    .with_deletions_retained(retain_updates);
+                let node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);
+                (hash_builder, node_iter)
+            }
+        };
 
-        let mut storage_node_iter = TrieNodeIter::storage_trie(walker, hashed_storage_cursor);
+        let mut hashed_entries_walked = 0;
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
@@ -486,17 +506,39 @@ where
                 }
                 TrieElement::Leaf(hashed_slot, value) => {
                     tracker.inc_leaf();
+                    hashed_entries_walked += 1;
                     hash_builder.add_leaf(
                         Nibbles::unpack(hashed_slot),
                         alloy_rlp::encode_fixed_size(&value).as_ref(),
                     );
+
+                    // Check if we need to return intermediate progress
+                    let total_updates_len =
+                        storage_node_iter.walker.removed_keys_len() + hash_builder.updates_len();
+                    if retain_updates && total_updates_len as u64 >= self.threshold {
+                        let (walker_stack, walker_deleted_keys) = storage_node_iter.walker.split();
+                        trie_updates.removed_nodes.extend(walker_deleted_keys);
+                        let (hash_builder, hash_builder_updates) = hash_builder.split();
+                        trie_updates.storage_nodes.extend(hash_builder_updates);
+
+                        let state = IntermediateRootState {
+                            hash_builder,
+                            walker_stack,
+                            last_hashed_key: hashed_slot,
+                        };
+
+                        return Ok(StorageRootProgress::Progress(
+                            Box::new(state),
+                            hashed_entries_walked,
+                            trie_updates,
+                        ))
+                    }
                 }
             }
         }
 
         let root = hash_builder.root();
 
-        let mut trie_updates = StorageTrieUpdates::default();
         let removed_keys = storage_node_iter.walker.take_removed_keys();
         trie_updates.finalize(hash_builder, removed_keys);
 
