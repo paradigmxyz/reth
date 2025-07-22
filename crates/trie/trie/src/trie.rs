@@ -227,7 +227,6 @@ where
                         // Still in progress, need to pause again
                         hashed_entries_walked += storage_slots_walked;
                         if retain_updates {
-                            updated_storage_nodes += updates.len();
                             trie_updates.insert_storage_updates(hashed_address, updates);
                         }
 
@@ -301,59 +300,59 @@ where
                     )
                     .with_threshold(remaining_threshold);
 
-                    let storage_result = storage_root_calculator.calculate(retain_updates)?;
-
-                    let (storage_root, storage_slots_walked, storage_updates, storage_progress) =
-                        match storage_result {
-                            StorageRootProgress::Complete(root, walked, updates) => {
-                                (root, walked, updates, None)
+                    match storage_root_calculator.calculate(retain_updates)? {
+                        StorageRootProgress::Complete(
+                            storage_root,
+                            storage_slots_walked,
+                            updates,
+                        ) => {
+                            // Storage root completed
+                            hashed_entries_walked += storage_slots_walked;
+                            if retain_updates {
+                                updated_storage_nodes += updates.len();
+                                trie_updates.insert_storage_updates(hashed_address, updates);
                             }
-                            StorageRootProgress::Progress(state, walked, updates) => {
-                                // Storage root calculation hit threshold, need to pause
-                                // We'll use a zero root for now and save the state
-                                (B256::ZERO, walked, updates, Some((account, *state)))
+
+                            // Encode the account with the computed storage root
+                            account_rlp.clear();
+                            let account = account.into_trie_account(storage_root);
+                            account.encode(&mut account_rlp as &mut dyn BufMut);
+                            hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
+                        }
+                        StorageRootProgress::Progress(state, storage_slots_walked, updates) => {
+                            // Storage root hit threshold, need to pause
+                            hashed_entries_walked += storage_slots_walked;
+                            if retain_updates {
+                                trie_updates.insert_storage_updates(hashed_address, updates);
                             }
-                        };
 
-                    hashed_entries_walked += storage_slots_walked;
-                    if retain_updates {
-                        updated_storage_nodes += storage_updates.len();
-                        trie_updates.insert_storage_updates(hashed_address, storage_updates);
+                            let (walker_stack, walker_deleted_keys) =
+                                account_node_iter.walker.split();
+                            trie_updates.removed_nodes.extend(walker_deleted_keys);
+                            let (hash_builder, hash_builder_updates) = hash_builder.split();
+                            trie_updates.account_nodes.extend(hash_builder_updates);
+
+                            let account_state = IntermediateRootState {
+                                hash_builder,
+                                walker_stack,
+                                last_hashed_key: hashed_address,
+                            };
+
+                            let state = IntermediateStateRootState {
+                                account_root_state: account_state,
+                                storage_root_state: Some(IntermediateStorageRootState {
+                                    state: *state,
+                                    account,
+                                }),
+                            };
+
+                            return Ok(StateRootProgress::Progress(
+                                Box::new(state),
+                                hashed_entries_walked,
+                                trie_updates,
+                            ))
+                        }
                     }
-
-                    // Check if we need to pause due to storage root progress
-                    if let Some((account_data, storage_state)) = storage_progress {
-                        // Storage root hit threshold, need to pause
-                        let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
-                        trie_updates.removed_nodes.extend(walker_deleted_keys);
-                        let (hash_builder, hash_builder_updates) = hash_builder.split();
-                        trie_updates.account_nodes.extend(hash_builder_updates);
-
-                        let account_state = IntermediateRootState {
-                            hash_builder,
-                            walker_stack,
-                            last_hashed_key: hashed_address,
-                        };
-
-                        let state = IntermediateStateRootState {
-                            account_root_state: account_state,
-                            storage_root_state: Some(IntermediateStorageRootState {
-                                state: storage_state,
-                                account: account_data,
-                            }),
-                        };
-
-                        return Ok(StateRootProgress::Progress(
-                            Box::new(state),
-                            hashed_entries_walked,
-                            trie_updates,
-                        ))
-                    }
-
-                    account_rlp.clear();
-                    let account = account.into_trie_account(storage_root);
-                    account.encode(&mut account_rlp as &mut dyn BufMut);
-                    hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
 
                     // Decide if we need to return intermediate progress.
                     let total_updates_len = updated_storage_nodes +
