@@ -5,7 +5,7 @@ use alloy_primitives::{hex, Bytes, B256};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
-    FromEvmError, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{AddedTransactionOutcome, PoolTransaction, TransactionPool};
