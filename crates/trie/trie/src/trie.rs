@@ -2,7 +2,9 @@ use crate::{
     hashed_cursor::{HashedCursorFactory, HashedStorageCursor},
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::{PrefixSet, TriePrefixSets},
-    progress::{IntermediateRootState, IntermediateStateRootState, StateRootProgress},
+    progress::{
+        IntermediateRootState, IntermediateStateRootState, StateRootProgress, StorageRootProgress,
+    },
     stats::TrieTracker,
     trie_cursor::TrieCursorFactory,
     updates::{StorageTrieUpdates, TrieUpdates},
@@ -14,6 +16,10 @@ use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
 use tracing::{trace, trace_span};
+
+/// The default updates after which root algorithms should return intermediate progress rather than
+/// finishing the computation.
+const DEFAULT_INTERMEDIATE_THRESHOLD: u64 = 100_000;
 
 #[cfg(feature = "metrics")]
 use crate::metrics::{StateRootMetrics, TrieRootMetrics};
@@ -48,7 +54,7 @@ impl<T, H> StateRoot<T, H> {
             hashed_cursor_factory,
             prefix_sets: TriePrefixSets::default(),
             previous_state: None,
-            threshold: 100_000,
+            threshold: DEFAULT_INTERMEDIATE_THRESHOLD,
             #[cfg(feature = "metrics")]
             metrics: StateRootMetrics::default(),
         }
@@ -295,6 +301,8 @@ pub struct StorageRoot<T, H> {
     pub hashed_address: B256,
     /// The set of storage slot prefixes that have changed.
     pub prefix_set: PrefixSet,
+    /// The number of updates after which the intermediate progress should be returned.
+    threshold: u64,
     /// Storage root metrics.
     #[cfg(feature = "metrics")]
     metrics: TrieRootMetrics,
@@ -332,6 +340,11 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory,
             hashed_address,
             prefix_set,
+            // TODO: should we have a constructor that accepts the threshold, so the higher level
+            // state root can share its remaining threshold with storage root computation? For
+            // example, if we want to stop after 100k, we could run to 99k in the state root part,
+            // then get to a storage root computation, which itself runs up to 100k.
+            threshold: DEFAULT_INTERMEDIATE_THRESHOLD,
             #[cfg(feature = "metrics")]
             metrics,
         }
@@ -343,6 +356,18 @@ impl<T, H> StorageRoot<T, H> {
         self
     }
 
+    /// Set the threshold.
+    pub const fn with_threshold(mut self, threshold: u64) -> Self {
+        self.threshold = threshold;
+        self
+    }
+
+    /// Set the threshold to maximum value so that intermediate progress is not returned.
+    pub const fn with_no_threshold(mut self) -> Self {
+        self.threshold = u64::MAX;
+        self
+    }
+
     /// Set the hashed cursor factory.
     pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StorageRoot<T, HF> {
         StorageRoot {
@@ -350,6 +375,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
+            threshold: self.threshold,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
@@ -362,6 +388,7 @@ impl<T, H> StorageRoot<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
+            threshold: self.threshold,
             #[cfg(feature = "metrics")]
             metrics: self.metrics,
         }
@@ -373,6 +400,16 @@ where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
 {
+    /// Walks the intermediate nodes of existing storage trie (if any) and hashed entries. Feeds the
+    /// nodes into the hash builder. Collects the updates in the process.
+    ///
+    /// # Returns
+    ///
+    /// The intermediate progress of state root computation.
+    pub fn root_with_progress(self) -> Result<StorageRootProgress, StateRootError> {
+        todo!()
+    }
+
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
     ///
     /// # Returns

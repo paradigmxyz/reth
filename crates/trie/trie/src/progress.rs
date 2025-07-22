@@ -1,4 +1,8 @@
-use crate::{hash_builder::HashBuilder, trie_cursor::CursorSubNode, updates::TrieUpdates};
+use crate::{
+    hash_builder::HashBuilder,
+    trie_cursor::CursorSubNode,
+    updates::{StorageTrieUpdates, TrieUpdates},
+};
 use alloy_primitives::B256;
 use reth_stages_types::MerkleCheckpoint;
 
@@ -8,7 +12,9 @@ pub enum StateRootProgress {
     /// The complete state root computation with updates and computed root.
     Complete(B256, usize, TrieUpdates),
     /// The intermediate progress of state root computation.
-    /// Contains the walker stack, the hash builder and the trie updates.
+    /// Contains the walker stack, the hash builder, and the trie updates.
+    ///
+    /// Also contains any progress in an inner storage root computation.
     Progress(Box<IntermediateStateRootState>, usize, TrieUpdates),
 }
 
@@ -44,4 +50,14 @@ pub struct IntermediateRootState {
     pub walker_stack: Vec<CursorSubNode>,
     /// The last hashed account key processed.
     pub last_account_key: B256,
+}
+
+/// The progress of a storage root calculation.
+#[derive(Debug)]
+pub enum StorageRootProgress {
+    /// The complete storage root computation with updates and computed root.
+    Complete(B256, usize, StorageTrieUpdates),
+    /// The intermediate progress of state root computation.
+    /// Contains the walker stack, the hash builder, and the trie updates.
+    Progress(Box<IntermediateRootState>, usize, StorageTrieUpdates),
 }
