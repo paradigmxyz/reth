@@ -502,3 +502,279 @@ pub mod op {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::{Address, Bytes, B256, U256};
+    use alloy_rpc_types_eth::TransactionInfo;
+
+    // Mock types for testing - simplified without complex trait implementations
+    #[derive(Debug, Clone, PartialEq)]
+    struct MockTx {
+        hash: B256,
+        value: U256,
+        nonce: u64,
+        gas_limit: u64,
+        gas_price: u128,
+        input: Bytes,
+    }
+
+    #[derive(Debug, Clone)]
+    struct MockRpcTx {
+        inner: MockTx,
+        signer: Address,
+        info: TransactionInfo,
+    }
+
+    // Implement FromConsensusTx for our mock type
+    impl FromConsensusTx<MockTx> for MockRpcTx {
+        type TxInfo = TransactionInfo;
+        
+        fn from_consensus_tx(tx: MockTx, signer: Address, tx_info: Self::TxInfo) -> Self {
+            Self { inner: tx, signer, info: tx_info }
+        }
+    }
+
+    mod new_converter_design {
+        use super::*;
+
+        // New trait for transaction conversion
+        pub trait RpcTxConverter<PrimitiveTx, RpcTx> {
+            type Error: std::error::Error;
+            
+            fn convert(&self, tx: PrimitiveTx, signer: Address, info: TransactionInfo) -> Result<RpcTx, Self::Error>;
+        }
+
+        // New RpcConverter with explicit generic parameters
+        pub struct RpcConverter<
+            Tx = (),      
+            TxEnv = (),   
+            SimTx = (),   
+            Receipt = (), 
+            Header = ()   
+        > {
+            tx_converter: Tx,
+            tx_env_converter: TxEnv,
+            sim_tx_converter: SimTx,
+            receipt_converter: Receipt,
+            header_converter: Header,
+        }
+
+        impl RpcConverter {
+            pub fn new() -> Self {
+                Self::default()
+            }
+        }
+
+        impl<Tx, TxEnv, SimTx, Receipt, Header> RpcConverter<Tx, TxEnv, SimTx, Receipt, Header> {
+            pub fn with_tx_converter<NewTx>(self, tx_converter: NewTx) -> RpcConverter<NewTx, TxEnv, SimTx, Receipt, Header> {
+                RpcConverter {
+                    tx_converter,
+                    tx_env_converter: self.tx_env_converter,
+                    sim_tx_converter: self.sim_tx_converter,
+                    receipt_converter: self.receipt_converter,
+                    header_converter: self.header_converter,
+                }
+            }
+        }
+
+        impl Default for RpcConverter {
+            fn default() -> Self {
+                Self {
+                    tx_converter: (),
+                    tx_env_converter: (),
+                    sim_tx_converter: (),
+                    receipt_converter: (),
+                    header_converter: (),
+                }
+            }
+        }
+
+        // Implementation for unit type (default converter)
+        impl<PrimitiveTx, RpcTx> RpcTxConverter<PrimitiveTx, RpcTx> for ()
+        where
+            RpcTx: super::FromConsensusTx<PrimitiveTx, TxInfo = TransactionInfo>,
+        {
+            type Error = std::convert::Infallible;
+
+            fn convert(&self, tx: PrimitiveTx, signer: Address, info: TransactionInfo) -> Result<RpcTx, Self::Error> {
+                Ok(RpcTx::from_consensus_tx(tx, signer, info))
+            }
+        }
+
+        // Implementation for function types
+        impl<F, PrimitiveTx, RpcTx, E> RpcTxConverter<PrimitiveTx, RpcTx> for F
+        where
+            F: Fn(PrimitiveTx, Address, TransactionInfo) -> Result<RpcTx, E>,
+            E: std::error::Error,
+        {
+            type Error = E;
+
+            fn convert(&self, tx: PrimitiveTx, signer: Address, info: TransactionInfo) -> Result<RpcTx, Self::Error> {
+                self(tx, signer, info)
+            }
+        }
+    }
+
+    #[test]
+    fn test_default_converter_construction() {
+        use new_converter_design::RpcConverter;
+        
+        // Test that default converter can be created
+        let _converter = RpcConverter::default();
+        
+        // This test will fail initially because the new design doesn't exist yet
+        // Once implemented, it should create a converter with all unit type parameters
+        assert!(false, "New RpcConverter design not implemented yet");
+    }
+
+    #[test]
+    fn test_converter_with_custom_tx_converter() {
+        use new_converter_design::RpcConverter;
+        
+        // Test that we can set a custom tx converter
+        let _converter = RpcConverter::new()
+            .with_tx_converter(|tx: MockTx, signer: Address, info: TransactionInfo| -> Result<MockRpcTx, std::convert::Infallible> {
+                Ok(MockRpcTx { inner: tx, signer, info })
+            });
+        
+        // This test will fail initially
+        assert!(false, "with_tx_converter not implemented yet");
+    }
+
+    #[test]
+    fn test_trait_based_conversion() {
+        use new_converter_design::RpcTxConverter;
+        
+        // Test that the blanket implementation works
+        let converter = ();
+        let tx = MockTx { 
+            hash: B256::default(), 
+            value: U256::from(100), 
+            nonce: 0, 
+            gas_limit: 21000, 
+            gas_price: 20_000_000_000, 
+            input: Bytes::default() 
+        };
+        let signer = Address::default();
+        let info = TransactionInfo::default();
+        
+        // This should work via the blanket implementation
+        let _result: Result<MockRpcTx, _> = converter.convert(tx.clone(), signer, info);
+        
+        // This test will fail initially
+        assert!(false, "Blanket implementation for FromConsensusTx not working yet");
+    }
+
+    #[test]
+    fn test_closure_based_conversion() {
+        use new_converter_design::RpcTxConverter;
+        
+        // Test using a closure for conversion
+        let custom_converter = |tx: MockTx, signer: Address, info: TransactionInfo| -> Result<MockRpcTx, std::convert::Infallible> {
+            Ok(MockRpcTx { inner: tx, signer, info })
+        };
+        
+        let tx = MockTx { 
+            hash: B256::default(), 
+            value: U256::from(200), 
+            nonce: 0, 
+            gas_limit: 21000, 
+            gas_price: 20_000_000_000, 
+            input: Bytes::default() 
+        };
+        let signer = Address::default();
+        let info = TransactionInfo::default();
+        
+        let _result = custom_converter.convert(tx.clone(), signer, info);
+        
+        // This test will fail initially
+        assert!(false, "Closure-based conversion not implemented yet");
+    }
+
+    #[test]
+    fn test_converter_with_captured_context() {
+        use new_converter_design::RpcTxConverter;
+        
+        // Test closure with captured variables
+        let multiplier = 2u64;
+        let converter_with_context = move |tx: MockTx, signer: Address, info: TransactionInfo| -> Result<MockRpcTx, std::convert::Infallible> {
+            let mut modified_tx = tx.clone();
+            modified_tx.value = modified_tx.value * U256::from(multiplier);
+            Ok(MockRpcTx { inner: modified_tx, signer, info })
+        };
+        
+        let tx = MockTx { 
+            hash: B256::default(), 
+            value: U256::from(100), 
+            nonce: 0, 
+            gas_limit: 21000, 
+            gas_price: 20_000_000_000, 
+            input: Bytes::default() 
+        };
+        let _result = converter_with_context.convert(tx, Address::default(), TransactionInfo::default());
+        
+        // This test will fail initially
+        assert!(false, "Context capture in converters not implemented yet");
+    }
+
+    #[test]
+    fn test_rpc_convert_trait_with_new_converter() {
+        use new_converter_design::RpcConverter;
+        
+        // Test that RpcConvert trait works with the new converter design
+        // This ensures backward compatibility
+        
+        // This test will fail initially
+        assert!(false, "RpcConvert trait integration not implemented yet");
+    }
+
+    #[test]
+    fn test_error_propagation() {
+        use new_converter_design::RpcTxConverter;
+        
+        #[derive(Debug)]
+        struct CustomError;
+        impl std::fmt::Display for CustomError {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "Custom conversion error")
+            }
+        }
+        impl std::error::Error for CustomError {}
+        
+        // Test error handling in conversion
+        let failing_converter = |_tx: MockTx, _signer: Address, _info: TransactionInfo| -> Result<MockRpcTx, CustomError> {
+            Err(CustomError)
+        };
+        
+        let tx = MockTx { 
+            hash: B256::default(), 
+            value: U256::from(100), 
+            nonce: 0, 
+            gas_limit: 21000, 
+            gas_price: 20_000_000_000, 
+            input: Bytes::default() 
+        };
+        let _result = failing_converter.convert(tx, Address::default(), TransactionInfo::default());
+        
+        // This test will fail initially
+        assert!(false, "Error propagation not implemented yet");
+    }
+
+    #[test]
+    fn test_multiple_converter_types() {
+        use new_converter_design::RpcConverter;
+        
+        // Test setting multiple converter types
+        let _converter = RpcConverter::new()
+            .with_tx_converter(|tx: MockTx, signer, info| -> Result<MockRpcTx, std::convert::Infallible> {
+                Ok(MockRpcTx { inner: tx, signer, info })
+            });
+            // Future: .with_receipt_converter(...)
+            // Future: .with_header_converter(...)
+        
+        // This test will fail initially
+        assert!(false, "Multiple converter types not implemented yet");
+    }
+}
