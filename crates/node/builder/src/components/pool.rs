@@ -1,15 +1,16 @@
 //! Pool component for the node builder.
 
+use crate::{BuilderContext, FullNodeTypes};
+
 use alloy_primitives::Address;
 use reth_chain_state::CanonStateSubscriptions;
+use reth_chainspec::ChainSpecProvider;
 use reth_node_api::TxTy;
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction, SubPoolLimit,
     TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use std::{collections::HashSet, future::Future};
-
-use crate::{BuilderContext, FullNodeTypes};
 
 /// A type that knows how to build the transaction pool.
 pub trait PoolBuilder<Node: FullNodeTypes>: Send {
@@ -236,11 +237,13 @@ where
 {
     let chain_events = ctx.provider().canonical_state_stream();
     let client = ctx.provider().clone();
+    let chain_spec = client.chain_spec();
 
     ctx.task_executor().spawn_critical(
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             client,
+            chain_spec,
             pool,
             chain_events,
             ctx.task_executor().clone(),

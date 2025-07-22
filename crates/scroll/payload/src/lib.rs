@@ -1,11 +1,5 @@
 //! Engine Payload related types.
 
-pub use base_fee::{
-    PayloadBuildingBaseFeeProvider, L1_BASE_FEE_OVERHEAD, L1_BASE_FEE_PRECISION,
-    L1_BASE_FEE_SCALAR, L1_BASE_FEE_SLOT, MAX_L2_BASE_FEE,
-};
-mod base_fee;
-
 pub mod builder;
 pub use builder::{ScrollPayloadBuilder, ScrollPayloadTransactions};
 

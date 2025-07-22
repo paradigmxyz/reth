@@ -20,7 +20,6 @@ alloy-primitives.workspace = true
 # scroll-alloy
 reth-scroll-evm.workspace = true
 scroll-alloy-hardforks.workspace = true
-scroll-alloy-evm.workspace = true
 
 # revm
 revm.workspace = true
@@ -40,6 +39,7 @@ reth-transaction-pool.workspace = true
 reth-payload-util.workspace = true
 
 # scroll
+reth-scroll-chainspec.workspace = true
 reth-scroll-primitives.workspace = true
 reth-scroll-engine-primitives.workspace = true
 

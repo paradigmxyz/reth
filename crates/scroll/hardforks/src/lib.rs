@@ -40,7 +40,7 @@ pub static SCROLL_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(||
         (ScrollHardfork::Euclid.boxed(), ForkCondition::Timestamp(1744815600)),
         (ScrollHardfork::EuclidV2.boxed(), ForkCondition::Timestamp(1745305200)),
         // TODO: update
-        (ScrollHardfork::Feynman.boxed(), ForkCondition::Timestamp(u64::MAX)),
+        (ScrollHardfork::Feynman.boxed(), ForkCondition::Timestamp(6000000000)),
     ])
 });
 

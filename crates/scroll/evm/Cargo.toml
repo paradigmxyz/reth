@@ -18,6 +18,7 @@ reth-evm = { workspace = true, features = ["scroll-alloy-traits"] }
 reth-execution-types.workspace = true
 reth-primitives = { workspace = true, features = ["serde-bincode-compat"] }
 reth-primitives-traits.workspace = true
+reth-storage-api.workspace = true
 
 # revm
 revm = { workspace = true, features = ["optional_no_base_fee"] }
@@ -46,8 +47,8 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-eyre.workspace = true
 alloy-primitives = { workspace = true, features = ["getrandom"] }
+eyre.workspace = true
 
 [features]
 std = [
@@ -72,4 +73,5 @@ std = [
     "thiserror/std",
     "tracing/std",
     "scroll-alloy-hardforks/std",
+    "reth-storage-api/std",
 ]

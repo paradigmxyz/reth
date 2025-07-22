@@ -1,3 +1,4 @@
+use reth_chainspec::EthChainSpec;
 use reth_node_api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{PoolBuilder, PoolBuilderConfigOverrides},
@@ -5,6 +6,8 @@ use reth_node_builder::{
 };
 
 use reth_provider::CanonStateSubscriptions;
+use reth_scroll_chainspec::{ChainConfig, ScrollChainConfig};
+use reth_scroll_evm::ScrollBaseFeeProvider;
 use reth_scroll_txpool::{ScrollTransactionPool, ScrollTransactionValidator};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, CoinbaseTipOrdering, EthPoolTransaction,
@@ -44,7 +47,11 @@ impl<T> ScrollPoolBuilder<T> {
 
 impl<Node, T> PoolBuilder<Node> for ScrollPoolBuilder<T>
 where
-    Node: FullNodeTypes<Types: NodeTypes<ChainSpec: ScrollHardforks>>,
+    Node: FullNodeTypes<
+        Types: NodeTypes<
+            ChainSpec: EthChainSpec + ScrollHardforks + ChainConfig<Config = ScrollChainConfig>,
+        >,
+    >,
     T: EthPoolTransaction<Consensus = TxTy<Node::Types>>,
 {
     type Pool = ScrollTransactionPool<Node::Provider, DiskFileBlobStore, T>;
@@ -86,6 +93,7 @@ where
             let client = ctx.provider().clone();
             let transactions_backup_config =
                 reth_transaction_pool::maintain::LocalTransactionBackupConfig::with_local_txs_backup(transactions_path);
+            let base_fee_provider = ScrollBaseFeeProvider::new(ctx.chain_spec());
 
             ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
                 "local transactions backup task",
@@ -103,6 +111,7 @@ where
                 "txpool maintenance task",
                 reth_transaction_pool::maintain::maintain_transaction_pool_future(
                     client,
+                    base_fee_provider,
                     transaction_pool.clone(),
                     chain_events,
                     ctx.task_executor().clone(),

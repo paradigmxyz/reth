@@ -1,7 +1,9 @@
 use reth_eth_wire_types::BasicNetworkPrimitives;
 use reth_network::{
-    config::NetworkMode, transform::header::HeaderTransform, NetworkConfig, NetworkHandle,
-    NetworkManager, PeersInfo,
+    config::NetworkMode,
+    protocol::{RlpxSubProtocol, RlpxSubProtocols},
+    transform::header::HeaderTransform,
+    NetworkConfig, NetworkHandle, NetworkManager, PeersInfo,
 };
 use reth_node_api::TxTy;
 use reth_node_builder::{components::NetworkBuilder, BuilderContext, FullNodeTypes};
@@ -15,8 +17,24 @@ use scroll_alloy_hardforks::ScrollHardforks;
 use std::fmt::Debug;
 
 /// The network builder for Scroll.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct ScrollNetworkBuilder;
+#[derive(Debug, Default)]
+pub struct ScrollNetworkBuilder {
+    /// Additional `RLPx` sub-protocols to be added to the network.
+    scroll_sub_protocols: RlpxSubProtocols,
+}
+
+impl ScrollNetworkBuilder {
+    /// Create a new [`ScrollNetworkBuilder`] with default configuration.
+    pub fn new() -> Self {
+        Self { scroll_sub_protocols: RlpxSubProtocols::default() }
+    }
+
+    /// Add a scroll sub-protocol to the network builder.
+    pub fn with_sub_protocol(mut self, protocol: RlpxSubProtocol) -> Self {
+        self.scroll_sub_protocols.push(protocol);
+        self
+    }
+}
 
 impl<Node, Pool> NetworkBuilder<Node, Pool> for ScrollNetworkBuilder
 where
@@ -46,6 +64,7 @@ where
         let config = NetworkConfig {
             network_mode: NetworkMode::Work,
             header_transform: Box::new(transform),
+            extra_protocols: self.scroll_sub_protocols,
             ..config
         };
 

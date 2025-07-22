@@ -8,14 +8,20 @@ mod build;
 
 mod config;
 
-pub use execute::{ScrollBlockExecutionInput, ScrollExecutorProvider};
 mod execute;
+pub use execute::{ScrollBlockExecutionInput, ScrollExecutorProvider};
 
 mod l1;
 pub use l1::RethL1BlockInfo;
 
-pub use receipt::ScrollRethReceiptBuilder;
+mod base_fee;
+pub use base_fee::{
+    ScrollBaseFeeProvider, DEFAULT_BASE_FEE_OVERHEAD, DEFAULT_BASE_FEE_SCALAR,
+    L1_BASE_FEE_PRECISION, L1_BASE_FEE_SLOT, MAX_L2_BASE_FEE,
+};
+
 mod receipt;
+pub use receipt::ScrollRethReceiptBuilder;
 
 use crate::build::ScrollBlockAssembler;
 use alloc::sync::Arc;

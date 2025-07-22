@@ -45,7 +45,7 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
             .build(),
     );
     let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
+        .with_chain(chain_spec.clone())
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
@@ -67,6 +67,7 @@ async fn maintain_txpool_stale_eviction() -> eyre::Result<()> {
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),
+            chain_spec,
             txpool.clone(),
             node.inner.provider.clone().canonical_state_stream(),
             executor.clone(),
@@ -120,7 +121,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
     );
     let genesis_hash = chain_spec.genesis_hash();
     let node_config = NodeConfig::test()
-        .with_chain(chain_spec)
+        .with_chain(chain_spec.clone())
         .with_unused_ports()
         .with_rpc(RpcServerArgs::default().with_unused_ports().with_http());
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
@@ -139,6 +140,7 @@ async fn maintain_txpool_reorg() -> eyre::Result<()> {
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),
+            chain_spec,
             txpool.clone(),
             node.inner.provider.clone().canonical_state_stream(),
             executor.clone(),
@@ -269,6 +271,7 @@ async fn maintain_txpool_commit() -> eyre::Result<()> {
         "txpool maintenance task",
         reth_transaction_pool::maintain::maintain_transaction_pool_future(
             node.inner.provider.clone(),
+            MAINNET.clone(),
             txpool.clone(),
             node.inner.provider.clone().canonical_state_stream(),
             executor.clone(),

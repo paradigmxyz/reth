@@ -95,6 +95,7 @@ where
                 "txpool maintenance task",
                 reth_ethereum::pool::maintain::maintain_transaction_pool_future(
                     client,
+                    ctx.chain_spec(),
                     pool,
                     chain_events,
                     ctx.task_executor().clone(),
