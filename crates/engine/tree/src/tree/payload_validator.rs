@@ -8,7 +8,6 @@ use crate::tree::{
     ConsistentDbView, EngineApiMetrics, EngineApiTreeState, InvalidHeaderCache, PersistingKind,
     StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use alloy_evm::{block::BlockExecutor, Evm};
 use alloy_primitives::B256;
@@ -21,7 +20,7 @@ use reth_payload_primitives::{
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{
-    Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    AlloyBlockHeader, Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -309,7 +308,7 @@ where
         }
 
         // Get the parent block's state to execute against
-        let parent_hash = block.parent_hash();
+        let parent_hash = block.header().parent_hash();
 
         // Get parent header for error context
         let parent_header = ensure_ok!(self.get_parent_header(parent_hash, tree_state));
@@ -622,7 +621,7 @@ where
         handle: &mut crate::tree::PayloadHandle,
         execution_time: Instant,
     ) -> Result<(B256, TrieUpdates), NewPayloadError> {
-        let parent_hash = block.parent_hash();
+        let parent_hash = block.header().parent_hash();
 
         if !run_parallel_state_root {
             // Use synchronous computation
@@ -712,7 +711,7 @@ where
             }
 
             // Move to the parent block
-            current_hash = block.block.recovered_block.parent_hash();
+            current_hash = block.block.recovered_block.header().parent_hash();
         }
 
         false
@@ -794,9 +793,12 @@ where
             self.persisting_kind_for(block.header(), persistence_info, tree_state);
 
         let trie_input_start = Instant::now();
-        let Ok(trie_input) =
-            self.compute_trie_input(provider_ro, block.parent_hash(), tree_state, persisting_kind)
-        else {
+        let Ok(trie_input) = self.compute_trie_input(
+            provider_ro,
+            block.header().parent_hash(),
+            tree_state,
+            persisting_kind,
+        ) else {
             // Fall back to cache-only spawn if trie input computation fails
             let handle =
                 self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder);
@@ -920,7 +922,7 @@ where
                     ))
                 })?;
 
-            blocks.retain(|b| b.recovered_block().number() > last_persisted_block_number);
+            blocks.retain(|b| b.recovered_block().header().number() > last_persisted_block_number);
         }
 
         if blocks.is_empty() {
@@ -1005,12 +1007,10 @@ pub trait EngineValidator<Types: PayloadTypes>:
     fn validate_payload_attributes_against_header(
         &self,
         attr: &<Types as PayloadTypes>::PayloadAttributes,
-        header: &impl BlockHeader,
-    ) -> Result<(), EngineObjectValidationError> {
+        header: &<Self::Block as Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
         if attr.timestamp() <= header.timestamp() {
-            return Err(EngineObjectValidationError::InvalidParams(
-                InvalidPayloadAttributesError::InvalidTimestamp.into(),
-            ))
+            return Err(InvalidPayloadAttributesError::InvalidTimestamp);
         }
         Ok(())
     }

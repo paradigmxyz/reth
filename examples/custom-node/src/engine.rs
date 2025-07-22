@@ -3,16 +3,15 @@ use crate::{
     primitives::{CustomHeader, CustomNodePrimitives, CustomTransaction},
     CustomNode,
 };
-use alloy_consensus::BlockHeader;
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_engine_tree::tree::EngineValidator;
 use reth_ethereum::{
     node::api::{
         validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
-        EngineObjectValidationError, ExecutionPayload, FullNodeComponents, NewPayloadError,
-        NodePrimitives, PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes,
-        PayloadTypes, PayloadValidator,
+        EngineObjectValidationError, ExecutionPayload, FullNodeComponents,
+        InvalidPayloadAttributesError, NewPayloadError, NodePrimitives, PayloadAttributes,
+        PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes, PayloadValidator,
     },
     primitives::{RecoveredBlock, SealedBlock},
     storage::StateProviderFactory,
@@ -275,8 +274,8 @@ where
     fn validate_payload_attributes_against_header(
         &self,
         _attr: &OpPayloadAttributes,
-        _header: &impl BlockHeader,
-    ) -> Result<(), EngineObjectValidationError> {
+        _header: &<Self::Block as reth_ethereum::primitives::Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
         // skip default timestamp validation
         Ok(())
     }

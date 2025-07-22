@@ -17,7 +17,6 @@
 
 #![warn(unused_crate_dependencies)]
 
-use alloy_consensus::BlockHeader;
 use alloy_eips::eip4895::Withdrawals;
 use alloy_genesis::Genesis;
 use alloy_primitives::{Address, B256};
@@ -37,8 +36,8 @@ use reth_ethereum::{
         api::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
             validate_version_specific_fields, AddOnsContext, EngineTypes, FullNodeComponents,
-            FullNodeTypes, NewPayloadError, NodeTypes, PayloadAttributes, PayloadBuilderAttributes,
-            PayloadTypes, PayloadValidator,
+            FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError, NodeTypes,
+            PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
@@ -244,8 +243,8 @@ where
     fn validate_payload_attributes_against_header(
         &self,
         _attr: &<T as PayloadTypes>::PayloadAttributes,
-        _header: &impl BlockHeader,
-    ) -> Result<(), EngineObjectValidationError> {
+        _header: &<Self::Block as reth_ethereum::primitives::Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
         // skip default timestamp validation
         Ok(())
     }
