@@ -68,8 +68,9 @@ def main():
         df1 = df1.head(min_len)
         df2 = df2.head(min_len)
 
-    latency1 = df1['total_latency'].values
-    latency2 = df2['total_latency'].values
+    # Convert from microseconds to milliseconds for better readability
+    latency1 = df1['total_latency'].values / 1000.0
+    latency2 = df2['total_latency'].values / 1000.0
 
     # Handle division by zero
     with np.errstate(divide='ignore', invalid='ignore'):
