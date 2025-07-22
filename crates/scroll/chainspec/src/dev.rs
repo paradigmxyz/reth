@@ -1,14 +1,17 @@
 //! Chain specification in dev mode for custom chain.
 
-use alloc::sync::Arc;
+use crate::{
+    constants::SCROLL_BASE_FEE_PARAMS_FEYNMAN, make_genesis_header, LazyLock, ScrollChainConfig,
+    ScrollChainSpec,
+};
+use alloc::{sync::Arc, vec};
 
 use alloy_chains::Chain;
 use alloy_primitives::U256;
-use reth_chainspec::{BaseFeeParams, BaseFeeParamsKind, ChainSpec};
+use reth_chainspec::{BaseFeeParamsKind, ChainSpec, Hardfork};
 use reth_primitives_traits::SealedHeader;
 use reth_scroll_forks::DEV_HARDFORKS;
-
-use crate::{make_genesis_header, LazyLock, ScrollChainConfig, ScrollChainSpec};
+use scroll_alloy_hardforks::ScrollHardfork;
 
 /// Scroll dev testnet specification
 ///
@@ -24,7 +27,9 @@ pub static SCROLL_DEV: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
             genesis,
             paris_block_and_final_difficulty: Some((0, U256::from(0))),
             hardforks: DEV_HARDFORKS.clone(),
-            base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
+            base_fee_params: BaseFeeParamsKind::Variable(
+                vec![(ScrollHardfork::Feynman.boxed(), SCROLL_BASE_FEE_PARAMS_FEYNMAN)].into(),
+            ),
             ..Default::default()
         },
         config: ScrollChainConfig::dev(),

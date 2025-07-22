@@ -91,9 +91,14 @@ pub struct L1Config {
     /// The L1 contract address of the contract that handles the message queue targeting the Scroll
     /// rollup.
     pub l1_message_queue_address: Address,
+    /// The L1 contract address of the contract that handles the message queue v2 targeting the
+    /// Scroll rollup, used post Euclid fork.
+    pub l1_message_queue_v2_address: Address,
     /// The L1 contract address of the proxy contract which is responsible for Scroll rollup
     /// settlement.
     pub scroll_chain_address: Address,
+    /// The address of the L2 system contract.
+    pub l2_system_config_address: Address,
     /// The maximum number of L1 messages to be consumed per L2 rollup block.
     pub num_l1_messages_per_block: u64,
 }
@@ -157,6 +162,8 @@ impl TryFrom<&OtherFields> for ScrollChainConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SCROLL_MAINNET_L2_SYSTEM_CONFIG_CONTRACT_ADDRESS;
+
     use alloy_primitives::address;
 
     #[test]
@@ -205,6 +212,8 @@ mod tests {
             "l1Config": {
                 "l1ChainId": 1,
                 "l1MessageQueueAddress": "0x0d7E906BD9cAFa154b048cFa766Cc1E54E39AF9B",
+                "l1MessageQueueV2Address": "0x56971da63A3C0205184FEF096E9ddFc7A8C2D18a",
+                "l2SystemConfigAddress": "0x331A873a2a85219863d80d248F9e2978fE88D0Ea",
                 "scrollChainAddress": "0xa13BAF47339d63B743e7Da8741db5456DAc1E556",
                 "numL1MessagesPerBlock": 10
             }
@@ -231,6 +240,10 @@ mod tests {
                 l1_config: L1Config {
                     l1_chain_id: 1,
                     l1_message_queue_address: address!("0d7E906BD9cAFa154b048cFa766Cc1E54E39AF9B"),
+                    l1_message_queue_v2_address: address!(
+                        "56971da63A3C0205184FEF096E9ddFc7A8C2D18a"
+                    ),
+                    l2_system_config_address: SCROLL_MAINNET_L2_SYSTEM_CONFIG_CONTRACT_ADDRESS,
                     scroll_chain_address: address!("a13BAF47339d63B743e7Da8741db5456DAc1E556"),
                     num_l1_messages_per_block: 10,
                 },

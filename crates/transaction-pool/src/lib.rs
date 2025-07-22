@@ -250,9 +250,10 @@
 //!         blob_store,
 //!         Default::default(),
 //!     );
+//!     let chainspec = client.chain_spec();
 //!
 //!   // spawn a task that listens for new blocks and updates the pool's transactions, mined transactions etc..
-//!   tokio::task::spawn(maintain_transaction_pool_future(client, pool, stream, executor.clone(), Default::default()));
+//!   tokio::task::spawn(maintain_transaction_pool_future(client, chainspec, pool, stream, executor.clone(), Default::default()));
 //!
 //! # }
 //! ```

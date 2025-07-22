@@ -35,6 +35,8 @@ impl Transaction {
             // For l1 messages, we set the `gasPrice` field to 0 in rpc
             0
         } else {
+            // TODO: should we get the pool base fee in the case where the transaction is a pending
+            // transaction here?
             base_fee
                 .map(|base_fee| {
                     tx.effective_tip_per_gas(base_fee).unwrap_or_default() + base_fee as u128

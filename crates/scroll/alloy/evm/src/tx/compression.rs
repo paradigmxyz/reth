@@ -5,7 +5,6 @@ use alloy_eips::{Encodable2718, Typed2718};
 use alloy_evm::{IntoTxEnv, RecoveredTx};
 use alloy_primitives::{Address, Bytes, TxKind, U256};
 use revm::context::TxEnv;
-use revm_scroll::l1block::TX_L1_FEE_PRECISION_U256;
 use scroll_alloy_consensus::{ScrollTxEnvelope, TxL1Message};
 pub use zstd_compression::compute_compression_ratio;
 
@@ -13,6 +12,8 @@ pub use zstd_compression::compute_compression_ratio;
 mod zstd_compression {
     use super::*;
     use std::io::Write;
+
+    use revm_scroll::l1block::TX_L1_FEE_PRECISION_U256;
     use zstd::{
         stream::Encoder,
         zstd_safe::{CParameter, ParamSwitch},
