@@ -56,12 +56,14 @@ impl reth_codecs::Compact for MerkleCheckpoint {
         // Serialize the optional storage root checkpoint
         match &self.storage_root_checkpoint {
             Some(checkpoint) => {
-                buf.put_u8(1); // Indicate Some
+                // one means Some
+                buf.put_u8(1);
                 len += 1;
                 len += checkpoint.to_compact(buf);
             }
             None => {
-                buf.put_u8(0); // Indicate None
+                // zero means None
+                buf.put_u8(0);
                 len += 1;
             }
         }

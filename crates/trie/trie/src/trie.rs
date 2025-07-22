@@ -123,7 +123,7 @@ where
     ///
     /// # Returns
     ///
-    /// The intermediate progress of state root computation and the trie updates.
+    /// The state root and the trie updates.
     pub fn root_with_updates(self) -> Result<(B256, TrieUpdates), StateRootError> {
         match self.with_no_threshold().calculate(true)? {
             StateRootProgress::Complete(root, _, updates) => Ok((root, updates)),
@@ -254,6 +254,7 @@ where
 
                         let state = IntermediateStateRootState {
                             account_root_state: state,
+                            // TODO: fill this field if required
                             storage_root_state: None,
                         };
 
@@ -406,8 +407,8 @@ where
     /// # Returns
     ///
     /// The intermediate progress of state root computation.
-    pub fn root_with_progress(self) -> Result<StorageRootProgress, StateRootError> {
-        todo!()
+    pub fn root_with_progress(self) -> Result<StorageRootProgress, StorageRootError> {
+        self.calculate(true)
     }
 
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
@@ -416,7 +417,10 @@ where
     ///
     /// The storage root and storage trie updates for a given address.
     pub fn root_with_updates(self) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
-        self.calculate(true)
+        match self.with_no_threshold().calculate(true)? {
+            StorageRootProgress::Complete(root, walked, updates) => Ok((root, walked, updates)),
+            StorageRootProgress::Progress(..) => unreachable!(), // unreachable threshold
+        }
     }
 
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
@@ -425,8 +429,10 @@ where
     ///
     /// The storage root.
     pub fn root(self) -> Result<B256, StorageRootError> {
-        let (root, _, _) = self.calculate(false)?;
-        Ok(root)
+        match self.calculate(false)? {
+            StorageRootProgress::Complete(root, _, _) => Ok(root),
+            StorageRootProgress::Progress(..) => unreachable!(), // update retenion is disabled
+        }
     }
 
     /// Walks the hashed storage table entries for a given address and calculates the storage root.
@@ -435,10 +441,7 @@ where
     ///
     /// The storage root, number of walked entries and trie updates
     /// for a given address if requested.
-    pub fn calculate(
-        self,
-        retain_updates: bool,
-    ) -> Result<(B256, usize, StorageTrieUpdates), StorageRootError> {
+    pub fn calculate(self, retain_updates: bool) -> Result<StorageRootProgress, StorageRootError> {
         let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_address = ?self.hashed_address);
         let _enter = span.enter();
 
@@ -449,7 +452,11 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok((EMPTY_ROOT_HASH, 0, StorageTrieUpdates::deleted()))
+            return Ok(StorageRootProgress::Complete(
+                EMPTY_ROOT_HASH,
+                0,
+                StorageTrieUpdates::deleted(),
+            ))
         }
 
         let mut tracker = TrieTracker::default();
@@ -498,7 +505,7 @@ where
         );
 
         let storage_slots_walked = stats.leaves_added() as usize;
-        Ok((root, storage_slots_walked, trie_updates))
+        Ok(StorageRootProgress::Complete(root, storage_slots_walked, trie_updates))
     }
 }
 

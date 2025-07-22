@@ -9,7 +9,8 @@ use reth_stages_types::MerkleCheckpoint;
 /// The progress of the state root computation.
 #[derive(Debug)]
 pub enum StateRootProgress {
-    /// The complete state root computation with updates and computed root.
+    /// The complete state root computation with updates, the total number of entries walked, and
+    /// the computed root.
     Complete(B256, usize, TrieUpdates),
     /// The intermediate progress of state root computation.
     /// Contains the walker stack, the hash builder, and the trie updates.
