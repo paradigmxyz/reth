@@ -1,6 +1,7 @@
 use crate::{
     chainspec::CustomChainSpec,
     primitives::{CustomHeader, CustomNodePrimitives, CustomTransaction},
+    CustomNode,
 };
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
@@ -8,9 +9,8 @@ use reth_ethereum::{
     node::api::{
         validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
         EngineObjectValidationError, EngineValidator, ExecutionPayload, FullNodeComponents,
-        InvalidPayloadAttributesError, NewPayloadError, NodePrimitives, NodeTypes,
-        PayloadAttributes, PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes,
-        PayloadValidator,
+        InvalidPayloadAttributesError, NewPayloadError, NodePrimitives, PayloadAttributes,
+        PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes, PayloadValidator,
     },
     primitives::{RecoveredBlock, SealedBlock},
     storage::StateProviderFactory,
@@ -176,9 +176,9 @@ impl From<CustomBuiltPayload>
 
 impl PayloadTypes for CustomPayloadTypes {
     type ExecutionData = CustomExecutionData;
-    type BuiltPayload = CustomBuiltPayload;
-    type PayloadAttributes = CustomPayloadAttributes;
-    type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
+    type BuiltPayload = OpBuiltPayload<CustomNodePrimitives>;
+    type PayloadAttributes = OpPayloadAttributes;
+    type PayloadBuilderAttributes = OpPayloadBuilderAttributes<CustomTransaction>;
 
     fn block_to_payload(
         block: SealedBlock<
@@ -237,18 +237,14 @@ where
     }
 }
 
-impl<P, T> EngineValidator<T> for CustomEngineValidator<P>
+impl<P> EngineValidator<CustomPayloadTypes> for CustomEngineValidator<P>
 where
     P: StateProviderFactory + Send + Sync + Unpin + 'static,
-    T: PayloadTypes<
-        PayloadAttributes = CustomPayloadAttributes,
-        ExecutionData = CustomExecutionData,
-    >,
 {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, T::PayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, OpPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(self.chain_spec(), version, payload_or_attrs)
     }
@@ -256,29 +252,27 @@ where
     fn ensure_well_formed_attributes(
         &self,
         version: EngineApiMessageVersion,
-        attributes: &T::PayloadAttributes,
+        attributes: &OpPayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         validate_version_specific_fields(
             self.chain_spec(),
             version,
-            PayloadOrAttributes::<Self::ExecutionData, T::PayloadAttributes>::PayloadAttributes(
-                attributes,
-            ),
+            PayloadOrAttributes::<Self::ExecutionData, _>::PayloadAttributes(attributes),
         )?;
 
         // custom validation logic - ensure that the custom field is not zero
-        if attributes.extension == 0 {
-            return Err(EngineObjectValidationError::invalid_params(
-                CustomError::CustomFieldIsNotZero,
-            ))
-        }
+        // if attributes.extension == 0 {
+        //     return Err(EngineObjectValidationError::invalid_params(
+        //         CustomError::CustomFieldIsNotZero,
+        //     ))
+        // }
 
         Ok(())
     }
 
     fn validate_payload_attributes_against_header(
         &self,
-        _attr: &<T as PayloadTypes>::PayloadAttributes,
+        _attr: &OpPayloadAttributes,
         _header: &<Self::Block as reth_ethereum::primitives::Block>::Header,
     ) -> Result<(), InvalidPayloadAttributesError> {
         // skip default timestamp validation
@@ -300,13 +294,7 @@ pub struct CustomEngineValidatorBuilder;
 
 impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            Payload = CustomPayloadTypes,
-            ChainSpec = CustomChainSpec,
-            Primitives = CustomNodePrimitives,
-        >,
-    >,
+    N: FullNodeComponents<Types = CustomNode>,
 {
     type Validator = CustomEngineValidator<N::Provider>;
 
