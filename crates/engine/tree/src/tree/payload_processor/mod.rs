@@ -352,6 +352,7 @@ where
             let (result, trie) = task.run();
             // Send state root computation result
             let _ = state_root_tx.send(result);
+
             // Clear the SparseStateTrie and replace it back into the mutex _after_ sending results
             // to the next step, so that time spent clearing doesn't block the step after this one.
             cleared_sparse_trie.lock().replace(ClearedSparseStateTrie::from_state_trie(trie));
