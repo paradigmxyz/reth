@@ -12,7 +12,7 @@ use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::ForkchoiceStatus;
 use reth_ethereum_consensus::EthBeaconConsensus;
-use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadTypes};
+use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
@@ -23,9 +23,6 @@ use std::{
     str::FromStr,
     sync::mpsc::{channel, Sender},
 };
-
-// Type alias to help with trait resolution
-type TestEngineTypes = EthEngineTypes<EthPayloadTypes>;
 
 /// Mock engine validator for tests
 #[derive(Debug, Clone)]
@@ -51,7 +48,7 @@ impl reth_engine_primitives::PayloadValidator for MockEngineValidator {
     }
 }
 
-impl EngineValidator<TestEngineTypes> for MockEngineValidator {
+impl EngineValidator<EthEngineTypes> for MockEngineValidator {
     fn validate_version_specific_fields(
         &self,
         _version: reth_payload_primitives::EngineApiMessageVersion,
@@ -132,11 +129,11 @@ struct TestHarness {
     tree: EngineApiTreeHandler<
         EthPrimitives,
         MockEthProvider,
-        TestEngineTypes,
+        EthEngineTypes,
         MockEngineValidator,
         MockEvmConfig,
     >,
-    to_tree_tx: Sender<FromEngine<EngineApiRequest<TestEngineTypes, EthPrimitives>, Block>>,
+    to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
     blocks: Vec<ExecutedBlockWithTrieUpdates>,
     action_rx: Receiver<PersistenceAction>,
