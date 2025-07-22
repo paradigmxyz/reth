@@ -64,10 +64,9 @@ pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 ///
 /// ## Leaf Operations
 ///
-/// **Update**: When updating a leaf, the [`prefix_set`](Self::prefix_set) is marked to track the
-/// change. The value is stored in the appropriate subtrie's values map. If the leaf is new, the
-/// trie structure is updated by walking to the leaf from the root, creating necessary intermediate
-/// branch nodes.
+/// **Update**: When updating a leaf, the `prefix_set` is marked to track the change. The value is
+/// stored in the appropriate subtrie's values map. If the leaf is new, the trie structure is
+/// updated by walking to the leaf from the root, creating necessary intermediate branch nodes.
 ///
 /// **Removal**: Leaf removal may require parent node modifications. The algorithm walks up the
 /// trie, removing nodes that become empty and converting single-child branches to extensions.
@@ -82,8 +81,8 @@ pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 /// 2. Update hashes for the upper subtrie (which may reference lower subtrie hashes)
 /// 3. Calculate the final root hash from the upper subtrie's root node
 ///
-/// The [`prefix_set`](Self::prefix_set) tracks which paths have been modified, enabling incremental
-/// updates instead of recalculating the entire trie.
+/// The `prefix_set` tracks which paths have been modified, enabling incremental updates instead of
+/// recalculating the entire trie.
 ///
 /// ## Invariants
 ///
