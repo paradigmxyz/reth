@@ -1165,6 +1165,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> BlockNumReader for DatabaseProvider<TX, N
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvider<TX, N> {
     type Block = BlockTy<N>;
+    type BlockBody = BodyTy<N>;
 
     fn find_block_by_hash(
         &self,
@@ -1207,6 +1208,35 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
 
         Ok(None)
     }
+
+    fn block_body(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::BlockBody>> {
+        if let Some(number) = self.convert_hash_or_number(id)? {
+            if self.block_body_indices(number)?.is_some() {
+                // If the body indices are not found, this means that the transactions either do not
+                // exist in the database yet, or they do exit but are not indexed.
+                // If they exist but are not indexed, we don't have enough
+                // information to return the block anyways, so we return `None`.
+                let Some(transactions) = self.transactions_by_block(number.into())? else {
+                    return Ok(None)
+                };
+
+                // We need a header to pass to read_block_bodies, but we only care about the body
+                if let Some(header) = self.header_by_number(number)? {
+                    let body = self
+                        .storage
+                        .reader()
+                        .read_block_bodies(self, vec![(&header, transactions)])?
+                        .pop()
+                        .ok_or(ProviderError::InvalidStorageOutput)?;
+
+                    return Ok(Some(body))
+                }
+            }
+        }
+
+        Ok(None)
+    }
+    
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         Ok(None)
     }

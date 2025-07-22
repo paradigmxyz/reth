@@ -62,6 +62,9 @@ pub trait BlockReader:
         Header = Self::Header,
     >;
 
+    /// The block body type this provider needs.
+    type BlockBody: reth_primitives_traits::BlockBody<Transaction = Self::Transaction>;
+
     /// Tries to find in the given block source.
     ///
     /// Note: this only operates on the hash because the number might be ambiguous.
@@ -77,6 +80,9 @@ pub trait BlockReader:
     ///
     /// Returns `None` if block is not found.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>>;
+
+    /// Returns None if block body is not found or if transactions are not indexed.
+    fn block_body(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::BlockBody>>;
 
     /// Returns the pending block if available
     ///
@@ -148,6 +154,7 @@ pub trait BlockReader:
 
 impl<T: BlockReader> BlockReader for Arc<T> {
     type Block = T::Block;
+    type BlockBody = T::BlockBody;
 
     fn find_block_by_hash(
         &self,
@@ -158,6 +165,9 @@ impl<T: BlockReader> BlockReader for Arc<T> {
     }
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
+    }
+    fn block_body(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::BlockBody>> {
+        T::block_body(self, id)
     }
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block(self)
@@ -206,6 +216,7 @@ impl<T: BlockReader> BlockReader for Arc<T> {
 
 impl<T: BlockReader> BlockReader for &T {
     type Block = T::Block;
+    type BlockBody = T::BlockBody;
 
     fn find_block_by_hash(
         &self,
@@ -216,6 +227,9 @@ impl<T: BlockReader> BlockReader for &T {
     }
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
+    }
+    fn block_body(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::BlockBody>> {
+        T::block_body(self, id)
     }
     fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block(self)
