@@ -89,11 +89,11 @@ impl<B: Block, R> PendingBlockEnvOrigin<B, R> {
 
 /// Locally built pending block for `pending` tag.
 #[derive(Debug, Constructor)]
-pub struct PendingBlock<B: Block, R> {
+pub struct PendingBlock<N: NodePrimitives> {
     /// Timestamp when the pending block is considered outdated.
     pub expires_at: Instant,
     /// The locally built pending block.
-    pub block: Arc<RecoveredBlock<B>>,
+    pub block: Arc<RecoveredBlock<N::Block>>,
     /// The receipts for the pending block
-    pub receipts: Arc<Vec<R>>,
+    pub receipts: Arc<Vec<N::Receipt>>,
 }

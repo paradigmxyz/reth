@@ -59,4 +59,7 @@ docs/vocs/node_modules
 
 # Cargo chef recipe file
 recipe.json
-.worktrees/
+
+_
+# broken links report
+links-report.json

@@ -12,31 +12,19 @@ use reth_evm::{
     evm::EvmFactoryExt, system_calls::SystemCaller, tracing::TracingCtx, ConfigureEvm, Database,
     Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
-use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock, SignedTransaction};
 use reth_revm::{database::StateProviderDatabase, db::CacheDB};
 use reth_rpc_eth_types::{
     cache::db::{StateCacheDb, StateCacheDbRefMutWrapper, StateProviderTraitObjWrapper},
     EthApiError,
 };
-use reth_storage_api::{BlockReader, ProviderBlock, ProviderHeader, ProviderTx};
+use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context_interface::result::ResultAndState, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
-pub trait Trace:
-    LoadState<
-    Provider: BlockReader,
-    Evm: ConfigureEvm<
-        Primitives: NodePrimitives<
-            BlockHeader = ProviderHeader<Self::Provider>,
-            SignedTx = ProviderTx<Self::Provider>,
-        >,
-    >,
-    Error: FromEvmError<Self::Evm>,
->
-{
+pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
     /// Executes the [`reth_evm::EvmEnv`] against the given [Database] without committing state
     /// changes.
     #[expect(clippy::type_complexity)]
@@ -364,7 +352,7 @@ pub trait Trace:
     ///
     /// This
     /// 1. fetches all transactions of the block
-    /// 2. configures the EVM evn
+    /// 2. configures the EVM env
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
     ///    _after_ the transaction [`StateProviderDatabase`] and the database that points to the
@@ -400,7 +388,7 @@ pub trait Trace:
     ///
     /// This
     /// 1. fetches all transactions of the block
-    /// 2. configures the EVM evn
+    /// 2. configures the EVM env
     /// 3. loops over all transactions and executes them
     /// 4. calls the callback with the transaction info, the execution result, the changed state
     ///    _after_ the transaction `EvmState` and the database that points to the state right

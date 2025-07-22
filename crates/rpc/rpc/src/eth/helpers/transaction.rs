@@ -2,22 +2,22 @@
 
 use crate::EthApi;
 use alloy_primitives::{Bytes, B256};
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt,
+    helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
+    FromEvmError, RpcNodeCore,
 };
-use reth_rpc_eth_types::utils::recover_raw_transaction;
-use reth_storage_api::{BlockReader, BlockReaderIdExt, ProviderTx, TransactionsProvider};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
 
-impl<Provider, Pool, Network, EvmConfig> EthTransactions
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
-    Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
     #[inline]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
+    fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes> {
         self.inner.signers()
     }
 
@@ -33,30 +33,23 @@ where
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
         // submit the transaction to the pool with a `Local` origin
-        let hash = self
-            .pool()
-            .add_transaction(TransactionOrigin::Local, pool_transaction)
-            .await
-            .map_err(Self::Error::from_eth_err)?;
+        let hash = self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
 
         Ok(hash)
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadTransaction
-    for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N, Rpc> LoadTransaction for EthApi<N, Rpc>
 where
-    Self: SpawnBlocking
-        + FullEthApiTypes
-        + RpcNodeCoreExt<Provider: TransactionsProvider, Pool: TransactionPool>,
-    Provider: BlockReader,
+    N: RpcNodeCore,
+    EthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
 {
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{hex_literal::hex, Bytes};
     use reth_chainspec::ChainSpecProvider;
     use reth_evm_ethereum::EthEvmConfig;
@@ -70,7 +63,6 @@ mod tests {
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
     };
     use reth_tasks::pool::BlockingTaskPool;
-    use reth_transaction_pool::{test_utils::testing_pool, TransactionPool};
 
     #[tokio::test]
     async fn send_raw_transaction() {

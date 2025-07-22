@@ -6,7 +6,8 @@ use futures::Future;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthereumHardforks};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
-use reth_storage_api::{BlockNumReader, StageCheckpointReader};
+use reth_rpc_convert::{RpcTxReq, RpcTypes};
+use reth_storage_api::{BlockNumReader, StageCheckpointReader, TransactionsProvider};
 
 use crate::{helpers::EthSigner, RpcNodeCore};
 
@@ -25,11 +26,14 @@ pub trait EthApiSpec:
     /// The transaction type signers are using.
     type Transaction;
 
+    /// The RPC requests and responses.
+    type Rpc: RpcTypes;
+
     /// Returns the block node is started on.
     fn starting_block(&self) -> U256;
 
     /// Returns a handle to the signers owned by provider.
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<Self::Transaction>>>>;
+    fn signers(&self) -> &SignersForApi<Self>;
 
     /// Returns the current ethereum protocol version.
     fn protocol_version(&self) -> impl Future<Output = RethResult<U64>> + Send {
@@ -88,3 +92,14 @@ pub trait EthApiSpec:
         Ok(status)
     }
 }
+
+/// A handle to [`EthSigner`]s with its generics set from [`EthApiSpec`].
+pub type SignersForApi<Api> = parking_lot::RwLock<
+    Vec<Box<dyn EthSigner<<Api as EthApiSpec>::Transaction, RpcTxReq<<Api as EthApiSpec>::Rpc>>>>,
+>;
+
+/// A handle to [`EthSigner`]s with its generics set from [`TransactionsProvider`] and
+/// [`reth_rpc_convert::RpcTypes`].
+pub type SignersForRpc<Provider, Rpc> = parking_lot::RwLock<
+    Vec<Box<dyn EthSigner<<Provider as TransactionsProvider>::Transaction, RpcTxReq<Rpc>>>>,
+>;

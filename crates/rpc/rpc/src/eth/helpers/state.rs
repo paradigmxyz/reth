@@ -1,44 +1,37 @@
 //! Contains RPC handler implementations specific to state.
 
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_storage_api::{BlockReader, StateProviderFactory};
-use reth_transaction_pool::TransactionPool;
-
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
-    helpers::{EthState, LoadState, SpawnBlocking},
-    RpcNodeCoreExt,
+    helpers::{EthState, LoadState},
+    RpcNodeCore,
 };
 
 use crate::EthApi;
 
-impl<Provider, Pool, Network, EvmConfig> EthState for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N, Rpc> EthState for EthApi<N, Rpc>
 where
-    Self: LoadState + SpawnBlocking,
-    Provider: BlockReader,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_proof_window()
     }
 }
 
-impl<Provider, Pool, Network, EvmConfig> LoadState for EthApi<Provider, Pool, Network, EvmConfig>
+impl<N, Rpc> LoadState for EthApi<N, Rpc>
 where
-    Self: RpcNodeCoreExt<
-        Provider: BlockReader
-                      + StateProviderFactory
-                      + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-        Pool: TransactionPool,
-    >,
-    Provider: BlockReader,
+    N: RpcNodeCore,
+    Rpc: RpcConvert<Primitives = N::Primitives>,
 {
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::eth::helpers::types::EthRpcConverter;
+
     use super::*;
-    use alloy_consensus::Header;
-    use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
     use alloy_primitives::{Address, StorageKey, StorageValue, U256};
+    use reth_chainspec::ChainSpec;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
@@ -49,11 +42,15 @@ mod tests {
     use reth_rpc_server_types::constants::{
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
     };
-    use reth_tasks::pool::BlockingTaskPool;
+    use reth_rpc_eth_api::{helpers::EthState, node::RpcNodeCoreAdapter};
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
     use std::collections::HashMap;
 
-    fn noop_eth_api() -> EthApi<NoopProvider, TestPool, NoopNetwork, EthEvmConfig> {
+    fn noop_eth_api() -> EthApi<
+        RpcNodeCoreAdapter<NoopProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        EthRpcConverter<ChainSpec>,
+    > {
+        let provider = NoopProvider::default();
         let pool = testing_pool();
         let evm_config = EthEvmConfig::mainnet();
 
@@ -77,7 +74,10 @@ mod tests {
 
     fn mock_eth_api(
         accounts: HashMap<Address, ExtendedAccount>,
-    ) -> EthApi<MockEthProvider, TestPool, (), EthEvmConfig> {
+    ) -> EthApi<
+        RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
+        EthRpcConverter<ChainSpec>,
+    > {
         let pool = testing_pool();
         let mock_provider = MockEthProvider::default();
 

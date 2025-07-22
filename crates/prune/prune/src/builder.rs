@@ -82,7 +82,7 @@ impl PrunerBuilder {
                 ProviderRW: PruneCheckpointWriter
                                 + BlockReader<Transaction: Encodable2718>
                                 + StaticFileProviderFactory<
-                    Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>,
+                    Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
                 >,
             > + StaticFileProviderFactory<
                 Primitives = <PF::ProviderRW as NodePrimitivesProvider>::Primitives,
@@ -107,8 +107,9 @@ impl PrunerBuilder {
         static_file_provider: StaticFileProvider<Provider::Primitives>,
     ) -> Pruner<Provider, ()>
     where
-        Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value, Receipt: Value>>
-            + DBProvider<Tx: DbTxMut>
+        Provider: StaticFileProviderFactory<
+                Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+            > + DBProvider<Tx: DbTxMut>
             + BlockReader<Transaction: Encodable2718>
             + PruneCheckpointWriter,
     {

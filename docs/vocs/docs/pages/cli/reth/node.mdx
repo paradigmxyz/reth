@@ -312,6 +312,11 @@ RPC:
 
           [default: <CACHE_DIR>_engine_api.ipc]
 
+      --disable-auth-server
+          Disable the auth/engine API server.
+
+          This will prevent the authenticated engine-API server from starting. Use this if you're running a node that doesn't need to serve engine API requests.
+
       --rpc.jwtsecret <HEX>
           Hex encoded JWT secret to authenticate the regular RPC server(s), see `--http.api` and `--ws.api`.
 
@@ -629,6 +634,9 @@ Debug:
           When enabled, the node will collect execution witnesses from the specified source and
           compare them against local execution when a bad block is encountered, helping identify
           discrepancies in state execution.
+
+      --ethstats <ETHSTATS>
+          The URL of the ethstats server to connect to. Example: `nodename:secret@host:port`
 
 Database:
       --db.log-level <LOG_LEVEL>

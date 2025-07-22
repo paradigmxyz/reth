@@ -2,21 +2,20 @@
 //! RPC methods.
 
 use super::SpawnBlocking;
-use crate::{types::RpcTypes, EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
+use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
 use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::U256;
+use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm, Evm, SpecFor,
+    ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
 };
-use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{
-    transaction::error::InvalidTransactionError, Receipt, RecoveredBlock, SealedHeader,
+    transaction::error::InvalidTransactionError, HeaderTy, RecoveredBlock, SealedHeader,
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
@@ -44,31 +43,17 @@ use tracing::debug;
 /// Behaviour shared by several `eth_` RPC methods, not exclusive to `eth_` blocks RPC methods.
 pub trait LoadPendingBlock:
     EthApiTypes<
-        NetworkTypes: RpcTypes<
-            Header = alloy_rpc_types_eth::Header<ProviderHeader<Self::Provider>>,
-        >,
         Error: FromEvmError<Self::Evm>,
         RpcConvert: RpcConvert<Network = Self::NetworkTypes>,
-    > + RpcNodeCore<
-        Provider: BlockReaderIdExt<Receipt: Receipt>
-                      + ChainSpecProvider<ChainSpec: EthChainSpec + EthereumHardforks>
-                      + StateProviderFactory,
-        Evm: ConfigureEvm<Primitives = <Self as RpcNodeCore>::Primitives>,
-        Primitives: NodePrimitives<
-            BlockHeader = ProviderHeader<Self::Provider>,
-            SignedTx = ProviderTx<Self::Provider>,
-            Receipt = ProviderReceipt<Self::Provider>,
-            Block = ProviderBlock<Self::Provider>,
-        >,
-    >
+    > + RpcNodeCore
 {
     /// Returns a handle to the pending block.
     ///
     /// Data access in default (L1) trait method implementations.
-    #[expect(clippy::type_complexity)]
-    fn pending_block(
-        &self,
-    ) -> &Mutex<Option<PendingBlock<ProviderBlock<Self::Provider>, ProviderReceipt<Self::Provider>>>>;
+    fn pending_block(&self) -> &Mutex<Option<PendingBlock<Self::Primitives>>>;
+
+    /// Returns a [`PendingEnvBuilder`] for the pending block.
+    fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
@@ -123,7 +108,9 @@ pub trait LoadPendingBlock:
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error>;
+    ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error> {
+        Ok(self.pending_env_builder().pending_env_attributes(parent)?)
+    }
 
     /// Returns the pending block mode configuration.
     fn pending_block_mode(&self) -> PendingBlockMode;
@@ -366,5 +353,49 @@ pub trait LoadPendingBlock:
             builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
 
         Ok((block, execution_result.receipts))
+    }
+}
+
+/// A type that knows how to build a [`ConfigureEvm::NextBlockEnvCtx`] for a pending block.
+pub trait PendingEnvBuilder<Evm: ConfigureEvm>: Send + Sync + Unpin + 'static {
+    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block.
+    fn pending_env_attributes(
+        &self,
+        parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
+    ) -> Result<Evm::NextBlockEnvCtx, EthApiError>;
+}
+
+/// Trait that should be implemented on [`ConfigureEvm::NextBlockEnvCtx`] to provide a way for it to
+/// build an environment for pending block.
+///
+/// This assumes that next environment building doesn't require any additional context, for more
+/// complex implementations one should implement [`PendingEnvBuilder`] on their custom type.
+pub trait BuildPendingEnv<Header> {
+    /// Builds a [`ConfigureEvm::NextBlockEnvCtx`] for pending block.
+    fn build_pending_env(parent: &SealedHeader<Header>) -> Self;
+}
+
+impl<Evm> PendingEnvBuilder<Evm> for ()
+where
+    Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<Evm::Primitives>>>,
+{
+    fn pending_env_attributes(
+        &self,
+        parent: &SealedHeader<HeaderTy<Evm::Primitives>>,
+    ) -> Result<Evm::NextBlockEnvCtx, EthApiError> {
+        Ok(Evm::NextBlockEnvCtx::build_pending_env(parent))
+    }
+}
+
+impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
+    fn build_pending_env(parent: &SealedHeader<H>) -> Self {
+        Self {
+            timestamp: parent.timestamp().saturating_add(12),
+            suggested_fee_recipient: parent.beneficiary(),
+            prev_randao: B256::random(),
+            gas_limit: parent.gas_limit(),
+            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
+            withdrawals: parent.withdrawals_root().map(|_| Default::default()),
+        }
     }
 }

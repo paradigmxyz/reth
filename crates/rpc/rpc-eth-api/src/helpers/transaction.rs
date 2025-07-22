@@ -3,8 +3,9 @@
 
 use super::{EthApiSpec, EthSigner, LoadBlock, LoadReceipt, LoadState, SpawnBlocking};
 use crate::{
-    helpers::estimate::EstimateCall, FromEthApiError, FullEthApiTypes, IntoEthApiError,
-    RpcNodeCore, RpcNodeCoreExt, RpcReceipt, RpcTransaction,
+    helpers::{estimate::EstimateCall, spec::SignersForRpc},
+    FromEthApiError, FullEthApiTypes, IntoEthApiError, RpcNodeCore, RpcNodeCoreExt, RpcReceipt,
+    RpcTransaction,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
@@ -14,12 +15,12 @@ use alloy_dyn_abi::TypedData;
 use alloy_eips::{eip2718::Encodable2718, BlockId};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Address, Bytes, TxHash, B256};
-use alloy_rpc_types_eth::{transaction::TransactionRequest, BlockNumberOrTag, TransactionInfo};
+use alloy_rpc_types_eth::{BlockNumberOrTag, TransactionInfo};
 use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{RecoveredBlock, SignedTransaction};
-use reth_rpc_convert::transaction::RpcConvert;
+use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     utils::binary_search, EthApiError, EthApiError::TransactionConfirmationTimeout, SignError,
     TransactionSource,
@@ -41,7 +42,7 @@ use std::sync::Arc;
 ///
 /// ## Calls
 ///
-/// There are subtle differences between when transacting [`TransactionRequest`]:
+/// There are subtle differences between when transacting [`RpcTxReq`]:
 ///
 /// The endpoints `eth_call` and `eth_estimateGas` and `eth_createAccessList` should always
 /// __disable__ the base fee check in the [`CfgEnv`](revm::context::CfgEnv).
@@ -57,8 +58,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns a handle for signing data.
     ///
     /// Signer access in default (L1) trait method implementations.
-    #[expect(clippy::type_complexity)]
-    fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>>;
+    fn signers(&self) -> &SignersForRpc<Self::Provider, Self::NetworkTypes>;
 
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
@@ -223,8 +223,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     where
         Self: 'static,
     {
-        let provider = self.provider().clone();
-        self.spawn_blocking_io(move |_| {
+        self.spawn_blocking_io(move |this| {
+            let provider = this.provider();
             let (tx, meta) = match provider
                 .transaction_by_hash_with_meta(hash)
                 .map_err(Self::Error::from_eth_err)?
@@ -379,13 +379,13 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns the hash of the signed transaction.
     fn send_transaction(
         &self,
-        mut request: TransactionRequest,
+        mut request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send
     where
         Self: EthApiSpec + LoadBlock + EstimateCall,
     {
         async move {
-            let from = match request.from {
+            let from = match request.as_ref().from() {
                 Some(from) => from,
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
@@ -395,18 +395,18 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             }
 
             // set nonce if not already set before
-            if request.nonce.is_none() {
+            if request.as_ref().nonce().is_none() {
                 let nonce = self.next_available_nonce(from).await?;
-                request.nonce = Some(nonce);
+                request.as_mut().set_nonce(nonce);
             }
 
             let chain_id = self.chain_id();
-            request.chain_id = Some(chain_id.to());
+            request.as_mut().set_chain_id(chain_id.to());
 
             let estimated_gas =
                 self.estimate_gas_at(request.clone(), BlockId::pending(), None).await?;
             let gas_limit = estimated_gas;
-            request.set_gas_limit(gas_limit.to());
+            request.as_mut().set_gas_limit(gas_limit.to());
 
             let transaction = self.sign_request(&from, request).await?.with_signer(from);
 
@@ -431,7 +431,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn sign_request(
         &self,
         from: &Address,
-        txn: TransactionRequest,
+        txn: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<ProviderTx<Self::Provider>, Self::Error>> + Send {
         async move {
             self.find_signer(from)?
@@ -462,10 +462,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Returns the EIP-2718 encoded signed transaction.
     fn sign_transaction(
         &self,
-        request: TransactionRequest,
+        request: RpcTxReq<Self::NetworkTypes>,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
-            let from = match request.from {
+            let from = match request.as_ref().from() {
                 Some(from) => from,
                 None => return Err(SignError::NoAccount.into_eth_err()),
             };
@@ -489,7 +489,10 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     fn find_signer(
         &self,
         account: &Address,
-    ) -> Result<Box<dyn EthSigner<ProviderTx<Self::Provider>> + 'static>, Self::Error> {
+    ) -> Result<
+        Box<dyn EthSigner<ProviderTx<Self::Provider>, RpcTxReq<Self::NetworkTypes>> + 'static>,
+        Self::Error,
+    > {
         self.signers()
             .read()
             .iter()
