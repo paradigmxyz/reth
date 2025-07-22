@@ -74,6 +74,70 @@ impl reth_codecs::Compact for MerkleCheckpoint {
     }
 }
 
+/// Saves the progress of a storage root computation.
+///
+/// This contains the walker stack, hash builder state, and the last storage key processed.
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub struct StorageRootMerkleCheckpoint {
+    /// The last storage key processed.
+    pub last_storage_key: B256,
+    /// Previously recorded walker stack.
+    pub walker_stack: Vec<StoredSubNode>,
+    /// The hash builder state.
+    pub state: HashBuilderState,
+}
+
+impl StorageRootMerkleCheckpoint {
+    /// Creates a new storage root merkle checkpoint.
+    pub const fn new(
+        last_storage_key: B256,
+        walker_stack: Vec<StoredSubNode>,
+        state: HashBuilderState,
+    ) -> Self {
+        Self { last_storage_key, walker_stack, state }
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let mut len = 0;
+
+        buf.put_slice(self.last_storage_key.as_slice());
+        len += self.last_storage_key.len();
+
+        buf.put_u16(self.walker_stack.len() as u16);
+        len += 2;
+        for item in &self.walker_stack {
+            len += item.to_compact(buf);
+        }
+
+        len += self.state.to_compact(buf);
+        len
+    }
+
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        let last_storage_key = B256::from_slice(&buf[..32]);
+        buf.advance(32);
+
+        let walker_stack_len = buf.get_u16() as usize;
+        let mut walker_stack = Vec::with_capacity(walker_stack_len);
+        for _ in 0..walker_stack_len {
+            let (item, rest) = StoredSubNode::from_compact(buf, 0);
+            walker_stack.push(item);
+            buf = rest;
+        }
+
+        let (state, buf) = HashBuilderState::from_compact(buf, 0);
+        (Self { last_storage_key, walker_stack, state }, buf)
+    }
+}
+
 /// Saves the progress of `AccountHashing` stage.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "test-utils"), derive(arbitrary::Arbitrary))]
@@ -428,6 +492,25 @@ mod tests {
         let mut buf = Vec::new();
         let encoded = checkpoint.to_compact(&mut buf);
         let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn storage_root_merkle_checkpoint_roundtrip() {
+        let mut rng = rand::rng();
+        let checkpoint = StorageRootMerkleCheckpoint {
+            last_storage_key: rng.random(),
+            walker_stack: vec![StoredSubNode {
+                key: B256::random_with(&mut rng).to_vec(),
+                nibble: Some(rng.random()),
+                node: None,
+            }],
+            state: HashBuilderState::default(),
+        };
+
+        let mut buf = Vec::new();
+        let encoded = checkpoint.to_compact(&mut buf);
+        let (decoded, _) = StorageRootMerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
     }
 }
