@@ -44,7 +44,7 @@ mod tests {
     use reth_provider::test_utils::{ExtendedAccount, MockEthProvider, NoopProvider};
     use reth_rpc_eth_api::helpers::EthState;
     use reth_rpc_eth_types::{
-        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle,
+        EthStateCache, FeeHistoryCache, FeeHistoryCacheConfig, GasPriceOracle, PendingBlockMode,
     };
     use reth_rpc_server_types::constants::{
         DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -71,6 +71,7 @@ mod tests {
             FeeHistoryCache::<Header>::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
+            PendingBlockMode::default(),
         )
     }
 
@@ -97,6 +98,7 @@ mod tests {
             FeeHistoryCache::<Header>::new(FeeHistoryCacheConfig::default()),
             evm_config,
             DEFAULT_PROOF_PERMITS,
+            PendingBlockMode::default(),
         )
     }
 

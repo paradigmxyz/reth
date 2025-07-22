@@ -156,6 +156,7 @@ where
         .fee_history_cache_config(ctx.config.fee_history_cache)
         .proof_permits(ctx.config.proof_permits)
         .gas_oracle_config(ctx.config.gas_oracle)
+        .pending_block_mode(ctx.config.pending_block_mode)
         .build();
         Ok(api)
     }

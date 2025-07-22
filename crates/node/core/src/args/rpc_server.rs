@@ -15,6 +15,7 @@ use clap::{
 };
 use rand::Rng;
 use reth_cli_util::parse_ether_value;
+use reth_rpc_eth_types::PendingBlockMode;
 use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
 
 use crate::args::{
@@ -218,6 +219,10 @@ pub struct RpcServerArgs {
     /// Gas price oracle configuration.
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
+
+    /// The mode for handling pending blocks.
+    #[arg(long = "rpc.pending-block-mode", value_enum, default_value_t = PendingBlockMode::default(), value_name = "MODE")]
+    pub rpc_pending_block_mode: PendingBlockMode,
 }
 
 impl RpcServerArgs {
@@ -352,6 +357,7 @@ impl Default for RpcServerArgs {
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
             builder_disallow: Default::default(),
+            rpc_pending_block_mode: PendingBlockMode::default(),
         }
     }
 }

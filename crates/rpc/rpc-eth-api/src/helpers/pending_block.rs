@@ -20,7 +20,9 @@ use reth_primitives_traits::{
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
-use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_rpc_eth_types::{
+    EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin, PendingBlockMode,
+};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     ReceiptProvider, StateProviderFactory,
@@ -123,6 +125,9 @@ pub trait LoadPendingBlock:
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
     ) -> Result<<Self::Evm as ConfigureEvm>::NextBlockEnvCtx, Self::Error>;
 
+    /// Returns the pending block mode configuration.
+    fn pending_block_mode(&self) -> PendingBlockMode;
+
     /// Returns the locally built pending block
     #[expect(clippy::type_complexity)]
     fn local_pending_block(
@@ -142,6 +147,18 @@ pub trait LoadPendingBlock:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
+            // Check the pending block mode configuration
+            let mode = self.pending_block_mode();
+            match mode {
+                PendingBlockMode::None => {
+                    // Return None immediately for pending requests
+                    return Ok(None);
+                }
+                _ => {
+                    // Continue with normal processing for Full and Empty modes
+                }
+            }
+
             let pending = self.pending_block_env_and_cfg()?;
             let parent = match pending.origin {
                 PendingBlockEnvOrigin::ActualPending(block, receipts) => {
@@ -170,7 +187,7 @@ pub trait LoadPendingBlock:
             let (sealed_block, receipts) = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
-                    this.build_block(&parent)
+                    this.build_block(&parent, mode)
                 })
                 .await
             {
@@ -205,6 +222,7 @@ pub trait LoadPendingBlock:
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+        mode: PendingBlockMode,
     ) -> Result<
         (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
         Self::Error,
@@ -239,6 +257,15 @@ pub trait LoadPendingBlock:
         let mut cumulative_gas_used = 0;
         let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit;
+
+        // Check if we should skip transactions based on the mode
+        if mode == PendingBlockMode::Empty {
+            // Build block without any transactions
+            let BlockBuilderOutcome { execution_result, block, .. } =
+                builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
+
+            return Ok((block, execution_result.receipts));
+        }
 
         let mut best_txs =
             self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(

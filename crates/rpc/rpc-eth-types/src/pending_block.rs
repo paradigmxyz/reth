@@ -11,6 +11,20 @@ use derive_more::Constructor;
 use reth_ethereum_primitives::Receipt;
 use reth_evm::EvmEnv;
 use reth_primitives_traits::{Block, RecoveredBlock, SealedHeader};
+use serde::{Deserialize, Serialize};
+
+/// Determines how pending blocks are handled by the RPC.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, clap::ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum PendingBlockMode {
+    /// Build a pending block with all transactions from the mempool.
+    #[default]
+    Full,
+    /// Build a pending block without transactions.
+    Empty,
+    /// Do not build a pending block and return None for pending requests.
+    None,
+}
 
 /// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]

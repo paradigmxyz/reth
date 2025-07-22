@@ -17,6 +17,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    PendingBlockMode,
 };
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, NodePrimitivesProvider, ProviderBlock, ProviderHeader,
@@ -131,6 +132,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<Provider>>,
         evm_config: EvmConfig,
         proof_permits: usize,
+        pending_block_mode: PendingBlockMode,
     ) -> Self {
         let inner = EthApiInner::new(
             provider,
@@ -146,6 +148,7 @@ where
             evm_config,
             TokioTaskExecutor::default().boxed(),
             proof_permits,
+            pending_block_mode,
         );
 
         Self { inner: Arc::new(inner), tx_resp_builder: Default::default() }
@@ -286,6 +289,8 @@ pub struct EthApiInner<Provider: BlockReader, Pool, Network, EvmConfig> {
 
     /// Transaction broadcast channel
     raw_tx_sender: broadcast::Sender<Bytes>,
+    /// The mode for handling pending blocks.
+    pending_block_mode: PendingBlockMode,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiInner<Provider, Pool, Network, EvmConfig>
@@ -308,6 +313,7 @@ where
         evm_config: EvmConfig,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
+        pending_block_mode: PendingBlockMode,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -340,6 +346,7 @@ where
             evm_config,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
             raw_tx_sender,
+            pending_block_mode,
         }
     }
 }
@@ -458,6 +465,12 @@ where
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
         let _ = self.raw_tx_sender.send(raw_tx);
+    }
+
+    /// Returns the pending block mode.
+    #[inline]
+    pub const fn pending_block_mode(&self) -> PendingBlockMode {
+        self.pending_block_mode
     }
 }
 

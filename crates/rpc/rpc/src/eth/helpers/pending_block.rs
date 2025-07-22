@@ -58,6 +58,11 @@ where
         self.inner.pending_block()
     }
 
+    #[inline]
+    fn pending_block_mode(&self) -> reth_rpc_eth_types::PendingBlockMode {
+        self.inner.pending_block_mode()
+    }
+
     fn next_env_attributes(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,

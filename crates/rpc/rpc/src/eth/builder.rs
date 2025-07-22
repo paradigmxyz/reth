@@ -7,6 +7,7 @@ use reth_node_api::NodePrimitives;
 use reth_rpc_eth_types::{
     fee_history::fee_history_cache_new_blocks_task, EthStateCache, EthStateCacheConfig,
     FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
+    PendingBlockMode,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -39,6 +40,7 @@ where
     gas_oracle: Option<GasPriceOracle<Provider>>,
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
+    pending_block_mode: PendingBlockMode,
 }
 
 impl<Provider, Pool, Network, EvmConfig> EthApiBuilder<Provider, Pool, Network, EvmConfig>
@@ -66,6 +68,7 @@ where
             task_spawner: TokioTaskExecutor::default().boxed(),
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
+            pending_block_mode: PendingBlockMode::default(),
         }
     }
 
@@ -146,6 +149,12 @@ where
         self
     }
 
+    /// Sets the pending block mode.
+    pub const fn pending_block_mode(mut self, pending_block_mode: PendingBlockMode) -> Self {
+        self.pending_block_mode = pending_block_mode;
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -185,6 +194,7 @@ where
             fee_history_cache_config,
             proof_permits,
             task_spawner,
+            pending_block_mode,
         } = self;
 
         let eth_cache = eth_cache
@@ -220,6 +230,7 @@ where
             evm_config,
             task_spawner,
             proof_permits,
+            pending_block_mode,
         )
     }
 
