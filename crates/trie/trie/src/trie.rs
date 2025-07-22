@@ -16,7 +16,7 @@ use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use reth_execution_errors::{StateRootError, StorageRootError};
-use tracing::{trace, trace_span};
+use tracing::{debug, trace, trace_span};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
 /// finishing the computation.
@@ -187,6 +187,14 @@ where
                 let hashed_address = storage_state.state.last_hashed_key;
                 let account = storage_state.account;
 
+                debug!(
+                    target: "trie::state_root",
+                    ?hashed_address,
+                    account_nonce = account.nonce,
+                    account_balance = ?account.balance,
+                    "Resuming storage root calculation"
+                );
+
                 // Resume the storage root calculation
                 let remaining_threshold = self.threshold.saturating_sub(
                     account_node_iter.walker.removed_keys_len() as u64 +
@@ -211,6 +219,14 @@ where
                 match storage_root_calculator.calculate(retain_updates)? {
                     StorageRootProgress::Complete(storage_root, storage_slots_walked, updates) => {
                         // Storage root completed, add it to the trie
+                        debug!(
+                            target: "trie::state_root",
+                            ?hashed_address,
+                            ?storage_root,
+                            storage_slots_walked,
+                            "Resumed storage root calculation completed"
+                        );
+
                         hashed_entries_walked += storage_slots_walked;
                         if retain_updates {
                             updated_storage_nodes += updates.len();
@@ -225,6 +241,14 @@ where
                     }
                     StorageRootProgress::Progress(state, storage_slots_walked, updates) => {
                         // Still in progress, need to pause again
+                        debug!(
+                            target: "trie::state_root",
+                            ?hashed_address,
+                            storage_slots_walked,
+                            last_storage_key = ?state.last_hashed_key,
+                            "Pausing resumed storage root calculation"
+                        );
+
                         hashed_entries_walked += storage_slots_walked;
                         if retain_updates {
                             trie_updates.insert_storage_updates(hashed_address, updates);
@@ -321,6 +345,14 @@ where
                         }
                         StorageRootProgress::Progress(state, storage_slots_walked, updates) => {
                             // Storage root hit threshold, need to pause
+                            debug!(
+                                target: "trie::state_root",
+                                ?hashed_address,
+                                storage_slots_walked,
+                                last_storage_key = ?state.last_hashed_key,
+                                "Pausing storage root calculation"
+                            );
+
                             hashed_entries_walked += storage_slots_walked;
                             if retain_updates {
                                 trie_updates.insert_storage_updates(hashed_address, updates);
