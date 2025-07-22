@@ -4,7 +4,6 @@ use alloy_primitives::{Address, BlockNumber, B256};
 use core::ops::RangeInclusive;
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
-// TODO: add storage root progress
 /// Saves the progress of Merkle stage.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct MerkleCheckpoint {
@@ -16,6 +15,8 @@ pub struct MerkleCheckpoint {
     pub walker_stack: Vec<StoredSubNode>,
     /// The hash builder state.
     pub state: HashBuilderState,
+    /// Optional storage root checkpoint for the last processed account.
+    pub storage_root_checkpoint: Option<StorageRootMerkleCheckpoint>,
 }
 
 impl MerkleCheckpoint {
@@ -26,7 +27,7 @@ impl MerkleCheckpoint {
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
     ) -> Self {
-        Self { target_block, last_account_key, walker_stack, state }
+        Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint: None }
     }
 }
 
@@ -51,6 +52,20 @@ impl reth_codecs::Compact for MerkleCheckpoint {
         }
 
         len += self.state.to_compact(buf);
+
+        // Serialize the optional storage root checkpoint
+        match &self.storage_root_checkpoint {
+            Some(checkpoint) => {
+                buf.put_u8(1); // Indicate Some
+                len += 1;
+                len += checkpoint.to_compact(buf);
+            }
+            None => {
+                buf.put_u8(0); // Indicate None
+                len += 1;
+            }
+        }
+
         len
     }
 
@@ -69,8 +84,23 @@ impl reth_codecs::Compact for MerkleCheckpoint {
             buf = rest;
         }
 
-        let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (Self { target_block, last_account_key, walker_stack, state }, buf)
+        let (state, mut buf) = HashBuilderState::from_compact(buf, 0);
+
+        // Deserialize the optional storage root checkpoint
+        let (storage_root_checkpoint, buf) = if buf.is_empty() {
+            // For backward compatibility, if no more data, assume None
+            (None, buf)
+        } else {
+            match buf.get_u8() {
+                1 => {
+                    let (checkpoint, rest) = StorageRootMerkleCheckpoint::from_compact(buf, 0);
+                    (Some(checkpoint), rest)
+                }
+                _ => (None, buf),
+            }
+        };
+
+        (Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint }, buf)
     }
 }
 
@@ -487,6 +517,7 @@ mod tests {
                 node: None,
             }],
             state: HashBuilderState::default(),
+            storage_root_checkpoint: None,
         };
 
         let mut buf = Vec::new();
@@ -511,6 +542,40 @@ mod tests {
         let mut buf = Vec::new();
         let encoded = checkpoint.to_compact(&mut buf);
         let (decoded, _) = StorageRootMerkleCheckpoint::from_compact(&buf, encoded);
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn merkle_checkpoint_with_storage_root_roundtrip() {
+        let mut rng = rand::rng();
+
+        // Create a storage root checkpoint
+        let storage_checkpoint = StorageRootMerkleCheckpoint {
+            last_storage_key: rng.random(),
+            walker_stack: vec![StoredSubNode {
+                key: B256::random_with(&mut rng).to_vec(),
+                nibble: Some(rng.random()),
+                node: None,
+            }],
+            state: HashBuilderState::default(),
+        };
+
+        // Create a merkle checkpoint with the storage root checkpoint
+        let checkpoint = MerkleCheckpoint {
+            target_block: rng.random(),
+            last_account_key: rng.random(),
+            walker_stack: vec![StoredSubNode {
+                key: B256::random_with(&mut rng).to_vec(),
+                nibble: Some(rng.random()),
+                node: None,
+            }],
+            state: HashBuilderState::default(),
+            storage_root_checkpoint: Some(storage_checkpoint),
+        };
+
+        let mut buf = Vec::new();
+        let encoded = checkpoint.to_compact(&mut buf);
+        let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
         assert_eq!(decoded, checkpoint);
     }
 }
