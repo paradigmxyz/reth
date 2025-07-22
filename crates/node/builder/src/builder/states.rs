@@ -290,6 +290,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use super::*;
+    use crate::components::Components;
     use reth_consensus::noop::NoopConsensus;
     use reth_db_api::mock::DatabaseMock;
     use reth_ethereum_engine_primitives::EthEngineTypes;
@@ -303,11 +305,6 @@ mod test {
     use reth_provider::noop::NoopProvider;
     use reth_tasks::TaskManager;
     use reth_transaction_pool::noop::NoopTransactionPool;
-    use tokio::sync::mpsc;
-
-    use crate::components::Components;
-
-    use super::*;
 
     #[test]
     fn test_noop_components() {
@@ -322,9 +319,7 @@ mod test {
             evm_config: NoopEvmConfig::default(),
             consensus: NoopConsensus::default(),
             network: NoopNetwork::default(),
-            payload_builder_handle: PayloadBuilderHandle::<EthEngineTypes>::new(
-                mpsc::unbounded_channel().0,
-            ),
+            payload_builder_handle: PayloadBuilderHandle::<EthEngineTypes>::noop(),
         };
 
         let task_executor = {
