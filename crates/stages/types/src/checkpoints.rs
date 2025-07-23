@@ -580,6 +580,9 @@ mod tests {
                 node: None,
             }],
             state: HashBuilderState::default(),
+            account_nonce: 0,
+            account_balance: U256::ZERO,
+            account_bytecode_hash: B256::ZERO,
         };
 
         let mut buf = Vec::new();
@@ -601,6 +604,9 @@ mod tests {
                 node: None,
             }],
             state: HashBuilderState::default(),
+            account_nonce: 0,
+            account_balance: U256::ZERO,
+            account_bytecode_hash: B256::ZERO,
         };
 
         // Create a merkle checkpoint with the storage root checkpoint
