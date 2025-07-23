@@ -275,6 +275,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     if let Some(reveal_path) = reveal_path {
                         let subtrie = self.subtrie_for_path_mut(&reveal_path);
                         if subtrie.nodes.get(&reveal_path).expect("node must exist").is_hash() {
+                                tracing::warn!("PARALLEL SPARSE TRIE UPDATE LEAF CASE (1) -- reveal_path:{reveal_path:?} full_path:{full_path:?}");
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&reveal_path)?
                             {
@@ -558,6 +559,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
                                 ?remaining_child_path,
                                 "Retrieving remaining blinded branch child",
                             );
+                            tracing::warn!("PARALLEL SPARSE TRIE REMOVAL LEAF CASE -- child_path:{remaining_child_path:?} full_path:{full_path:?}");
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&remaining_child_path)?
                             {
@@ -1458,6 +1460,7 @@ impl SparseSubtrie {
                 LeafUpdateStep::Complete { reveal_path, .. } => {
                     if let Some(reveal_path) = reveal_path {
                         if self.nodes.get(&reveal_path).expect("node must exist").is_hash() {
+                                tracing::warn!("PARALLEL SPARSE TRIE UPDATE LEAF CASE (2) -- reveal_path:{reveal_path:?} full_path:{full_path:?}");
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&reveal_path)?
                             {

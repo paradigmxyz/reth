@@ -623,6 +623,8 @@ impl SparseTrieInterface for SerialSparseTrie {
                     break;
                 }
                 SparseNode::Extension { key, .. } => {
+                    let orig_current = current;
+                    let orig_key = key.clone();
                     current.extend(key);
 
                     if !full_path.starts_with(&current) {
@@ -636,6 +638,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
+                                tracing::warn!("SERIAL SPARSE TRIE UPDATE LEAF CASE -- extension_path:{orig_current:?} key:{orig_key:?} full_path:{full_path:?}");
                                 if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                     provider.trie_node(&current)?
                                 {
@@ -804,6 +807,7 @@ impl SparseTrieInterface for SerialSparseTrie {
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
                             trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
+                            tracing::warn!("SERIAL SPARSE TRIE REMOVAL LEAF CASE -- child_path:{child_path:?} full_path:{full_path:?}");
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&child_path)?
                             {

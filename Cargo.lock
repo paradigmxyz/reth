@@ -900,8 +900,7 @@ dependencies = [
 [[package]]
 name = "alloy-trie"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bada1fc392a33665de0dc50d401a3701b62583c655e3522a323490a5da016962"
+source = "git+https://github.com/mediocregopher/alloy-rs-trie?branch=mediocregopher%2F17571-leaf-update-removal#e2ede1390c2f489bd414e967388043f565396f46"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",

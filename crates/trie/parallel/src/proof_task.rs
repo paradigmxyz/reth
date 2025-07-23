@@ -240,6 +240,13 @@ where
             "Starting storage proof task calculation"
         );
 
+        let _span = tracing::trace_span!(
+        target: "trie::proof_task",
+        "Storage proof task",
+        hashed_address=?input.hashed_address,
+        );
+        let _span_entered = _span.enter();
+
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
         let target_slots_len = input.target_slots.len();

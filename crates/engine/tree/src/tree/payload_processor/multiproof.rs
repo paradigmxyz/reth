@@ -515,8 +515,10 @@ where
                 ?proof_targets,
                 account_targets,
                 storage_targets,
+                ?hashed_state_update,
                 "Starting multiproof calculation",
             );
+
             let start = Instant::now();
             let result = ParallelProof::new(
                 config.consistent_view,
