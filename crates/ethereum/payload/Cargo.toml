@@ -27,6 +27,12 @@ reth-evm-ethereum.workspace = true
 reth-errors.workspace = true
 reth-chainspec.workspace = true
 reth-payload-validator.workspace = true
+reth-engine-tree.workspace = true
+reth-engine-primitives.workspace = true
+reth-consensus.workspace = true
+reth-provider.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+reth-trie.workspace = true
 
 # ethereum
 revm.workspace = true
