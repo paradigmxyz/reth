@@ -112,7 +112,12 @@ impl<Eip4844: Compact + Transaction + RlpEcdsaEncodableTx> Envelope
     }
 }
 
-pub(super) trait CompactEnvelope: Sized {
+/// Trait for efficient compact serialization and deserialization of transaction envelopes.
+///
+/// This trait provides a standardized interface for converting transaction envelopes
+/// to and from compact binary format, optimized for database storage with features like
+/// compression and bitfield packing.
+pub trait CompactEnvelope: Sized {
     /// Takes a buffer which can be written to. *Ideally*, it returns the length written to.
     fn to_compact<B>(&self, buf: &mut B) -> usize
     where
