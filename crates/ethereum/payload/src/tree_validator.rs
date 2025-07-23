@@ -27,11 +27,23 @@ use std::sync::Arc;
 // Import the standalone validation function
 use crate::validator::ensure_well_formed_payload;
 
-/// Ethereum-specific payload validator that uses [`TreePayloadValidator`] for common validation
-/// logic.
-#[derive(Debug)]
-pub struct EthPayloadValidator<P, C, Spec>
-where
+/// Common trait bounds for the provider type used throughout EthPayloadValidator
+pub trait EthProvider: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
+    + BlockReader
+    + BlockNumReader
+    + StateProviderFactory
+    + StateReader
+    + StateCommitmentProvider
+    + HashedPostStateProvider
+    + HeaderProvider<Header = <EthPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader>
+    + Clone
+    + Unpin
+    + 'static
+{
+}
+
+/// Automatic implementation for types that satisfy the bounds
+impl<P> EthProvider for P where
     P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
         + BlockReader
         + BlockNumReader
@@ -43,7 +55,16 @@ where
             Header = <EthPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
         > + Clone
         + Unpin
-        + 'static,
+        + 'static
+{
+}
+
+/// Ethereum-specific payload validator that uses [`TreePayloadValidator`] for common validation
+/// logic.
+#[derive(Debug)]
+pub struct EthPayloadValidator<P, C, Spec>
+where
+    P: EthProvider,
     C: ConfigureEvm<Primitives = EthPrimitives> + 'static,
 {
     /// Reusable validation logic provider
@@ -54,18 +75,7 @@ where
 
 impl<P, C, Spec> EthPayloadValidator<P, C, Spec>
 where
-    P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
-        + BlockReader
-        + BlockNumReader
-        + StateProviderFactory
-        + StateReader
-        + StateCommitmentProvider
-        + HashedPostStateProvider
-        + HeaderProvider<
-            Header = <EthPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
-        > + Clone
-        + Unpin
-        + 'static,
+    P: EthProvider,
     C: ConfigureEvm<Primitives = EthPrimitives> + 'static,
     Spec: EthereumHardforks,
 {
@@ -99,18 +109,7 @@ where
 
 impl<P, C, Spec> PayloadValidator for EthPayloadValidator<P, C, Spec>
 where
-    P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
-        + BlockReader
-        + BlockNumReader
-        + StateProviderFactory
-        + StateReader
-        + StateCommitmentProvider
-        + HashedPostStateProvider
-        + HeaderProvider<
-            Header = <EthPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
-        > + Clone
-        + Unpin
-        + 'static,
+    P: EthProvider,
     C: ConfigureEvm<Primitives = EthPrimitives> + 'static,
     Spec: EthereumHardforks + Send + Sync + 'static,
 {
@@ -145,18 +144,7 @@ where
 
 impl<P, C, Spec> EngineValidator<EthPayloadTypes> for EthPayloadValidator<P, C, Spec>
 where
-    P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
-        + BlockReader
-        + BlockNumReader
-        + StateProviderFactory
-        + StateReader
-        + StateCommitmentProvider
-        + HashedPostStateProvider
-        + HeaderProvider<
-            Header = <EthPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
-        > + Clone
-        + Unpin
-        + 'static,
+    P: EthProvider,
     C: ConfigureEvm<Primitives = EthPrimitives> + 'static,
     Spec: EthereumHardforks + Send + Sync + 'static,
 {
