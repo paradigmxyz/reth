@@ -42,8 +42,40 @@
           rustc = rustPkg;
           cargo = rustPkg;
         };
+
+        commonArgs = name: {
+          pname = name;
+          version = packageVersion;
+          cargoLock.lockFile = ./Cargo.lock;
+          RUSTFLAGS = "-C target-cpu=native";
+          buildType = "maxperf";
+          buildFeatures = [
+            "jemalloc"
+            "asm-keccak"
+          ];
+          doCheck = false;
+          nativeBuildInputs = with pkgs; [ perl ] ++ linuxPackages;
+          src = ./.;
+        };
       in
       {
+        packages = rec {
+          reth = rustPlatform.buildRustPackage (commonArgs "reth");
+
+          op-reth = rustPlatform.buildRustPackage (
+            commonArgs "op-reth"
+            // {
+              buildAndTestSubdir = "crates/optimism/bin";
+              cargoBuildFlags = (commonArgs "op-reth").cargoBuildArgs ++ [
+                "--bin"
+                "op-reth"
+              ];
+            }
+          );
+
+          default = reth;
+        };
+
         devShell = pkgs.mkShell {
           buildInputs = with pkgs; [
             linuxPackages
@@ -57,28 +89,6 @@
             ${pkgs.lib.getExe pkgs.rustup} -q default ${rustVersion} > /dev/null
             ${pkgs.lib.getExe pkgs.rustup} -q component add --toolchain nightly rust-analyzer clippy rustfmt > /dev/null
           '';
-        };
-
-        defaultPackage = rustPlatform.buildRustPackage {
-          pname = "reth";
-          version = packageVersion;
-          cargoLock = {
-            lockFile = ./Cargo.lock;
-          };
-          RUSTFLAGS = "-C target-cpu=native";
-          buildType = "maxperf";
-          buildFeatures = [
-            "jemalloc"
-            "asm-keccak"
-          ];
-          doCheck = false;
-          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
-          nativeBuildInputs =
-            (with pkgs; [
-              perl # Required for asm-keccak feature
-            ])
-            ++ linuxPackages;
-          src = ./.;
         };
       }
     );
