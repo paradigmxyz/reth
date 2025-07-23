@@ -160,10 +160,10 @@ mod tests {
         let state = TxState::default();
         assert_eq!(SubPool::Queued, state.into());
 
-        let state = TxState::NO_PARKED_ANCESTORS |
-            TxState::NO_NONCE_GAPS |
-            TxState::NOT_TOO_MUCH_GAS |
-            TxState::ENOUGH_FEE_CAP_BLOCK;
+        let state = TxState::NO_PARKED_ANCESTORS
+            | TxState::NO_NONCE_GAPS
+            | TxState::NOT_TOO_MUCH_GAS
+            | TxState::ENOUGH_FEE_CAP_BLOCK;
         assert_eq!(SubPool::Queued, state.into());
     }
 

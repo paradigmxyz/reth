@@ -40,14 +40,14 @@ where
                 expected: header.ommers_hash(),
             }
             .into(),
-        ))
+        ));
     }
 
     let tx_root = body.calculate_tx_root();
     if header.transactions_root() != tx_root {
         return Err(ConsensusError::BodyTransactionRootDiff(
             GotExpected { got: tx_root, expected: header.transactions_root() }.into(),
-        ))
+        ));
     }
 
     match (header.withdrawals_root(), body.calculate_withdrawals_root()) {
@@ -59,7 +59,7 @@ where
                 if withdrawals_root != EMPTY_ROOT_HASH {
                     return Err(ConsensusError::BodyWithdrawalsRootDiff(
                         GotExpected { got: withdrawals_root, expected: EMPTY_ROOT_HASH }.into(),
-                    ))
+                    ));
                 }
             } else {
                 // before isthmus we ensure that the header root matches the body
@@ -67,7 +67,7 @@ where
                     return Err(ConsensusError::BodyWithdrawalsRootDiff(
                         GotExpected { got: withdrawals_root, expected: header_withdrawals_root }
                             .into(),
-                    ))
+                    ));
                 }
             }
         }
@@ -106,7 +106,7 @@ pub fn validate_block_post_execution<R: DepositReceipt>(
                 .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
                 .collect::<Vec<_>>();
             tracing::debug!(%error, ?receipts, "receipts verification failed");
-            return Err(error)
+            return Err(error);
         }
     }
 
@@ -117,7 +117,7 @@ pub fn validate_block_post_execution<R: DepositReceipt>(
         return Err(ConsensusError::BlockGasUsed {
             gas: GotExpected { got: cumulative_gas_used, expected: header.gas_used() },
             gas_spent_by_tx: gas_spent_by_transactions(receipts),
-        })
+        });
     }
 
     Ok(())
@@ -160,13 +160,13 @@ fn compare_receipts_root_and_logs_bloom(
     if calculated_receipts_root != expected_receipts_root {
         return Err(ConsensusError::BodyReceiptRootDiff(
             GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }.into(),
-        ))
+        ));
     }
 
     if calculated_logs_bloom != expected_logs_bloom {
         return Err(ConsensusError::BodyBloomLogDiff(
             GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into(),
-        ))
+        ));
     }
 
     Ok(())

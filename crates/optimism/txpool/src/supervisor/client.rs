@@ -103,7 +103,7 @@ impl SupervisorClient {
         // Interop check
         if !is_interop_active {
             // No cross chain tx allowed before interop
-            return Some(Err(InvalidCrossTx::CrossChainTxPreInterop))
+            return Some(Err(InvalidCrossTx::CrossChainTxPreInterop));
         }
 
         if let Err(err) = self

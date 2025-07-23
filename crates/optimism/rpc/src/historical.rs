@@ -136,17 +136,17 @@ where
 
         Box::pin(async move {
             let maybe_block_id = match req.method_name() {
-                "eth_getBlockByNumber" |
-                "eth_getBlockByHash" |
-                "debug_traceBlockByNumber" |
-                "debug_traceBlockByHash" => parse_block_id_from_params(&req.params(), 0),
-                "eth_getBalance" |
-                "eth_getCode" |
-                "eth_getTransactionCount" |
-                "eth_call" |
-                "eth_estimateGas" |
-                "eth_createAccessList" |
-                "debug_traceCall" => parse_block_id_from_params(&req.params(), 1),
+                "eth_getBlockByNumber"
+                | "eth_getBlockByHash"
+                | "debug_traceBlockByNumber"
+                | "debug_traceBlockByHash" => parse_block_id_from_params(&req.params(), 0),
+                "eth_getBalance"
+                | "eth_getCode"
+                | "eth_getTransactionCount"
+                | "eth_call"
+                | "eth_estimateGas"
+                | "eth_createAccessList"
+                | "debug_traceCall" => parse_block_id_from_params(&req.params(), 1),
                 "eth_getStorageAt" | "eth_getProof" => parse_block_id_from_params(&req.params(), 2),
                 "debug_traceTransaction" => {
                     // debug_traceTransaction takes a transaction hash as its first parameter,

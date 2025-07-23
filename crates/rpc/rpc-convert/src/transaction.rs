@@ -303,7 +303,7 @@ impl TryIntoTxEnv<TxEnv> for TransactionRequest {
     ) -> Result<TxEnv, Self::Err> {
         // Ensure that if versioned hashes are set, they're not empty
         if self.blob_versioned_hashes.as_ref().is_some_and(|hashes| hashes.is_empty()) {
-            return Err(CallFeesError::BlobTransactionMissingBlobHashes.into())
+            return Err(CallFeesError::BlobTransactionMissingBlobHashes.into());
         }
 
         let tx_type = self.minimal_tx_type() as u8;
@@ -722,10 +722,7 @@ impl<E, Evm, Err, Map> LegacyRpcConverter<E, Evm, Err, Map> {
     }
 
     /// Configures the mapper.
-    pub fn with_mapper<MapNew>(
-        self,
-        mapper: Map2,
-    ) -> LegacyRpcConverter<E2, Evm2, Err2, Map2> {
+    pub fn with_mapper<MapNew>(self, mapper: Map2) -> LegacyRpcConverter<E2, Evm2, Err2, Map2> {
         self.convert().map(mapper)
     }
 }
@@ -743,7 +740,6 @@ impl<E, Evm, Err> Default for LegacyRpcConverter<E, Evm, Err> {
 }
 
 impl<N, E, Evm, Err, Map> RpcConvert for LegacyRpcConverter<E, Evm, Err, Map>
-
 where
     N: NodePrimitives,
     E: RpcTypes + Send + Sync + Unpin + Clone + Debug,

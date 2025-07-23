@@ -49,7 +49,7 @@ where
             let Some((key, block_nums)) =
                 shard.map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v))).transpose()?
             else {
-                break
+                break;
             };
 
             if key_matches(&key, &sharded_key) {
@@ -60,7 +60,7 @@ where
                 }
             } else {
                 // If such shard doesn't exist, skip to the next sharded key
-                break 'shard
+                break 'shard;
             }
 
             shard = cursor.next()?;

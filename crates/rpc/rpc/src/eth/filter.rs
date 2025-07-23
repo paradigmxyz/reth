@@ -210,7 +210,7 @@ where
 
             if filter.block > best_number {
                 // no new blocks since the last poll
-                return Ok(FilterChanges::Empty)
+                return Ok(FilterChanges::Empty);
             }
 
             // update filter
@@ -284,7 +284,7 @@ where
                 *filter.clone()
             } else {
                 // Not a log filter
-                return Err(EthFilterError::FilterNotFound(id))
+                return Err(EthFilterError::FilterNotFound(id));
             }
         };
 
@@ -537,13 +537,13 @@ where
 
         // perform boundary checks first
         if to_block < from_block {
-            return Err(EthFilterError::InvalidBlockRangeParams)
+            return Err(EthFilterError::InvalidBlockRangeParams);
         }
 
         if let Some(max_blocks_per_filter) =
             limits.max_blocks_per_filter.filter(|limit| to_block - from_block > *limit)
         {
-            return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter))
+            return Err(EthFilterError::QueryExceedsMaxBlocks(max_blocks_per_filter));
         }
 
         let (tx, rx) = oneshot::channel();
@@ -588,7 +588,7 @@ where
 
             while let Some(header) = headers_iter.next() {
                 if !filter.matches_bloom(header.logs_bloom()) {
-                    continue
+                    continue;
                 }
 
                 let current_number = header.number();
@@ -813,7 +813,7 @@ impl Iterator for BlockRangeInclusiveIter {
         let start = self.iter.next()?;
         let end = (start + self.step).min(self.end);
         if start > end {
-            return None
+            return None;
         }
         Some((start, end))
     }
@@ -860,9 +860,9 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
                 rpc_error_with_code(jsonrpsee::types::error::INTERNAL_ERROR_CODE, err.to_string())
             }
             EthFilterError::EthAPIError(err) => err.into(),
-            err @ (EthFilterError::InvalidBlockRangeParams |
-            EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults { .. }) => {
+            err @ (EthFilterError::InvalidBlockRangeParams
+            | EthFilterError::QueryExceedsMaxBlocks(_)
+            | EthFilterError::QueryExceedsMaxResults { .. }) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }

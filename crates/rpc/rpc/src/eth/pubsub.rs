@@ -139,7 +139,7 @@ where
                                 };
                                 std::future::ready(tx_value)
                             });
-                            return pipe_from_stream(accepted_sink, stream).await
+                            return pipe_from_stream(accepted_sink, stream).await;
                         }
                         Params::Bool(false) | Params::None => {
                             // only hashes requested
@@ -172,7 +172,7 @@ where
                 .map_err(SubscriptionSerializeError::new)?;
 
                 if accepted_sink.send(msg).await.is_err() {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 while canon_state.next().await.is_some() {
@@ -192,7 +192,7 @@ where
                         .map_err(SubscriptionSerializeError::new)?;
 
                         if accepted_sink.send(msg).await.is_err() {
-                            break
+                            break;
                         }
                     }
                 }
