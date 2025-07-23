@@ -11,6 +11,7 @@ exclude = [".github/"]
 members = [
     "bin/reth-bench/",
     "bin/reth/",
+    "bin/rpc-load-test/",
     "crates/storage/rpc-provider/",
     "crates/chain-state/",
     "crates/chainspec/",

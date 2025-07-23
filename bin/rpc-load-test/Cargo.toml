@@ -1,0 +1,39 @@
+[package]
+name = "rpc-load-test"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "RPC load testing tool for reth"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-rpc-api = { workspace = true, features = ["client"] }
+reth-rpc-eth-api.workspace = true
+reth-ethereum-primitives.workspace = true
+
+# ethereum
+alloy-primitives.workspace = true
+alloy-rpc-types-trace.workspace = true
+alloy-rpc-types-eth.workspace = true
+
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "sync"] }
+
+# rpc
+jsonrpsee = { workspace = true, features = ["http-client"] }
+jsonrpsee-http-client.workspace = true
+
+# misc
+rand.workspace = true
+clap = { workspace = true, features = ["derive"] }
+
+[[bin]]
+name = "rpc-load-test"
+path = "src/main.rs"

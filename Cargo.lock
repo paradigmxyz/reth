@@ -10994,6 +10994,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afab94fb28594581f62d981211a9a4d53cc8130bbcbbb89a0440d9b8e81a7746"
 
 [[package]]
+name = "rpc-load-test"
+version = "1.6.0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rpc-types-eth",
+ "alloy-rpc-types-trace",
+ "clap",
+ "futures",
+ "jsonrpsee",
+ "jsonrpsee-http-client",
+ "rand 0.9.1",
+ "reth-ethereum-primitives",
+ "reth-rpc-api",
+ "reth-rpc-eth-api",
+ "tokio",
+]
+
+[[package]]
 name = "rstest"
 version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
