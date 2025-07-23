@@ -358,6 +358,7 @@ where
     pub async fn scroll_suggest_tip_cap(
         &self,
         min_suggested_priority_fee: U256,
+        payload_size_limit: u64,
     ) -> EthResult<U256> {
         let header = self
             .provider
@@ -418,12 +419,9 @@ where
             total_payload_size += payload_size;
         }
 
-        // Scroll block payload size limit (122,880 bytes)
-        const SCROLL_BLOCK_PAYLOAD_SIZE_LIMIT: u64 = 122_880;
-
         // if the block is at capacity, the suggestion must be increased
         if header.gas_used() + max_tx_gas_used > header.gas_limit() ||
-            total_payload_size + max_tx_payload_size > SCROLL_BLOCK_PAYLOAD_SIZE_LIMIT
+            total_payload_size + max_tx_payload_size > payload_size_limit
         {
             let Some(median_tip) = self.get_block_median_tip(header.hash()).await? else {
                 return Ok(suggestion);

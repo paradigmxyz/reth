@@ -73,8 +73,8 @@ pub struct ScrollEthApi<N: ScrollNodeCore, NetworkT = Scroll> {
 
 impl<N: ScrollNodeCore, NetworkT> ScrollEthApi<N, NetworkT> {
     /// Creates a new [`ScrollEthApi`].
-    pub fn new(eth_api: EthApiNodeBackend<N>, min_suggested_priority_fee: U256) -> Self {
-        let inner = Arc::new(ScrollEthApiInner { eth_api, min_suggested_priority_fee });
+    pub fn new(eth_api: EthApiNodeBackend<N>, min_suggested_priority_fee: U256, payload_size_limit: u64) -> Self {
+        let inner = Arc::new(ScrollEthApiInner { eth_api, min_suggested_priority_fee, payload_size_limit });
         Self {
             inner: inner.clone(),
             _nt: PhantomData,
@@ -238,7 +238,7 @@ where
 
     async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
         let min_tip = U256::from(self.inner.min_suggested_priority_fee);
-        self.inner.eth_api.gas_oracle().scroll_suggest_tip_cap(min_tip).await.map_err(Into::into)
+        self.inner.eth_api.gas_oracle().scroll_suggest_tip_cap(min_tip, self.inner.payload_size_limit).await.map_err(Into::into)
     }
 }
 
@@ -314,6 +314,8 @@ pub struct ScrollEthApiInner<N: ScrollNodeCore> {
     pub eth_api: EthApiNodeBackend<N>,
     /// Minimum priority fee
     min_suggested_priority_fee: U256,
+    /// Maximum payload size
+    payload_size_limit: u64,
 }
 
 impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
@@ -328,17 +330,25 @@ impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
 pub struct ScrollEthApiBuilder {
     /// Minimum suggested priority fee (tip)
     min_suggested_priority_fee: u64,
+    /// Maximum payload size
+    payload_size_limit: u64,
 }
 
 impl ScrollEthApiBuilder {
     /// Creates a [`ScrollEthApiBuilder`] instance.
     pub const fn new() -> Self {
-        Self { min_suggested_priority_fee: 0 }
+        Self { min_suggested_priority_fee: 0, payload_size_limit: 0 }
     }
 
     /// With minimum suggested priority fee (tip)
     pub const fn with_min_suggested_priority_fee(mut self, min: u64) -> Self {
         self.min_suggested_priority_fee = min;
+        self
+    }
+
+    /// With payload size limit
+    pub const fn with_payload_size_limit(mut self, limit: u64) -> Self {
+        self.payload_size_limit = limit;
         self
     }
 }
@@ -351,7 +361,7 @@ where
     type EthApi = ScrollEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let Self { min_suggested_priority_fee, .. } = self;
+        let Self { min_suggested_priority_fee, payload_size_limit } = self;
 
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
@@ -368,6 +378,6 @@ where
         .proof_permits(ctx.config.proof_permits)
         .build_inner();
 
-        Ok(ScrollEthApi::new(eth_api, U256::from(min_suggested_priority_fee)))
+        Ok(ScrollEthApi::new(eth_api, U256::from(min_suggested_priority_fee), payload_size_limit))
     }
 }
