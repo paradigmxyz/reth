@@ -466,15 +466,15 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
     where
         Self: LoadPendingBlock + Call,
         F: Fn(
-            usize, // call index
-            TracingCtx<
-                '_,
-                TxEnvFor<Self::Evm>,
-                EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_, '_>, TracingInspector>,
-            >,
-        ) -> Result<R, Self::Error>
-        + Send
-        + 'static,
+                usize, // call index
+                TracingCtx<
+                    '_,
+                    TxEnvFor<Self::Evm>,
+                    EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_, '_>, TracingInspector>,
+                >,
+            ) -> Result<R, Self::Error>
+            + Send
+            + 'static,
         R: Send + 'static,
     {
         async move {
@@ -486,25 +486,19 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
 
                 let inspector_setup = || TracingInspector::new(config);
 
-                let mut tracer = this
-                    .evm_config()
-                    .evm_factory()
-                    .create_tracer(
-                        StateCacheDbRefMutWrapper(&mut db),
-                        evm_env,
-                        inspector_setup()
-                    );
+                let mut tracer = this.evm_config().evm_factory().create_tracer(
+                    StateCacheDbRefMutWrapper(&mut db),
+                    evm_env,
+                    inspector_setup(),
+                );
 
                 let mut call_idx = 0;
                 let results = tracer
-                    .try_trace_many(
-                        tx_envs.into_iter(),
-                        |ctx| {
-                            let result = f(call_idx, ctx);
-                            call_idx += 1;
-                            result
-                        }
-                    )
+                    .try_trace_many(tx_envs.into_iter(), |ctx| {
+                        let result = f(call_idx, ctx);
+                        call_idx += 1;
+                        result
+                    })
                     .collect::<Result<Vec<_>, _>>()?;
 
                 Ok(results)

@@ -148,21 +148,20 @@ where
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
         // Create unified config from all trace types for optimal tracer reuse
-        let all_trace_types: HashSet<TraceType> = calls.iter()
-            .flat_map(|(_, trace_types)| trace_types.iter())
-            .cloned()
-            .collect();
+        let all_trace_types: HashSet<TraceType> =
+            calls.iter().flat_map(|(_, trace_types)| trace_types.iter()).copied().collect();
         let unified_config = TracingInspectorConfig::from_parity_config(&all_trace_types);
 
         // Convert RpcTxReq to TxEnv first
         let this = self.clone();
         let calls_clone = calls.clone();
-        let tx_envs = self.eth_api()
+        let tx_envs = self
+            .eth_api()
             .spawn_with_state_at_block(at, move |state| {
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
                 let mut tx_envs = Vec::with_capacity(calls_clone.len());
 
-                for (call, _) in calls_clone.iter() {
+                for (call, _) in &calls_clone {
                     let (_, tx_env) = this.eth_api().prepare_call_env(
                         evm_env.clone(),
                         call.clone(),
