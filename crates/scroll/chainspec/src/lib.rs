@@ -281,7 +281,9 @@ fn make_genesis_header(genesis: &Genesis) -> Header {
         timestamp: genesis.timestamp,
         mix_hash: genesis.mix_hash,
         beneficiary: genesis.coinbase,
-        base_fee_per_gas: None,
+        base_fee_per_gas: genesis
+            .base_fee_per_gas
+            .map(|b| b.try_into().expect("base fee should fit in u64")),
         withdrawals_root: None,
         parent_beacon_block_root: None,
         blob_gas_used: None,
