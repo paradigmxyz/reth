@@ -272,7 +272,7 @@ where
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
     /// The type responsible for processing new payloads
-    payload_processor: PayloadProcessor<N, C>,
+    payload_processor: PayloadProcessor<C>,
     /// The EVM configuration.
     evm_config: C,
     /// Precompile cache map.
