@@ -28,7 +28,6 @@ use reth_rpc_eth_types::{error::EthApiError, utils::recover_raw_transaction, Eth
 use reth_storage_api::{BlockNumReader, BlockReader};
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
-use revm::DatabaseCommit;
 use revm_inspectors::{
     opcode::OpcodeGasInspector,
     tracing::{parity::populate_state_diff, TracingInspector, TracingInspectorConfig},
@@ -148,45 +147,49 @@ where
         let at = block_id.unwrap_or(BlockId::pending());
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
+        // Create unified config from all trace types for optimal tracer reuse
+        let all_trace_types: HashSet<TraceType> = calls.iter()
+            .flat_map(|(_, trace_types)| trace_types.iter())
+            .cloned()
+            .collect();
+        let unified_config = TracingInspectorConfig::from_parity_config(&all_trace_types);
+
+        // Convert RpcTxReq to TxEnv first
         let this = self.clone();
-        // execute all transactions on top of each other and record the traces
-        self.eth_api()
+        let calls_clone = calls.clone();
+        let tx_envs = self.eth_api()
             .spawn_with_state_at_block(at, move |state| {
-                let mut results = Vec::with_capacity(calls.len());
                 let mut db = CacheDB::new(StateProviderDatabase::new(state));
+                let mut tx_envs = Vec::with_capacity(calls_clone.len());
 
-                let mut calls = calls.into_iter().peekable();
-
-                while let Some((call, trace_types)) = calls.next() {
-                    let (evm_env, tx_env) = this.eth_api().prepare_call_env(
+                for (call, _) in calls_clone.iter() {
+                    let (_, tx_env) = this.eth_api().prepare_call_env(
                         evm_env.clone(),
-                        call,
+                        call.clone(),
                         &mut db,
                         Default::default(),
                     )?;
-                    let config = TracingInspectorConfig::from_parity_config(&trace_types);
-                    let mut inspector = TracingInspector::new(config);
-                    let (res, _) =
-                        this.eth_api().inspect(&mut db, evm_env, tx_env, &mut inspector)?;
-
-                    let trace_res = inspector
-                        .into_parity_builder()
-                        .into_trace_results_with_state(&res, &trace_types, &db)
-                        .map_err(Eth::Error::from_eth_err)?;
-
-                    results.push(trace_res);
-
-                    // need to apply the state changes of this call before executing the
-                    // next call
-                    if calls.peek().is_some() {
-                        // need to apply the state changes of this call before executing
-                        // the next call
-                        db.commit(res.state)
-                    }
+                    tx_envs.push(tx_env);
                 }
-
-                Ok(results)
+                Ok(tx_envs)
             })
+            .await?;
+
+        // Use the helper function
+        self.eth_api()
+            .spawn_trace_call_many_at_block(
+                tx_envs,
+                at,
+                unified_config,
+                move |call_idx, mut ctx| {
+                    let original_trace_types = &calls[call_idx].1;
+                    let trace_res = ctx
+                        .take_inspector()
+                        .into_parity_builder()
+                        .into_trace_results(&ctx.result, original_trace_types);
+                    Ok(trace_res)
+                },
+            )
             .await
     }
 

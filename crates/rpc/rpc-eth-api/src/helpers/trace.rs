@@ -446,4 +446,70 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
 
         Ok(())
     }
+
+    /// Executes multiple calls sequentially on the same block state, reusing the EVM tracer
+    /// instance for optimal performance.
+    ///
+    /// Each call is executed on the state resulting from all previous calls, allowing tracing of
+    /// dependent transactions. The EVM tracer instance is reused across all calls with a unified
+    /// configuration.
+    ///
+    /// Note: Implementers should use a threadpool where blocking is allowed, such as
+    /// [`BlockingTaskPool`](reth_tasks::pool::BlockingTaskPool).
+    fn spawn_trace_call_many_at_block<F, R>(
+        &self,
+        tx_envs: Vec<TxEnvFor<Self::Evm>>,
+        block_id: BlockId,
+        config: TracingInspectorConfig,
+        f: F,
+    ) -> impl Future<Output = Result<Vec<R>, Self::Error>> + Send
+    where
+        Self: LoadPendingBlock + Call,
+        F: Fn(
+            usize, // call index
+            TracingCtx<
+                '_,
+                TxEnvFor<Self::Evm>,
+                EvmFor<Self::Evm, StateCacheDbRefMutWrapper<'_, '_>, TracingInspector>,
+            >,
+        ) -> Result<R, Self::Error>
+        + Send
+        + 'static,
+        R: Send + 'static,
+    {
+        async move {
+            let (evm_env, at) = self.evm_env_at(block_id).await?;
+
+            let this = self.clone();
+            self.spawn_with_state_at_block(at, move |state| {
+                let mut db = CacheDB::new(StateProviderDatabase::new(state));
+
+                let inspector_setup = || TracingInspector::new(config);
+
+                let mut tracer = this
+                    .evm_config()
+                    .evm_factory()
+                    .create_tracer(
+                        StateCacheDbRefMutWrapper(&mut db),
+                        evm_env,
+                        inspector_setup()
+                    );
+
+                let mut call_idx = 0;
+                let results = tracer
+                    .try_trace_many(
+                        tx_envs.iter().cloned(),
+                        |ctx| {
+                            let current_idx = call_idx;
+                            call_idx += 1;
+                            f(current_idx, ctx)
+                        }
+                    )
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                Ok(results)
+            })
+            .await
+        }
+    }
 }
