@@ -167,14 +167,6 @@ where
         let mut hashed_entries_walked = 0;
         let mut updated_storage_nodes = 0;
 
-        let mut resuming_storage_root =
-            self.previous_state.as_ref().is_some_and(|state| state.storage_root_state.is_some());
-        let account_previous_state = self
-            .previous_state
-            .as_ref()
-            .and_then(|state| state.storage_root_state.as_ref())
-            .map(|state| state.account);
-
         // First, handle any in-progress storage root calculation
         let (mut hash_builder, mut account_node_iter) = if let Some(state) = self.previous_state {
             let IntermediateStateRootState { account_root_state, storage_root_state } = state;
@@ -200,7 +192,7 @@ where
                     account_nonce = account.nonce,
                     account_balance = ?account.balance,
                     last_hashed_key = ?account_root_state.last_hashed_key,
-                    "Resuming storage root calculation at start of root calculation"
+                    "Resuming storage root calculation"
                 );
 
                 // Resume the storage root calculation
@@ -227,15 +219,6 @@ where
                 match storage_root_calculator.calculate(retain_updates)? {
                     StorageRootProgress::Complete(storage_root, storage_slots_walked, updates) => {
                         // Storage root completed, add it to the trie
-                        debug!(
-                            target: "trie::state_root",
-                            ?hashed_address,
-                            ?storage_root,
-                            storage_slots_walked,
-                            ?account,
-                            "Resumed storage root calculation completed"
-                        );
-
                         hashed_entries_walked += storage_slots_walked;
                         if retain_updates {
                             updated_storage_nodes += updates.len();
@@ -246,11 +229,6 @@ where
                         account_rlp.clear();
                         let trie_account = account.into_trie_account(storage_root);
                         trie_account.encode(&mut account_rlp as &mut dyn BufMut);
-                        debug!(
-                            target: "trie::state_root",
-                            ?hashed_address,
-                            "Adding account leaf after resumed storage root"
-                        );
                         hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
                     }
                     StorageRootProgress::Progress(state, storage_slots_walked, updates) => {
@@ -310,10 +288,6 @@ where
         while let Some(node) = account_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
-                    if resuming_storage_root {
-                        resuming_storage_root = false;
-                        tracing::debug!(target: "trie::state_root", ?node, ?account_previous_state, "next trie node after resuming storage root");
-                    }
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
@@ -353,11 +327,6 @@ where
                             if retain_updates {
                                 updated_storage_nodes += updates.len();
                                 trie_updates.insert_storage_updates(hashed_address, updates);
-                            }
-
-                            if resuming_storage_root {
-                                resuming_storage_root = false;
-                                tracing::debug!(target: "trie::state_root", ?hashed_address, ?account_previous_state, ?account, ?storage_root, "next trie node after resuming storage root, root is complete");
                             }
 
                             // Encode the account with the computed storage root
@@ -517,10 +486,6 @@ impl<T, H> StorageRoot<T, H> {
             hashed_address,
             prefix_set,
             previous_state: None,
-            // TODO: should we have a constructor that accepts the threshold, so the higher level
-            // state root can share its remaining threshold with storage root computation? For
-            // example, if we want to stop after 100k, we could run to 99k in the state root part,
-            // then get to a storage root computation, which itself runs up to 100k.
             threshold: DEFAULT_INTERMEDIATE_THRESHOLD,
             #[cfg(feature = "metrics")]
             metrics,
@@ -650,12 +615,6 @@ where
 
         let (mut hash_builder, mut storage_node_iter) = match self.previous_state {
             Some(state) => {
-                debug!(
-                    target: "trie::storage_root",
-                    haashed_addr=?self.hashed_address,
-                    last_hashed_key = ?state.last_hashed_key,
-                    "Resuming storage root from intermediate state"
-                );
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
                 let walker = TrieWalker::storage_trie_from_stack(
                     trie_cursor,
@@ -699,13 +658,6 @@ where
                         trie_updates.removed_nodes.extend(walker_deleted_keys);
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
                         trie_updates.storage_nodes.extend(hash_builder_updates);
-
-                        tracing::debug!(
-                            target: "trie::storage_root",
-                            threshold = ?self.threshold,
-                            ?total_updates_len,
-                            "Returning progress from inner storage root",
-                        );
 
                         let state = IntermediateRootState {
                             hash_builder,

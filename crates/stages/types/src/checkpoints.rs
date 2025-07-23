@@ -53,7 +53,7 @@ impl reth_codecs::Compact for MerkleCheckpoint {
 
         len += self.state.to_compact(buf);
 
-        // Serialize the optional storage root checkpoint
+        // Encode the optional storage root checkpoint
         match &self.storage_root_checkpoint {
             Some(checkpoint) => {
                 // one means Some
@@ -88,9 +88,8 @@ impl reth_codecs::Compact for MerkleCheckpoint {
 
         let (state, mut buf) = HashBuilderState::from_compact(buf, 0);
 
-        // Deserialize the optional storage root checkpoint
+        // Decode the storage root checkpoint if it exists
         let (storage_root_checkpoint, buf) = if buf.is_empty() {
-            // For backward compatibility, if no more data, assume None
             (None, buf)
         } else {
             match buf.get_u8() {
@@ -168,7 +167,12 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
         // Encode account fields
         buf.put_u64(self.account_nonce);
         len += 8;
+
+        let balance_len = self.account_balance.byte_len() as u8;
+        buf.put_u8(balance_len);
+        len += 1;
         len += self.account_balance.to_compact(buf);
+
         buf.put_slice(self.account_bytecode_hash.as_slice());
         len += 32;
 
@@ -193,7 +197,8 @@ impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
 
         // Decode account fields
         let account_nonce = buf.get_u64();
-        let (account_balance, mut buf) = U256::from_compact(buf, 0);
+        let balance_len = buf.get_u8() as usize;
+        let (account_balance, mut buf) = U256::from_compact(buf, balance_len);
         let account_bytecode_hash = B256::from_slice(&buf[..32]);
         buf.advance(32);
 
@@ -545,6 +550,7 @@ stage_unit_checkpoints!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b256;
     use rand::Rng;
     use reth_codecs::Compact;
 
@@ -604,9 +610,11 @@ mod tests {
                 node: None,
             }],
             state: HashBuilderState::default(),
-            account_nonce: 0,
-            account_balance: U256::ZERO,
-            account_bytecode_hash: B256::ZERO,
+            account_nonce: 1,
+            account_balance: U256::from(1),
+            account_bytecode_hash: b256!(
+                "0x0fffffffffffffffffffffffffffffff0fffffffffffffffffffffffffffffff"
+            ),
         };
 
         // Create a merkle checkpoint with the storage root checkpoint
