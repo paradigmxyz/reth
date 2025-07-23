@@ -499,34 +499,14 @@ impl BlockTuple {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::{create_header, create_test_receipt, create_test_receipts};
     use alloy_eips::eip4895::Withdrawals;
-    use alloy_primitives::{Address, Bytes, B64};
+    use alloy_primitives::{Bytes, U256};
+    use reth_ethereum_primitives::{Receipt, TxType};
 
     #[test]
     fn test_header_conversion_roundtrip() {
-        let header = Header {
-            parent_hash: B256::default(),
-            ommers_hash: B256::default(),
-            beneficiary: Address::default(),
-            state_root: B256::default(),
-            transactions_root: B256::default(),
-            receipts_root: B256::default(),
-            logs_bloom: Default::default(),
-            difficulty: U256::from(123456u64),
-            number: 100,
-            gas_limit: 5000000,
-            gas_used: 21000,
-            timestamp: 1609459200,
-            extra_data: Bytes::default(),
-            mix_hash: B256::default(),
-            nonce: B64::default(),
-            base_fee_per_gas: Some(10),
-            withdrawals_root: None,
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            parent_beacon_block_root: None,
-            requests_hash: None,
-        };
+        let header = create_header();
 
         let compressed_header = CompressedHeader::from_header(&header).unwrap();
 
@@ -592,29 +572,7 @@ mod tests {
     #[test]
     fn test_block_tuple_with_data() {
         // Create block with transactions and withdrawals
-        let header = Header {
-            parent_hash: B256::default(),
-            ommers_hash: B256::default(),
-            beneficiary: Address::default(),
-            state_root: B256::default(),
-            transactions_root: B256::default(),
-            receipts_root: B256::default(),
-            logs_bloom: Default::default(),
-            difficulty: U256::from(123456u64),
-            number: 100,
-            gas_limit: 5000000,
-            gas_used: 21000,
-            timestamp: 1609459200,
-            extra_data: Bytes::default(),
-            mix_hash: B256::default(),
-            nonce: B64::default(),
-            base_fee_per_gas: Some(10),
-            withdrawals_root: Some(B256::default()),
-            blob_gas_used: None,
-            excess_blob_gas: None,
-            parent_beacon_block_root: None,
-            requests_hash: None,
-        };
+        let header = create_header();
 
         let transactions = vec![Bytes::from(vec![1, 2, 3, 4]), Bytes::from(vec![5, 6, 7, 8])];
 
@@ -638,5 +596,62 @@ mod tests {
         assert_eq!(decoded_block.body.transactions[0], Bytes::from(vec![1, 2, 3, 4]));
         assert_eq!(decoded_block.body.transactions[1], Bytes::from(vec![5, 6, 7, 8]));
         assert!(decoded_block.body.withdrawals.is_some());
+    }
+
+    #[test]
+    fn test_single_receipt_compression_roundtrip() {
+        let test_receipt = create_test_receipt(TxType::Eip1559, true, 21000, 2);
+
+        // Compress the receipt
+        let compressed_receipts =
+            CompressedReceipts::from_encodable(&test_receipt).expect("Failed to compress receipt");
+
+        // Verify compression
+        assert!(!compressed_receipts.data.is_empty());
+
+        // Decode the compressed receipt back
+        let decoded_receipt: Receipt =
+            compressed_receipts.decode().expect("Failed to decode compressed receipt");
+
+        // Verify that the decoded receipt matches the original
+        assert_eq!(decoded_receipt.tx_type, test_receipt.tx_type);
+        assert_eq!(decoded_receipt.success, test_receipt.success);
+        assert_eq!(decoded_receipt.cumulative_gas_used, test_receipt.cumulative_gas_used);
+        assert_eq!(decoded_receipt.logs.len(), test_receipt.logs.len());
+
+        // Verify each log
+        for (original_log, decoded_log) in test_receipt.logs.iter().zip(decoded_receipt.logs.iter())
+        {
+            assert_eq!(decoded_log.address, original_log.address);
+            assert_eq!(decoded_log.data.topics(), original_log.data.topics());
+        }
+    }
+
+    #[test]
+    fn test_receipt_list_compression() {
+        let receipts = create_test_receipts();
+
+        // Compress the list of receipts
+        let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts)
+            .expect("Failed to compress receipt list");
+
+        // Decode the compressed receipts back
+        let decoded_receipts: Vec<Receipt> =
+            compressed_receipts.decode().expect("Failed to decode compressed receipt list");
+
+        // Verify that the decoded receipts match the original
+        assert_eq!(decoded_receipts.len(), receipts.len());
+
+        for (original, decoded) in receipts.iter().zip(decoded_receipts.iter()) {
+            assert_eq!(decoded.tx_type, original.tx_type);
+            assert_eq!(decoded.success, original.success);
+            assert_eq!(decoded.cumulative_gas_used, original.cumulative_gas_used);
+            assert_eq!(decoded.logs.len(), original.logs.len());
+
+            for (original_log, decoded_log) in original.logs.iter().zip(decoded.logs.iter()) {
+                assert_eq!(decoded_log.address, original_log.address);
+                assert_eq!(decoded_log.data.topics(), original_log.data.topics());
+            }
+        }
     }
 }
