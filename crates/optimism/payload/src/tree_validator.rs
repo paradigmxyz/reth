@@ -1,6 +1,6 @@
-//! Ethereum-specific tree payload validator implementation.
+//! Optimism-specific tree payload validator implementation.
 
-use alloy_rpc_types_engine::ExecutionData;
+use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{InvalidBlockHook, PayloadValidator};
@@ -9,12 +9,12 @@ use reth_engine_tree::tree::{
     precompile_cache::PrecompileCacheMap,
     EngineValidator, PayloadProcessor, TreeConfig, TreePayloadValidator,
 };
-use reth_ethereum_engine_primitives::EthPayloadTypes;
-use reth_ethereum_primitives::{Block as EthBlock, EthPrimitives};
 use reth_evm::{ConfigureEvm, SpecFor};
+use reth_optimism_forks::OpHardforks;
+use reth_optimism_primitives::{OpBlock, OpPrimitives};
 use reth_payload_primitives::{
-    validate_execution_requests, validate_version_specific_fields, EngineApiMessageVersion,
-    EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
+    validate_version_specific_fields, EngineApiMessageVersion, EngineObjectValidationError,
+    NewPayloadError, PayloadOrAttributes,
 };
 use reth_primitives_traits::RecoveredBlock;
 use reth_provider::{
@@ -25,17 +25,18 @@ use reth_trie::HashedPostState;
 use std::sync::Arc;
 
 // Import the standalone validation function
-use crate::validator::ensure_well_formed_payload;
+use crate::{validator::ensure_well_formed_payload, OpPayloadTypes};
 
-/// Common trait bounds for the provider type used throughout `EthPayloadValidator`
-pub trait EthProvider: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
+/// Common trait bounds for the provider type used throughout [`OpPayloadValidator`]
+pub trait OpProvider:
+    DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
     + BlockReader
     + BlockNumReader
     + StateProviderFactory
     + StateReader
     + StateCommitmentProvider
     + HashedPostStateProvider
-    + HeaderProvider<Header = <EthPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader>
+    + HeaderProvider<Header = <OpPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader>
     + Clone
     + Unpin
     + 'static
@@ -43,7 +44,7 @@ pub trait EthProvider: DatabaseProviderFactory<Provider: BlockReader + BlockNumR
 }
 
 /// Automatic implementation for types that satisfy the bounds
-impl<P> EthProvider for P where
+impl<P> OpProvider for P where
     P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
         + BlockReader
         + BlockNumReader
@@ -52,43 +53,43 @@ impl<P> EthProvider for P where
         + StateCommitmentProvider
         + HashedPostStateProvider
         + HeaderProvider<
-            Header = <EthPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
+            Header = <OpPrimitives as reth_primitives_traits::NodePrimitives>::BlockHeader,
         > + Clone
         + Unpin
         + 'static
 {
 }
 
-/// Ethereum-specific payload validator that uses [`TreePayloadValidator`] for common validation
+/// Optimism-specific payload validator that uses [`TreePayloadValidator`] for common validation
 /// logic.
 #[derive(Debug)]
-pub struct EthPayloadValidator<P, C, Spec>
+pub struct OpPayloadValidator<P, C, Spec>
 where
-    P: EthProvider,
-    C: ConfigureEvm<Primitives = EthPrimitives> + 'static,
+    P: OpProvider,
+    C: ConfigureEvm<Primitives = OpPrimitives> + 'static,
 {
     /// Reusable validation logic provider
-    tree_validator: TreePayloadValidator<EthPrimitives, P, C>,
+    tree_validator: TreePayloadValidator<OpPrimitives, P, C>,
     /// Chain spec for hardfork checks
     chain_spec: Arc<Spec>,
 }
 
-impl<P, C, Spec> EthPayloadValidator<P, C, Spec>
+impl<P, C, Spec> OpPayloadValidator<P, C, Spec>
 where
-    P: EthProvider,
-    C: ConfigureEvm<Primitives = EthPrimitives> + 'static,
-    Spec: EthereumHardforks,
+    P: OpProvider,
+    C: ConfigureEvm<Primitives = OpPrimitives> + 'static,
+    Spec: OpHardforks,
 {
-    /// Creates a new Ethereum payload validator.
+    /// Creates a new Optimism payload validator.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        consensus: Arc<dyn FullConsensus<EthPrimitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<OpPrimitives, Error = ConsensusError>>,
         evm_config: C,
         config: TreeConfig,
-        payload_processor: PayloadProcessor<EthPrimitives, C>,
+        payload_processor: PayloadProcessor<OpPrimitives, C>,
         precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
-        invalid_block_hook: Box<dyn InvalidBlockHook<EthPrimitives>>,
+        invalid_block_hook: Box<dyn InvalidBlockHook<OpPrimitives>>,
         chain_spec: Arc<Spec>,
     ) -> Self {
         let tree_validator = TreePayloadValidator::new(
@@ -107,14 +108,14 @@ where
     }
 }
 
-impl<P, C, Spec> PayloadValidator for EthPayloadValidator<P, C, Spec>
+impl<P, C, Spec> PayloadValidator for OpPayloadValidator<P, C, Spec>
 where
-    P: EthProvider,
-    C: ConfigureEvm<Primitives = EthPrimitives> + 'static,
-    Spec: EthereumHardforks + Send + Sync + 'static,
+    P: OpProvider,
+    C: ConfigureEvm<Primitives = OpPrimitives> + 'static,
+    Spec: OpHardforks + EthereumHardforks + Send + Sync + 'static,
 {
-    type Block = EthBlock;
-    type ExecutionData = ExecutionData;
+    type Block = OpBlock;
+    type ExecutionData = OpExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
@@ -122,7 +123,7 @@ where
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         // Use the standalone validation function with chain spec
         let sealed_block = ensure_well_formed_payload(self.chain_spec.as_ref(), payload)
-            .map_err(NewPayloadError::Eth)?;
+            .map_err(|e| NewPayloadError::Other(e.to_string().into()))?;
 
         // Recover senders for the block
         let recovered_block = sealed_block
@@ -137,31 +138,28 @@ where
         _state_updates: &HashedPostState,
         _block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
-        // Default implementation - no additional validation needed for Ethereum
+        // Default implementation - no additional validation needed for Optimism
         Ok(())
     }
 }
 
-impl<P, C, Spec> EngineValidator<EthPayloadTypes> for EthPayloadValidator<P, C, Spec>
+impl<P, C, Spec> EngineValidator<OpPayloadTypes> for OpPayloadValidator<P, C, Spec>
 where
-    P: EthProvider,
-    C: ConfigureEvm<Primitives = EthPrimitives> + 'static,
-    Spec: EthereumHardforks + Send + Sync + 'static,
+    P: OpProvider,
+    C: ConfigureEvm<Primitives = OpPrimitives> + 'static,
+    Spec: OpHardforks + EthereumHardforks + Send + Sync + 'static,
 {
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
         payload_or_attrs: PayloadOrAttributes<
             '_,
-            ExecutionData,
-            <EthPayloadTypes as reth_payload_primitives::PayloadTypes>::PayloadAttributes,
+            OpExecutionData,
+            <OpPayloadTypes as reth_payload_primitives::PayloadTypes>::PayloadAttributes,
         >,
     ) -> Result<(), EngineObjectValidationError> {
-        // Validate execution requests for Prague (V4+)
-        payload_or_attrs
-            .execution_requests()
-            .map(|requests| validate_execution_requests(requests))
-            .transpose()?;
+        // For Optimism, execution requests should always be empty in V4+
+        // The sidecar contains isthmus fields which should have empty execution requests
 
         // Validate version-specific fields (withdrawals, parent beacon block root, etc.)
         validate_version_specific_fields(self.chain_spec.as_ref(), version, payload_or_attrs)
@@ -170,24 +168,24 @@ where
     fn ensure_well_formed_attributes(
         &self,
         version: EngineApiMessageVersion,
-        attributes: &<EthPayloadTypes as reth_payload_primitives::PayloadTypes>::PayloadAttributes,
+        attributes: &<OpPayloadTypes as reth_payload_primitives::PayloadTypes>::PayloadAttributes,
     ) -> Result<(), EngineObjectValidationError> {
         // Validate the attributes using the generic validation function
         validate_version_specific_fields(
             self.chain_spec.as_ref(),
             version,
-            PayloadOrAttributes::<ExecutionData, _>::PayloadAttributes(attributes),
+            PayloadOrAttributes::<OpExecutionData, _>::PayloadAttributes(attributes),
         )
     }
 
     fn validate_payload(
         &mut self,
-        payload: ExecutionData,
-        ctx: TreeCtx<'_, EthPrimitives>,
-    ) -> Result<PayloadValidationOutcome<EthBlock>, NewPayloadError> {
+        payload: OpExecutionData,
+        ctx: TreeCtx<'_, OpPrimitives>,
+    ) -> Result<PayloadValidationOutcome<OpBlock>, NewPayloadError> {
         // Use the standalone validation function to convert and validate the payload
         let sealed_block = ensure_well_formed_payload(self.chain_spec.as_ref(), payload)
-            .map_err(NewPayloadError::Eth)?;
+            .map_err(|e| NewPayloadError::Other(e.to_string().into()))?;
 
         // Recover senders for the block
         let block = sealed_block
@@ -199,8 +197,8 @@ where
 
     fn validate_block(
         &self,
-        block: &RecoveredBlock<EthBlock>,
-        ctx: TreeCtx<'_, EthPrimitives>,
+        block: &RecoveredBlock<OpBlock>,
+        ctx: TreeCtx<'_, OpPrimitives>,
     ) -> Result<(), ConsensusError> {
         self.tree_validator.validate_block(block, ctx)
     }
