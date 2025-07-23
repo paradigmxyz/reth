@@ -498,11 +498,11 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
                 let mut call_idx = 0;
                 let results = tracer
                     .try_trace_many(
-                        tx_envs.iter().cloned(),
+                        tx_envs.into_iter(),
                         |ctx| {
-                            let current_idx = call_idx;
+                            let result = f(call_idx, ctx);
                             call_idx += 1;
-                            f(current_idx, ctx)
+                            result
                         }
                     )
                     .collect::<Result<Vec<_>, _>>()?;
