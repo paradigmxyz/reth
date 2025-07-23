@@ -25,7 +25,7 @@ macro_rules! delegate {
 
 /// An enum that combines two different transaction types.
 ///
-/// This is intended to be used to extend existing presets, for example the ethereum or optstack
+/// This is intended to be used to extend existing presets, for example the ethereum or opstack
 /// transaction types and receipts
 ///
 /// Note: The [`Extended::Other`] variants must not overlap with the builtin one, transaction

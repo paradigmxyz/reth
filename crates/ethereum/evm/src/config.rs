@@ -1,14 +1,15 @@
-use alloy_consensus::Header;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_ethereum_forks::{EthereumHardfork, Hardforks};
+use reth_primitives_traits::BlockHeader;
 use revm::primitives::hardfork::SpecId;
 
 /// Map the latest active hardfork at the given header to a revm [`SpecId`].
-pub fn revm_spec<C>(chain_spec: &C, header: &Header) -> SpecId
+pub fn revm_spec<C, H>(chain_spec: &C, header: &H) -> SpecId
 where
     C: EthereumHardforks + EthChainSpec + Hardforks,
+    H: BlockHeader,
 {
-    revm_spec_by_timestamp_and_block_number(chain_spec, header.timestamp, header.number)
+    revm_spec_by_timestamp_and_block_number(chain_spec, header.timestamp(), header.number())
 }
 
 /// Map the latest active hardfork at the given timestamp or block number to a revm [`SpecId`].
@@ -99,6 +100,7 @@ where
 mod tests {
     use super::*;
     use crate::U256;
+    use alloy_consensus::Header;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
 
     #[test]
@@ -129,74 +131,74 @@ mod tests {
     #[test]
     fn test_to_revm_spec() {
         assert_eq!(
-            revm_spec(&ChainSpecBuilder::mainnet().cancun_activated().build(), &Default::default()),
+            revm_spec(&ChainSpecBuilder::mainnet().cancun_activated().build(), &Header::default()),
             SpecId::CANCUN
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().shanghai_activated().build(),
-                &Default::default()
+                &Header::default()
             ),
             SpecId::SHANGHAI
         );
         assert_eq!(
-            revm_spec(&ChainSpecBuilder::mainnet().paris_activated().build(), &Default::default()),
+            revm_spec(&ChainSpecBuilder::mainnet().paris_activated().build(), &Header::default()),
             SpecId::MERGE
         );
         assert_eq!(
-            revm_spec(&ChainSpecBuilder::mainnet().london_activated().build(), &Default::default()),
+            revm_spec(&ChainSpecBuilder::mainnet().london_activated().build(), &Header::default()),
             SpecId::LONDON
         );
         assert_eq!(
-            revm_spec(&ChainSpecBuilder::mainnet().berlin_activated().build(), &Default::default()),
+            revm_spec(&ChainSpecBuilder::mainnet().berlin_activated().build(), &Header::default()),
             SpecId::BERLIN
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().istanbul_activated().build(),
-                &Default::default()
+                &Header::default()
             ),
             SpecId::ISTANBUL
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().petersburg_activated().build(),
-                &Default::default()
+                &Header::default()
             ),
             SpecId::PETERSBURG
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().byzantium_activated().build(),
-                &Default::default()
+                &Header::default()
             ),
             SpecId::BYZANTIUM
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().spurious_dragon_activated().build(),
-                &Default::default()
+                &Header::default()
             ),
             SpecId::SPURIOUS_DRAGON
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().tangerine_whistle_activated().build(),
-                &Default::default()
+                &Header::default()
             ),
             SpecId::TANGERINE
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().homestead_activated().build(),
-                &Default::default()
+                &Header::default()
             ),
             SpecId::HOMESTEAD
         );
         assert_eq!(
             revm_spec(
                 &ChainSpecBuilder::mainnet().frontier_activated().build(),
-                &Default::default()
+                &Header::default()
             ),
             SpecId::FRONTIER
         );

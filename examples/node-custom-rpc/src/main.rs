@@ -32,7 +32,9 @@ fn main() {
     Cli::<EthereumChainSpecParser, RethCliTxpoolExt>::parse()
         .run(|builder, args| async move {
             let handle = builder
+                // configure default ethereum node
                 .node(EthereumNode::default())
+                // extend the rpc modules with our custom `TxpoolExt` endpoints
                 .extend_rpc_modules(move |ctx| {
                     if !args.enable_ext {
                         return Ok(())
@@ -50,6 +52,7 @@ fn main() {
 
                     Ok(())
                 })
+                // launch the node with custom rpc
                 .launch()
                 .await?;
 

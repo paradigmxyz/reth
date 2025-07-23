@@ -2,7 +2,7 @@ use futures::Future;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use std::{fmt, marker::PhantomData, sync::Arc};
+use std::{fmt, sync::Arc};
 
 /// A trait for launching a reth node with custom configuration strategies.
 ///
@@ -40,14 +40,12 @@ where
 /// This struct adapts existing closures to work with the new [`Launcher`] trait,
 /// maintaining backward compatibility with current node implementations while
 /// enabling the transition to the more flexible trait-based approach.
-pub struct FnLauncher<F, Fut> {
+pub struct FnLauncher<F> {
     /// The function to execute when launching the node
     func: F,
-    /// Phantom data to track the future type
-    _result: PhantomData<Fut>,
 }
 
-impl<F, Fut> FnLauncher<F, Fut> {
+impl<F> FnLauncher<F> {
     /// Creates a new function launcher adapter.
     ///
     /// Type parameters `C` and `Ext` help the compiler infer correct types
@@ -59,18 +57,23 @@ impl<F, Fut> FnLauncher<F, Fut> {
     pub fn new<C, Ext>(func: F) -> Self
     where
         C: ChainSpecParser,
-        F: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
+        F: AsyncFnOnce(
+            WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+            Ext,
+        ) -> eyre::Result<()>,
     {
-        Self { func, _result: PhantomData }
+        Self { func }
     }
 }
 
-impl<C, Ext, F, Fut> Launcher<C, Ext> for FnLauncher<F, Fut>
+impl<C, Ext, F> Launcher<C, Ext> for FnLauncher<F>
 where
     C: ChainSpecParser,
     Ext: clap::Args + fmt::Debug,
-    F: FnOnce(WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>, Ext) -> Fut,
-    Fut: Future<Output = eyre::Result<()>>,
+    F: AsyncFnOnce(
+        WithLaunchContext<NodeBuilder<Arc<DatabaseEnv>, C::ChainSpec>>,
+        Ext,
+    ) -> eyre::Result<()>,
 {
     fn entrypoint(
         self,

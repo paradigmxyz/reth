@@ -11,14 +11,14 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
     AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, ReceiptTy,
+    NodeAddOns, NodeTypes, PayloadTypes, PrimitivesTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_rpc::eth::{EthApiTypes, FullEthApiServer};
+use reth_rpc::eth::{core::EthRpcConverterFor, EthApiTypes, FullEthApiServer};
 use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
@@ -283,6 +283,8 @@ where
     }
 
     /// Returns a reference to the configured node.
+    ///
+    /// This gives access to the node's components.
     pub const fn node(&self) -> &Node {
         &self.node
     }
@@ -681,11 +683,30 @@ where
     }
 
     /// Launches the RPC servers with the given context and an additional hook for extending
-    /// modules.
+    /// modules. Whether the auth server is launched depends on the CLI configuration.
     pub async fn launch_add_ons_with<F>(
         self,
         ctx: AddOnsContext<'_, N>,
         ext: F,
+    ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
+    where
+        F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
+    {
+        // Check CLI config to determine if auth server should be disabled
+        let disable_auth = ctx.config.rpc.disable_auth_server;
+        self.launch_add_ons_with_opt_engine(ctx, ext, disable_auth).await
+    }
+
+    /// Launches the RPC servers with the given context and an additional hook for extending
+    /// modules. Optionally disables the auth server based on the `disable_auth` parameter.
+    ///
+    /// When `disable_auth` is true, the auth server will not be started and a noop handle
+    /// will be used instead.
+    pub async fn launch_add_ons_with_opt_engine<F>(
+        self,
+        ctx: AddOnsContext<'_, N>,
+        ext: F,
+        disable_auth: bool,
     ) -> eyre::Result<RpcHandle<N, EthB::EthApi>>
     where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
@@ -705,14 +726,21 @@ where
         } = setup_ctx;
 
         let server_config = config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware);
-        let auth_module_clone = auth_module.clone();
 
-        // launch servers concurrently
-        let (rpc, auth) = futures::future::try_join(
-            Self::launch_rpc_server_internal(server_config, &modules),
-            Self::launch_auth_server_internal(auth_module_clone, auth_config),
-        )
-        .await?;
+        let (rpc, auth) = if disable_auth {
+            // Only launch the RPC server, use a noop auth handle
+            let rpc = Self::launch_rpc_server_internal(server_config, &modules).await?;
+            (rpc, AuthServerHandle::noop())
+        } else {
+            let auth_module_clone = auth_module.clone();
+            // launch servers concurrently
+            let (rpc, auth) = futures::future::try_join(
+                Self::launch_rpc_server_internal(server_config, &modules),
+                Self::launch_auth_server_internal(auth_module_clone, auth_config),
+            )
+            .await?;
+            (rpc, auth)
+        };
 
         let handles = RethRpcServerHandles { rpc, auth };
 
@@ -925,7 +953,22 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     /// Eth API configuration
     pub config: EthConfig,
     /// Cache for eth state
-    pub cache: EthStateCache<BlockTy<N::Types>, ReceiptTy<N::Types>>,
+    pub cache: EthStateCache<PrimitivesTy<N::Types>>,
+}
+
+impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> EthApiCtx<'a, N> {
+    /// Provides a [`EthApiBuilder`] with preconfigured config and components.
+    pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
+        reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
+            .eth_cache(self.cache)
+            .task_spawner(self.components.task_executor().clone())
+            .gas_cap(self.config.rpc_gas_cap.into())
+            .max_simulate_blocks(self.config.rpc_max_simulate_blocks)
+            .eth_proof_window(self.config.eth_proof_window)
+            .fee_history_cache_config(self.config.fee_history_cache)
+            .proof_permits(self.config.proof_permits)
+            .gas_oracle_config(self.config.gas_oracle)
+    }
 }
 
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].

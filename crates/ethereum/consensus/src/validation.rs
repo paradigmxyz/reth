@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn test_verify_receipts_success() {
         // Create a vector of 5 default Receipt instances
-        let receipts = vec![Receipt::default(); 5];
+        let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
 
         // Compare against expected values
         assert!(verify_receipts(
@@ -140,7 +140,7 @@ mod tests {
         let expected_logs_bloom = Bloom::random();
 
         // Create a vector of 5 random Receipt instances
-        let receipts = vec![Receipt::default(); 5];
+        let receipts: Vec<Receipt> = vec![Receipt::default(); 5];
 
         assert!(verify_receipts(expected_receipts_root, expected_logs_bloom, &receipts).is_err());
     }
