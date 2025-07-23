@@ -2,6 +2,7 @@
 
 use crate::tree::{
     cached_state::CachedStateProvider,
+    executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
     payload_processor::PayloadProcessor,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
@@ -158,76 +159,35 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
 /// This type contains common validation, execution, and state root computation logic that can be
 /// used by network-specific payload validators (e.g., Ethereum, Optimism). It is not meant to be
 /// used as a standalone component, but rather as a building block for concrete implementations.
-pub struct TreePayloadValidator<N, P, C>
+#[derive(derive_more::Debug)]
+pub struct TreePayloadValidator<P, Evm>
 where
-    N: NodePrimitives,
-    P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
-        + BlockReader
-        + BlockNumReader
-        + StateProviderFactory
-        + StateReader
-        + StateCommitmentProvider
-        + HashedPostStateProvider
-        + HeaderProvider<Header = N::BlockHeader>
-        + Clone
-        + 'static,
-    C: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm,
 {
     /// Provider for database access.
     provider: P,
     /// Consensus implementation for validation.
-    consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<Evm::Primitives, Error = ConsensusError>>,
     /// EVM configuration.
-    evm_config: C,
+    evm_config: Evm,
     /// Configuration for the tree.
     config: TreeConfig,
     /// Payload processor for state root computation.
-    payload_processor: PayloadProcessor<N, C>,
+    payload_processor: PayloadProcessor<Evm>,
     /// Precompile cache map.
-    precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
+    precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Precompile cache metrics.
     precompile_cache_metrics: HashMap<alloy_primitives::Address, CachedPrecompileMetrics>,
     /// Tracks invalid headers to prevent duplicate hook calls.
     invalid_headers: InvalidHeaderCache,
     /// Hook to call when invalid blocks are encountered.
-    invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
+    #[debug(skip)]
+    invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
 }
 
-impl<N, P, C> std::fmt::Debug for TreePayloadValidator<N, P, C>
-where
-    N: NodePrimitives,
-    P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
-        + BlockReader
-        + BlockNumReader
-        + StateProviderFactory
-        + StateReader
-        + StateCommitmentProvider
-        + HashedPostStateProvider
-        + HeaderProvider<Header = N::BlockHeader>
-        + Clone
-        + std::fmt::Debug
-        + 'static,
-    C: ConfigureEvm<Primitives = N> + 'static,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TreePayloadValidator")
-            .field("provider", &self.provider)
-            .field("consensus", &"Arc<dyn FullConsensus>")
-            .field("evm_config", &self.evm_config)
-            .field("config", &self.config)
-            .field("payload_processor", &self.payload_processor)
-            .field("precompile_cache_map", &self.precompile_cache_map)
-            .field("precompile_cache_metrics", &self.precompile_cache_metrics)
-            .field("invalid_headers", &self.invalid_headers)
-            .field("invalid_block_hook", &"Box<dyn InvalidBlockHook>")
-            .field("metrics", &self.metrics)
-            .finish()
-    }
-}
-
-impl<N, P, C> TreePayloadValidator<N, P, C>
+impl<N, P, Evm> TreePayloadValidator<P, Evm>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
@@ -240,32 +200,35 @@ where
         + HeaderProvider<Header = N::BlockHeader>
         + Clone
         + 'static,
-    C: ConfigureEvm<Primitives = N> + 'static,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
 {
     /// Creates a new `TreePayloadValidator`.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
-        evm_config: C,
+        evm_config: Evm,
         config: TreeConfig,
-        payload_processor: PayloadProcessor<N, C>,
-        precompile_cache_map: PrecompileCacheMap<SpecFor<C>>,
-        invalid_headers_cache_size: u32,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
-        metrics: EngineApiMetrics,
     ) -> Self {
+        let precompile_cache_map = PrecompileCacheMap::default();
+        let payload_processor = PayloadProcessor::new(
+            WorkloadExecutor::default(),
+            evm_config.clone(),
+            &config,
+            precompile_cache_map.clone(),
+        );
         Self {
             provider,
             consensus,
             evm_config,
-            config,
             payload_processor,
             precompile_cache_map,
             precompile_cache_metrics: HashMap::new(),
-            invalid_headers: InvalidHeaderCache::new(invalid_headers_cache_size),
+            invalid_headers: InvalidHeaderCache::new(config.max_invalid_header_cache_length()),
+            config,
             invalid_block_hook,
-            metrics,
+            metrics: EngineApiMetrics::default(),
         }
     }
 
