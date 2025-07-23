@@ -184,15 +184,15 @@ where
 
             // If we have an in-progress storage root, complete it first
             if let Some(storage_state) = storage_root_state {
-                let hashed_address = storage_state.state.last_hashed_key;
+                let hashed_address = account_root_state.last_hashed_key;
                 let account = storage_state.account;
 
                 debug!(
                     target: "trie::state_root",
-                    ?hashed_address,
                     account_nonce = account.nonce,
                     account_balance = ?account.balance,
-                    "Resuming storage root calculation"
+                    last_hashed_key = ?account_root_state.last_hashed_key,
+                    "Resuming storage root calculation at start of root calculation"
                 );
 
                 // Resume the storage root calculation
@@ -237,6 +237,11 @@ where
                         account_rlp.clear();
                         let trie_account = account.into_trie_account(storage_root);
                         trie_account.encode(&mut account_rlp as &mut dyn BufMut);
+                        debug!(
+                            target: "trie::state_root",
+                            ?hashed_address,
+                            "Adding account leaf after resumed storage root"
+                        );
                         hash_builder.add_leaf(Nibbles::unpack(hashed_address), &account_rlp);
                     }
                     StorageRootProgress::Progress(state, storage_slots_walked, updates) => {
@@ -262,7 +267,7 @@ where
                         let account_state = IntermediateRootState {
                             hash_builder,
                             walker_stack,
-                            last_hashed_key: hashed_address,
+                            last_hashed_key: account_root_state.last_hashed_key,
                         };
 
                         let state = IntermediateStateRootState {
@@ -626,6 +631,12 @@ where
 
         let (mut hash_builder, mut storage_node_iter) = match self.previous_state {
             Some(state) => {
+                debug!(
+                    target: "trie::storage_root",
+                    haashed_addr=?self.hashed_address,
+                    last_hashed_key = ?state.last_hashed_key,
+                    "Resuming storage root from intermediate state"
+                );
                 let hash_builder = state.hash_builder.with_updates(retain_updates);
                 let walker = TrieWalker::storage_trie_from_stack(
                     trie_cursor,
@@ -669,6 +680,13 @@ where
                         trie_updates.removed_nodes.extend(walker_deleted_keys);
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
                         trie_updates.storage_nodes.extend(hash_builder_updates);
+
+                        tracing::debug!(
+                            target: "trie::storage_root",
+                            threshold = ?self.threshold,
+                            ?total_updates_len,
+                            "Returning progress from inner storage root",
+                        );
 
                         let state = IntermediateRootState {
                             hash_builder,
