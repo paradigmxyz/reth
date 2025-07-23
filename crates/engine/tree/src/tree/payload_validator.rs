@@ -16,8 +16,9 @@ use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{InvalidBlockHook, PayloadValidator};
 use reth_evm::{ConfigureEvm, SpecFor};
 use reth_payload_primitives::{
-    EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
-    NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
+    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError,
+    InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes, PayloadOrAttributes,
+    PayloadTypes,
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
@@ -1012,6 +1013,31 @@ pub trait EngineValidator<Types: PayloadTypes>:
         if attr.timestamp() <= header.timestamp() {
             return Err(InvalidPayloadAttributesError::InvalidTimestamp);
         }
+        Ok(())
+    }
+
+    /// Validates a payload received from engine API.
+    fn validate_payload(
+        &mut self,
+        payload: Self::ExecutionData,
+        _ctx: TreeCtx<'_, <Types::BuiltPayload as BuiltPayload>::Primitives>,
+    ) -> Result<PayloadValidationOutcome<Self::Block>, NewPayloadError> {
+        // Default implementation: try to convert using existing method
+        match self.ensure_well_formed_payload(payload) {
+            Ok(block) => {
+                Ok(PayloadValidationOutcome::Valid { block, trie_updates: TrieUpdates::default() })
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    /// Validates a block downloaded from the network.
+    fn validate_block(
+        &self,
+        _block: &RecoveredBlock<Self::Block>,
+        _ctx: TreeCtx<'_, <Types::BuiltPayload as BuiltPayload>::Primitives>,
+    ) -> Result<(), ConsensusError> {
+        // Default implementation: accept all blocks
         Ok(())
     }
 }
