@@ -238,7 +238,7 @@ where
 
     async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
         let min_tip = U256::from(self.inner.min_suggested_priority_fee);
-        self.inner.eth_api.gas_oracle().op_suggest_tip_cap(min_tip).await.map_err(Into::into)
+        self.inner.eth_api.gas_oracle().scroll_suggest_tip_cap(min_tip).await.map_err(Into::into)
     }
 }
 
