@@ -1,5 +1,6 @@
 //! Ethereum-specific tree payload validator implementation.
 
+use crate::validator::ensure_well_formed_payload;
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
@@ -23,9 +24,6 @@ use reth_provider::{
 };
 use reth_trie::HashedPostState;
 use std::sync::Arc;
-
-// Import the standalone validation function
-use crate::validator::ensure_well_formed_payload;
 
 /// Common trait bounds for the provider type used throughout `EthPayloadValidator`
 pub trait EthProvider: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
