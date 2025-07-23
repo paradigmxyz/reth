@@ -10,6 +10,7 @@
 use alloy_consensus::{BlockBody, BlockHeader, Header};
 use rand::{prelude::IndexedRandom, rng};
 use reth_era::{
+    e2s_types::IndexEntry,
     era1_file::{Era1File, Era1Reader, Era1Writer},
     era1_types::{Era1Group, Era1Id},
     execution_types::{BlockTuple, CompressedBody, CompressedHeader, TotalDifficulty},
@@ -71,7 +72,7 @@ async fn test_file_roundtrip(
     for &block_id in &test_block_indices {
         let original_block = &original_file.group.blocks[block_id];
         let roundtrip_block = &roundtrip_file.group.blocks[block_id];
-        let block_number = original_file.group.block_index.starting_number + block_id as u64;
+        let block_number = original_file.group.block_index.starting_number() + block_id as u64;
 
         println!("Testing roundtrip for block {block_number}");
 

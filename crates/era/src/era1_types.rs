@@ -3,7 +3,7 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 use crate::{
-    e2s_types::{E2sError, Entry},
+    e2s_types::{Entry, IndexEntry},
     execution_types::{Accumulator, BlockTuple, MAX_BLOCKS_PER_ERA1},
 };
 use alloy_primitives::BlockNumber;
@@ -38,6 +38,7 @@ impl Era1Group {
     ) -> Self {
         Self { blocks, accumulator, block_index, other_entries: Vec::new() }
     }
+
     /// Add another entry to this group
     pub fn add_entry(&mut self, entry: Entry) {
         self.other_entries.push(entry);
@@ -52,20 +53,15 @@ impl Era1Group {
 #[derive(Debug, Clone)]
 pub struct BlockIndex {
     /// Starting block number
-    pub starting_number: BlockNumber,
+    starting_number: BlockNumber,
 
     /// Offsets to data at each block number
-    pub offsets: Vec<i64>,
+    offsets: Vec<u64>,
 }
 
 impl BlockIndex {
-    /// Create a new [`BlockIndex`]
-    pub const fn new(starting_number: BlockNumber, offsets: Vec<i64>) -> Self {
-        Self { starting_number, offsets }
-    }
-
     /// Get the offset for a specific block number
-    pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<i64> {
+    pub fn offset_for_block(&self, block_number: BlockNumber) -> Option<u64> {
         if block_number < self.starting_number {
             return None;
         }
@@ -73,72 +69,23 @@ impl BlockIndex {
         let index = (block_number - self.starting_number) as usize;
         self.offsets.get(index).copied()
     }
+}
 
-    /// Convert to an [`Entry`] for storage in an e2store file
-    pub fn to_entry(&self) -> Entry {
-        // Format: starting-(block)-number | index | index | index ... | count
-        let mut data = Vec::with_capacity(8 + self.offsets.len() * 8 + 8);
-
-        // Add starting block number
-        data.extend_from_slice(&self.starting_number.to_le_bytes());
-
-        // Add all offsets
-        for offset in &self.offsets {
-            data.extend_from_slice(&offset.to_le_bytes());
-        }
-
-        // Add count
-        data.extend_from_slice(&(self.offsets.len() as i64).to_le_bytes());
-
-        Entry::new(BLOCK_INDEX, data)
+impl IndexEntry for BlockIndex {
+    fn new(starting_number: u64, offsets: Vec<u64>) -> Self {
+        Self { starting_number, offsets }
     }
 
-    /// Create from an [`Entry`]
-    pub fn from_entry(entry: &Entry) -> Result<Self, E2sError> {
-        if entry.entry_type != BLOCK_INDEX {
-            return Err(E2sError::Ssz(format!(
-                "Invalid entry type for BlockIndex: expected {:02x}{:02x}, got {:02x}{:02x}",
-                BLOCK_INDEX[0], BLOCK_INDEX[1], entry.entry_type[0], entry.entry_type[1]
-            )));
-        }
+    fn entry_type() -> [u8; 2] {
+        BLOCK_INDEX
+    }
 
-        if entry.data.len() < 16 {
-            return Err(E2sError::Ssz(String::from(
-                "BlockIndex entry too short to contain starting block number and count",
-            )));
-        }
+    fn starting_number(&self) -> u64 {
+        self.starting_number
+    }
 
-        // Extract starting block number = first 8 bytes
-        let mut starting_number_bytes = [0u8; 8];
-        starting_number_bytes.copy_from_slice(&entry.data[0..8]);
-        let starting_number = u64::from_le_bytes(starting_number_bytes);
-
-        // Extract count = last 8 bytes
-        let mut count_bytes = [0u8; 8];
-        count_bytes.copy_from_slice(&entry.data[entry.data.len() - 8..]);
-        let count = u64::from_le_bytes(count_bytes) as usize;
-
-        // Verify that the entry has the correct size
-        let expected_size = 8 + count * 8 + 8;
-        if entry.data.len() != expected_size {
-            return Err(E2sError::Ssz(format!(
-                "BlockIndex entry has incorrect size: expected {}, got {}",
-                expected_size,
-                entry.data.len()
-            )));
-        }
-
-        // Extract all offsets
-        let mut offsets = Vec::with_capacity(count);
-        for i in 0..count {
-            let start = 8 + i * 8;
-            let end = start + 8;
-            let mut offset_bytes = [0u8; 8];
-            offset_bytes.copy_from_slice(&entry.data[start..end]);
-            offsets.push(i64::from_le_bytes(offset_bytes));
-        }
-
-        Ok(Self { starting_number, offsets })
+    fn offsets(&self) -> &[u64] {
+        &self.offsets
     }
 }
 
