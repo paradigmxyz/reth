@@ -28,14 +28,13 @@ impl Default for ScrollPayloadBuilderBuilder {
         Self {
             best_transactions: (),
             payload_building_time_limit: SCROLL_PAYLOAD_BUILDING_DURATION,
-            block_da_size_limit: SCROLL_BLOCK_PAYLOAD_SIZE_LIMIT,
+            block_da_size_limit: 0,
         }
     }
 }
 
 const SCROLL_GAS_LIMIT: u64 = 20_000_000;
 const SCROLL_PAYLOAD_BUILDING_DURATION: Duration = Duration::from_secs(1);
-const SCROLL_BLOCK_PAYLOAD_SIZE_LIMIT: u64 = 122_880;
 
 impl<Txs> ScrollPayloadBuilderBuilder<Txs> {
     /// A helper method to initialize [`reth_scroll_payload::ScrollPayloadBuilder`] with the
