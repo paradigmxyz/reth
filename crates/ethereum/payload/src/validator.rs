@@ -1,11 +1,10 @@
 //! Validates execution payload wrt Ethereum consensus rules
 
 use alloy_consensus::Block;
-use alloy_eips::{Decodable2718, Typed2718};
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 use reth_chainspec::EthereumHardforks;
 use reth_payload_validator::{cancun, prague, shanghai};
-use reth_primitives_traits::{Block as _, SealedBlock};
+use reth_primitives_traits::{Block as _, SealedBlock, SignedTransaction};
 use std::sync::Arc;
 
 /// Execution payload validator.
@@ -33,7 +32,7 @@ impl<ChainSpec: EthereumHardforks> EthereumExecutionPayloadValidator<ChainSpec> 
     /// layout,
     ///
     /// See also [`ensure_well_formed_payload`]
-    pub fn ensure_well_formed_payload<T: Decodable2718 + Typed2718>(
+    pub fn ensure_well_formed_payload<T: SignedTransaction>(
         &self,
         payload: ExecutionData,
     ) -> Result<SealedBlock<Block<T>>, PayloadError> {
@@ -70,7 +69,7 @@ pub fn ensure_well_formed_payload<ChainSpec, T>(
 ) -> Result<SealedBlock<Block<T>>, PayloadError>
 where
     ChainSpec: EthereumHardforks,
-    T: Decodable2718 + Typed2718,
+    T: SignedTransaction,
 {
     let ExecutionData { payload, sidecar } = payload;
 
