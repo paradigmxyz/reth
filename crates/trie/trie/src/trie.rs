@@ -167,6 +167,14 @@ where
         let mut hashed_entries_walked = 0;
         let mut updated_storage_nodes = 0;
 
+        let mut resuming_storage_root =
+            self.previous_state.as_ref().is_some_and(|state| state.storage_root_state.is_some());
+        let account_previous_state = self
+            .previous_state
+            .as_ref()
+            .and_then(|state| state.storage_root_state.as_ref())
+            .map(|state| state.account);
+
         // First, handle any in-progress storage root calculation
         let (mut hash_builder, mut account_node_iter) = if let Some(state) = self.previous_state {
             let IntermediateStateRootState { account_root_state, storage_root_state } = state;
@@ -224,6 +232,7 @@ where
                             ?hashed_address,
                             ?storage_root,
                             storage_slots_walked,
+                            ?account,
                             "Resumed storage root calculation completed"
                         );
 
@@ -301,6 +310,10 @@ where
         while let Some(node) = account_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
+                    if resuming_storage_root {
+                        resuming_storage_root = false;
+                        tracing::debug!(target: "trie::state_root", ?node, ?account_previous_state, "next trie node after resuming storage root");
+                    }
                     tracker.inc_branch();
                     hash_builder.add_branch(node.key, node.value, node.children_are_in_trie);
                 }
@@ -342,6 +355,11 @@ where
                                 trie_updates.insert_storage_updates(hashed_address, updates);
                             }
 
+                            if resuming_storage_root {
+                                resuming_storage_root = false;
+                                tracing::debug!(target: "trie::state_root", ?hashed_address, ?account_previous_state, ?account, ?storage_root, "next trie node after resuming storage root, root is complete");
+                            }
+
                             // Encode the account with the computed storage root
                             account_rlp.clear();
                             let account = account.into_trie_account(storage_root);
@@ -355,6 +373,7 @@ where
                                 ?hashed_address,
                                 storage_slots_walked,
                                 last_storage_key = ?state.last_hashed_key,
+                                ?account,
                                 "Pausing storage root calculation"
                             );
 
