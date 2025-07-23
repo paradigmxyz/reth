@@ -5,10 +5,11 @@ use crate::{
 };
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_engine_tree::tree::EngineValidator;
 use reth_ethereum::{
     node::api::{
         validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
-        EngineObjectValidationError, EngineValidator, ExecutionPayload, FullNodeComponents,
+        EngineObjectValidationError, ExecutionPayload, FullNodeComponents,
         InvalidPayloadAttributesError, NewPayloadError, NodePrimitives, PayloadAttributes,
         PayloadBuilderAttributes, PayloadOrAttributes, PayloadTypes, PayloadValidator,
     },

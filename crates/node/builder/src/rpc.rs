@@ -9,9 +9,10 @@ use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_engine_tree::tree::EngineValidator;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PrimitivesTy,
+    AddOnsContext, BlockTy, EngineTypes, FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes,
+    PayloadTypes, PrimitivesTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
