@@ -10,7 +10,10 @@
 //!
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
-use crate::e2s_types::{E2sError, Entry};
+use crate::{
+    e2s_types::{E2sError, Entry},
+    DecodeCompressed,
+};
 use alloy_consensus::{Block, BlockBody, Header};
 use alloy_primitives::{B256, U256};
 use alloy_rlp::{Decodable, Encodable};
@@ -94,12 +97,6 @@ impl<T: Encodable> SnappyRlpCodec<T> {
 pub struct CompressedHeader {
     /// The compressed data
     pub data: Vec<u8>,
-}
-
-/// Extension trait for generic decoding from compressed data
-pub trait DecodeCompressed {
-    /// Decompress and decode the data into the given type
-    fn decode<T: Decodable>(&self) -> Result<T, E2sError>;
 }
 
 impl CompressedHeader {
