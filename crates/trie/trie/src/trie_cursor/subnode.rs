@@ -87,6 +87,25 @@ impl CursorSubNode {
         &self.full_key
     }
 
+    /// Returns None if:
+    /// - Position is a parent
+    /// - There is no branch node
+    /// - The branch node has more than 2 children
+    ///
+    /// Otherwise returns the full path of the branch node's child which is not the current one.
+    pub fn only_sibling_full_key(&self) -> Option<Nibbles> {
+        self.position.as_child().zip(self.node.as_ref()).and_then(|(nibble, node)| {
+            let mut mask = node.state_mask;
+            mask.unset_bit(nibble);
+            (mask.count_ones() == 1).then(|| {
+                let sibling_nibble = mask.trailing_zeros() as u8;
+                let mut key = self.key;
+                key.push(sibling_nibble);
+                key
+            })
+        })
+    }
+
     /// Updates the full key by replacing or appending a child nibble based on the old subnode
     /// position.
     #[inline]

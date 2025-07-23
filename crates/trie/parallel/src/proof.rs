@@ -52,6 +52,9 @@ pub struct ParallelProof<Factory: DatabaseProviderFactory> {
     pub prefix_sets: Arc<TriePrefixSetsMut>,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
+    /// Flag indicating whether to also retain proofs for nodes which might be required for adding
+    /// and removing leaves in the trie.
+    with_leaf_additions_removals: bool,
     /// Handle to the storage proof task.
     storage_proof_task_handle: ProofTaskManagerHandle<FactoryTx<Factory>>,
     #[cfg(feature = "metrics")]
@@ -73,6 +76,7 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
             state_sorted,
             prefix_sets,
             collect_branch_node_masks: false,
+            with_leaf_additions_removals: false,
             storage_proof_task_handle,
             #[cfg(feature = "metrics")]
             metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
@@ -82,6 +86,13 @@ impl<Factory: DatabaseProviderFactory> ParallelProof<Factory> {
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
+        self
+    }
+
+    /// Set the flag indicating whether to retain proofs for nodes which might be required for
+    /// leaf additions/removals.
+    pub const fn with_leaf_additions_removals(mut self, leaf_additions_removals: bool) -> Self {
+        self.with_leaf_additions_removals = leaf_additions_removals;
         self
     }
 }
@@ -103,6 +114,7 @@ where
             prefix_set,
             target_slots,
             self.collect_branch_node_masks,
+            self.with_leaf_additions_removals,
         );
 
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -226,7 +238,11 @@ where
         .with_deletions_retained(true);
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer: ProofRetainer = targets.keys().map(Nibbles::unpack).collect();
+        let retainer = targets
+            .keys()
+            .map(Nibbles::unpack)
+            .collect::<ProofRetainer>()
+            .with_leaf_additions_removals(self.with_leaf_additions_removals);
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);

@@ -251,6 +251,7 @@ where
         )
         .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
+        .with_leaf_additions_removals(input.with_leaf_additions_removals)
         .storage_multiproof(input.target_slots)
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
@@ -389,6 +390,9 @@ pub struct StorageProofInput {
     target_slots: B256Set,
     /// Whether or not to collect branch node masks
     with_branch_node_masks: bool,
+    /// Flag indicating whether to also retain proofs for nodes which might be required for adding
+    /// and removing leaves in the trie.
+    with_leaf_additions_removals: bool,
 }
 
 impl StorageProofInput {
@@ -399,8 +403,15 @@ impl StorageProofInput {
         prefix_set: PrefixSet,
         target_slots: B256Set,
         with_branch_node_masks: bool,
+        with_leaf_additions_removals: bool,
     ) -> Self {
-        Self { hashed_address, prefix_set, target_slots, with_branch_node_masks }
+        Self {
+            hashed_address,
+            prefix_set,
+            target_slots,
+            with_branch_node_masks,
+            with_leaf_additions_removals,
+        }
     }
 }
 

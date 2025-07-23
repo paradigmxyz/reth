@@ -24,7 +24,7 @@ use reth_trie_common::{
     TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
-use tracing::trace;
+use tracing::{trace, warn};
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`SerialSparseTrie::update_subtrie_hashes`].
@@ -636,6 +636,12 @@ impl SparseTrieInterface for SerialSparseTrie {
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
                             if self.nodes.get(&current).unwrap().is_hash() {
+                                warn!(
+                                    target: "trie::sparse",
+                                    leaf_full_path = ?full_path,
+                                    child_path = ?current,
+                                    "Extension node child not revealed in update_leaf, falling back to db",
+                                );
                                 if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                     provider.trie_node(&current)?
                                 {
@@ -803,7 +809,12 @@ impl SparseTrieInterface for SerialSparseTrie {
                         trace!(target: "trie::sparse", ?removed_path, ?child_path, "Branch node has only one child");
 
                         if self.nodes.get(&child_path).unwrap().is_hash() {
-                            trace!(target: "trie::sparse", ?child_path, "Retrieving remaining blinded branch child");
+                            warn!(
+                                target: "trie::sparse",
+                                ?child_path,
+                                leaf_full_path = ?full_path,
+                                "Branch node child not revealed in remove_leaf, falling back to db",
+                            );
                             if let Some(RevealedNode { node, tree_mask, hash_mask }) =
                                 provider.trie_node(&child_path)?
                             {
@@ -2279,9 +2290,9 @@ mod tests {
     {
         let mut account_rlp = Vec::new();
 
-        let mut hash_builder = HashBuilder::default()
-            .with_updates(true)
-            .with_proof_retainer(ProofRetainer::from_iter(proof_targets));
+        let mut hash_builder = HashBuilder::default().with_updates(true).with_proof_retainer(
+            ProofRetainer::from_iter(proof_targets).with_leaf_additions_removals(true),
+        );
 
         let mut prefix_set = PrefixSetMut::default();
         prefix_set.extend_keys(state.clone().into_iter().map(|(nibbles, _)| nibbles));

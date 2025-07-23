@@ -150,10 +150,27 @@ impl<C> TrieWalker<C> {
     /// Updates the skip node flag based on the walker's current state.
     fn update_skip_node(&mut self) {
         let old = self.can_skip_current_node;
-        self.can_skip_current_node = self
-            .stack
-            .last()
-            .is_some_and(|node| !self.changes.contains(node.full_key()) && node.hash_flag());
+        self.can_skip_current_node = self.stack.last().is_some_and(|node| {
+            // This case is required to support the `with_leaf_additions_removals` option of the
+            // hash builder's proof retainer. When a branch has two children and one of them has
+            // changes while the other doesn't, it's possible the changed child is a removed leaf,
+            // and the other leaf will still be required in the proof.
+            //
+            // See documentation within the hash builder's proof retainer, specifically within
+            // `retain_branch_proof`, for more details on what this is intended to be handling.
+            let only_sibling_has_changes =
+                node.only_sibling_full_key().is_some_and(|sibling_full_key| {
+                    let res = self.changes.contains(&sibling_full_key);
+                    trace!(
+                        target: "trie::walker",
+                        only_sibling_has_changes = res,
+                        ?sibling_full_key,
+                        "Checked for only sibling with changes",
+                    );
+                    res
+                });
+            !self.changes.contains(node.full_key()) && node.hash_flag() && !only_sibling_has_changes
+        });
         trace!(
             target: "trie::walker",
             old,
