@@ -13,9 +13,12 @@ use alloy_evm::{block::BlockExecutor, Evm};
 use alloy_primitives::B256;
 use reth_chain_state::CanonicalInMemoryState;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::InvalidBlockHook;
+use reth_engine_primitives::{InvalidBlockHook, PayloadValidator};
 use reth_evm::{ConfigureEvm, SpecFor};
-use reth_payload_primitives::NewPayloadError;
+use reth_payload_primitives::{
+    EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
+    NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
+};
 use reth_primitives_traits::{
     AlloyBlockHeader, Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
@@ -305,7 +308,7 @@ where
         }
 
         // Get the parent block's state to execute against
-        let parent_hash = block.parent_hash();
+        let parent_hash = block.header().parent_hash();
 
         // Get parent header for error context
         let parent_header = ensure_ok!(self.get_parent_header(parent_hash, tree_state));
@@ -618,7 +621,7 @@ where
         handle: &mut crate::tree::PayloadHandle,
         execution_time: Instant,
     ) -> Result<(B256, TrieUpdates), NewPayloadError> {
-        let parent_hash = block.parent_hash();
+        let parent_hash = block.header().parent_hash();
 
         if !run_parallel_state_root {
             // Use synchronous computation
@@ -708,7 +711,7 @@ where
             }
 
             // Move to the parent block
-            current_hash = block.block.recovered_block.parent_hash();
+            current_hash = block.block.recovered_block.header().parent_hash();
         }
 
         false
@@ -790,9 +793,12 @@ where
             self.persisting_kind_for(block.header(), persistence_info, tree_state);
 
         let trie_input_start = Instant::now();
-        let Ok(trie_input) =
-            self.compute_trie_input(provider_ro, block.parent_hash(), tree_state, persisting_kind)
-        else {
+        let Ok(trie_input) = self.compute_trie_input(
+            provider_ro,
+            block.header().parent_hash(),
+            tree_state,
+            persisting_kind,
+        ) else {
             // Fall back to cache-only spawn if trie input computation fails
             let handle =
                 self.payload_processor.spawn_cache_exclusive(header, txs, provider_builder);
@@ -916,7 +922,7 @@ where
                     ))
                 })?;
 
-            blocks.retain(|b| b.recovered_block().number() > last_persisted_block_number);
+            blocks.retain(|b| b.recovered_block().header().number() > last_persisted_block_number);
         }
 
         if blocks.is_empty() {
@@ -963,5 +969,49 @@ where
         );
 
         Ok(input)
+    }
+}
+
+/// Type that validates the payloads processed by the engine.
+pub trait EngineValidator<Types: PayloadTypes>:
+    PayloadValidator<ExecutionData = Types::ExecutionData>
+{
+    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+    /// and the message version.
+    fn validate_version_specific_fields(
+        &self,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<
+            '_,
+            Types::ExecutionData,
+            <Types as PayloadTypes>::PayloadAttributes,
+        >,
+    ) -> Result<(), EngineObjectValidationError>;
+
+    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &<Types as PayloadTypes>::PayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError>;
+
+    /// Validates the payload attributes with respect to the header.
+    ///
+    /// By default, this enforces that the payload attributes timestamp is greater than the
+    /// timestamp according to:
+    ///   > 7. Client software MUST ensure that payloadAttributes.timestamp is greater than
+    ///   > timestamp
+    ///   > of a block referenced by forkchoiceState.headBlockHash.
+    ///
+    /// See also: <https://github.com/ethereum/execution-apis/blob/647a677b7b97e09145b8d306c0eaf51c32dae256/src/engine/common.md#specification-1>
+    fn validate_payload_attributes_against_header(
+        &self,
+        attr: &<Types as PayloadTypes>::PayloadAttributes,
+        header: &<Self::Block as Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
+        if attr.timestamp() <= header.timestamp() {
+            return Err(InvalidPayloadAttributesError::InvalidTimestamp);
+        }
+        Ok(())
     }
 }
