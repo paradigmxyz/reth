@@ -73,8 +73,8 @@ pub struct ScrollEthApi<N: ScrollNodeCore, NetworkT = Scroll> {
 
 impl<N: ScrollNodeCore, NetworkT> ScrollEthApi<N, NetworkT> {
     /// Creates a new [`ScrollEthApi`].
-    pub fn new(eth_api: EthApiNodeBackend<N>) -> Self {
-        let inner = Arc::new(ScrollEthApiInner { eth_api });
+    pub fn new(eth_api: EthApiNodeBackend<N>, min_suggested_priority_fee: U256) -> Self {
+        let inner = Arc::new(ScrollEthApiInner { eth_api, min_suggested_priority_fee });
         Self {
             inner: inner.clone(),
             _nt: PhantomData,
@@ -235,6 +235,11 @@ where
     fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
         self.inner.eth_api.fee_history_cache()
     }
+
+    async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
+        let min_tip = U256::from(self.inner.min_suggested_priority_fee);
+        self.inner.eth_api.gas_oracle().op_suggest_tip_cap(min_tip).await.map_err(Into::into)
+    }
 }
 
 impl<N, NetworkT> LoadState for ScrollEthApi<N, NetworkT>
@@ -307,6 +312,8 @@ impl<N: ScrollNodeCore, NetworkT> fmt::Debug for ScrollEthApi<N, NetworkT> {
 pub struct ScrollEthApiInner<N: ScrollNodeCore> {
     /// Gateway to node's core components.
     pub eth_api: EthApiNodeBackend<N>,
+    /// Minimum priority fee
+    min_suggested_priority_fee: U256,
 }
 
 impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
@@ -318,12 +325,21 @@ impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
 
 /// A type that knows how to build a [`ScrollEthApi`].
 #[derive(Debug, Default)]
-pub struct ScrollEthApiBuilder {}
+pub struct ScrollEthApiBuilder {
+    /// Minimum suggested priority fee (tip)
+    min_suggested_priority_fee: u64,
+}
 
 impl ScrollEthApiBuilder {
     /// Creates a [`ScrollEthApiBuilder`] instance.
     pub const fn new() -> Self {
-        Self {}
+        Self { min_suggested_priority_fee: 0 }
+    }
+
+    /// With minimum suggested priority fee (tip)
+    pub const fn with_min_suggested_priority_fee(mut self, min: u64) -> Self {
+        self.min_suggested_priority_fee = min;
+        self
     }
 }
 
@@ -335,6 +351,8 @@ where
     type EthApi = ScrollEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
+        let Self { min_suggested_priority_fee, .. } = self;
+
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
             ctx.components.pool().clone(),
@@ -350,6 +368,6 @@ where
         .proof_permits(ctx.config.proof_permits)
         .build_inner();
 
-        Ok(ScrollEthApi::new(eth_api))
+        Ok(ScrollEthApi::new(eth_api, U256::from(min_suggested_priority_fee)))
     }
 }

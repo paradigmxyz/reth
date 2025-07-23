@@ -32,7 +32,7 @@ impl ScrollBuilderConfig {
     }
 
     /// Returns the max allowed data availability size per block, if any.
-    pub fn max_da_block_size(&self) -> Option<u64> {
+    pub const fn max_da_block_size(&self) -> Option<u64> {
         if self.max_da_block_size == 0 {
             None
         } else {

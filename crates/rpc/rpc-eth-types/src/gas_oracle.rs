@@ -345,6 +345,109 @@ where
         Ok(suggestion)
     }
 
+    /// Suggests a max priority fee value using a simplified and more predictable algorithm
+    /// appropriate for chains like Scroll with a single known block builder.
+    ///
+    /// It returns either:
+    /// - The minimum suggested priority fee when blocks have capacity
+    /// - 10% above the median effective priority fee from the last block when at capacity
+    ///
+    /// A block is considered at capacity if its total gas used plus the maximum single transaction
+    /// gas would exceed the block's gas limit, or the total block payload size  plus the maximum
+    /// single transaction would exceed the block's payload size limit.
+    pub async fn scroll_suggest_tip_cap(
+        &self,
+        min_suggested_priority_fee: U256,
+    ) -> EthResult<U256> {
+        let header = self
+            .provider
+            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+
+        let mut inner = self.inner.lock().await;
+
+        // if we have stored a last price, then we check whether or not it was for the same head
+        if inner.last_price.block_hash == header.hash() {
+            return Ok(inner.last_price.price);
+        }
+
+        let mut suggestion = min_suggested_priority_fee;
+
+        // find the maximum gas used by any of the transactions in the block to use as the
+        // capacity margin for the block, if no receipts are found return the
+        // suggested_min_priority_fee
+        let Some(max_tx_gas_used) = self
+            .cache
+            .get_receipts(header.hash())
+            .await?
+            .ok_or(EthApiError::ReceiptsNotFound(BlockId::latest()))?
+            // get the gas used by each transaction in the block, by subtracting the
+            // cumulative gas used of the previous transaction from the cumulative gas used of the
+            // current transaction. This is because there is no gas_used() method on the Receipt
+            // trait.
+            .windows(2)
+            .map(|window| {
+                let prev = window[0].cumulative_gas_used();
+                let curr = window[1].cumulative_gas_used();
+                curr - prev
+            })
+            .max()
+        else {
+            return Ok(suggestion);
+        };
+
+        // find the maximum and total payload size used by the transactions in the block to use as
+        // the capacity margin for the block, if no block is found return the
+        // suggested_min_priority_fee
+        let block = self
+            .cache
+            .get_recovered_block(header.hash())
+            .await?
+            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+
+        let transactions = block.transactions_recovered();
+
+        // Calculate payload sizes for all transactions
+        let mut max_tx_payload_size = 0u64;
+        let mut total_payload_size = 0u64;
+
+        for tx in transactions {
+            // Get the EIP-2718 encoded length as payload size
+            let payload_size = tx.into_encoded().encoded_bytes().len() as u64;
+            max_tx_payload_size = max_tx_payload_size.max(payload_size);
+            total_payload_size += payload_size;
+        }
+
+        // Scroll block payload size limit (122,880 bytes)
+        const SCROLL_BLOCK_PAYLOAD_SIZE_LIMIT: u64 = 122_880;
+
+        // if the block is at capacity, the suggestion must be increased
+        if header.gas_used() + max_tx_gas_used > header.gas_limit() ||
+            total_payload_size + max_tx_payload_size > SCROLL_BLOCK_PAYLOAD_SIZE_LIMIT
+        {
+            let Some(median_tip) = self.get_block_median_tip(header.hash()).await? else {
+                return Ok(suggestion);
+            };
+
+            let new_suggestion = median_tip + median_tip / U256::from(10);
+
+            if new_suggestion > suggestion {
+                suggestion = new_suggestion;
+            }
+        }
+
+        // constrain to the max price
+        if let Some(max_price) = self.oracle_config.max_price {
+            if suggestion > max_price {
+                suggestion = max_price;
+            }
+        }
+
+        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };
+
+        Ok(suggestion)
+    }
+
     /// Get the median tip value for the given block. This is useful for determining
     /// tips when a block is at capacity.
     ///
