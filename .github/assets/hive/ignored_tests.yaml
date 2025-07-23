@@ -1,0 +1,17 @@
+# Ignored Tests Configuration
+#
+# This file contains tests that should be ignored for various reasons (flaky, known issues, etc).
+# These tests will be IGNORED in the CI results - they won't cause the build to fail
+# regardless of whether they pass or fail.
+#
+# Format
+# test_suite:
+#   - "test name 1"
+#   - "test name 2"
+#
+# When a test should no longer be ignored, remove it from this list.
+
+engine-withdrawals:
+  # flaky
+  - Withdrawals Fork on Block 1 - 8 Block Re-Org NewPayload (Paris) (reth)
+
