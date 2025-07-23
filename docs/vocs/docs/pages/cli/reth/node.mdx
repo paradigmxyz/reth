@@ -287,6 +287,11 @@ RPC:
 
           [default: <CACHE_DIR>.ipc]
 
+      --ipc.permissions <IPC_SOCKET_PERMISSIONS>
+          Set the permissions for the IPC socket file, in octal format.
+
+          If not specified, the permissions will be set by the system's umask.
+
       --authrpc.addr <AUTH_ADDR>
           Auth server address to listen on
 
