@@ -69,6 +69,17 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     ///
     /// Note: validating blocks does not include other validations of the Consensus
     fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
+
+    /// This performs the same validations as [`Self::validate_block_pre_execution`], besides the
+    /// transactions root validation check.
+    ///
+    /// This primarily validates the post-merge fork specific fields in the block.
+    fn validate_post_merge_fork_fields(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
+
+    /// This performs transaction validation. Typically this would perform transactions root
+    /// validation, by calculating the root and comparing the computed root to the field in the
+    /// header.
+    fn validate_transactions(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
 }
 
 /// `HeaderValidator` is a protocol that validates headers and their relationships.
