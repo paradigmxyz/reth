@@ -7,7 +7,8 @@ use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use op_revm::{OpHaltReason, OpTransactionError};
 use reth_evm::execute::ProviderError;
 use reth_optimism_evm::OpBlockExecutionError;
-use reth_rpc_eth_api::{AsEthApiError, EthTxEnvError, TransactionConversionError};
+use reth_rpc_eth_api::{AsEthApiError, EthTxEnvError};
+use reth_rpc_convert::TransactionConversionError;
 use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
 use revm::context_interface::result::{EVMError, InvalidTransaction};
@@ -34,6 +35,9 @@ pub enum OpEthApiError {
     /// Sequencer client error.
     #[error(transparent)]
     Sequencer(#[from] SequencerClientError),
+    /// Generic conversion error.
+    #[error("{0}")]
+    ConversionError(String),
 }
 
 impl AsEthApiError for OpEthApiError {
@@ -54,6 +58,7 @@ impl From<OpEthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             | OpEthApiError::L1BlockFeeError
             | OpEthApiError::L1BlockGasError => internal_rpc_err(err.to_string()),
             OpEthApiError::Sequencer(err) => err.into(),
+            OpEthApiError::ConversionError(err) => internal_rpc_err(err),
         }
     }
 }

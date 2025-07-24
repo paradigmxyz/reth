@@ -148,6 +148,9 @@ pub trait RpcTypes: CrateRpcTypes {}
 
 impl RpcTypes for alloy_network::Ethereum {}
 
+#[cfg(feature = "op")]
+impl RpcTypes for op_alloy_network::Optimism {}
+
 /// Trait for converting network transaction responses to primitive transaction types.
 pub trait TryFromTransactionResponse<N: alloy_network::Network> {
     /// The error type returned if the conversion fails.

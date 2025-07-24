@@ -13,22 +13,20 @@ use crate::{
     OpEthApiError, SequencerClient,
 };
 use alloy_consensus::transaction::Recovered;
-use alloy_network::TryCast;
 use alloy_primitives::U256;
 use alloy_rpc_types_eth::TransactionInfo;
 use eyre::WrapErr;
-use op_alloy_consensus::OpTransaction;
 use op_alloy_network::Optimism;
-use op_alloy_rpc_types::{OpTransactionReceipt, Transaction};
+use op_alloy_rpc_types::Transaction;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_primitives::OpPrimitives;
-use reth_primitives_traits::{SealedHeaderFor, SignedTransaction, TxTy};
+use reth_primitives_traits::{SealedHeaderFor, TxTy};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_convert::{
-    transaction::{ConvertReceiptInput, TryIntoSimTx, TryIntoTxEnv},
+    transaction::{ConvertReceiptInput, RpcTypes, TryIntoSimTx, TryIntoTxEnv},
     RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq,
 };
 use reth_rpc_eth_api::{
@@ -36,12 +34,13 @@ use reth_rpc_eth_api::{
         pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
         EthState, LoadFee, LoadState, SpawnBlocking, Trace,
     },
-    transaction::RpcTypes,
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes, SignableTxRequest, TxInfoMapper,
+    transaction::ReceiptConverter,
+    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcNodeCore,
+    RpcNodeCoreExt, SignableTxRequest, TxInfoMapper,
 };
+use reth_chainspec::ChainSpecProvider;
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
-use reth_storage_api::{ProviderHeader, ProviderTx};
+use reth_storage_api::{BlockReader, ProviderHeader, ProviderTx, ReceiptProvider};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -324,12 +323,15 @@ where
 
 impl<Provider> RpcConvert for OpRpcConverter<Provider>
 where
-    Provider: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static,
+    Provider: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static
+        + BlockReader
+        + ChainSpecProvider
+        + ReceiptProvider,
+    Provider::ChainSpec: reth_optimism_forks::OpHardforks,
+    Provider::Receipt: reth_optimism_primitives::DepositReceipt,
     OpTxInfoMapper<Provider>: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static,
     OpReceiptConverter<Provider>: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static,
-    OpTxInfoMapper<Provider>: for<'a> TxInfoMapper<&'a TxTy<OpPrimitives>>,
-    <OpTxInfoMapper<Provider> as TxInfoMapper<&TxTy<OpPrimitives>>>::Out:
-        Into<OpTransactionReceipt>,
+    OpTxInfoMapper<Provider>: for<'a> TxInfoMapper<&'a TxTy<OpPrimitives>, Out = op_alloy_consensus::transaction::OpTransactionInfo, Err = reth_storage_api::errors::ProviderError>,
 {
     type Primitives = OpPrimitives;
     type Network = Optimism;
@@ -345,7 +347,7 @@ where
         let tx_info = self
             .tx_mapper
             .try_map(&tx, tx_info)
-            .map_err(|e| OpEthApiError::from(format!("{:?}", e)))?;
+            .map_err(|e| OpEthApiError::ConversionError(format!("{:?}", e)))?;
         Ok(Transaction::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info))
     }
 
@@ -353,7 +355,7 @@ where
         &self,
         request: RpcTxReq<Self::Network>,
     ) -> Result<TxTy<Self::Primitives>, Self::Error> {
-        request.try_into_sim_tx().map_err(|e| OpEthApiError::from(e.to_string()))
+        request.try_into_sim_tx().map_err(|e| OpEthApiError::ConversionError(e.to_string()))
     }
 
     fn tx_env<Spec>(
@@ -364,16 +366,15 @@ where
     ) -> Result<Self::TxEnv, Self::Error> {
         request
             .try_into_tx_env(cfg_env, block_env)
-            .map_err(|e| OpEthApiError::from(format!("{:?}", e)))
+            .map(|op_tx| op_tx.base)
+            .map_err(|e| OpEthApiError::ConversionError(format!("{:?}", e)))
     }
 
     fn convert_receipts(
         &self,
         receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
     ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
-        self.receipt_converter
-            .convert_receipts(receipts)
-            .map_err(|e| OpEthApiError::from(format!("{:?}", e)))
+        ReceiptConverter::<Self::Primitives>::convert_receipts(&self.receipt_converter, receipts)
     }
 
     fn convert_header(
