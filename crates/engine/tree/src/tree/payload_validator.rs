@@ -199,16 +199,8 @@ where
         }
 
         let block_num_hash = block.num_hash();
-        debug!(target: "engine::tree", block=?block_num_hash, parent = ?block.parent_hash(), state_root = ?block.state_root(), "Inserting new block into tree");
-
-        // TODO: do in the tree
-        // if ensure_ok!(self.provider.block_by_hash(block.hash())).is_some() {
-        //     return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
-        // }
-        // let start = Instant::now();
 
         trace!(target: "engine::tree", block=?block_num_hash, "Validating block consensus");
-
         // validate block consensus rules
         ensure_ok!(self.validate_block_inner(&block));
 
@@ -216,23 +208,13 @@ where
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(block.parent_hash(), ctx.state()))
         else {
-            // TODO: do in the tree
-            // // we don't have the state required to execute this block, buffering it and find the
-            // // missing parent block
-            // let missing_ancestor = ctx
-            //     .state()
-            //     .buffer
-            //     .lowest_ancestor(&block.parent_hash())
-            //     .map(|block| block.parent_num_hash())
-            //     .unwrap_or_else(|| block.parent_num_hash());
-
-            // ctx.state().buffer.insert_block(block);
-
-            // return Ok(InsertPayloadOk::Inserted(BlockStatus::Disconnected {
-            //     head: ctx.state().tree_state.current_canonical_head,
-            //     missing_ancestor,
-            // }))
-            todo!()
+            // this is pre-validated in the tree
+            return Err((
+                InsertBlockErrorKind::Provider(ProviderError::HeaderNotFound(
+                    block.parent_hash().into(),
+                )),
+                block,
+            ))
         };
 
         // now validate against the parent
@@ -837,13 +819,6 @@ pub trait EngineValidator<
         payload: Types::ExecutionData,
     ) -> Result<RecoveredBlock<N::Block>, NewPayloadError>;
 
-    /// Verifies payload post-execution w.r.t. hashed state updates.
-    fn validate_block_post_execution_with_hashed_state(
-        &self,
-        _state_updates: &HashedPostState,
-        _block: &RecoveredBlock<N::Block>,
-    ) -> Result<(), ConsensusError>;
-
     /// Validates a payload received from engine API.
     fn validate_payload(
         &mut self,
@@ -880,14 +855,6 @@ where
     ) -> Result<RecoveredBlock<N::Block>, NewPayloadError> {
         let block = self.validator.ensure_well_formed_payload(payload)?;
         Ok(block)
-    }
-
-    fn validate_block_post_execution_with_hashed_state(
-        &self,
-        state_updates: &HashedPostState,
-        block: &RecoveredBlock<N::Block>,
-    ) -> Result<(), ConsensusError> {
-        self.validator.validate_block_post_execution_with_hashed_state(state_updates, block)
     }
 
     fn validate_payload(
