@@ -959,7 +959,14 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
 impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> EthApiCtx<'a, N> {
     /// Provides a [`EthApiBuilder`] with preconfigured config and components.
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
+        use reth_rpc::eth::helpers::types::EthRpcConverter;
+        use reth_rpc_eth_types::receipt::EthReceiptConverter;
+        
+        let chain_spec = self.components.provider().chain_spec();
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(chain_spec));
+        
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
+            .with_rpc_converter(rpc_converter)
             .eth_cache(self.cache)
             .task_spawner(self.components.task_executor().clone())
             .gas_cap(self.config.rpc_gas_cap.into())

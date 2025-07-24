@@ -127,9 +127,10 @@ where
         evm_env.block_env.gas_limit = self.inner.eth_api.call_gas_limit();
         if let Some(gas_limit) = gas_limit {
             if gas_limit > evm_env.block_env.gas_limit {
-                return Err(
-                    EthApiError::InvalidTransaction(RpcInvalidTransactionError::GasTooHigh).into()
-                );
+                return Err(EthApiError::InvalidTransaction(
+                    RpcInvalidTransactionError::GasTooHigh,
+                )
+                .into());
             }
             evm_env.block_env.gas_limit = gas_limit;
         }

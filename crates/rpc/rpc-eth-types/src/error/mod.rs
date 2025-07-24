@@ -326,24 +326,22 @@ where
 impl From<EthTxEnvError> for EthApiError {
     fn from(value: EthTxEnvError) -> Self {
         match value {
-            EthTxEnvError::CallFees(CallFeesError::BlobTransactionMissingBlobHashes) => {
-                Self::InvalidTransaction(
+            EthTxEnvError::CallFeesError(err) => match err {
+                CallFeesError::BlobTransactionMissingBlobHashes => Self::InvalidTransaction(
                     RpcInvalidTransactionError::BlobTransactionMissingBlobHashes,
-                )
-            }
-            EthTxEnvError::CallFees(CallFeesError::FeeCapTooLow) => {
-                Self::InvalidTransaction(RpcInvalidTransactionError::FeeCapTooLow)
-            }
-            EthTxEnvError::CallFees(CallFeesError::ConflictingFeeFieldsInRequest) => {
-                Self::ConflictingFeeFieldsInRequest
-            }
-            EthTxEnvError::CallFees(CallFeesError::TipAboveFeeCap) => {
-                Self::InvalidTransaction(RpcInvalidTransactionError::TipAboveFeeCap)
-            }
-            EthTxEnvError::CallFees(CallFeesError::TipVeryHigh) => {
-                Self::InvalidTransaction(RpcInvalidTransactionError::TipVeryHigh)
-            }
-            EthTxEnvError::Input(err) => Self::TransactionInputError(err),
+                ),
+                CallFeesError::FeeCapTooLow => {
+                    Self::InvalidTransaction(RpcInvalidTransactionError::FeeCapTooLow)
+                }
+                CallFeesError::ConflictingFeeFieldsInRequest => Self::ConflictingFeeFieldsInRequest,
+                CallFeesError::TipAboveFeeCap => {
+                    Self::InvalidTransaction(RpcInvalidTransactionError::TipAboveFeeCap)
+                }
+                CallFeesError::TipVeryHigh => {
+                    Self::InvalidTransaction(RpcInvalidTransactionError::TipVeryHigh)
+                }
+            },
+            EthTxEnvError::TransactionInputError(err) => Self::TransactionInputError(err),
         }
     }
 }

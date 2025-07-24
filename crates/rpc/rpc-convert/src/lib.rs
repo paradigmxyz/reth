@@ -23,7 +23,7 @@ pub use rpc::*;
 pub use transaction::{
     EthTxEnvError, IntoRpcTx, LegacyRpcConverter, RpcConvert, RpcConverter, RpcHeaderConverter,
     RpcReceiptConverter, RpcSimTxConverter, RpcTxConverter, RpcTxEnvConverter,
-    TransactionConversionError, TryIntoSimTx, TxInfoMapper,
+    TransactionConversionError, TryFromTransactionResponse, TryIntoSimTx, TxInfoMapper,
 };
 
 #[cfg(feature = "op")]

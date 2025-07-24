@@ -294,7 +294,14 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
                 {
                     let transaction = tx.transaction.clone_into_consensus();
-                    return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
+                    let tx_info = TransactionInfo::default();
+                    return Ok(Some(self.tx_resp_builder().fill(
+                        alloy_consensus::transaction::Recovered::new_unchecked(
+                            transaction.into_inner(),
+                            tx.sender(),
+                        ),
+                        tx_info,
+                    )?));
                 }
             }
 

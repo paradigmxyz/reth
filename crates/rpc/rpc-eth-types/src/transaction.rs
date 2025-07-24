@@ -47,7 +47,10 @@ impl<T: SignedTransaction> TransactionSource<T> {
         Builder: RpcConvert<Primitives: NodePrimitives<SignedTx = T>>,
     {
         match self {
-            Self::Pool(tx) => resp_builder.fill_pending(tx),
+            Self::Pool(tx) => {
+                let tx_info = TransactionInfo::default();
+                resp_builder.fill(tx, tx_info)
+            }
             Self::Block { transaction, index, block_hash, block_number, base_fee } => {
                 let tx_info = TransactionInfo {
                     hash: Some(transaction.trie_hash()),

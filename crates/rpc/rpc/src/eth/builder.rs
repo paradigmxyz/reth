@@ -1,7 +1,6 @@
 //! `EthApiBuilder` implementation
 
 use crate::{eth::core::EthApiInner, EthApi};
-use alloy_network::Ethereum;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::HeaderTy;
@@ -45,7 +44,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
     EthApiBuilder<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<(), (), (), EthReceiptConverter<ChainSpec>, ()>,
     >
 where
     RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
@@ -57,14 +56,14 @@ where
     }
 }
 
-impl<N, ChainSpec> EthApiBuilder<N, RpcConverter<Ethereum, N::Evm, EthReceiptConverter<ChainSpec>>>
+impl<N, ChainSpec> EthApiBuilder<N, RpcConverter<(), (), (), EthReceiptConverter<ChainSpec>, ()>>
 where
     N: RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,
 {
     /// Creates a new `EthApiBuilder` instance with the provided components.
     pub fn new_with_components(components: N) -> Self {
-        let rpc_converter =
-            RpcConverter::new(EthReceiptConverter::new(components.provider().chain_spec()));
+        let rpc_converter = RpcConverter::new()
+            .with_receipt_converter(EthReceiptConverter::new(components.provider().chain_spec()));
         Self {
             components,
             rpc_converter,

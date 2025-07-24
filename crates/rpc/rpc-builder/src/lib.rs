@@ -20,7 +20,6 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
-use alloy_network::Ethereum;
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
@@ -258,7 +257,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         &self,
     ) -> EthApiBuilder<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<(), (), (), EthReceiptConverter<ChainSpec>, ()>,
     >
     where
         Provider: Clone,
@@ -286,7 +285,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         &self,
     ) -> EthApi<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        RpcConverter<(), (), (), EthReceiptConverter<ChainSpec>, ()>,
     >
     where
         Provider: Clone,
@@ -295,7 +294,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         EvmConfig: ConfigureEvm + Clone,
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
             RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>: RpcConvert,
+        RpcConverter<(), (), (), EthReceiptConverter<ChainSpec>, ()>: RpcConvert,
         (): PendingEnvBuilder<EvmConfig>,
     {
         self.eth_api_builder().build()

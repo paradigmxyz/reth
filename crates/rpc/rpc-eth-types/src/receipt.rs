@@ -7,7 +7,7 @@ use alloy_rpc_types_eth::{Log, ReceiptWithBloom, TransactionReceipt};
 use reth_chainspec::EthChainSpec;
 use reth_ethereum_primitives::Receipt;
 use reth_primitives_traits::NodePrimitives;
-use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
+use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter, RpcReceiptConverter};
 use std::{borrow::Cow, sync::Arc};
 
 use crate::EthApiError;
@@ -122,5 +122,22 @@ where
         }
 
         Ok(receipts)
+    }
+}
+
+// Implement RpcReceiptConverter for the new converter design
+impl<ChainSpec> RpcReceiptConverter<Receipt, TransactionReceipt> for EthReceiptConverter<ChainSpec>
+where
+    ChainSpec: EthChainSpec + 'static,
+{
+    type Error = EthApiError;
+
+    fn convert(&self, _receipt: Receipt) -> Result<TransactionReceipt, Self::Error> {
+        // This is a simplified conversion for the new trait.
+        // In practice, this would need access to transaction and metadata,
+        // which is why the ReceiptConverter trait with ConvertReceiptInput is preferred.
+        Err(EthApiError::InvalidParams(
+            "Direct receipt conversion not supported. Use ReceiptConverter::convert_receipts instead.".to_string(),
+        ))
     }
 }

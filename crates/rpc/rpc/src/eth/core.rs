@@ -4,24 +4,23 @@
 use std::sync::Arc;
 
 use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
+use reth_rpc_eth_types::receipt::EthReceiptConverter;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
-use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
 use derive_more::Deref;
-use reth_chainspec::{ChainSpec, ChainSpecProvider};
+use reth_chainspec::ChainSpecProvider;
 use reth_evm_ethereum::EthEvmConfig;
 use reth_network_api::noop::NoopNetwork;
-use reth_node_api::{FullNodeComponents, FullNodeTypes};
-use reth_rpc_convert::{RpcConvert, RpcConverter};
+use reth_node_api::FullNodeTypes;
+use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, spec::SignersForRpc, SpawnBlocking},
     node::{RpcNodeCoreAdapter, RpcNodeCoreExt},
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasCap,
-    GasPriceOracle, PendingBlock,
+    EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -34,11 +33,8 @@ use tokio::sync::{broadcast, Mutex};
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// Helper type alias for [`RpcConverter`] with components from the given [`FullNodeComponents`].
-pub type EthRpcConverterFor<N> = RpcConverter<
-    Ethereum,
-    <N as FullNodeComponents>::Evm,
-    EthReceiptConverter<<<N as FullNodeTypes>::Provider as ChainSpecProvider>::ChainSpec>,
->;
+pub type EthRpcConverterFor<N> =
+    EthRpcConverter<<<N as FullNodeTypes>::Provider as ChainSpecProvider>::ChainSpec>;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
 pub type EthApiFor<N> = EthApi<N, EthRpcConverterFor<N>>;
@@ -80,7 +76,7 @@ where
 impl
     EthApi<
         RpcNodeCoreAdapter<NoopProvider, NoopTransactionPool, NoopNetwork, EthEvmConfig>,
-        EthRpcConverter<ChainSpec>,
+        EthRpcConverter,
     >
 {
     /// Convenience fn to obtain a new [`EthApiBuilder`] instance with mandatory components.
@@ -95,7 +91,6 @@ impl
     /// # Create an instance with noop ethereum implementations
     ///
     /// ```no_run
-    /// use alloy_network::Ethereum;
     /// use reth_evm_ethereum::EthEvmConfig;
     /// use reth_network_api::noop::NoopNetwork;
     /// use reth_provider::noop::NoopProvider;
@@ -117,13 +112,17 @@ impl
         evm_config: EvmConfig,
     ) -> EthApiBuilder<
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
-        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+        EthRpcConverter<ChainSpec>,
     >
     where
         RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
             RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
+        ChainSpec: Clone,
     {
-        EthApiBuilder::new(provider, pool, network, evm_config)
+        let components = RpcNodeCoreAdapter::new(provider, pool, network, evm_config);
+        let chain_spec = components.provider().chain_spec();
+        let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(chain_spec));
+        EthApiBuilder::new_with_components(components).with_rpc_converter(rpc_converter)
     }
 }
 
@@ -176,7 +175,7 @@ where
     type RpcConvert = Rpc;
 
     fn tx_resp_builder(&self) -> &Self::RpcConvert {
-        &self.tx_resp_builder
+        &self.inner.rpc_converter
     }
 }
 
@@ -285,7 +284,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     raw_tx_sender: broadcast::Sender<Bytes>,
 
     /// Converter for RPC types.
-    tx_resp_builder: Rpc,
+    rpc_converter: Rpc,
 
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
@@ -309,7 +308,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
-        tx_resp_builder: Rpc,
+        rpc_converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -341,7 +340,7 @@ where
             fee_history_cache,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
             raw_tx_sender,
-            tx_resp_builder,
+            rpc_converter,
             next_env_builder: Box::new(next_env),
         }
     }
@@ -361,7 +360,7 @@ where
     /// Returns a handle to the transaction response builder.
     #[inline]
     pub const fn tx_resp_builder(&self) -> &Rpc {
-        &self.tx_resp_builder
+        &self.rpc_converter
     }
 
     /// Returns a handle to data in memory.
@@ -476,7 +475,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::{eth::helpers::types::EthRpcConverter, EthApi, EthApiBuilder};
+    use crate::{eth::helpers::types::EthRpcConverter, EthApi};
     use alloy_consensus::{Block, BlockBody, Header};
     use alloy_eips::BlockNumberOrTag;
     use alloy_primitives::{Signature, B256, U64};
@@ -519,13 +518,12 @@ mod tests {
     >(
         provider: P,
     ) -> FakeEthApi<P> {
-        EthApiBuilder::new(
+        EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
             EthEvmConfig::new(provider.chain_spec()),
-        )
-        .build()
+        ).build()
     }
 
     // Function to prepare the EthApi with mock data

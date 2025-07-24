@@ -5,7 +5,7 @@ use std::sync::Arc;
 use alloy_primitives::{TxHash, U256};
 use alloy_rpc_types_eth::{
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
-    Filter, Header, Log,
+    Filter, Header, Log, TransactionInfo,
 };
 use futures::StreamExt;
 use jsonrpsee::{
@@ -122,12 +122,14 @@ where
                         Params::Bool(true) => {
                             // full transaction objects requested
                             let stream = self.full_pending_transaction_stream().filter_map(|tx| {
-                                let tx_value = match self
-                                    .inner
-                                    .eth_api
-                                    .tx_resp_builder()
-                                    .fill_pending(tx.transaction.to_consensus())
-                                {
+                                let tx_info = TransactionInfo::default();
+                                let tx_value = match self.inner.eth_api.tx_resp_builder().fill(
+                                    alloy_consensus::transaction::Recovered::new_unchecked(
+                                        tx.transaction.to_consensus().into_inner(),
+                                        tx.transaction.sender(),
+                                    ),
+                                    tx_info,
+                                ) {
                                     Ok(tx) => Some(tx),
                                     Err(err) => {
                                         error!(target = "rpc",

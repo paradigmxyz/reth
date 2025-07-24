@@ -4,7 +4,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, TxHash};
 use alloy_rpc_types_eth::{
     BlockNumHash, Filter, FilterBlockOption, FilterChanges, FilterId, Log,
-    PendingTransactionFilterKind,
+    PendingTransactionFilterKind, TransactionInfo,
 };
 use async_trait::async_trait;
 use futures::future::TryFutureExt;
@@ -733,7 +733,14 @@ where
         let mut prepared_stream = self.txs_stream.lock().await;
 
         while let Ok(tx) = prepared_stream.try_recv() {
-            match self.tx_resp_builder.fill_pending(tx.transaction.to_consensus()) {
+            let tx_info = TransactionInfo::default();
+            match self.tx_resp_builder.fill(
+                alloy_consensus::transaction::Recovered::new_unchecked(
+                    tx.transaction.to_consensus().into_inner(),
+                    tx.transaction.sender(),
+                ),
+                tx_info,
+            ) {
                 Ok(tx) => pending_txs.push(tx),
                 Err(err) => {
                     error!(target: "rpc",
@@ -1075,8 +1082,7 @@ impl<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{eth::EthApi, EthApiBuilder};
-    use alloy_network::Ethereum;
+    use crate::{eth::EthApi, eth::helpers::types::EthRpcConverter};
     use alloy_primitives::FixedBytes;
     use rand::Rng;
     use reth_chainspec::{ChainSpec, ChainSpecProvider};
@@ -1084,9 +1090,7 @@ mod tests {
     use reth_evm_ethereum::EthEvmConfig;
     use reth_network_api::noop::NoopNetwork;
     use reth_provider::test_utils::MockEthProvider;
-    use reth_rpc_convert::RpcConverter;
     use reth_rpc_eth_api::node::RpcNodeCoreAdapter;
-    use reth_rpc_eth_types::receipt::EthReceiptConverter;
     use reth_tasks::TokioTaskExecutor;
     use reth_testing_utils::generators;
     use reth_transaction_pool::test_utils::{testing_pool, TestPool};
@@ -1120,15 +1124,14 @@ mod tests {
         provider: MockEthProvider,
     ) -> EthApi<
         RpcNodeCoreAdapter<MockEthProvider, TestPool, NoopNetwork, EthEvmConfig>,
-        RpcConverter<Ethereum, EthEvmConfig, EthReceiptConverter<ChainSpec>>,
+        EthRpcConverter<ChainSpec>,
     > {
-        EthApiBuilder::new(
+        EthApi::builder(
             provider.clone(),
             testing_pool(),
             NoopNetwork::default(),
             EthEvmConfig::new(provider.chain_spec()),
-        )
-        .build()
+        ).build()
     }
 
     #[tokio::test]

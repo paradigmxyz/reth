@@ -12,6 +12,21 @@ use crate::{
     eth::{receipt::OpReceiptConverter, transaction::OpTxInfoMapper},
     OpEthApiError, SequencerClient,
 };
+use alloy_consensus::transaction::Recovered;
+use alloy_network::TryCast;
+use alloy_rpc_types_eth::TransactionInfo;
+use op_alloy_consensus::OpTransaction;
+use op_alloy_rpc_types::{OpTransactionReceipt, Transaction};
+use reth_optimism_primitives::OpPrimitives;
+use reth_primitives_traits::{SignedTransaction, SealedHeaderFor, TxTy};
+use reth_rpc_convert::{
+    transaction::{ConvertReceiptInput, TryIntoSimTx, TryIntoTxEnv},
+    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq,
+};
+use reth_rpc_eth_api::{transaction::RpcTypes, TxInfoMapper};
+use revm::{
+    context::{BlockEnv, CfgEnv, TxEnv},
+};
 use alloy_primitives::U256;
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
@@ -289,14 +304,88 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApiInner<N, Rpc> {
     }
 }
 
+/// An RPC converter for Optimism that implements [`RpcConvert`].
+#[derive(Debug, Clone)]
+pub struct OpRpcConverter<Provider> {
+    tx_mapper: OpTxInfoMapper<Provider>,
+    receipt_converter: OpReceiptConverter<Provider>,
+}
+
+impl<Provider> OpRpcConverter<Provider>
+where
+    Provider: Clone,
+{
+    /// Creates a new [`OpRpcConverter`] with the given transaction mapper and receipt converter.
+    pub fn new(
+        tx_mapper: OpTxInfoMapper<Provider>,
+        receipt_converter: OpReceiptConverter<Provider>,
+    ) -> Self {
+        Self { tx_mapper, receipt_converter }
+    }
+}
+
+impl<Provider> RpcConvert for OpRpcConverter<Provider>
+where
+    Provider: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static,
+    OpTxInfoMapper<Provider>: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static,
+    OpReceiptConverter<Provider>: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static,
+    OpTxInfoMapper<Provider>: for<'a> TxInfoMapper<&'a TxTy<OpPrimitives>>,
+    <OpTxInfoMapper<Provider> as TxInfoMapper<&TxTy<OpPrimitives>>>::Out: Into<OpTransactionReceipt>,
+{
+    type Primitives = OpPrimitives;
+    type Network = Optimism;
+    type TxEnv = TxEnv;
+    type Error = OpEthApiError;
+
+    fn fill(
+        &self,
+        tx: Recovered<TxTy<Self::Primitives>>,
+        tx_info: TransactionInfo,
+    ) -> Result<RpcTransaction<Self::Network>, Self::Error> {
+        let (tx, signer) = tx.into_parts();
+        let tx_info = self.tx_mapper.try_map(&tx, tx_info).map_err(|e| OpEthApiError::from(format!("{:?}", e)))?;
+        Ok(Transaction::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info))
+    }
+
+    fn build_simulate_v1_transaction(
+        &self,
+        request: RpcTxReq<Self::Network>,
+    ) -> Result<TxTy<Self::Primitives>, Self::Error> {
+        request.try_into_sim_tx().map_err(|e| OpEthApiError::from(e.to_string()))
+    }
+
+    fn tx_env<Spec>(
+        &self,
+        request: RpcTxReq<Self::Network>,
+        cfg_env: &CfgEnv<Spec>,
+        block_env: &BlockEnv,
+    ) -> Result<Self::TxEnv, Self::Error> {
+        request
+            .try_into_tx_env(cfg_env, block_env)
+            .map_err(|e| OpEthApiError::from(format!("{:?}", e)))
+    }
+
+    fn convert_receipts(
+        &self,
+        receipts: Vec<ConvertReceiptInput<'_, Self::Primitives>>,
+    ) -> Result<Vec<RpcReceipt<Self::Network>>, Self::Error> {
+        self.receipt_converter
+            .convert_receipts(receipts)
+            .map_err(|e| OpEthApiError::from(format!("{:?}", e)))
+    }
+
+    fn convert_header(
+        &self,
+        header: SealedHeaderFor<Self::Primitives>,
+        block_size: usize,
+    ) -> Result<RpcHeader<Self::Network>, Self::Error> {
+        use alloy_rpc_types_eth::Header;
+        Ok(Header::from_consensus(header.into(), None, Some(U256::from(block_size))))
+    }
+}
+
 /// Converter for OP RPC types.
-pub type OpRpcConvert<N, NetworkT> = RpcConverter<
-    NetworkT,
-    <N as FullNodeComponents>::Evm,
-    OpReceiptConverter<<N as FullNodeTypes>::Provider>,
-    (),
-    OpTxInfoMapper<<N as FullNodeTypes>::Provider>,
->;
+pub type OpRpcConvert<N> = OpRpcConverter<<N as FullNodeTypes>::Provider>;
 
 /// Builds [`OpEthApi`] for Optimism.
 #[derive(Debug)]
@@ -357,17 +446,18 @@ impl<N, NetworkT> EthApiBuilder<N> for OpEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>>,
     NetworkT: RpcTypes,
-    OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
-    OpEthApi<N, OpRpcConvert<N, NetworkT>>:
+    OpRpcConvert<N>: RpcConvert<Network = NetworkT>,
+    OpEthApi<N, OpRpcConvert<N>>:
         FullEthApiServer<Provider = N::Provider, Pool = N::Pool> + AddDevSigners,
 {
-    type EthApi = OpEthApi<N, OpRpcConvert<N, NetworkT>>;
+    type EthApi = OpEthApi<N, OpRpcConvert<N>>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let Self { sequencer_url, sequencer_headers, min_suggested_priority_fee, .. } = self;
-        let rpc_converter =
-            RpcConverter::new(OpReceiptConverter::new(ctx.components.provider().clone()))
-                .with_mapper(OpTxInfoMapper::new(ctx.components.provider().clone()));
+        let rpc_converter = OpRpcConverter::new(
+            OpTxInfoMapper::new(ctx.components.provider().clone()),
+            OpReceiptConverter::new(ctx.components.provider().clone()),
+        );
 
         let eth_api = ctx.eth_api_builder().with_rpc_converter(rpc_converter).build_inner();
 

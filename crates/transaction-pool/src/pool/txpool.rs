@@ -1770,7 +1770,9 @@ impl<T: PoolTransaction> AllTransactions<T> {
                         cumulative_cost += tx.transaction.cost();
                         if tx.transaction.is_eip4844() && cumulative_cost > on_chain_balance {
                             // the transaction would shift
-                            return Err(InsertErr::Overdraft { transaction: Arc::new(new_blob_tx) });
+                            return Err(InsertErr::Overdraft {
+                                transaction: Arc::new(new_blob_tx),
+                            });
                         }
                     }
                 }

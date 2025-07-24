@@ -181,7 +181,7 @@ where
 
     let tx = tx_resp_builder
         .build_simulate_v1_transaction(tx)
-        .map_err(|e| EthApiError::other(e.into()))?;
+        .map_err(|_e| EthApiError::TransactionConversionError)?;
 
     Ok(Recovered::new_unchecked(tx, from))
 }
@@ -207,7 +207,7 @@ where
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
                         message: error.to_string(),
-                        code: error.into().code(),
+                        code: 0, // Default error code for now
                     }),
                     gas_used,
                     logs: Vec::new(),

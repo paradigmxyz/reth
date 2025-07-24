@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 use alloy_consensus::Transaction;
 use alloy_primitives::Address;
+use alloy_rpc_types_eth::TransactionInfo;
 use alloy_rpc_types_txpool::{
     TxpoolContent, TxpoolContentFrom, TxpoolInspect, TxpoolInspectSummary, TxpoolStatus,
 };
@@ -39,7 +40,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus: Transaction>> + 'static,
     Eth: RpcConvert<Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Pool>>>,
 {
-    fn content(&self) -> Result<TxpoolContent<RpcTransaction<Eth::Network>>, Eth::Error> {
+    fn content(&self) -> RpcResult<TxpoolContent<RpcTransaction<Eth::Network>>> {
         #[inline]
         fn insert<Tx, RpcTxB>(
             tx: &Tx,
@@ -53,10 +54,16 @@ where
             Tx: PoolTransaction,
             RpcTxB: RpcConvert<Primitives: NodePrimitives<SignedTx = Tx::Consensus>>,
         {
-            content.entry(tx.sender()).or_default().insert(
-                tx.nonce().to_string(),
-                resp_builder.fill_pending(tx.clone_into_consensus())?,
-            );
+            content.entry(tx.sender()).or_default().insert(tx.nonce().to_string(), {
+                let tx_info = TransactionInfo::default();
+                resp_builder.fill(
+                    alloy_consensus::transaction::Recovered::new_unchecked(
+                        tx.clone_into_consensus().into_inner(),
+                        tx.sender(),
+                    ),
+                    tx_info,
+                )?
+            });
 
             Ok(())
         }
@@ -65,10 +72,24 @@ where
 
         let mut content = TxpoolContent::default();
         for pending in pending {
-            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder)?;
+            insert::<_, Eth>(&pending.transaction, &mut content.pending, &self.tx_resp_builder)
+                .map_err(|e| {
+                    jsonrpsee::types::ErrorObject::owned(
+                        jsonrpsee::types::error::INTERNAL_ERROR_CODE,
+                        e.to_string(),
+                        None::<()>,
+                    )
+                })?;
         }
         for queued in queued {
-            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.tx_resp_builder)?;
+            insert::<_, Eth>(&queued.transaction, &mut content.queued, &self.tx_resp_builder)
+                .map_err(|e| {
+                    jsonrpsee::types::ErrorObject::owned(
+                        jsonrpsee::types::error::INTERNAL_ERROR_CODE,
+                        e.to_string(),
+                        None::<()>,
+                    )
+                })?;
         }
 
         Ok(content)
@@ -135,7 +156,8 @@ where
         from: Address,
     ) -> RpcResult<TxpoolContentFrom<RpcTransaction<Eth::Network>>> {
         trace!(target: "rpc::eth", ?from, "Serving txpool_contentFrom");
-        Ok(self.content().map_err(Into::into)?.remove_from(&from))
+        let mut content = self.content()?;
+        Ok(content.remove_from(&from))
     }
 
     /// Returns the details of all transactions currently pending for inclusion in the next
@@ -145,7 +167,7 @@ where
     /// Handler for `txpool_content`
     async fn txpool_content(&self) -> RpcResult<TxpoolContent<RpcTransaction<Eth::Network>>> {
         trace!(target: "rpc::eth", "Serving txpool_content");
-        Ok(self.content().map_err(Into::into)?)
+        self.content()
     }
 }
 
