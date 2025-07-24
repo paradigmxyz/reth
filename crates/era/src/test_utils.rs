@@ -1,11 +1,12 @@
 //! Utilities helpers to create era data structures for testing purposes.
+
 use crate::{
     consensus_types::{CompressedBeaconState, CompressedSignedBeaconBlock},
     execution_types::{
         BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
     },
 };
-use alloy_consensus::Header;
+use alloy_consensus::{Header, ReceiptWithBloom};
 use alloy_primitives::{Address, BlockNumber, Bytes, Log, LogData, B256, B64, U256};
 use reth_ethereum_primitives::{Receipt, TxType};
 
@@ -78,6 +79,16 @@ pub(crate) fn create_test_receipts() -> Vec<Receipt> {
     ]
 }
 
+pub(crate) fn create_test_receipt_with_bloom(
+    tx_type: TxType,
+    success: bool,
+    cumulative_gas_used: u64,
+    log_count: usize,
+) -> ReceiptWithBloom {
+    let receipt = create_test_receipt(tx_type, success, cumulative_gas_used, log_count);
+    ReceiptWithBloom { receipt: receipt.into(), logs_bloom: Default::default() }
+}
+
 // Helper function to create a sample block tuple
 pub(crate) fn create_sample_block(data_size: usize) -> BlockTuple {
     // Create a compressed header with very sample data - not compressed for simplicity
@@ -104,7 +115,7 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
     use alloy_eips::eip4895::Withdrawals;
     use alloy_primitives::{Address, Bytes, B256, B64, U256};
 
-    // Create a proper test header
+    // Create test header
     let header = Header {
         parent_hash: B256::default(),
         ommers_hash: B256::default(),
@@ -129,24 +140,21 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
         requests_hash: None,
     };
 
-    // Create a proper test body
+    // Create test body
     let body: BlockBody<Bytes> = BlockBody {
         transactions: vec![Bytes::from(vec![(number % 256) as u8; 10])],
         ommers: vec![],
         withdrawals: Some(Withdrawals(vec![])),
     };
 
-    // Create test receipts
-    let receipts_list: Vec<reth_ethereum_primitives::Receipt> =
-        vec![create_test_receipt(reth_ethereum_primitives::TxType::Legacy, true, 21000, 0)];
+    // Create test receipt list with bloom
+    let receipts_list: Vec<ReceiptWithBloom> =
+        vec![create_test_receipt_with_bloom(reth_ethereum_primitives::TxType::Legacy, true, 21000, 0)];
 
-    let receipts: alloy_consensus::Receipts<reth_ethereum_primitives::Receipt> =
-        alloy_consensus::Receipts::from(receipts_list);
-
-    // Create properly compressed components using the correct methods
+    // Compressed test compressed
     let compressed_header = CompressedHeader::from_header(&header).unwrap();
     let compressed_body = CompressedBody::from_body(&body).unwrap();
-    let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts).unwrap();
+    let compressed_receipts = CompressedReceipts::from_encodable_list(&receipts_list).unwrap();
     let total_difficulty = TotalDifficulty::new(U256::from(number * 1000));
 
     BlockTuple::new(compressed_header, compressed_body, compressed_receipts, total_difficulty)

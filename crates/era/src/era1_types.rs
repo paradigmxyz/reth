@@ -163,11 +163,11 @@ mod tests {
         test_utils::{create_sample_block, create_test_block_with_compressed_data},
         DecodeCompressed,
     };
+    use alloy_consensus::ReceiptWithBloom;
     use alloy_primitives::{B256, U256};
-    use reth_ethereum_primitives::Receipt;
 
     #[test]
-    fn test_alloy_components_decode() {
+    fn test_alloy_components_decode_and_receipt_in_bloom() {
         // Create a block tuple from compressed data
         let block: BlockTuple = create_test_block_with_compressed_data(30);
 
@@ -188,7 +188,7 @@ mod tests {
         assert_eq!(body.ommers.len(), 0, "Should have no ommers");
         assert!(body.withdrawals.is_some(), "Should have withdrawals field");
 
-        let receipts: alloy_consensus::Receipts<Receipt> = block.receipts.decode().unwrap();
+        let receipts: Vec<ReceiptWithBloom> = block.receipts.decode().unwrap();
         assert_eq!(receipts.len(), 1, "Should have exactly 1 receipt");
     }
 
