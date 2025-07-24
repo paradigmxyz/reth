@@ -252,6 +252,7 @@ async fn test_file_roundtrip(
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "download intensive"]
 async fn test_roundtrip_compression_encoding_mainnet() -> eyre::Result<()> {
     let downloader = Era1TestDownloader::new().await?;
 
