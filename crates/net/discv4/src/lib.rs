@@ -834,6 +834,13 @@ impl Discv4Service {
     ///
     /// Removes all listeners that are closed.
     fn notify(&mut self, update: DiscoveryUpdate) {
+        // Do not forward Added events for preconfigured bootstrap nodes.
+        if let DiscoveryUpdate::Added(ref rec) = update {
+            if self.config.bootstrap_nodes.contains(rec) {
+                return; // skip notifying listeners
+            }
+        }
+
         self.update_listeners.retain_mut(|listener| match listener.try_send(update.clone()) {
             Ok(()) => true,
             Err(err) => match err {
@@ -3059,10 +3066,10 @@ mod tests {
             }
         }
 
-        // Bootnode is expected to appear in the update stream.
+        // Bootnode should NOT appear in the update stream.
         assert!(
-            bootnode_appeared,
-            "Bootnode should appear in discovery update stream but did not"
+            !bootnode_appeared,
+            "Bootnode unexpectedly appeared in discovery update stream"
         );
     }
 }
