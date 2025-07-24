@@ -4,11 +4,12 @@ use crate::{
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
     tree::{
-        cached_state::CachedStateProvider, executor::WorkloadExecutor, metrics::EngineApiMetrics,
+        cached_state::CachedStateProvider, error::InsertPayloadError, executor::WorkloadExecutor,
+        metrics::EngineApiMetrics,
     },
 };
 use alloy_consensus::BlockHeader;
-use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
+use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_evm::block::BlockExecutor;
 use alloy_primitives::{Address, B256};
 use alloy_rpc_types_engine::{
@@ -32,7 +33,9 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{ConfigureEvm, Evm, SpecFor};
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
+use reth_payload_primitives::{
+    EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
+};
 use reth_primitives_traits::{
     Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
 };
@@ -556,52 +559,43 @@ where
         //
         // This validation **MUST** be instantly run in all cases even during active sync process.
         let parent_hash = payload.parent_hash();
-        let block = match self.payload_validator.ensure_well_formed_payload(payload) {
-            Ok(block) => block,
-            Err(error) => {
-                error!(target: "engine::tree", %error, "Invalid payload");
-                // we need to convert the error to a payload status (response to the CL)
-
-                let latest_valid_hash =
-                    if error.is_block_hash_mismatch() || error.is_invalid_versioned_hashes() {
-                        // Engine-API rules:
-                        // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
-                        // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
-                        None
-                    } else {
-                        self.latest_valid_hash_for_invalid_payload(parent_hash)?
-                    };
-
-                let status = PayloadStatusEnum::from(error);
-                return Ok(TreeOutcome::new(PayloadStatus::new(status, latest_valid_hash)))
-            }
-        };
 
         self.metrics
             .block_validation
             .record_payload_validation(validation_start.elapsed().as_secs_f64());
 
-        let num_hash = block.num_hash();
+        let num_hash = payload.num_hash();
         let engine_event = BeaconConsensusEngineEvent::BlockReceived(num_hash);
         self.emit_event(EngineApiEvent::BeaconConsensus(engine_event));
 
-        let block_hash = block.hash();
+        let block_hash = num_hash.hash;
         let mut lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_hash);
         if lowest_buffered_ancestor == block_hash {
-            lowest_buffered_ancestor = block.parent_hash();
+            lowest_buffered_ancestor = parent_hash;
         }
 
-        // now check the block itself
-        if let Some(status) =
-            self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, &block)?
-        {
+        // now check if the block has an invalid ancestor
+        if let Some(invalid) = self.state.invalid_headers.get(&lowest_buffered_ancestor) {
+            // Here we might have 2 cases
+            // 1. the block is well formed and indeed links to an invalid header, meaning we should
+            //    remember it as invalid
+            // 2. the block is not well formed (i.e block hash is incorrect), and we should just
+            //    return an error and forget it
+            let block = match self.payload_validator.ensure_well_formed_payload(payload) {
+                Ok(block) => block,
+                Err(error) => {
+                    let status = self.on_new_payload_error(error, parent_hash)?;
+                    return Ok(TreeOutcome::new(status))
+                }
+            };
+
+            let status = self.on_invalid_new_payload(block.into_sealed_block(), invalid)?;
             return Ok(TreeOutcome::new(status))
         }
 
         let status = if self.backfill_sync_state.is_idle() {
             let mut latest_valid_hash = None;
-            let num_hash = block.num_hash();
-            match self.insert_block(block) {
+            match self.insert_payload(payload) {
                 Ok(status) => {
                     let status = match status {
                         InsertPayloadOk::Inserted(BlockStatus::Valid) => {
@@ -622,12 +616,25 @@ where
 
                     PayloadStatus::new(status, latest_valid_hash)
                 }
-                Err(error) => self.on_insert_block_error(error)?,
+                Err(error) => match error {
+                    InsertPayloadError::Block(error) => self.on_insert_block_error(error)?,
+                    InsertPayloadError::Payload(error) => {
+                        self.on_new_payload_error(error, parent_hash)?
+                    }
+                },
             }
-        } else if let Err(error) = self.buffer_block(block) {
-            self.on_insert_block_error(error)?
         } else {
-            PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+            match self.payload_validator.ensure_well_formed_payload(payload) {
+                // if the block is well-formed, buffer it for later
+                Ok(block) => {
+                    if let Err(error) = self.buffer_block(block) {
+                        self.on_insert_block_error(error)?
+                    } else {
+                        PayloadStatus::from_status(PayloadStatusEnum::Syncing)
+                    }
+                }
+                Err(error) => self.on_new_payload_error(error, parent_hash)?,
+            }
         };
 
         let mut outcome = TreeOutcome::new(status);
@@ -1665,14 +1672,23 @@ where
         // check if the check hash was previously marked as invalid
         let Some(header) = self.state.invalid_headers.get(&check) else { return Ok(None) };
 
+        Ok(Some(self.on_invalid_new_payload(head.clone(), header)?))
+    }
+
+    /// Invoked when a new payload received is invalid.
+    fn on_invalid_new_payload(
+        &mut self,
+        head: SealedBlock<N::Block>,
+        invalid: BlockWithParent,
+    ) -> ProviderResult<PayloadStatus> {
         // populate the latest valid hash field
-        let status = self.prepare_invalid_response(header.parent)?;
+        let status = self.prepare_invalid_response(invalid.parent)?;
 
         // insert the head block into the invalid header cache
-        self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), header);
-        self.emit_event(BeaconConsensusEngineEvent::InvalidBlock(Box::new(head.clone())));
+        self.state.invalid_headers.insert_with_invalid_ancestor(head.hash(), invalid);
+        self.emit_event(BeaconConsensusEngineEvent::InvalidBlock(Box::new(head)));
 
-        Ok(Some(status))
+        Ok(status)
     }
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response
@@ -2092,6 +2108,20 @@ where
             }
         }
         Ok(None)
+    }
+
+    fn insert_payload(
+        &mut self,
+        payload: T::ExecutionData,
+    ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
+        let validation_start = Instant::now();
+
+        let block = self.payload_validator.ensure_well_formed_payload(payload)?;
+
+        self.metrics
+            .block_validation
+            .record_payload_validation(validation_start.elapsed().as_secs_f64());
+        Ok(self.insert_block(block)?)
     }
 
     fn insert_block(
@@ -2630,6 +2660,29 @@ where
             PayloadStatusEnum::Invalid { validation_error: validation_err.to_string() },
             latest_valid_hash,
         ))
+    }
+
+    /// Handles a [`NewPayloadError`] by converting it to a [`PayloadStatus`].
+    fn on_new_payload_error(
+        &mut self,
+        error: NewPayloadError,
+        parent_hash: B256,
+    ) -> ProviderResult<PayloadStatus> {
+        error!(target: "engine::tree", %error, "Invalid payload");
+        // we need to convert the error to a payload status (response to the CL)
+
+        let latest_valid_hash =
+            if error.is_block_hash_mismatch() || error.is_invalid_versioned_hashes() {
+                // Engine-API rules:
+                // > `latestValidHash: null` if the blockHash validation has failed (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/shanghai.md?plain=1#L113>)
+                // > `latestValidHash: null` if the expected and the actual arrays don't match (<https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md?plain=1#L103>)
+                None
+            } else {
+                self.latest_valid_hash_for_invalid_payload(parent_hash)?
+            };
+
+        let status = PayloadStatusEnum::from(error);
+        Ok(PayloadStatus::new(status, latest_valid_hash))
     }
 
     /// Attempts to find the header for the given block hash if it is canonical.
