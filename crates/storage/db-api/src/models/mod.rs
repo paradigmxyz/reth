@@ -14,6 +14,7 @@ use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::StageCheckpoint;
 use reth_trie_common::{StoredNibbles, StoredNibblesSubKey, *};
 use serde::{Deserialize, Serialize};
+use bytes::BufMut;
 
 pub mod accounts;
 pub mod blocks;
@@ -272,6 +273,35 @@ macro_rules! impl_compression_fixed_compact {
 }
 
 impl_compression_fixed_compact!(B256, Address);
+
+// -----------------------------------------------------------------------------
+//  Parlia snapshot raw blob (BNB Smart Chain checkpoints)
+// -----------------------------------------------------------------------------
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ParliaSnapshotBlob(pub Vec<u8>);
+
+impl crate::table::Compress for ParliaSnapshotBlob {
+    type Compressed = Vec<u8>;
+    fn uncompressable_ref(&self) -> Option<&[u8]> { Some(&self.0) }
+    fn compress(self) -> Self::Compressed { self.0 }
+    fn compress_to_buf<B: bytes::BufMut + AsMut<[u8]>>(&self, buf: &mut B) {
+        buf.put_slice(&self.0);
+    }
+}
+
+impl crate::table::Decompress for ParliaSnapshotBlob {
+    fn decompress(value: &[u8]) -> Result<Self, DatabaseError> { Ok(Self(value.to_vec())) }
+}
+
+impl crate::table::Encode for ParliaSnapshotBlob {
+    type Encoded = Vec<u8>;
+    fn encode(self) -> Self::Encoded { self.0 }
+}
+
+impl crate::table::Decode for ParliaSnapshotBlob {
+    fn decode(value: &[u8]) -> Result<Self, DatabaseError> { Ok(Self(value.to_vec())) }
+    fn decode_owned(value: Vec<u8>) -> Result<Self, DatabaseError> { Ok(Self(value)) }
+}
 
 /// Adds wrapper structs for some primitive types so they can use `StructFlags` from Compact, when
 /// used as pure table values.

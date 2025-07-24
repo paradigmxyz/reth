@@ -185,7 +185,7 @@ where
         Ok(job)
     }
 
-    fn on_new_state<N: NodePrimitives>(&mut self, new_state: CanonStateNotification<N>) {
+    fn on_new_state<N: NodePrimitives>(&mut self, new_state: reth_chain_state::CanonStateNotification<N>) {
         let mut cached = CachedReads::default();
 
         // extract the state from the notification and put it into the cache

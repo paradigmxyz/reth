@@ -7508,6 +7508,7 @@ dependencies = [
  "reth-consensus",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
+ "tracing",
 ]
 
 [[package]]
@@ -8405,6 +8406,7 @@ dependencies = [
  "arbitrary",
  "bincode 1.3.3",
  "derive_more",
+ "once_cell",
  "rand 0.9.1",
  "reth-ethereum-primitives",
  "reth-primitives-traits",
