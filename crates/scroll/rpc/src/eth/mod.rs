@@ -73,8 +73,13 @@ pub struct ScrollEthApi<N: ScrollNodeCore, NetworkT = Scroll> {
 
 impl<N: ScrollNodeCore, NetworkT> ScrollEthApi<N, NetworkT> {
     /// Creates a new [`ScrollEthApi`].
-    pub fn new(eth_api: EthApiNodeBackend<N>, min_suggested_priority_fee: U256, payload_size_limit: u64) -> Self {
-        let inner = Arc::new(ScrollEthApiInner { eth_api, min_suggested_priority_fee, payload_size_limit });
+    pub fn new(
+        eth_api: EthApiNodeBackend<N>,
+        min_suggested_priority_fee: U256,
+        payload_size_limit: u64,
+    ) -> Self {
+        let inner =
+            Arc::new(ScrollEthApiInner { eth_api, min_suggested_priority_fee, payload_size_limit });
         Self {
             inner: inner.clone(),
             _nt: PhantomData,
@@ -238,7 +243,12 @@ where
 
     async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
         let min_tip = U256::from(self.inner.min_suggested_priority_fee);
-        self.inner.eth_api.gas_oracle().scroll_suggest_tip_cap(min_tip, self.inner.payload_size_limit).await.map_err(Into::into)
+        self.inner
+            .eth_api
+            .gas_oracle()
+            .scroll_suggest_tip_cap(min_tip, self.inner.payload_size_limit)
+            .await
+            .map_err(Into::into)
     }
 }
 
