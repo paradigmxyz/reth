@@ -6,12 +6,12 @@ use crate::tree::{
     executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
     payload_processor::PayloadProcessor,
+    persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, PayloadHandle, PersistingKind,
-    StateProviderBuilder, StateProviderDatabase, TreeConfig,
+    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, PayloadHandle, PersistenceState,
+    PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
-use alloy_eips::BlockNumHash;
 use alloy_evm::{block::BlockExecutor, Evm};
 use alloy_primitives::B256;
 use reth_chain_state::{
@@ -36,77 +36,26 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{borrow::Cow, collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
-
-/// Information about the current persistence state for validation context
-#[derive(Debug, Clone, Copy)]
-pub struct PersistenceInfo {
-    /// The last persisted block
-    pub last_persisted_block: BlockNumHash,
-    /// The current persistence action, if any
-    pub current_action: Option<PersistenceAction>,
-}
-
-impl PersistenceInfo {
-    /// Creates a new persistence info with no current action
-    pub const fn new(last_persisted_block: BlockNumHash) -> Self {
-        Self { last_persisted_block, current_action: None }
-    }
-
-    /// Creates persistence info with a saving blocks action
-    pub const fn with_saving_blocks(
-        last_persisted_block: BlockNumHash,
-        highest: BlockNumHash,
-    ) -> Self {
-        Self {
-            last_persisted_block,
-            current_action: Some(PersistenceAction::SavingBlocks { highest }),
-        }
-    }
-
-    /// Creates persistence info with a removing blocks action
-    pub const fn with_removing_blocks(
-        last_persisted_block: BlockNumHash,
-        new_tip_num: u64,
-    ) -> Self {
-        Self {
-            last_persisted_block,
-            current_action: Some(PersistenceAction::RemovingBlocks { new_tip_num }),
-        }
-    }
-}
-
-/// The type of persistence action currently in progress
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PersistenceAction {
-    /// Saving blocks to disk
-    SavingBlocks {
-        /// The highest block being saved
-        highest: BlockNumHash,
-    },
-    /// Removing blocks from disk
-    RemovingBlocks {
-        /// The new tip after removal
-        new_tip_num: u64,
-    },
-}
 
 /// Context providing access to tree state during validation
 pub struct TreeCtx<'a, N: NodePrimitives> {
     /// The engine API tree state
     state: &'a mut EngineApiTreeState<N>,
     /// Information about the current persistence state
-    persistence_info: PersistenceInfo,
+    persistence: &'a PersistenceState,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
+    /// Whether the currently validated block is on a fork chain.
+    is_fork: bool,
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
-            .field("persistence_info", &self.persistence_info)
+            .field("persistence_info", &self.persistence)
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .finish()
     }
@@ -116,10 +65,11 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Creates a new tree context
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
-        persistence_info: PersistenceInfo,
+        persistence: &'a PersistenceState,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
+        is_fork: bool,
     ) -> Self {
-        Self { state, persistence_info, canonical_in_memory_state }
+        Self { state, persistence, canonical_in_memory_state, is_fork }
     }
 
     /// Returns a reference to the engine API tree state
@@ -133,13 +83,18 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     }
 
     /// Returns a reference to the persistence info
-    pub const fn persistence_info(&self) -> &PersistenceInfo {
-        &self.persistence_info
+    pub const fn persistence(&self) -> &PersistenceState {
+        self.persistence
     }
 
     /// Returns a reference to the canonical in-memory state
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
+    }
+
+    /// Returns whether the currently validated block is on a fork chain.
+    pub const fn is_fork(&self) -> bool {
+        self.is_fork
     }
 }
 
@@ -523,11 +478,9 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(output.state.clone()));
 
-        let is_fork = ensure_ok!(self.is_fork(block.sealed_header(), &ctx));
-
         // If the block is a fork, we don't save the trie updates, because they may be incorrect.
         // Instead, they will be recomputed on persistence.
-        let trie_updates = if is_fork {
+        let trie_updates = if ctx.is_fork() {
             ExecutedTrieUpdates::Missing
         } else {
             ExecutedTrieUpdates::Present(Arc::new(trie_output))
@@ -558,54 +511,6 @@ where
         } else {
             self.provider.sealed_header_by_hash(hash)
         }
-    }
-
-    /// Determines if the given block is part of a fork by checking that these
-    /// conditions are true:
-    /// * walking back from the target hash to verify that the target hash is not part of an
-    ///   extension of the canonical chain.
-    /// * walking back from the current head to verify that the target hash is not already part of
-    ///   the canonical chain.
-    ///
-    /// The header is required as an arg, because we might be checking that the header is a fork
-    /// block before it's in the tree state and before it's in the database.
-    fn is_fork(
-        &self,
-        target_header: &SealedHeader<N::BlockHeader>,
-        ctx: &TreeCtx<'_, N>,
-    ) -> ProviderResult<bool> {
-        let target_hash = target_header.hash();
-        // verify that the given hash is not part of an extension of the canon chain.
-        let canonical_head = ctx.state().tree_state.canonical_head();
-        let mut current_hash;
-        let mut current_block = Cow::Borrowed(target_header);
-        loop {
-            if current_block.hash() == canonical_head.hash {
-                return Ok(false)
-            }
-            // We already passed the canonical head
-            if current_block.number() <= canonical_head.number {
-                break
-            }
-            current_hash = current_block.parent_hash();
-
-            let Some(next_block) = self.sealed_header_by_hash(current_hash, ctx.state())? else {
-                break
-            };
-            current_block = Cow::Owned(next_block);
-        }
-
-        // verify that the given hash is not already part of canonical chain stored in memory
-        if ctx.canonical_in_memory_state().header_by_hash(target_hash).is_some() {
-            return Ok(false)
-        }
-
-        // verify that the given hash is not already part of persisted canonical chain
-        if self.provider.block_number(target_hash)?.is_some() {
-            return Ok(false)
-        }
-
-        Ok(true)
     }
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
@@ -722,17 +627,18 @@ where
     /// This is adapted from the `persisting_kind_for` method in `EngineApiTreeHandler`.
     fn persisting_kind_for(&self, block: &N::BlockHeader, ctx: &TreeCtx<'_, N>) -> PersistingKind {
         // Check that we're currently persisting.
-        let Some(action) = ctx.persistence_info().current_action else {
+        let Some(action) = ctx.persistence().current_action() else {
             return PersistingKind::NotPersisting
         };
         // Check that the persistince action is saving blocks, not removing them.
-        let PersistenceAction::SavingBlocks { highest } = action else {
+        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
             return PersistingKind::PersistingNotDescendant
         };
 
         // The block being validated can only be a descendant if its number is higher than
         // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.number() > highest.number && ctx.state().tree_state.is_descendant(highest, block) {
+        if block.number() > highest.number && ctx.state().tree_state.is_descendant(*highest, block)
+        {
             return PersistingKind::PersistingDescendant
         }
 
