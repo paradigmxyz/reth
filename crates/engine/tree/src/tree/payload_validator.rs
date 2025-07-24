@@ -682,7 +682,7 @@ where
     ///
     /// It works as follows:
     /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
-    ///    [`TreeState::blocks_by_hash`].
+    ///    [`crate::tree::TreeState::blocks_by_hash`].
     /// 2. If the persistence is in progress, and the block that we're computing the trie input for
     ///    is a descendant of the currently persisting blocks, we need to be sure that in-memory
     ///    blocks are not overlapping with the database blocks that may have been already persisted.
