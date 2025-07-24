@@ -197,7 +197,8 @@ async fn test_file_roundtrip(
         );
 
         // Re-encore and re-compress the receipts
-        let recompressed_receipts = CompressedReceipts::from_encodable(&roundtrip_receipts_decoded)?;
+        let recompressed_receipts =
+            CompressedReceipts::from_encodable(&roundtrip_receipts_decoded)?;
         let recompressed_receipts_data = recompressed_receipts.decompress()?;
 
         assert_eq!(
