@@ -89,7 +89,7 @@ pub use block_buffer::BlockBuffer;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
-pub use payload_validator::{EngineValidator, TreePayloadValidator};
+pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
@@ -326,8 +326,8 @@ where
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     C: ConfigureEvm<Primitives = N> + 'static,
-    T: PayloadTypes,
-    V: EngineValidator<T, Block = N::Block>,
+    T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+    V: EngineValidator<T>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]

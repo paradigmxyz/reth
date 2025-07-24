@@ -17,16 +17,17 @@ use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{InvalidBlockHook, PayloadValidator};
 use reth_evm::{ConfigureEvm, SpecFor};
 use reth_payload_primitives::{
-    BuiltPayload, EngineApiMessageVersion, EngineObjectValidationError,
-    InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes, PayloadOrAttributes,
+    BuiltPayload,
+    InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes,
     PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, Block, BlockBody, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    AlloyBlockHeader, Block, BlockBody, BlockTy, GotExpected, HeaderTy, NodePrimitives,
+    RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, ProviderError, StateCommitmentProvider, StateProvider,
+    HashedPostStateProvider, ProviderError, StateCommitmentProvider, StateProvider,
     StateProviderFactory, StateReader,
 };
 use reth_revm::db::State;
@@ -160,7 +161,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
 /// used by network-specific payload validators (e.g., Ethereum, Optimism). It is not meant to be
 /// used as a standalone component, but rather as a building block for concrete implementations.
 #[derive(derive_more::Debug)]
-pub struct TreePayloadValidator<P, Evm>
+pub struct BasicEngineValidator<P, Evm, V>
 where
     Evm: ConfigureEvm,
 {
@@ -185,22 +186,23 @@ where
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
+    /// Validator for the payload.
+    validator: V,
 }
 
-impl<N, P, Evm> TreePayloadValidator<P, Evm>
+impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
-    P: DatabaseProviderFactory<Provider: BlockReader + BlockNumReader + HeaderProvider>
-        + BlockReader
-        + BlockNumReader
+    P: DatabaseProviderFactory<Provider: BlockReader>
+        + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
         + StateCommitmentProvider
         + HashedPostStateProvider
-        + HeaderProvider<Header = N::BlockHeader>
         + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
+    V: PayloadValidator<Block = N::Block>,
 {
     /// Creates a new `TreePayloadValidator`.
     #[allow(clippy::too_many_arguments)]
@@ -208,6 +210,7 @@ where
         provider: P,
         consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
         evm_config: Evm,
+        validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     ) -> Self {
@@ -229,6 +232,7 @@ where
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
+            validator,
         }
     }
 
@@ -265,7 +269,7 @@ where
         let persistence_info = *ctx.persistence_info();
 
         // Then validate the block using the validate_block method
-        if let Err(consensus_error) = self.validate_block(&block, ctx) {
+        if let Err(consensus_error) = self.validate_block_inner(&block, ctx) {
             trace!(target: "engine::tree", block=?block.num_hash(), ?consensus_error, "Block validation failed");
             let payload_error = NewPayloadError::Other(Box::new(consensus_error));
             return Ok(PayloadValidationOutcome::Invalid { block, error: payload_error });
@@ -400,7 +404,7 @@ where
     ///
     /// This method is intended to be used by network-specific validators as part of their
     /// block validation flow.
-    pub fn validate_block(
+    pub fn validate_block_inner(
         &self,
         block: &RecoveredBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
@@ -937,28 +941,7 @@ where
 }
 
 /// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: PayloadTypes>:
-    PayloadValidator<ExecutionData = Types::ExecutionData>
-{
-    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
-    /// and the message version.
-    fn validate_version_specific_fields(
-        &self,
-        version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<
-            '_,
-            Types::ExecutionData,
-            <Types as PayloadTypes>::PayloadAttributes,
-        >,
-    ) -> Result<(), EngineObjectValidationError>;
-
-    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
-    fn ensure_well_formed_attributes(
-        &self,
-        version: EngineApiMessageVersion,
-        attributes: &<Types as PayloadTypes>::PayloadAttributes,
-    ) -> Result<(), EngineObjectValidationError>;
-
+pub trait EngineValidator<Types: PayloadTypes>: Send + Sync + 'static {
     /// Validates the payload attributes with respect to the header.
     ///
     /// By default, this enforces that the payload attributes timestamp is greater than the
@@ -970,8 +953,8 @@ pub trait EngineValidator<Types: PayloadTypes>:
     /// See also: <https://github.com/ethereum/execution-apis/blob/647a677b7b97e09145b8d306c0eaf51c32dae256/src/engine/common.md#specification-1>
     fn validate_payload_attributes_against_header(
         &self,
-        attr: &<Types as PayloadTypes>::PayloadAttributes,
-        header: &<Self::Block as Block>::Header,
+        attr: &Types::PayloadAttributes,
+        header: &HeaderTy<<Types::BuiltPayload as BuiltPayload>::Primitives>,
     ) -> Result<(), InvalidPayloadAttributesError> {
         if attr.timestamp() <= header.timestamp() {
             return Err(InvalidPayloadAttributesError::InvalidTimestamp);
@@ -982,25 +965,51 @@ pub trait EngineValidator<Types: PayloadTypes>:
     /// Validates a payload received from engine API.
     fn validate_payload(
         &mut self,
-        payload: Self::ExecutionData,
+        payload: Types::ExecutionData,
         _ctx: TreeCtx<'_, <Types::BuiltPayload as BuiltPayload>::Primitives>,
-    ) -> Result<PayloadValidationOutcome<Self::Block>, NewPayloadError> {
-        // Default implementation: try to convert using existing method
-        match self.ensure_well_formed_payload(payload) {
-            Ok(block) => {
-                Ok(PayloadValidationOutcome::Valid { block, trie_updates: TrieUpdates::default() })
-            }
-            Err(error) => Err(error),
-        }
-    }
+    ) -> Result<
+        PayloadValidationOutcome<BlockTy<<Types::BuiltPayload as BuiltPayload>::Primitives>>,
+        NewPayloadError,
+    >;
 
     /// Validates a block downloaded from the network.
     fn validate_block(
-        &self,
-        _block: &RecoveredBlock<Self::Block>,
+        &mut self,
+        _block: &RecoveredBlock<BlockTy<<Types::BuiltPayload as BuiltPayload>::Primitives>>,
         _ctx: TreeCtx<'_, <Types::BuiltPayload as BuiltPayload>::Primitives>,
-    ) -> Result<(), ConsensusError> {
-        // Default implementation: accept all blocks
+    ) -> Result<(), NewPayloadError>;
+}
+
+impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
+where
+    P: DatabaseProviderFactory<Provider: BlockReader>
+        + BlockReader<Header = N::BlockHeader>
+        + StateProviderFactory
+        + StateReader
+        + StateCommitmentProvider
+        + HashedPostStateProvider
+        + Clone
+        + 'static,
+    N: NodePrimitives,
+    Evm: ConfigureEvm<Primitives = N> + 'static,
+    Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+    V: PayloadValidator<ExecutionData = Types::ExecutionData, Block = N::Block>,
+{
+    fn validate_payload(
+        &mut self,
+        payload: Types::ExecutionData,
+        ctx: TreeCtx<'_, N>,
+    ) -> Result<PayloadValidationOutcome<N::Block>, NewPayloadError> {
+        let block = self.validator.ensure_well_formed_payload(payload)?;
+        self.validate_block_with_state(block, ctx)
+    }
+
+    fn validate_block(
+        &mut self,
+        block: &RecoveredBlock<N::Block>,
+        ctx: TreeCtx<'_, N>,
+    ) -> Result<(), NewPayloadError> {
+        self.validate_block_with_state(block.clone(), ctx)?;
         Ok(())
     }
 }
