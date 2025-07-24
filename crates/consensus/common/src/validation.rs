@@ -304,7 +304,7 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
     parent: &H,
 ) -> Result<(), ConsensusError> {
     // As BSC Maxwell hardfork reduces block interval to 0.75s,
-    // assuming header.timestamp() <= parent.timestamp() is no longer valid.
+    // assuming header.timestamp() strictly larger than parent.timestamp() is no longer valid.
     // so we use < here to relax the check
     if header.timestamp() < parent.timestamp() {
         return Err(ConsensusError::TimestampIsInPast {

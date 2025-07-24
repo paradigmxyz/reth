@@ -730,9 +730,10 @@ mod tests {
         // vector, and first_block set to 10
         let execution_outcome = ExecutionOutcome {
             bundle: Default::default(),
-            receipts,
+            receipts: receipts.clone(),
             requests: vec![],
             first_block: 10,
+            snapshots: Vec::new(),
         };
 
         // Create a Chain object with a BTreeMap of blocks mapped to their block numbers,
@@ -752,6 +753,7 @@ mod tests {
             receipts: vec![vec![receipt1]],
             requests: vec![],
             first_block: 10,
+            snapshots: Vec::new(),
         };
 
         // Assert that the execution outcome at the first block contains only the first receipt

@@ -3059,7 +3059,10 @@ mod tests {
             }
         }
 
-        // Assert bootnode did not appear in update stream
-        assert!(bootnode_appeared, "Bootnode should appear in update stream");
+        // Bootnode is expected to appear in the update stream.
+        assert!(
+            bootnode_appeared,
+            "Bootnode should appear in discovery update stream but did not"
+        );
     }
 }

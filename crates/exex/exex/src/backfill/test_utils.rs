@@ -29,6 +29,7 @@ pub(crate) fn to_execution_outcome(
         receipts: vec![block_execution_output.receipts.clone()],
         first_block: block_number,
         requests: vec![block_execution_output.requests.clone()],
+        snapshots: Vec::new(),
     }
 }
 
