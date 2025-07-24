@@ -2,6 +2,7 @@
 //!
 //! Types used in block building.
 
+use reth_trie::HashedPostState;
 use std::{sync::Arc, time::Instant};
 
 use alloy_consensus::BlockHeader;
@@ -82,4 +83,6 @@ pub struct PendingBlock<N: NodePrimitives> {
     pub block: Arc<RecoveredBlock<N::Block>>,
     /// The receipts for the pending block
     pub receipts: Arc<Vec<N::Receipt>>,
+    /// Block's hashed state.
+    pub hashed_state: Arc<HashedPostState>,
 }

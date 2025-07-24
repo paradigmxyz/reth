@@ -28,6 +28,7 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
     TransactionPool,
 };
+use reth_trie_common::HashedPostState;
 use revm::context_interface::Block;
 use std::{
     sync::Arc,
@@ -154,7 +155,7 @@ pub trait LoadPendingBlock:
             }
 
             // no pending block from the CL yet, so we need to build it ourselves via txpool
-            let (sealed_block, receipts) = match self
+            let (sealed_block, receipts, hashed_state) = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
                     this.build_block(&parent)
@@ -176,6 +177,7 @@ pub trait LoadPendingBlock:
                 now + Duration::from_secs(1),
                 sealed_block.clone(),
                 receipts.clone(),
+                hashed_state.clone(),
             ));
 
             Ok(Some((sealed_block, receipts)))
@@ -193,7 +195,11 @@ pub trait LoadPendingBlock:
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
     ) -> Result<
-        (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
+        (
+            RecoveredBlock<ProviderBlock<Self::Provider>>,
+            Vec<ProviderReceipt<Self::Provider>>,
+            Arc<HashedPostState>,
+        ),
         Self::Error,
     >
     where
@@ -322,10 +328,10 @@ pub trait LoadPendingBlock:
             cumulative_gas_used += gas_used;
         }
 
-        let BlockBuilderOutcome { execution_result, block, .. } =
+        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
             builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
 
-        Ok((block, execution_result.receipts))
+        Ok((block, execution_result.receipts, Arc::new(hashed_state)))
     }
 }
 
