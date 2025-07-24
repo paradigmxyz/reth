@@ -53,10 +53,9 @@ use configured_sparse_trie::ConfiguredSparseTrie;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
-pub struct PayloadProcessor<N, Evm>
+pub struct PayloadProcessor<Evm>
 where
-    N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N>,
+    Evm: ConfigureEvm,
 {
     /// The executor used by to spawn tasks.
     executor: WorkloadExecutor,
@@ -81,10 +80,9 @@ where
     >,
     /// Whether to use the parallel sparse trie.
     use_parallel_sparse_trie: bool,
-    _marker: std::marker::PhantomData<N>,
 }
 
-impl<N, Evm> PayloadProcessor<N, Evm>
+impl<N, Evm> PayloadProcessor<Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
@@ -107,12 +105,11 @@ where
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
             use_parallel_sparse_trie: config.enable_parallel_sparse_trie(),
-            _marker: Default::default(),
         }
     }
 }
 
-impl<N, Evm> PayloadProcessor<N, Evm>
+impl<N, Evm> PayloadProcessor<Evm>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -508,7 +505,6 @@ mod tests {
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
-    use reth_ethereum_primitives::EthPrimitives;
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
     use reth_primitives_traits::{Account, StorageEntry};
@@ -623,7 +619,7 @@ mod tests {
             }
         }
 
-        let mut payload_processor = PayloadProcessor::<EthPrimitives, _>::new(
+        let mut payload_processor = PayloadProcessor::new(
             WorkloadExecutor::default(),
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),

@@ -15,13 +15,13 @@ pub(crate) struct EngineApiMetrics {
     /// Metrics for block validation
     pub(crate) block_validation: BlockValidationMetrics,
     /// A copy of legacy blockchain tree metrics, to be replaced when we replace the old tree
-    pub(crate) tree: TreeMetrics,
+    pub tree: TreeMetrics,
 }
 
 /// Metrics for the entire blockchain tree
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree")]
-pub(super) struct TreeMetrics {
+pub(crate) struct TreeMetrics {
     /// The highest block number in the canonical chain
     pub canonical_chain_height: Gauge,
     /// The number of reorgs

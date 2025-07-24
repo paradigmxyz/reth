@@ -26,8 +26,8 @@ use reth_chain_state::{
 use reth_consensus::{Consensus, FullConsensus};
 pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
-    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, EngineValidator,
-    ExecutionPayload, ForkchoiceStateTracker, OnForkChoiceUpdated,
+    BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload,
+    ForkchoiceStateTracker, OnForkChoiceUpdated,
 };
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{ConfigureEvm, Evm, SpecFor};
@@ -72,6 +72,7 @@ mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
+pub mod payload_validator;
 mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
@@ -85,6 +86,7 @@ pub use block_buffer::BlockBuffer;
 pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
+pub use payload_validator::{EngineValidator, TreePayloadValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 use reth_evm::execute::BlockExecutionOutput;
@@ -270,7 +272,7 @@ where
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
     /// The type responsible for processing new payloads
-    payload_processor: PayloadProcessor<N, C>,
+    payload_processor: PayloadProcessor<C>,
     /// The EVM configuration.
     evm_config: C,
     /// Precompile cache map.

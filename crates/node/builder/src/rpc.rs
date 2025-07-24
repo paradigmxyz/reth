@@ -9,9 +9,10 @@ use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_engine_tree::tree::EngineValidator;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PrimitivesTy,
+    AddOnsContext, BlockTy, EngineTypes, FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes,
+    PayloadTypes, PrimitivesTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -961,10 +962,10 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> 
     pub fn eth_api_builder(self) -> reth_rpc::EthApiBuilder<N, EthRpcConverterFor<N>> {
         use reth_rpc::eth::helpers::types::EthRpcConverter;
         use reth_rpc_eth_types::receipt::EthReceiptConverter;
-        
+
         let chain_spec = self.components.provider().chain_spec();
         let rpc_converter = EthRpcConverter::new(EthReceiptConverter::new(chain_spec));
-        
+
         reth_rpc::EthApiBuilder::new_with_components(self.components.clone())
             .with_rpc_converter(rpc_converter)
             .eth_cache(self.cache)

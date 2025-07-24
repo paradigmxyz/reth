@@ -158,7 +158,9 @@ pub trait TryFromTransactionResponse<N: alloy_network::Network> {
     /// # Returns
     ///
     /// Returns `Ok(Self)` on successful conversion, or `Err(Self::Error)` if the conversion fails.
-    fn from_transaction_response(transaction_response: N::TransactionResponse) -> Result<Self, Self::Error>
+    fn from_transaction_response(
+        transaction_response: N::TransactionResponse,
+    ) -> Result<Self, Self::Error>
     where
         Self: Sized;
 }
@@ -169,7 +171,9 @@ where
 {
     type Error = Infallible;
 
-    fn from_transaction_response(transaction_response: N::TransactionResponse) -> Result<Self, Self::Error> {
+    fn from_transaction_response(
+        transaction_response: N::TransactionResponse,
+    ) -> Result<Self, Self::Error> {
         Ok(transaction_response.into())
     }
 }

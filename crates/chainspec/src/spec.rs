@@ -1050,9 +1050,9 @@ mod tests {
                     "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for hardfork {hardfork}"
                 );
                 if matches!(hardfork, EthereumHardfork::Shanghai) {
-                    if let Some(shangai_id) = spec.shanghai_fork_id() {
+                    if let Some(shanghai_id) = spec.shanghai_fork_id() {
                         assert_eq!(
-                            expected_id, &shangai_id,
+                            expected_id, &shanghai_id,
                             "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for Shanghai hardfork"
                         );
                     } else {

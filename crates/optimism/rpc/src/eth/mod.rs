@@ -14,34 +14,31 @@ use crate::{
 };
 use alloy_consensus::transaction::Recovered;
 use alloy_network::TryCast;
-use alloy_rpc_types_eth::TransactionInfo;
-use op_alloy_consensus::OpTransaction;
-use op_alloy_rpc_types::{OpTransactionReceipt, Transaction};
-use reth_optimism_primitives::OpPrimitives;
-use reth_primitives_traits::{SignedTransaction, SealedHeaderFor, TxTy};
-use reth_rpc_convert::{
-    transaction::{ConvertReceiptInput, TryIntoSimTx, TryIntoTxEnv},
-    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq,
-};
-use reth_rpc_eth_api::{transaction::RpcTypes, TxInfoMapper};
-use revm::{
-    context::{BlockEnv, CfgEnv, TxEnv},
-};
 use alloy_primitives::U256;
+use alloy_rpc_types_eth::TransactionInfo;
 use eyre::WrapErr;
+use op_alloy_consensus::OpTransaction;
 use op_alloy_network::Optimism;
+use op_alloy_rpc_types::{OpTransactionReceipt, Transaction};
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
+use reth_optimism_primitives::OpPrimitives;
+use reth_primitives_traits::{SealedHeaderFor, SignedTransaction, TxTy};
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
+use reth_rpc_convert::{
+    transaction::{ConvertReceiptInput, TryIntoSimTx, TryIntoTxEnv},
+    RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq,
+};
 use reth_rpc_eth_api::{
     helpers::{
         pending_block::BuildPendingEnv, spec::SignersForApi, AddDevSigners, EthApiSpec, EthFees,
         EthState, LoadFee, LoadState, SpawnBlocking, Trace,
     },
+    transaction::RpcTypes,
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes, SignableTxRequest,
+    RpcNodeCoreExt, RpcTypes, SignableTxRequest, TxInfoMapper,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle};
 use reth_storage_api::{ProviderHeader, ProviderTx};
@@ -49,6 +46,7 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
 };
+use revm::context::{BlockEnv, CfgEnv, TxEnv};
 use std::{fmt, fmt::Formatter, marker::PhantomData, sync::Arc};
 
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
@@ -330,7 +328,8 @@ where
     OpTxInfoMapper<Provider>: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static,
     OpReceiptConverter<Provider>: Send + Sync + Clone + std::fmt::Debug + Unpin + 'static,
     OpTxInfoMapper<Provider>: for<'a> TxInfoMapper<&'a TxTy<OpPrimitives>>,
-    <OpTxInfoMapper<Provider> as TxInfoMapper<&TxTy<OpPrimitives>>>::Out: Into<OpTransactionReceipt>,
+    <OpTxInfoMapper<Provider> as TxInfoMapper<&TxTy<OpPrimitives>>>::Out:
+        Into<OpTransactionReceipt>,
 {
     type Primitives = OpPrimitives;
     type Network = Optimism;
@@ -343,7 +342,10 @@ where
         tx_info: TransactionInfo,
     ) -> Result<RpcTransaction<Self::Network>, Self::Error> {
         let (tx, signer) = tx.into_parts();
-        let tx_info = self.tx_mapper.try_map(&tx, tx_info).map_err(|e| OpEthApiError::from(format!("{:?}", e)))?;
+        let tx_info = self
+            .tx_mapper
+            .try_map(&tx, tx_info)
+            .map_err(|e| OpEthApiError::from(format!("{:?}", e)))?;
         Ok(Transaction::from_transaction(Recovered::new_unchecked(tx.into(), signer), tx_info))
     }
 

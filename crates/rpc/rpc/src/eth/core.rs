@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
-use reth_rpc_eth_types::receipt::EthReceiptConverter;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Bytes, U256};
@@ -20,7 +19,8 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
+    receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasCap,
+    GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -523,7 +523,8 @@ mod tests {
             testing_pool(),
             NoopNetwork::default(),
             EthEvmConfig::new(provider.chain_spec()),
-        ).build()
+        )
+        .build()
     }
 
     // Function to prepare the EthApi with mock data

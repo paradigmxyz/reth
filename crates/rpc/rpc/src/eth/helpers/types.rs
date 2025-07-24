@@ -1,15 +1,17 @@
 //! L1 `eth` API types.
 
-use std::fmt;
-use reth_chainspec::ChainSpec;
-use reth_rpc_convert::{RpcConverter, RpcConvert, transaction::{ConvertReceiptInput, ReceiptConverter}};
-use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthApiError};
-use reth_primitives_traits::{SealedHeaderFor, TxTy};
-use reth_rpc_convert::{RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq};
-use alloy_rpc_types_eth::TransactionInfo;
 use alloy_consensus::transaction::Recovered;
-use revm::{context::{BlockEnv, CfgEnv, TxEnv}};
+use alloy_rpc_types_eth::TransactionInfo;
+use reth_chainspec::ChainSpec;
 use reth_ethereum_primitives::EthPrimitives;
+use reth_primitives_traits::{SealedHeaderFor, TxTy};
+use reth_rpc_convert::{
+    transaction::{ConvertReceiptInput, ReceiptConverter},
+    RpcConvert, RpcConverter, RpcHeader, RpcReceipt, RpcTransaction, RpcTxReq,
+};
+use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthApiError};
+use revm::context::{BlockEnv, CfgEnv, TxEnv};
+use std::fmt;
 
 /// An adapter wrapper around [`RpcConverter`] that converts errors to [`EthApiError`].
 #[derive(Debug, Clone)]
@@ -20,24 +22,19 @@ pub struct EthRpcConverter<ChainSpecT = ChainSpec> {
 impl<ChainSpecT> EthRpcConverter<ChainSpecT> {
     /// Creates a new [`EthRpcConverter`] with the given receipt converter.
     pub fn new(receipt_converter: EthReceiptConverter<ChainSpecT>) -> Self {
-        Self {
-            inner: RpcConverter::new().with_receipt_converter(receipt_converter),
-        }
+        Self { inner: RpcConverter::new().with_receipt_converter(receipt_converter) }
     }
 }
 
 impl<ChainSpecT> RpcConvert for EthRpcConverter<ChainSpecT>
 where
     ChainSpecT: Send + Sync + Clone + fmt::Debug + 'static,
-    EthReceiptConverter<ChainSpecT>: ReceiptConverter<EthPrimitives>
-        + Clone
-        + fmt::Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static,
-    <EthReceiptConverter<ChainSpecT> as ReceiptConverter<EthPrimitives>>::Error: core::error::Error + Send + Sync + 'static,
-    <EthReceiptConverter<ChainSpecT> as ReceiptConverter<EthPrimitives>>::RpcReceipt: Into<alloy_rpc_types_eth::TransactionReceipt>,
+    EthReceiptConverter<ChainSpecT>:
+        ReceiptConverter<EthPrimitives> + Clone + fmt::Debug + Send + Sync + Unpin + 'static,
+    <EthReceiptConverter<ChainSpecT> as ReceiptConverter<EthPrimitives>>::Error:
+        core::error::Error + Send + Sync + 'static,
+    <EthReceiptConverter<ChainSpecT> as ReceiptConverter<EthPrimitives>>::RpcReceipt:
+        Into<alloy_rpc_types_eth::TransactionReceipt>,
 {
     type Primitives = EthPrimitives;
     type Network = alloy_network::Ethereum;

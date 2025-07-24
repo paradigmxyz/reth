@@ -21,6 +21,7 @@ reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-engine-primitives.workspace = true
+reth-engine-tree.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
 

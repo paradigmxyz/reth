@@ -64,3 +64,8 @@ _
 # broken links report
 links-report.json
 .worktrees/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class

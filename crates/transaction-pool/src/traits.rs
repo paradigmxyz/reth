@@ -58,7 +58,7 @@ use crate::{
         TransactionListenerKind,
     },
     validate::ValidPoolTransaction,
-    AllTransactionsEvents,
+    AddedTransactionOutcome, AllTransactionsEvents,
 };
 use alloy_consensus::{error::ValueError, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
@@ -130,7 +130,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn add_external_transaction(
         &self,
         transaction: Self::Transaction,
-    ) -> impl Future<Output = PoolResult<TxHash>> + Send {
+    ) -> impl Future<Output = PoolResult<AddedTransactionOutcome>> + Send {
         self.add_transaction(TransactionOrigin::External, transaction)
     }
 
@@ -140,7 +140,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn add_external_transactions(
         &self,
         transactions: Vec<Self::Transaction>,
-    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send {
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
         self.add_transactions(TransactionOrigin::External, transactions)
     }
 
@@ -163,7 +163,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> impl Future<Output = PoolResult<TxHash>> + Send;
+    ) -> impl Future<Output = PoolResult<AddedTransactionOutcome>> + Send;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
@@ -174,14 +174,14 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send;
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
 
     /// Submit a consensus transaction directly to the pool
     fn add_consensus_transaction(
         &self,
         tx: Recovered<<Self::Transaction as PoolTransaction>::Consensus>,
         origin: TransactionOrigin,
-    ) -> impl Future<Output = PoolResult<TxHash>> + Send {
+    ) -> impl Future<Output = PoolResult<AddedTransactionOutcome>> + Send {
         async move {
             let tx_hash = *tx.tx_hash();
 

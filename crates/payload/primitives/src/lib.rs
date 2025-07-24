@@ -26,7 +26,8 @@ pub use error::{
 
 mod traits;
 pub use traits::{
-    BuiltPayload, PayloadAttributes, PayloadAttributesBuilder, PayloadBuilderAttributes,
+    BuildNextEnv, BuiltPayload, PayloadAttributes, PayloadAttributesBuilder,
+    PayloadBuilderAttributes,
 };
 
 mod payload;
