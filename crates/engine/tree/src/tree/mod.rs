@@ -34,7 +34,7 @@ use reth_errors::{ConsensusError, ProviderResult};
 use reth_evm::{ConfigureEvm, Evm, SpecFor};
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
-    EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
+    BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{
     Block, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
