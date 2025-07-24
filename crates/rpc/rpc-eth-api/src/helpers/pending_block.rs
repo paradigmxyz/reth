@@ -8,10 +8,11 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
 };
 use reth_primitives_traits::{
@@ -28,7 +29,6 @@ use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
     TransactionPool,
 };
-use reth_trie_common::HashedPostState;
 use revm::context_interface::Block;
 use std::{
     sync::Arc,
@@ -155,7 +155,7 @@ pub trait LoadPendingBlock:
             }
 
             // no pending block from the CL yet, so we need to build it ourselves via txpool
-            let (sealed_block, receipts, hashed_state) = match self
+            let executed_block = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
                     this.build_block(&parent)
@@ -169,18 +169,19 @@ pub trait LoadPendingBlock:
                 }
             };
 
-            let sealed_block = Arc::new(sealed_block);
-            let receipts = Arc::new(receipts);
+            let sealed_block = executed_block.recovered_block;
+            let receipts = &executed_block.execution_output.receipts;
+            let hashed_state = executed_block.hashed_state;
 
             let now = Instant::now();
             *lock = Some(PendingBlock::new(
                 now + Duration::from_secs(1),
                 sealed_block.clone(),
-                receipts.clone(),
+                Arc::new(receipts.iter().flatten().cloned().collect()),
                 hashed_state.clone(),
             ));
 
-            Ok(Some((sealed_block, receipts)))
+            Ok(Some((sealed_block, Arc::new(receipts.iter().flatten().cloned().collect()))))
         }
     }
 
@@ -194,14 +195,7 @@ pub trait LoadPendingBlock:
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<
-        (
-            RecoveredBlock<ProviderBlock<Self::Provider>>,
-            Vec<ProviderReceipt<Self::Provider>>,
-            Arc<HashedPostState>,
-        ),
-        Self::Error,
-    >
+    ) -> Result<ExecutedBlock<Self::Primitives>, Self::Error>
     where
         Self::Pool:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
@@ -331,7 +325,14 @@ pub trait LoadPendingBlock:
         let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
             builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
 
-        Ok((block, execution_result.receipts, Arc::new(hashed_state)))
+        Ok(ExecutedBlock {
+            recovered_block: block.into(),
+            execution_output: Arc::new(ExecutionOutcome {
+                receipts: vec![execution_result.receipts],
+                ..Default::default()
+            }),
+            hashed_state: Arc::new(hashed_state),
+        })
     }
 }
 
