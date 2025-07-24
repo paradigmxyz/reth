@@ -9,6 +9,67 @@
 //! These types use Snappy compression to match the specification.
 //!
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
+//!
+//! # Examples
+//!
+//! ## [`CompressedHeader`]
+//!
+//! ```rust
+//! use alloy_consensus::Header;
+//! use reth_era::execution_types::CompressedHeader;
+//!
+//! let header = Header { number: 100, ..Default::default() };
+//! // Compress the header : rlp encoding and Snappy compression
+//! let compressed = CompressedHeader::from_header(&header)?;
+//! // Get raw decompressed rlp data
+//! let decompressed = compressed.decompress()?;
+//! // Decode back to typed header
+//! let decoded: Header = compressed.decode()?;
+//! assert_eq!(decoded.number, 100);
+//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! ```
+//!
+//! ## [`CompressedBody`]
+//!
+//! ```rust
+//! use alloy_consensus::BlockBody;
+//! use alloy_primitives::Bytes;
+//! use reth_era::execution_types::CompressedBody;
+//!
+//! let body = BlockBody { transactions: vec![Bytes::from(vec![1, 2, 3])], ..Default::default() };
+//! // Compress the body : rlp encoding and Snappy compression
+//! let compressed = CompressedBody::from_body(&body)?;
+//! // Get raw decompressed rlp data
+//! let decompressed = compressed.decompress()?;
+//! // Decode back to typed body
+//! let decoded: BlockBody<Bytes> = compressed.decode()?;
+//! assert_eq!(decoded.transactions.len(), 1);
+//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! ```
+//!
+//! ## [`CompressedReceipts`]
+//!
+//! ```rust
+//! use alloy_consensus::ReceiptWithBloom;
+//! use reth_era::execution_types::CompressedReceipts;
+//! use reth_ethereum_primitives::{Receipt, TxType};
+//!
+//! let receipt = Receipt {
+//!     tx_type: TxType::Legacy,
+//!     success: true,
+//!     cumulative_gas_used: 21000,
+//!     logs: vec![],
+//! };
+//! let receipt_with_bloom = ReceiptWithBloom { receipt, logs_bloom: Default::default() };
+//! // Compress the receipts : rlp encoding and Snappy compression
+//! let compressed = CompressedReceipts::from_encodable(&receipt_with_bloom)?;
+//! // Get raw decompressed rlp data
+//! let decompressed = compressed.decompress()?;
+//! // Decode back to typed receipts
+//! let decoded: ReceiptWithBloom = compressed.decode()?;
+//! assert_eq!(decoded.receipt.cumulative_gas_used, 21000);
+//! # Ok::<(), reth_era::e2s_types::E2sError>(())
+//! ``````
 
 use crate::{
     e2s_types::{E2sError, Entry},
@@ -158,7 +219,7 @@ impl CompressedHeader {
         self.decode()
     }
 
-    /// Create a [`CompressedHeader`] from a header.
+    /// Create a [`CompressedHeader`] from a header
     pub fn from_header<H: Encodable>(header: &H) -> Result<Self, E2sError> {
         let encoder = SnappyRlpCodec::new();
         let compressed = encoder.encode(header)?;
