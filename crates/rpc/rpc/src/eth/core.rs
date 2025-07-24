@@ -8,6 +8,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
+use alloy_rpc_client::RpcClient;
 use derive_more::Deref;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_evm_ethereum::EthEvmConfig;
@@ -146,6 +147,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         proof_permits: usize,
         rpc_converter: Rpc,
+        raw_tx_forwarder: Option<RpcClient>,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -160,6 +162,7 @@ where
             proof_permits,
             rpc_converter,
             (),
+            raw_tx_forwarder,
         );
 
         Self { inner: Arc::new(inner) }
@@ -284,6 +287,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Transaction broadcast channel
     raw_tx_sender: broadcast::Sender<Bytes>,
 
+    /// Raw transaction forwarder
+    raw_tx_forwarder: Option<RpcClient>,
+
     /// Converter for RPC types.
     tx_resp_builder: Rpc,
 
@@ -311,6 +317,7 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
+        raw_tx_forwarder: Option<RpcClient>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -341,6 +348,7 @@ where
             fee_history_cache,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
             raw_tx_sender,
+            raw_tx_forwarder,
             tx_resp_builder,
             next_env_builder: Box::new(next_env),
         }
@@ -471,6 +479,12 @@ where
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
         let _ = self.raw_tx_sender.send(raw_tx);
+    }
+
+    /// Returns a handle to the raw transaction forwarder.
+    #[inline]
+    pub const fn raw_tx_forwarder(&self) -> Option<&RpcClient> {
+        self.raw_tx_forwarder.as_ref()
     }
 }
 

@@ -1,11 +1,11 @@
 //! Contains RPC handler implementations specific to transactions
 
 use crate::EthApi;
-use alloy_primitives::{Bytes, B256};
+use alloy_primitives::{hex, Bytes, B256};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
-    FromEvmError, RpcNodeCore,
+    FromEthApiError, FromEvmError, RpcNodeCore,
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{
@@ -30,9 +30,31 @@ where
         let recovered = recover_raw_transaction(&tx)?;
 
         // broadcast raw transaction to subscribers if there is any.
-        self.broadcast_raw_transaction(tx);
+        self.broadcast_raw_transaction(tx.clone());
 
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+
+        // forward the transaction to the specific endpoint if configured.
+        if let Some(client) = self.raw_tx_forwarder() {
+            tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to forwarder");
+            let rlp_hex = hex::encode_prefixed(tx);
+
+            let hash =
+                client.request("eth_sendRawTransaction", (rlp_hex,)).await.inspect_err(|err| {
+                    tracing::debug!(target: "rpc::eth", %err, hash=% *pool_transaction.hash(), "failed to forward raw transaction");
+                }).map_err(EthApiError::other)?;
+
+            // Retain tx in local tx pool after forwarding, for local RPC usage.
+            let _ = self
+                .pool()
+                .add_transaction(TransactionOrigin::Local, pool_transaction)
+                .await
+                .map_err(|_arg0: reth_transaction_pool::error::PoolError| {
+                    Self::Error::from_eth_err
+                });
+
+            return Ok(hash);
+        }
 
         // submit the transaction to the pool with a `Local` origin
         let AddedTransactionOutcome { hash, .. } =
