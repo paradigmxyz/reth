@@ -4,11 +4,13 @@
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::{eip7840::BlobParams, BlockId};
+use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{
+    ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, MemoryOverlayStateProviderRef,
+};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
@@ -335,33 +337,39 @@ pub trait LoadPendingBlock:
         })
     }
 
-    /// Returns the pending state for the given block id.
+    /// Returns the pending state by combining with latest state.
     fn get_pending_state(
         &self,
-        id: &BlockId,
     ) -> impl std::future::Future<Output = Result<StateProviderBox, Self::Error>> + Send {
         async move {
-            if matches!(id, BlockId::Number(BlockNumberOrTag::Pending)) {
-                let pending_block = self.pending_block().lock().await;
-                let block = pending_block.as_ref().ok_or_else(|| {
-                    Self::Error::from_eth_err(EthApiError::HeaderNotFound(
-                        BlockNumberOrTag::Pending.into(),
-                    ))
-                })?;
-                let hash = block.block.hash();
+            // First get the latest state from database
+            let latest_header =
+                self.provider().latest_header().map_err(Self::Error::from_eth_err)?.ok_or_else(
+                    || {
+                        Self::Error::from_eth_err(EthApiError::HeaderNotFound(
+                            BlockNumberOrTag::Latest.into(),
+                        ))
+                    },
+                )?;
+            let historical_state = self
+                .provider()
+                .history_by_block_hash(latest_header.hash())
+                .map_err(Self::Error::from_eth_err)?;
 
-                let state = self
-                    .provider()
-                    .pending_state_by_hash(hash)
-                    .map_err(Self::Error::from_eth_err)?;
-
-                return state.ok_or_else(|| {
-                    Self::Error::from_eth_err(EthApiError::HeaderNotFound(
-                        BlockNumberOrTag::Pending.into(),
-                    ))
-                });
+            let pending_block = self.pending_block().lock().await;
+            if let Some(_pending_block) = pending_block.as_ref() {
+                let ex_block = self.build_block(&latest_header);
+                let overlay = MemoryOverlayStateProviderRef::new(
+                    historical_state,
+                    vec![ExecutedBlockWithTrieUpdates {
+                        block: ex_block.unwrap(),
+                        trie: ExecutedTrieUpdates::Missing,
+                    }],
+                );
+                Ok(Box::new(overlay) as StateProviderBox)
+            } else {
+                Ok(historical_state)
             }
-            Err(Self::Error::from_eth_err(EthApiError::HeaderNotFound(*id)))
         }
     }
 }
