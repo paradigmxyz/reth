@@ -12,10 +12,6 @@
 //! - Era format: <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
 //! - Era1 format: <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
-//! # Examples
-//! ```
-//! ```
-
 pub mod consensus_types;
 pub mod e2s_file;
 pub mod e2s_types;

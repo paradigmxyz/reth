@@ -15,41 +15,46 @@
 //! ## [`CompressedHeader`]
 //!
 //! ```rust
+//! use crate::reth_era::DecodeCompressed;
 //! use alloy_consensus::Header;
 //! use reth_era::execution_types::CompressedHeader;
 //!
 //! let header = Header { number: 100, ..Default::default() };
 //! // Compress the header : rlp encoding and Snappy compression
 //! let compressed = CompressedHeader::from_header(&header)?;
-//! // Get raw decompressed rlp data
-//! let decompressed = compressed.decompress()?;
-//! // Decode back to typed header
-//! let decoded: Header = compressed.decode()?;
-//! assert_eq!(decoded.number, 100);
+//! // Decompressed and decode typed compressed header
+//! let decoded_header: Header = compressed.decode_header()?;
+//! assert_eq!(decoded_header.number, 100);
 //! # Ok::<(), reth_era::e2s_types::E2sError>(())
 //! ```
 //!
 //! ## [`CompressedBody`]
 //!
 //! ```rust
-//! use alloy_consensus::BlockBody;
+//! use crate::reth_era::DecodeCompressed;
+//! use alloy_consensus::{BlockBody, Header};
 //! use alloy_primitives::Bytes;
 //! use reth_era::execution_types::CompressedBody;
+//! use reth_ethereum_primitives::TransactionSigned;
 //!
-//! let body = BlockBody { transactions: vec![Bytes::from(vec![1, 2, 3])], ..Default::default() };
-//! // Compress the body : rlp encoding and Snappy compression
-//! let compressed = CompressedBody::from_body(&body)?;
-//! // Get raw decompressed rlp data
-//! let decompressed = compressed.decompress()?;
-//! // Decode back to typed body
-//! let decoded: BlockBody<Bytes> = compressed.decode()?;
-//! assert_eq!(decoded.transactions.len(), 1);
+//! let body: BlockBody<Bytes> = BlockBody {
+//!     transactions: vec![Bytes::from(vec![1, 2, 3])],
+//!     ommers: vec![],
+//!     withdrawals: None,
+//! };
+//! // Compress the body: rlp encoding and snappy compression
+//! let compressed_body = CompressedBody::from_body(&body)?;
+//! // Decode back to typed body by decompressing and decoding
+//! let decoded_body: alloy_consensus::BlockBody<alloy_primitives::Bytes> =
+//!     compressed_body.decode()?;
+//! assert_eq!(decoded_body.transactions.len(), 1);
 //! # Ok::<(), reth_era::e2s_types::E2sError>(())
 //! ```
 //!
 //! ## [`CompressedReceipts`]
 //!
 //! ```rust
+//! use crate::reth_era::DecodeCompressed;
 //! use alloy_consensus::ReceiptWithBloom;
 //! use reth_era::execution_types::CompressedReceipts;
 //! use reth_ethereum_primitives::{Receipt, TxType};
@@ -62,12 +67,10 @@
 //! };
 //! let receipt_with_bloom = ReceiptWithBloom { receipt, logs_bloom: Default::default() };
 //! // Compress the receipts : rlp encoding and Snappy compression
-//! let compressed = CompressedReceipts::from_encodable(&receipt_with_bloom)?;
-//! // Get raw decompressed rlp data
-//! let decompressed = compressed.decompress()?;
-//! // Decode back to typed receipts
-//! let decoded: ReceiptWithBloom = compressed.decode()?;
-//! assert_eq!(decoded.receipt.cumulative_gas_used, 21000);
+//! let compressed_receipt_data = CompressedReceipts::from_encodable(&receipt_with_bloom)?;
+//! // Get raw receipt by decoding and decompressing compressed and encoded receipt
+//! let decompressed_receipt = compressed_receipt_data.decode::<ReceiptWithBloom>()?;
+//! assert_eq!(decompressed_receipt.receipt.cumulative_gas_used, 21000);
 //! # Ok::<(), reth_era::e2s_types::E2sError>(())
 //! ``````
 
@@ -697,6 +700,8 @@ mod tests {
             .expect("Failed to compress receipt list");
 
         // Decode the compressed receipts back
+        // Note: most likely the decoding for real era files will be done to reach
+        // `Vec<ReceiptWithBloom>``
         let decoded_receipts: Vec<Receipt> =
             compressed_receipts.decode().expect("Failed to decode compressed receipt list");
 
