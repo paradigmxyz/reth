@@ -51,14 +51,22 @@ pub(crate) struct InMemoryStateMetrics {
 /// get the block hash.
 #[derive(Debug, Default)]
 pub(crate) struct InMemoryState<N: NodePrimitives = EthPrimitives> {
-    /// All canonical blocks that are not on disk yet.
-    blocks: RwLock<HashMap<B256, Arc<BlockState<N>>>>,
-    /// Mapping of block numbers to block hashes.
-    numbers: RwLock<BTreeMap<u64, B256>>,
-    /// The pending block that has not yet been made canonical.
+    /// All information about blocks and their numbers is now stored in a single structure
+    /// to ensure atomicity of operations and avoid races and deadlocks.
+    inner: RwLock<InMemoryStateInner<N>>,
+    /// The pending block that has not yet become canonical.
     pending: watch::Sender<Option<BlockState<N>>>,
     /// Metrics for the in-memory state.
     metrics: InMemoryStateMetrics,
+}
+
+/// Internal structure for storing blocks and numbers.
+#[derive(Debug, Default)]
+pub(crate) struct InMemoryStateInner<N: NodePrimitives = EthPrimitives> {
+    /// All canonical blocks that have not yet been persisted to disk.
+    blocks: HashMap<B256, Arc<BlockState<N>>>,
+    /// Mapping of block numbers to their hashes.
+    numbers: BTreeMap<u64, B256>,
 }
 
 impl<N: NodePrimitives> InMemoryState<N> {
@@ -69,8 +77,7 @@ impl<N: NodePrimitives> InMemoryState<N> {
     ) -> Self {
         let (pending, _) = watch::channel(pending);
         let this = Self {
-            blocks: RwLock::new(blocks),
-            numbers: RwLock::new(numbers),
+            inner: RwLock::new(InMemoryStateInner { blocks, numbers }),
             pending,
             metrics: Default::default(),
         };
@@ -78,53 +85,50 @@ impl<N: NodePrimitives> InMemoryState<N> {
         this
     }
 
-    /// Update the metrics for the in-memory state.
+    /// Updates the metrics for the in-memory state.
     ///
-    /// # Locking behavior
-    ///
-    /// This tries to acquire a read lock. Drop any write locks before calling this.
+    /// Now acquires a read lock only once for the entire internal structure.
     pub(crate) fn update_metrics(&self) {
-        let numbers = self.numbers.read();
-        if let Some((earliest_block_number, _)) = numbers.first_key_value() {
+        let inner = self.inner.read();
+        if let Some((earliest_block_number, _)) = inner.numbers.first_key_value() {
             self.metrics.earliest_block.set(*earliest_block_number as f64);
         }
-        if let Some((latest_block_number, _)) = numbers.last_key_value() {
+        if let Some((latest_block_number, _)) = inner.numbers.last_key_value() {
             self.metrics.latest_block.set(*latest_block_number as f64);
         }
-        self.metrics.num_blocks.set(numbers.len() as f64);
+        self.metrics.num_blocks.set(inner.numbers.len() as f64);
     }
 
     /// Returns the state for a given block hash.
     pub(crate) fn state_by_hash(&self, hash: B256) -> Option<Arc<BlockState<N>>> {
-        self.blocks.read().get(&hash).cloned()
+        self.inner.read().blocks.get(&hash).cloned()
     }
 
     /// Returns the state for a given block number.
     pub(crate) fn state_by_number(&self, number: u64) -> Option<Arc<BlockState<N>>> {
-        let hash = self.hash_by_number(number)?;
-        self.state_by_hash(hash)
+        let inner = self.inner.read();
+        inner.numbers.get(&number).and_then(|hash| inner.blocks.get(hash)).cloned()
     }
 
-    /// Returns the hash for a specific block number
+    /// Returns the hash for a specific block number.
     pub(crate) fn hash_by_number(&self, number: u64) -> Option<B256> {
-        self.numbers.read().get(&number).copied()
+        self.inner.read().numbers.get(&number).cloned()
     }
 
-    /// Returns the current chain head state.
+    /// Returns the state of the current chain head.
     pub(crate) fn head_state(&self) -> Option<Arc<BlockState<N>>> {
-        let hash = *self.numbers.read().last_key_value()?.1;
-        self.state_by_hash(hash)
+        let inner = self.inner.read();
+        inner.numbers.last_key_value().and_then(|(_, hash)| inner.blocks.get(hash)).cloned()
     }
 
-    /// Returns the pending state corresponding to the current head plus one,
-    /// from the payload received in newPayload that does not have a FCU yet.
+    /// Returns the pending state.
     pub(crate) fn pending_state(&self) -> Option<BlockState<N>> {
         self.pending.borrow().clone()
     }
 
-    #[cfg(test)]
+    /// Returns the number of blocks in memory.
     fn block_count(&self) -> usize {
-        self.blocks.read().len()
+        self.inner.read().blocks.len()
     }
 }
 
@@ -146,95 +150,14 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
     fn clear(&self) {
         {
             // acquire locks, starting with the numbers lock
-            let mut numbers = self.in_memory_state.numbers.write();
-            let mut blocks = self.in_memory_state.blocks.write();
-            numbers.clear();
-            blocks.clear();
+            let mut inner = self.in_memory_state.inner.write();
+            inner.blocks.clear();
+            inner.numbers.clear();
             self.in_memory_state.pending.send_modify(|p| {
                 p.take();
             });
         }
         self.in_memory_state.update_metrics();
-    }
-}
-
-type PendingBlockAndReceipts<N> =
-    (RecoveredBlock<<N as NodePrimitives>::Block>, Vec<reth_primitives_traits::ReceiptTy<N>>);
-
-/// This type is responsible for providing the blocks, receipts, and state for
-/// all canonical blocks not on disk yet and keeps track of the block range that
-/// is in memory.
-#[derive(Debug, Clone)]
-pub struct CanonicalInMemoryState<N: NodePrimitives = EthPrimitives> {
-    pub(crate) inner: Arc<CanonicalInMemoryStateInner<N>>,
-}
-
-impl<N: NodePrimitives> CanonicalInMemoryState<N> {
-    /// Create a new in-memory state with the given blocks, numbers, pending state, and optional
-    /// finalized header.
-    pub fn new(
-        blocks: HashMap<B256, Arc<BlockState<N>>>,
-        numbers: BTreeMap<u64, B256>,
-        pending: Option<BlockState<N>>,
-        finalized: Option<SealedHeader<N::BlockHeader>>,
-        safe: Option<SealedHeader<N::BlockHeader>>,
-    ) -> Self {
-        let in_memory_state = InMemoryState::new(blocks, numbers, pending);
-        let header = in_memory_state.head_state().map_or_else(SealedHeader::default, |state| {
-            state.block_ref().recovered_block().clone_sealed_header()
-        });
-        let chain_info_tracker = ChainInfoTracker::new(header, finalized, safe);
-        let (canon_state_notification_sender, _) =
-            broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
-
-        Self {
-            inner: Arc::new(CanonicalInMemoryStateInner {
-                chain_info_tracker,
-                in_memory_state,
-                canon_state_notification_sender,
-            }),
-        }
-    }
-
-    /// Create an empty state.
-    pub fn empty() -> Self {
-        Self::new(HashMap::default(), BTreeMap::new(), None, None, None)
-    }
-
-    /// Create a new in memory state with the given local head and finalized header
-    /// if it exists.
-    pub fn with_head(
-        head: SealedHeader<N::BlockHeader>,
-        finalized: Option<SealedHeader<N::BlockHeader>>,
-        safe: Option<SealedHeader<N::BlockHeader>>,
-    ) -> Self {
-        let chain_info_tracker = ChainInfoTracker::new(head, finalized, safe);
-        let in_memory_state = InMemoryState::default();
-        let (canon_state_notification_sender, _) =
-            broadcast::channel(CANON_STATE_NOTIFICATION_CHANNEL_SIZE);
-        let inner = CanonicalInMemoryStateInner {
-            chain_info_tracker,
-            in_memory_state,
-            canon_state_notification_sender,
-        };
-
-        Self { inner: Arc::new(inner) }
-    }
-
-    /// Returns the block hash corresponding to the given number.
-    pub fn hash_by_number(&self, number: u64) -> Option<B256> {
-        self.inner.in_memory_state.hash_by_number(number)
-    }
-
-    /// Returns the header corresponding to the given hash.
-    pub fn header_by_hash(&self, hash: B256) -> Option<SealedHeader<N::BlockHeader>> {
-        self.state_by_hash(hash)
-            .map(|block| block.block_ref().recovered_block().clone_sealed_header())
-    }
-
-    /// Clears all entries in the in memory state.
-    pub fn clear_state(&self) {
-        self.inner.clear()
     }
 
     /// Updates the pending block with the given block.
@@ -260,36 +183,35 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         R: IntoIterator<Item = ExecutedBlock<N>>,
     {
         {
-            // acquire locks, starting with the numbers lock
-            let mut numbers = self.inner.in_memory_state.numbers.write();
-            let mut blocks = self.inner.in_memory_state.blocks.write();
+            // Acquire a single write lock for the entire internal structure.
+            let mut inner = self.in_memory_state.inner.write();
 
-            // we first remove the blocks from the reorged chain
+            // First, remove blocks from the reorged chain.
             for block in reorged {
                 let hash = block.recovered_block().hash();
                 let number = block.recovered_block().number();
-                blocks.remove(&hash);
-                numbers.remove(&number);
+                inner.blocks.remove(&hash);
+                inner.numbers.remove(&number);
             }
 
-            // insert the new blocks
+            // Insert new blocks.
             for block in new_blocks {
-                let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
+                let parent = inner.blocks.get(&block.recovered_block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
-
-                // append new blocks
-                blocks.insert(hash, Arc::new(block_state));
-                numbers.insert(number, hash);
+                inner.blocks.insert(hash, Arc::new(block_state));
+                inner.numbers.insert(number, hash);
             }
 
-            // remove the pending state
-            self.inner.in_memory_state.pending.send_modify(|p| {
+            // Remove the pending state.
+            self.in_memory_state.pending.send_modify(|p| {
                 p.take();
             });
+
+            // Update metrics inside the write lock to avoid races.
+            self.in_memory_state.update_metrics();
         }
-        self.inner.in_memory_state.update_metrics();
     }
 
     /// Update the in memory state with the given chain update.
@@ -314,7 +236,7 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         //
         // This can happen if the persistence task takes a long time, while a reorg is happening.
         {
-            if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
+            if self.inner.in_memory_state.inner.read().blocks.get(&persisted_num_hash.hash).is_none() {
                 // do nothing
                 return
             }
@@ -322,17 +244,17 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
         {
             // acquire locks, starting with the numbers lock
-            let mut numbers = self.inner.in_memory_state.numbers.write();
-            let mut blocks = self.inner.in_memory_state.blocks.write();
+            let mut inner = self.inner.in_memory_state.inner.write();
 
             let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
 
             // clear all numbers
-            numbers.clear();
+            inner.numbers.clear();
 
             // drain all blocks and only keep the ones that are not persisted (below the persisted
             // height)
-            let mut old_blocks = blocks
+            let mut old_blocks = inner
+                .blocks
                 .drain()
                 .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
                 .map(|(_, b)| b.block.clone())
@@ -343,20 +265,20 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
             // re-insert the blocks in natural order and connect them to their parent blocks
             for block in old_blocks {
-                let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
+                let parent = inner.blocks.get(&block.recovered_block().parent_hash()).cloned();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
 
                 // append new blocks
-                blocks.insert(hash, Arc::new(block_state));
-                numbers.insert(number, hash);
+                inner.blocks.insert(hash, Arc::new(block_state));
+                inner.numbers.insert(number, hash);
             }
 
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
+                    p.parent = inner.blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
                 }
             });
         }
