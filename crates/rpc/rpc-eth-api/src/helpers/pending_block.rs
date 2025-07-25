@@ -341,27 +341,25 @@ pub trait LoadPendingBlock:
         id: &BlockId,
     ) -> impl std::future::Future<Output = Result<StateProviderBox, Self::Error>> + Send {
         async move {
-            if let BlockId::Number(tag) = id {
-                if let BlockNumberOrTag::Pending = tag {
-                    let pending_block = self.pending_block().lock().await;
-                    let block = pending_block.as_ref().ok_or_else(|| {
-                        Self::Error::from_eth_err(EthApiError::HeaderNotFound(
-                            BlockNumberOrTag::Pending.into(),
-                        ))
-                    })?;
-                    let hash = block.block.hash();
+            if let BlockId::Number(BlockNumberOrTag::Pending) = id {
+                let pending_block = self.pending_block().lock().await;
+                let block = pending_block.as_ref().ok_or_else(|| {
+                    Self::Error::from_eth_err(EthApiError::HeaderNotFound(
+                        BlockNumberOrTag::Pending.into(),
+                    ))
+                })?;
+                let hash = block.block.hash();
 
-                    let state = self
-                        .provider()
-                        .pending_state_by_hash(hash)
-                        .map_err(Self::Error::from_eth_err)?;
+                let state = self
+                    .provider()
+                    .pending_state_by_hash(hash)
+                    .map_err(Self::Error::from_eth_err)?;
 
-                    return state.ok_or_else(|| {
-                        Self::Error::from_eth_err(EthApiError::HeaderNotFound(
-                            BlockNumberOrTag::Pending.into(),
-                        ))
-                    });
-                }
+                return state.ok_or_else(|| {
+                    Self::Error::from_eth_err(EthApiError::HeaderNotFound(
+                        BlockNumberOrTag::Pending.into(),
+                    ))
+                });
             }
             Err(Self::Error::from_eth_err(EthApiError::HeaderNotFound(*id)))
         }
