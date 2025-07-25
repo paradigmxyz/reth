@@ -76,6 +76,10 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.chain()
     }
 
+    fn chain_config_at_timestamp(&self, timestamp: u64) -> Option<alloy_eips::eip7910::EthConfig> {
+        self.inner.chain_config_at_timestamp(timestamp)
+    }
+
     fn deposit_contract(&self) -> Option<&reth_ethereum::chainspec::DepositContract> {
         self.inner.deposit_contract()
     }

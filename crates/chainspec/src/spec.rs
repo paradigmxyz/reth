@@ -15,7 +15,10 @@ use alloy_consensus::{
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
+    eip1559::INITIAL_BASE_FEE,
+    eip7685::EMPTY_REQUESTS_HASH,
+    eip7892::BlobScheduleBlobParams,
+    eip7910::{EthConfig, EthForkConfig},
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -327,6 +330,103 @@ impl ChainSpec {
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
+    }
+
+    /// Returns chain configuration at specific block.
+    /// Returns [`None`] if there is no current timestamp based fork.
+    pub fn chain_config_at_timestamp(
+        &self,
+        timestamp: u64,
+    ) -> serde_json::Result<Option<EthConfig>> {
+        let bpo_forks = self.blob_params.scheduled.iter().map(|(activation, _)| *activation);
+
+        let mut timestamp_forks = self
+            .hardforks
+            .forks_iter()
+            .filter_map(|(_, cond)| cond.as_timestamp())
+            .chain(bpo_forks)
+            .filter(|time| time > &self.genesis.timestamp)
+            .collect::<Vec<_>>();
+        // sort because bpo can happen in-between
+        timestamp_forks.sort();
+
+        let Some(current_fork_idx) = timestamp_forks
+            .iter()
+            .position(|ts| &timestamp < ts)
+            .and_then(|idx| idx.checked_sub(1))
+            .or_else(|| timestamp_forks.len().checked_sub(1))
+        else {
+            return Ok(None)
+        };
+        let Some(current_fork_timestamp) = timestamp_forks.get(current_fork_idx).copied() else {
+            return Ok(None)
+        };
+        let Some(current) = self.fork_config_at_timestamp(current_fork_timestamp) else {
+            return Ok(None)
+        };
+        let current_hash = current.fork_hash()?;
+        let current_fork_id = self.fork_id(&Head {
+            number: u64::MAX,
+            timestamp: current_fork_timestamp,
+            ..Default::default()
+        });
+        let mut config = EthConfig {
+            current,
+            current_hash,
+            current_fork_id: current_fork_id.hash,
+            next: None,
+            next_hash: None,
+            next_fork_id: None,
+            last: None,
+            last_hash: None,
+            last_fork_id: None,
+        };
+
+        if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) {
+            if let Some(last_fork_timestamp) = timestamp_forks.get(last_fork_idx).copied() {
+                if let Some(last) = self.fork_config_at_timestamp(last_fork_timestamp) {
+                    let last_hash = last.fork_hash()?;
+                    let last_fork_id = self.fork_id(&Head {
+                        number: u64::MAX,
+                        timestamp: last_fork_timestamp,
+                        ..Default::default()
+                    });
+                    config.last = Some(last);
+                    config.last_hash = Some(last_hash);
+                    config.last_fork_id = Some(last_fork_id.hash);
+                }
+            }
+        }
+
+        if let Some(next_fork_timestamp) = timestamp_forks.get(current_fork_idx + 1).copied() {
+            if let Some(next) = self.fork_config_at_timestamp(next_fork_timestamp) {
+                let next_hash = next.fork_hash()?;
+                let next_fork_id = self.fork_id(&Head {
+                    number: u64::MAX,
+                    timestamp: next_fork_timestamp,
+                    ..Default::default()
+                });
+                config.next = Some(next);
+                config.next_hash = Some(next_hash);
+                config.next_fork_id = Some(next_fork_id.hash);
+            }
+        }
+
+        Ok(Some(config))
+    }
+
+    /// Returns fork config for specific timestamp.
+    fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthForkConfig> {
+        let blob_schedule = self.blob_params_at_timestamp(timestamp)?;
+        let fork_config = EthForkConfig {
+            chain_id: alloy_primitives::U64::from(self.chain.id()),
+            activation_time: timestamp,
+            blob_schedule,
+            // TODO:
+            precompiles: Default::default(),
+            system_contracts: Default::default(),
+        };
+        Some(fork_config)
     }
 
     /// Returns `true` if this chain contains Ethereum configuration.
