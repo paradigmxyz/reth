@@ -7,6 +7,8 @@ use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
     state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
 };
+use alloy_primitives::StorageKey;
+use alloy_primitives::StorageValue;
 use alloy_rpc_types_trace::geth::{
     call::FlatCallFrame, BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType,
     GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
@@ -1263,16 +1265,24 @@ where
         Ok(())
     }
 
-    async fn debug_storage_range_at(
-        &self,
-        _block_hash: B256,
-        _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
-    }
+  async fn debug_storage_range_at(
+    &self,
+    block_hash: B256,
+    tx_idx: usize,
+    contract_address: Address,
+    key_start: B256,
+    max_result: u64,
+) -> RpcResult<(Vec<(B256, StorageKey, StorageValue)>, Option<B256>)> {
+    let state_provider = self
+        .provider()
+        .state_by_block_hash(block_hash);
+    
+    let account = state_provider.unwrap().basic_account(&contract_address).unwrap().unwrap();
+    let results = self.provider()
+        .storage_range_at(&contract_address, &key_start, max_result)
+        .map_err(Eth::Error::from_eth_err)?;
+    Ok((results))
+}
 
     async fn debug_trace_bad_block(
         &self,
