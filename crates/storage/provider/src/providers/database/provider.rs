@@ -18,7 +18,6 @@ use crate::{
     StaticFileProviderFactory, StatsReader, StorageLocation, StorageReader, StorageTrieWriter,
     TransactionVariant, TransactionsProvider, TransactionsProviderExt, TrieWriter,
 };
-use alloy_primitives::{StorageKey, StorageValue};
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta},
     BlockHeader, Header, TxReceipt,
@@ -27,7 +26,7 @@ use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber, B256, U256,
 };
 use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
@@ -1779,34 +1778,33 @@ impl<TX: DbTx + 'static, N: NodeTypes> StorageReader for DatabaseProvider<TX, N>
 
         Ok(storage_changeset_lists)
     }
-    
+
     fn storage_range_at(
-    &self,
-    contract_address: Address,
-    key_start: B256,
-    max_result: u64,
-) -> ProviderResult<(Vec<(B256, StorageKey, StorageValue)>, Option<B256>)> {
-    
-    let mut storage_cursor = self.tx_ref().cursor_dup_read::<tables::PlainStorageState>()?;
-    
-    let mut results = Vec::new();
-    let mut next_key = None;
-    
-    if let Some(first_entry) = storage_cursor.seek_by_key_subkey(contract_address, key_start)? {
-        results.push((key_start, first_entry.key, first_entry.value));
-        
-        for _ in 1..max_result {
-            if let Some((_, entry)) = storage_cursor.next_dup()? {
-                results.push((B256::from(entry.key), entry.key, entry.value));
-                next_key = Some(B256::from(entry.key));
-            } else {
-                break;
+        &self,
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> ProviderResult<(Vec<(B256, StorageKey, StorageValue)>, Option<B256>)> {
+        let mut storage_cursor = self.tx_ref().cursor_dup_read::<tables::PlainStorageState>()?;
+
+        let mut results = Vec::new();
+        let mut next_key = None;
+
+        if let Some(first_entry) = storage_cursor.seek_by_key_subkey(contract_address, key_start)? {
+            results.push((key_start, first_entry.key, first_entry.value));
+
+            for _ in 1..max_result {
+                if let Some((_, entry)) = storage_cursor.next_dup()? {
+                    results.push((B256::from(entry.key), entry.key, entry.value));
+                    next_key = Some(B256::from(entry.key));
+                } else {
+                    break;
+                }
             }
         }
+
+        Ok((results, next_key))
     }
-    
-    Ok((results, next_key))
-}
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
