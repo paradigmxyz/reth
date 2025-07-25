@@ -112,18 +112,18 @@ where
     }
 }
 
-impl<P, Tx, ChainSpec> PayloadValidator for OpEngineValidator<P, Tx, ChainSpec>
+impl<P, Tx, ChainSpec, Types> PayloadValidator<Types> for OpEngineValidator<P, Tx, ChainSpec>
 where
     P: StateProviderFactory + Unpin + 'static,
     Tx: SignedTransaction + Unpin + 'static,
     ChainSpec: OpHardforks + Send + Sync + 'static,
+    Types: PayloadTypes<ExecutionData = OpExecutionData>,
 {
     type Block = alloy_consensus::Block<Tx>;
-    type ExecutionData = OpExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: Self::ExecutionData,
+        payload: OpExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let sealed_block =
             self.inner.ensure_well_formed_payload(payload).map_err(NewPayloadError::other)?;
@@ -165,7 +165,7 @@ impl<Types, P, Tx, ChainSpec> EngineValidator<Types> for OpEngineValidator<P, Tx
 where
     Types: PayloadTypes<
         PayloadAttributes = OpPayloadAttributes,
-        ExecutionData = <Self as PayloadValidator>::ExecutionData,
+        ExecutionData = OpExecutionData,
         BuiltPayload: BuiltPayload<Primitives: NodePrimitives<SignedTx = Tx>>,
     >,
     P: StateProviderFactory + Unpin + 'static,
@@ -205,7 +205,7 @@ where
         validate_version_specific_fields(
             self.chain_spec(),
             version,
-            PayloadOrAttributes::<Self::ExecutionData, OpPayloadAttributes>::PayloadAttributes(
+            PayloadOrAttributes::<OpExecutionData, OpPayloadAttributes>::PayloadAttributes(
                 attributes,
             ),
         )?;
