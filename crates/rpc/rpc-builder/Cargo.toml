@@ -52,9 +52,7 @@ alloy-provider = { workspace = true, features = ["ws", "ipc"] }
 alloy-network.workspace = true
 
 [dev-dependencies]
-reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-chainspec.workspace = true
 reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-evm-ethereum.workspace = true

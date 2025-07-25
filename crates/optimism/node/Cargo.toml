@@ -81,9 +81,7 @@ reth-payload-validator.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 
 alloy-primitives.workspace = true
-op-alloy-consensus.workspace = true
 alloy-network.workspace = true
-alloy-consensus.workspace = true
 futures.workspace = true
 alloy-eips.workspace = true
 

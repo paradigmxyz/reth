@@ -13,7 +13,7 @@ workspace = true
 
 [dependencies]
 # reth
-reth-chainspec.workspace = true
+reth-chainspec = { workspace = true, features = ["test-utils"] }
 reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
 reth-network-peers.workspace = true
@@ -45,11 +45,6 @@ derive_more.workspace = true
 paste = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 op-alloy-consensus.workspace = true
-
-[dev-dependencies]
-reth-chainspec = { workspace = true, features = ["test-utils"] }
-alloy-genesis.workspace = true
-op-alloy-rpc-types.workspace = true
 
 [features]
 default = ["std"]

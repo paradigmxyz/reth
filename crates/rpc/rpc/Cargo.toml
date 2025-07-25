@@ -99,7 +99,6 @@ reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-db-api.workspace = true
 
-alloy-consensus.workspace = true
 rand.workspace = true
 
 jsonrpsee-types.workspace = true

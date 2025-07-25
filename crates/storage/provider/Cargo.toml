@@ -81,7 +81,6 @@ rand.workspace = true
 eyre.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
-alloy-consensus.workspace = true
 
 [features]
 test-utils = [

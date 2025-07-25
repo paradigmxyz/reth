@@ -33,9 +33,6 @@ eyre.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
-# reth
-reth-cli-commands.workspace = true
-
 # fs
 tempfile.workspace = true
 
