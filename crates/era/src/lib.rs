@@ -19,6 +19,8 @@ pub mod era1_file;
 pub mod era1_types;
 pub mod era_types;
 pub mod execution_types;
+#[cfg(test)]
+pub(crate) mod test_utils;
 
 use crate::e2s_types::E2sError;
 use alloy_rlp::Decodable;

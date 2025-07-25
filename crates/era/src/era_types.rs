@@ -126,21 +126,9 @@ impl IndexEntry for SlotIndex {
 mod tests {
     use super::*;
     use crate::{
-        consensus_types::{CompressedBeaconState, CompressedSignedBeaconBlock},
         e2s_types::{Entry, IndexEntry},
+        test_utils::{create_beacon_block, create_beacon_state},
     };
-
-    /// Helper function to create a simple beacon block
-    fn create_beacon_block(data_size: usize) -> CompressedSignedBeaconBlock {
-        let block_data = vec![0xAA; data_size];
-        CompressedSignedBeaconBlock::new(block_data)
-    }
-
-    /// Helper function to create a simple beacon state
-    fn create_beacon_state(data_size: usize) -> CompressedBeaconState {
-        let state_data = vec![0xBB; data_size];
-        CompressedBeaconState::new(state_data)
-    }
 
     #[test]
     fn test_slot_index_roundtrip() {
@@ -208,6 +196,7 @@ mod tests {
         assert_eq!(era_group.state_slot_index.starting_slot, 1000);
         assert_eq!(era_group.state_slot_index.offsets, vec![100, 200, 300]);
     }
+
     #[test]
     fn test_era_group_with_block_index() {
         let blocks = vec![create_beacon_block(10), create_beacon_block(15)];
