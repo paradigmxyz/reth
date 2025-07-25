@@ -4,7 +4,7 @@
 use super::SpawnBlocking;
 use crate::{EthApiTypes, FromEthApiError, FromEvmError, RpcNodeCore};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::eip7840::BlobParams;
+use alloy_eips::{eip7840::BlobParams, BlockId};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
@@ -23,7 +23,7 @@ use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
-    ReceiptProvider, StateProviderFactory,
+    ReceiptProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
@@ -333,6 +333,38 @@ pub trait LoadPendingBlock:
             }),
             hashed_state: Arc::new(hashed_state),
         })
+    }
+
+    /// Returns the pending state for the given block id.
+    fn get_pending_state(
+        &self,
+        id: &BlockId,
+    ) -> impl std::future::Future<Output = Result<StateProviderBox, Self::Error>> + Send {
+        async move {
+            if let BlockId::Number(tag) = id {
+                if let BlockNumberOrTag::Pending = tag {
+                    let pending_block = self.pending_block().lock().await;
+                    let block = pending_block.as_ref().ok_or_else(|| {
+                        Self::Error::from_eth_err(EthApiError::HeaderNotFound(
+                            BlockNumberOrTag::Pending.into(),
+                        ))
+                    })?;
+                    let hash = block.block.hash();
+
+                    let state = self
+                        .provider()
+                        .pending_state_by_hash(hash.into())
+                        .map_err(Self::Error::from_eth_err)?;
+
+                    return state.ok_or_else(|| {
+                        Self::Error::from_eth_err(EthApiError::HeaderNotFound(
+                            BlockNumberOrTag::Pending.into(),
+                        ))
+                    });
+                }
+            }
+            Err(Self::Error::from_eth_err(EthApiError::HeaderNotFound(id.clone())))
+        }
     }
 }
 
