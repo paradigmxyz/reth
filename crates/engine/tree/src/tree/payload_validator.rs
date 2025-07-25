@@ -1,4 +1,4 @@
-//! Concrete implementation of the `PayloadValidator` trait.
+//! Types and traits for validating blocks and payloads.
 
 use crate::tree::{
     cached_state::CachedStateProvider,
@@ -39,7 +39,10 @@ use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
-/// Context providing access to tree state during validation
+/// Context providing access to tree state during validation.
+///
+/// This context is provided to the [`EngineValidator`] and includes the state of the tree's
+/// internals
 pub struct TreeCtx<'a, N: NodePrimitives> {
     /// The engine API tree state
     state: &'a mut EngineApiTreeState<N>,
@@ -72,12 +75,12 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         Self { state, persistence, canonical_in_memory_state, is_fork }
     }
 
-    /// Returns a reference to the engine API tree state
+    /// Returns a reference to the engine tree state
     pub const fn state(&self) -> &EngineApiTreeState<N> {
         &*self.state
     }
 
-    /// Returns a mutable reference to the engine API tree state
+    /// Returns a mutable reference to the engine tree state
     pub const fn state_mut(&mut self) -> &mut EngineApiTreeState<N> {
         self.state
     }
@@ -96,9 +99,38 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     pub const fn is_fork(&self) -> bool {
         self.is_fork
     }
+
+    /// Determines the persisting kind for the given block based on persistence info.
+    ///
+    /// Based on the given header it returns whether any conflicting persistence operation is
+    /// currently in progress.
+    ///
+    /// This is adapted from the `persisting_kind_for` method in `EngineApiTreeHandler`.
+    pub fn persisting_kind_for(&self, block: &N::BlockHeader) -> PersistingKind {
+        // Check that we're currently persisting.
+        let Some(action) = self.persistence().current_action() else {
+            return PersistingKind::NotPersisting
+        };
+        // Check that the persistince action is saving blocks, not removing them.
+        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
+            return PersistingKind::PersistingNotDescendant
+        };
+
+        // The block being validated can only be a descendant if its number is higher than
+        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
+        if block.number() > highest.number && self.state().tree_state.is_descendant(*highest, block)
+        {
+            return PersistingKind::PersistingDescendant
+        }
+
+        // In all other cases, the block is not a descendant.
+        PersistingKind::PersistingNotDescendant
+    }
 }
 
 /// A helper type that provides reusable payload validation logic for network-specific validators.
+///
+/// This type satisfies [`EngineValidator`] and is responsible for executing blocks/payloads.
 ///
 /// This type contains common validation, execution, and state root computation logic that can be
 /// used by network-specific payload validators (e.g., Ethereum, Optimism). It is not meant to be
@@ -249,7 +281,7 @@ where
         // collect in `compute_state_root_parallel`.
         //
         // See https://github.com/paradigmxyz/reth/issues/12688 for more details
-        let persisting_kind = self.persisting_kind_for(block.header(), &ctx);
+        let persisting_kind = ctx.persisting_kind_for(block.header());
         // don't run parallel if state root fallback is set
         let run_parallel_state_root =
             persisting_kind.can_run_parallel_state_root() && !self.config.state_root_fallback();
@@ -606,30 +638,6 @@ where
         false
     }
 
-    /// Determines the persisting kind for the given block based on persistence info.
-    ///
-    /// This is adapted from the `persisting_kind_for` method in `EngineApiTreeHandler`.
-    fn persisting_kind_for(&self, block: &N::BlockHeader, ctx: &TreeCtx<'_, N>) -> PersistingKind {
-        // Check that we're currently persisting.
-        let Some(action) = ctx.persistence().current_action() else {
-            return PersistingKind::NotPersisting
-        };
-        // Check that the persistince action is saving blocks, not removing them.
-        let CurrentPersistenceAction::SavingBlocks { highest } = action else {
-            return PersistingKind::PersistingNotDescendant
-        };
-
-        // The block being validated can only be a descendant if its number is higher than
-        // the highest block persisting. Otherwise, it's likely a fork of a lower block.
-        if block.number() > highest.number && ctx.state().tree_state.is_descendant(*highest, block)
-        {
-            return PersistingKind::PersistingDescendant
-        }
-
-        // In all other cases, the block is not a descendant.
-        PersistingKind::PersistingNotDescendant
-    }
-
     /// Creates a `StateProviderBuilder` for the given parent hash.
     ///
     /// This method checks if the parent is in the tree state (in-memory) or persisted to disk,
@@ -783,6 +791,8 @@ pub type ValidationOutcome<N, E = InsertBlockError<BlockTy<N>>> =
     Result<ExecutedBlockWithTrieUpdates<N>, E>;
 
 /// Type that validates the payloads processed by the engine.
+///
+/// This provides the necessary functions for validating/executing payloads/blocks.
 pub trait EngineValidator<
     Types: PayloadTypes,
     N: NodePrimitives = <<Types as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives,
