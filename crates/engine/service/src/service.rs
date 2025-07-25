@@ -8,7 +8,7 @@ use reth_engine_tree::{
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandler, EngineValidator, InvalidBlockHook, TreeConfig},
+    tree::{EngineApiTreeHandler, EngineValidator, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -82,7 +82,6 @@ where
         payload_builder: PayloadBuilderHandle<N::Payload>,
         payload_validator: V,
         tree_config: TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
         sync_metrics_tx: MetricEventsSender,
         evm_config: C,
     ) -> Self
@@ -108,7 +107,6 @@ where
             payload_builder,
             canonical_in_memory_state,
             tree_config,
-            invalid_block_hook,
             engine_kind,
             evm_config,
         );
@@ -222,7 +220,6 @@ mod tests {
             PayloadBuilderHandle::new(tx),
             engine_validator,
             TreeConfig::default(),
-            Box::new(NoopInvalidBlockHook::default()),
             sync_metrics_tx,
             evm_config,
         );
