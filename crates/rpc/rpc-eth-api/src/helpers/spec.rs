@@ -1,9 +1,10 @@
 //! Loads chain metadata.
 
+use alloy_eips::eip7910::EthConfig;
 use alloy_primitives::{Address, U256, U64};
 use alloy_rpc_types_eth::{Stage, SyncInfo, SyncStatus};
 use futures::Future;
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthereumHardforks};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::{RethError, RethResult};
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::{RpcTxReq, RpcTypes};
@@ -51,6 +52,11 @@ pub trait EthApiSpec:
     /// Returns provider chain info
     fn chain_info(&self) -> RethResult<ChainInfo> {
         Ok(self.provider().chain_info()?)
+    }
+
+    /// Returns provider fork configuration
+    fn chain_config(&self) -> RethResult<EthConfig> {
+        Ok(self.provider().chain_spec().chain_config_at_timestamp(0).unwrap()) // TODO:
     }
 
     /// Returns a list of addresses owned by provider.
