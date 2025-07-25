@@ -44,6 +44,9 @@ pub use config::*;
 pub mod validator;
 pub use validator::EthereumExecutionPayloadValidator;
 
+pub mod tree_validator;
+pub use tree_validator::EthPayloadValidator;
+
 type BestTransactionsIter<Pool> = Box<
     dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
 >;
