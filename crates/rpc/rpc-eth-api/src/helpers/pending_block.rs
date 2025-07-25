@@ -341,7 +341,7 @@ pub trait LoadPendingBlock:
         id: &BlockId,
     ) -> impl std::future::Future<Output = Result<StateProviderBox, Self::Error>> + Send {
         async move {
-            if let BlockId::Number(BlockNumberOrTag::Pending) = id {
+            if matches!(id, BlockId::Number(BlockNumberOrTag::Pending)) {
                 let pending_block = self.pending_block().lock().await;
                 let block = pending_block.as_ref().ok_or_else(|| {
                     Self::Error::from_eth_err(EthApiError::HeaderNotFound(
