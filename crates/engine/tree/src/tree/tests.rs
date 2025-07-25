@@ -1,5 +1,5 @@
 use super::*;
-use crate::{persistence::PersistenceAction, tree::EngineValidator};
+use crate::persistence::PersistenceAction;
 use alloy_consensus::Header;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -10,13 +10,13 @@ use alloy_rpc_types_engine::{ExecutionData, ExecutionPayloadSidecar, ExecutionPa
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::ForkchoiceStatus;
+use reth_engine_primitives::{EngineValidator, ForkchoiceStatus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
-use reth_provider::test_utils::MockEthProvider;
+use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
 use reth_trie::HashedPostState;
 use std::{
     collections::BTreeMap,
@@ -28,13 +28,12 @@ use std::{
 #[derive(Debug, Clone)]
 struct MockEngineValidator;
 
-impl reth_engine_primitives::PayloadValidator for MockEngineValidator {
+impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
     type Block = Block;
-    type ExecutionData = alloy_rpc_types_engine::ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: Self::ExecutionData,
+        payload: ExecutionData,
     ) -> Result<
         reth_primitives_traits::RecoveredBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,
@@ -130,7 +129,7 @@ struct TestHarness {
         EthPrimitives,
         MockEthProvider,
         EthEngineTypes,
-        MockEngineValidator,
+        BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator>,
         MockEvmConfig,
     >,
     to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
@@ -178,11 +177,19 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
+        let engine_validator = BasicEngineValidator::new(
+            provider.clone(),
+            consensus.clone(),
+            evm_config.clone(),
+            payload_validator,
+            TreeConfig::default(),
+            Box::new(NoopInvalidBlockHook::default()),
+        );
 
         let tree = EngineApiTreeHandler::new(
             provider.clone(),
             consensus,
-            payload_validator,
+            engine_validator,
             from_tree_tx,
             engine_api_tree_state,
             canonical_in_memory_state,

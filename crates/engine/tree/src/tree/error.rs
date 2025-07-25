@@ -5,6 +5,7 @@ use alloy_primitives::B256;
 use reth_consensus::ConsensusError;
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError};
 use reth_evm::execute::InternalBlockExecutionError;
+use reth_payload_primitives::NewPayloadError;
 use reth_primitives_traits::{Block, BlockBody, SealedBlock};
 use tokio::sync::oneshot::error::TryRecvError;
 
@@ -188,4 +189,15 @@ pub enum InsertBlockValidationError {
     /// Validation error, transparently wrapping [`BlockValidationError`]
     #[error(transparent)]
     Validation(#[from] BlockValidationError),
+}
+
+/// Errors that may occur when inserting a payload.
+#[derive(Debug, thiserror::Error)]
+pub enum InsertPayloadError<B: Block> {
+    /// Block validation error
+    #[error(transparent)]
+    Block(#[from] InsertBlockError<B>),
+    /// Payload validation error
+    #[error(transparent)]
+    Payload(#[from] NewPayloadError),
 }
