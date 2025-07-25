@@ -21,6 +21,9 @@ pub trait Hardforks: Clone {
     /// Get an iterator of all hardforks with their respective activation conditions.
     fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)>;
 
+    /// Returns all unique sorted fork timestamps.
+    fn fork_timestamps(&self) -> Vec<u64>;
+
     /// Convenience method to check if a fork is active at a given timestamp.
     fn is_fork_active_at_timestamp<H: Hardfork>(&self, fork: H, timestamp: u64) -> bool {
         self.fork(fork).active_at_timestamp(timestamp)

@@ -18,7 +18,7 @@ use alloy_eips::{
     eip1559::INITIAL_BASE_FEE,
     eip7685::EMPTY_REQUESTS_HASH,
     eip7892::BlobScheduleBlobParams,
-    eip7910::{EthConfig, EthForkConfig},
+    eip7910::{EthBaseForkConfig, EthConfig},
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -332,8 +332,8 @@ impl ChainSpec {
         self.chain
     }
 
-    /// Returns chain configuration at specific block.
-    /// Returns [`None`] if there is no current timestamp based fork.
+    /// Returns chain configuration at specific block timestamp.
+    /// Returns [`None`] if there is no current timestamp-based fork.
     pub fn chain_config_at_timestamp(
         &self,
         timestamp: u64,
@@ -364,69 +364,66 @@ impl ChainSpec {
         let Some(current) = self.fork_config_at_timestamp(current_fork_timestamp) else {
             return Ok(None)
         };
-        let current_hash = current.fork_hash()?;
-        let current_fork_id = self.fork_id(&Head {
-            number: u64::MAX,
-            timestamp: current_fork_timestamp,
-            ..Default::default()
-        });
-        let mut config = EthConfig {
-            current,
-            current_hash,
-            current_fork_id: current_fork_id.hash,
-            next: None,
-            next_hash: None,
-            next_fork_id: None,
-            last: None,
-            last_hash: None,
-            last_fork_id: None,
-        };
+        // let current_hash = current.fork_hash()?;
+        // let current_fork_id = self.fork_id(&Head {
+        //     number: u64::MAX,
+        //     timestamp: current_fork_timestamp,
+        //     ..Default::default()
+        // });
+        // let mut config = EthConfig {
+        //     current,
+        //     current_hash,
+        //     current_fork_id: current_fork_id.hash,
+        //     next: None,
+        //     next_hash: None,
+        //     next_fork_id: None,
+        //     last: None,
+        //     last_hash: None,
+        //     last_fork_id: None,
+        // };
 
-        if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) {
-            if let Some(last_fork_timestamp) = timestamp_forks.get(last_fork_idx).copied() {
-                if let Some(last) = self.fork_config_at_timestamp(last_fork_timestamp) {
-                    let last_hash = last.fork_hash()?;
-                    let last_fork_id = self.fork_id(&Head {
-                        number: u64::MAX,
-                        timestamp: last_fork_timestamp,
-                        ..Default::default()
-                    });
-                    config.last = Some(last);
-                    config.last_hash = Some(last_hash);
-                    config.last_fork_id = Some(last_fork_id.hash);
-                }
-            }
-        }
+        // if let Some(last_fork_idx) = current_fork_idx.checked_sub(1) {
+        //     if let Some(last_fork_timestamp) = timestamp_forks.get(last_fork_idx).copied() {
+        //         if let Some(last) = self.fork_config_at_timestamp(last_fork_timestamp) {
+        //             let last_hash = last.fork_hash()?;
+        //             let last_fork_id = self.fork_id(&Head {
+        //                 number: u64::MAX,
+        //                 timestamp: last_fork_timestamp,
+        //                 ..Default::default()
+        //             });
+        //             config.last = Some(last);
+        //             config.last_hash = Some(last_hash);
+        //             config.last_fork_id = Some(last_fork_id.hash);
+        //         }
+        //     }
+        // }
 
-        if let Some(next_fork_timestamp) = timestamp_forks.get(current_fork_idx + 1).copied() {
-            if let Some(next) = self.fork_config_at_timestamp(next_fork_timestamp) {
-                let next_hash = next.fork_hash()?;
-                let next_fork_id = self.fork_id(&Head {
-                    number: u64::MAX,
-                    timestamp: next_fork_timestamp,
-                    ..Default::default()
-                });
-                config.next = Some(next);
-                config.next_hash = Some(next_hash);
-                config.next_fork_id = Some(next_fork_id.hash);
-            }
-        }
+        // if let Some(next_fork_timestamp) = timestamp_forks.get(current_fork_idx + 1).copied() {
+        //     if let Some(next) = self.fork_config_at_timestamp(next_fork_timestamp) {
+        //         let next_hash = next.fork_hash()?;
+        //         let next_fork_id = self.fork_id(&Head {
+        //             number: u64::MAX,
+        //             timestamp: next_fork_timestamp,
+        //             ..Default::default()
+        //         });
+        //         config.next = Some(next);
+        //         config.next_hash = Some(next_hash);
+        //         config.next_fork_id = Some(next_fork_id.hash);
+        //     }
+        // }
 
-        Ok(Some(config))
+        // Ok(Some(config))
+        todo!()
     }
 
-    /// Returns fork config for specific timestamp.
-    fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthForkConfig> {
-        let blob_schedule = self.blob_params_at_timestamp(timestamp)?;
-        let fork_config = EthForkConfig {
+    /// Returns base fork config for specific timestamp.
+    /// Returns [`None`] if no blob params were found for this fork.
+    pub fn fork_config_at_timestamp(&self, timestamp: u64) -> Option<EthBaseForkConfig> {
+        Some(EthBaseForkConfig {
             chain_id: alloy_primitives::U64::from(self.chain.id()),
             activation_time: timestamp,
-            blob_schedule,
-            // TODO:
-            precompiles: Default::default(),
-            system_contracts: Default::default(),
-        };
-        Some(fork_config)
+            blob_schedule: self.blob_params_at_timestamp(timestamp)?,
+        })
     }
 
     /// Returns `true` if this chain contains Ethereum configuration.
@@ -868,6 +865,19 @@ impl Hardforks for ChainSpec {
 
     fn forks_iter(&self) -> impl Iterator<Item = (&dyn Hardfork, ForkCondition)> {
         self.hardforks.forks_iter()
+    }
+
+    fn fork_timestamps(&self) -> Vec<u64> {
+        let mut timestamp_forks = self
+            .hardforks
+            .forks_iter()
+            .filter_map(|(_, cond)| cond.as_timestamp())
+            .chain(self.blob_params.scheduled.iter().map(|(activation, _)| *activation))
+            .collect::<Vec<_>>();
+        // sort because bpo can happen in-between
+        timestamp_forks.sort();
+        timestamp_forks.dedup();
+        timestamp_forks
     }
 
     fn fork_id(&self, head: &Head) -> ForkId {
