@@ -26,6 +26,8 @@ use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
 pub use traits::*;
 pub mod validator;
 pub use validator::OpExecutionPayloadValidator;
+pub mod tree_validator;
+pub use tree_validator::{OpPayloadValidator, OpProvider};
 
 pub mod config;
 

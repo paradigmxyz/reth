@@ -27,6 +27,11 @@ reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-payload-validator.workspace = true
+reth-consensus.workspace = true
+reth-engine-primitives.workspace = true
+reth-engine-tree.workspace = true
+reth-provider.workspace = true
+reth-trie.workspace = true
 
 # op-reth
 reth-optimism-evm.workspace = true
