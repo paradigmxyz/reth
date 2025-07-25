@@ -72,6 +72,9 @@ Database:
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
 
+      --db.max-readers <MAX_READERS>
+          Maximum number of readers allowed to access the database concurrently
+
       --offline
           If this is enabled, then all stages except headers, bodies, and sender recovery will be unwound
 
@@ -109,7 +112,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
 
-          [default: <CACHE_DIR>/logs]
+          [default: C:\Users\soubh\AppData\Local\reth\logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file

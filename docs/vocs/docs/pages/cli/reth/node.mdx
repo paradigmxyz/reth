@@ -285,7 +285,7 @@ RPC:
       --ipcpath <IPCPATH>
           Filename for IPC socket/pipe within the datadir
 
-          [default: <CACHE_DIR>.ipc]
+          [default: \\.\pipe\reth.ipc]
 
       --ipc.permissions <IPC_SOCKET_PERMISSIONS>
           Set the permissions for the IPC socket file, in octal format.
@@ -315,7 +315,7 @@ RPC:
       --auth-ipc.path <AUTH_IPC_PATH>
           Filename for auth IPC socket/pipe within the datadir
 
-          [default: <CACHE_DIR>_engine_api.ipc]
+          [default: \\.\pipe\reth_engine_api.ipc]
 
       --disable-auth-server
           Disable the auth/engine API server.
@@ -671,6 +671,9 @@ Database:
       --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
           Read transaction timeout in seconds, 0 means no timeout
 
+      --db.max-readers <MAX_READERS>
+          Maximum number of readers allowed to access the database concurrently
+
 Dev testnet:
       --dev
           Start the node in dev mode
@@ -885,7 +888,7 @@ Logging:
       --log.file.directory <PATH>
           The path to put log files in
 
-          [default: <CACHE_DIR>/logs]
+          [default: C:\Users\soubh\AppData\Local\reth\logs]
 
       --log.file.max-size <SIZE>
           The maximum size (in MB) of one log file
