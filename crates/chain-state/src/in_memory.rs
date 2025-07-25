@@ -243,7 +243,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
                 .read()
                 .blocks
                 .get(&persisted_num_hash.hash)
-                .is_none() 
+                .is_none()
             {
                 // do nothing
                 return
@@ -286,7 +286,7 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = 
+                    p.parent =
                         inner.blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
                 }
             });
