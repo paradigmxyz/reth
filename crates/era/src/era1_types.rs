@@ -159,29 +159,37 @@ impl Era1Id {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::execution_types::{
-        CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+    use crate::{
+        test_utils::{create_sample_block, create_test_block_with_compressed_data},
+        DecodeCompressed,
     };
+    use alloy_consensus::ReceiptWithBloom;
     use alloy_primitives::{B256, U256};
 
-    /// Helper function to create a sample block tuple
-    fn create_sample_block(data_size: usize) -> BlockTuple {
-        // Create a compressed header with very sample data
-        let header_data = vec![0xAA; data_size];
-        let header = CompressedHeader::new(header_data);
+    #[test]
+    fn test_alloy_components_decode_and_receipt_in_bloom() {
+        // Create a block tuple from compressed data
+        let block: BlockTuple = create_test_block_with_compressed_data(30);
 
-        // Create a compressed body
-        let body_data = vec![0xBB; data_size * 2];
-        let body = CompressedBody::new(body_data);
+        // Decode and decompress the block header
+        let header: alloy_consensus::Header = block.header.decode().unwrap();
+        assert_eq!(header.number, 30, "Header block number should match");
+        assert_eq!(header.difficulty, U256::from(30 * 1000), "Header difficulty should match");
+        assert_eq!(header.gas_limit, 5000000, "Gas limit should match");
+        assert_eq!(header.gas_used, 21000, "Gas used should match");
+        assert_eq!(header.timestamp, 1609459200 + 30, "Timestamp should match");
+        assert_eq!(header.base_fee_per_gas, Some(10), "Base fee per gas should match");
+        assert!(header.withdrawals_root.is_some(), "Should have withdrawals root");
+        assert!(header.blob_gas_used.is_none(), "Should not have blob gas used");
+        assert!(header.excess_blob_gas.is_none(), "Should not have excess blob gas");
 
-        // Create compressed receipts
-        let receipts_data = vec![0xCC; data_size];
-        let receipts = CompressedReceipts::new(receipts_data);
+        let body: alloy_consensus::BlockBody<alloy_primitives::Bytes> =
+            block.body.decode().unwrap();
+        assert_eq!(body.ommers.len(), 0, "Should have no ommers");
+        assert!(body.withdrawals.is_some(), "Should have withdrawals field");
 
-        let difficulty = TotalDifficulty::new(U256::from(data_size));
-
-        // Create and return the block tuple
-        BlockTuple::new(header, body, receipts, difficulty)
+        let receipts: Vec<ReceiptWithBloom> = block.receipts.decode().unwrap();
+        assert_eq!(receipts.len(), 1, "Should have exactly 1 receipt");
     }
 
     #[test]
