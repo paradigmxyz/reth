@@ -21,7 +21,7 @@ pub enum ProviderError {
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
     /// RLP error.
-    #[error("{_0}")]
+    #[error("failed to decode RLP data: {_0}")]
     Rlp(alloy_rlp::Error),
     /// Trie witness error.
     #[error("trie witness error: {_0}")]
