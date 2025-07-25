@@ -1,4 +1,4 @@
-//! Execution layer specific types for era1 files
+//! Execution layer specific types for `.era1` files
 //!
 //! Contains implementations for compressed execution layer data structures:
 //! - [`CompressedHeader`] - Block header
@@ -15,12 +15,11 @@
 //! ## [`CompressedHeader`]
 //!
 //! ```rust
-//! use crate::reth_era::DecodeCompressed;
 //! use alloy_consensus::Header;
-//! use reth_era::execution_types::CompressedHeader;
+//! use reth_era::{execution_types::CompressedHeader, DecodeCompressed};
 //!
 //! let header = Header { number: 100, ..Default::default() };
-//! // Compress the header : rlp encoding and Snappy compression
+//! // Compress the header: rlp encoding and Snappy compression
 //! let compressed = CompressedHeader::from_header(&header)?;
 //! // Decompressed and decode typed compressed header
 //! let decoded_header: Header = compressed.decode_header()?;
@@ -31,10 +30,9 @@
 //! ## [`CompressedBody`]
 //!
 //! ```rust
-//! use crate::reth_era::DecodeCompressed;
 //! use alloy_consensus::{BlockBody, Header};
 //! use alloy_primitives::Bytes;
-//! use reth_era::execution_types::CompressedBody;
+//! use reth_era::{execution_types::CompressedBody, DecodeCompressed};
 //! use reth_ethereum_primitives::TransactionSigned;
 //!
 //! let body: BlockBody<Bytes> = BlockBody {
@@ -54,9 +52,8 @@
 //! ## [`CompressedReceipts`]
 //!
 //! ```rust
-//! use crate::reth_era::DecodeCompressed;
 //! use alloy_consensus::ReceiptWithBloom;
-//! use reth_era::execution_types::CompressedReceipts;
+//! use reth_era::{execution_types::CompressedReceipts, DecodeCompressed};
 //! use reth_ethereum_primitives::{Receipt, TxType};
 //!
 //! let receipt = Receipt {
@@ -66,7 +63,7 @@
 //!     logs: vec![],
 //! };
 //! let receipt_with_bloom = ReceiptWithBloom { receipt, logs_bloom: Default::default() };
-//! // Compress the receipts : rlp encoding and Snappy compression
+//! // Compress the receipt: rlp encoding and snappy compression
 //! let compressed_receipt_data = CompressedReceipts::from_encodable(&receipt_with_bloom)?;
 //! // Get raw receipt by decoding and decompressing compressed and encoded receipt
 //! let decompressed_receipt = compressed_receipt_data.decode::<ReceiptWithBloom>()?;
