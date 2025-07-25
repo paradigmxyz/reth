@@ -5,7 +5,6 @@ Start the node
 ```bash
 $ reth node --help
 ```
-
 ```txt
 Usage: reth node [OPTIONS]
 
