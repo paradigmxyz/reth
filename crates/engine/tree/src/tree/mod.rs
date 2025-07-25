@@ -256,8 +256,6 @@ where
     config: TreeConfig,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
-    /// An invalid block hook.
-    invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
     /// The engine API variant of this handler
     engine_kind: EngineApiKind,
     /// The EVM configuration.
@@ -284,7 +282,6 @@ where
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
             .field("metrics", &self.metrics)
-            .field("invalid_block_hook", &format!("{:p}", self.invalid_block_hook))
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
             .finish()
@@ -341,15 +338,9 @@ where
             config,
             metrics: Default::default(),
             incoming_tx,
-            invalid_block_hook: Box::new(NoopInvalidBlockHook),
             engine_kind,
             evm_config,
         }
-    }
-
-    /// Sets the invalid block hook.
-    fn set_invalid_block_hook(&mut self, invalid_block_hook: Box<dyn InvalidBlockHook<N>>) {
-        self.invalid_block_hook = invalid_block_hook;
     }
 
     /// Creates a new [`EngineApiTreeHandler`] instance and spawns it in its
@@ -366,7 +357,6 @@ where
         payload_builder: PayloadBuilderHandle<T>,
         canonical_in_memory_state: CanonicalInMemoryState<N>,
         config: TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
         kind: EngineApiKind,
         evm_config: C,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
@@ -387,7 +377,7 @@ where
             kind,
         );
 
-        let mut task = Self::new(
+        let task = Self::new(
             provider,
             consensus,
             payload_validator,
@@ -401,7 +391,6 @@ where
             kind,
             evm_config,
         );
-        task.set_invalid_block_hook(invalid_block_hook);
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Tree Task".to_string()).spawn(|| task.run()).unwrap();
         (incoming, outgoing)
