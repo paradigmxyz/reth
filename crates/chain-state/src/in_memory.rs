@@ -278,7 +278,8 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
             // also shift the pending state if it exists
             self.inner.in_memory_state.pending.send_modify(|p| {
                 if let Some(p) = p.as_mut() {
-                    p.parent = inner.blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
+                    p.parent = 
+                        inner.blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
                 }
             });
         }
