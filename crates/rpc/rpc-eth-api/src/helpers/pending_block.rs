@@ -178,7 +178,7 @@ pub trait LoadPendingBlock:
                 now + Duration::from_secs(1),
                 sealed_block.clone(),
                 Arc::new(receipts.iter().flatten().cloned().collect()),
-                hashed_state.clone(),
+                hashed_state,
             ));
 
             Ok(Some((sealed_block, Arc::new(receipts.iter().flatten().cloned().collect()))))
@@ -353,7 +353,7 @@ pub trait LoadPendingBlock:
 
                     let state = self
                         .provider()
-                        .pending_state_by_hash(hash.into())
+                        .pending_state_by_hash(hash)
                         .map_err(Self::Error::from_eth_err)?;
 
                     return state.ok_or_else(|| {
@@ -363,7 +363,7 @@ pub trait LoadPendingBlock:
                     });
                 }
             }
-            Err(Self::Error::from_eth_err(EthApiError::HeaderNotFound(id.clone())))
+            Err(Self::Error::from_eth_err(EthApiError::HeaderNotFound(*id)))
         }
     }
 }
