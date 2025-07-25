@@ -8,10 +8,13 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
+use reth_chain_state::{
+    ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates, MemoryOverlayStateProviderRef,
+};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
+    execute::{BlockBuilder, BlockBuilderOutcome, ExecutionOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes, SpecFor,
 };
 use reth_primitives_traits::{
@@ -22,7 +25,7 @@ use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
-    ReceiptProvider, StateProviderFactory,
+    ReceiptProvider, StateProviderBox, StateProviderFactory,
 };
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, BestTransactionsAttributes, PoolTransaction,
@@ -154,7 +157,7 @@ pub trait LoadPendingBlock:
             }
 
             // no pending block from the CL yet, so we need to build it ourselves via txpool
-            let (sealed_block, receipts) = match self
+            let executed_block = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
                     this.build_block(&parent)
@@ -168,17 +171,19 @@ pub trait LoadPendingBlock:
                 }
             };
 
-            let sealed_block = Arc::new(sealed_block);
-            let receipts = Arc::new(receipts);
+            let sealed_block = executed_block.recovered_block;
+            let receipts = &executed_block.execution_output.receipts;
+            let hashed_state = executed_block.hashed_state;
 
             let now = Instant::now();
             *lock = Some(PendingBlock::new(
                 now + Duration::from_secs(1),
                 sealed_block.clone(),
-                receipts.clone(),
+                Arc::new(receipts.iter().flatten().cloned().collect()),
+                hashed_state,
             ));
 
-            Ok(Some((sealed_block, receipts)))
+            Ok(Some((sealed_block, Arc::new(receipts.iter().flatten().cloned().collect()))))
         }
     }
 
@@ -192,10 +197,7 @@ pub trait LoadPendingBlock:
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
-    ) -> Result<
-        (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
-        Self::Error,
-    >
+    ) -> Result<ExecutedBlock<Self::Primitives>, Self::Error>
     where
         Self::Pool:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
@@ -322,10 +324,53 @@ pub trait LoadPendingBlock:
             cumulative_gas_used += gas_used;
         }
 
-        let BlockBuilderOutcome { execution_result, block, .. } =
+        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
             builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
 
-        Ok((block, execution_result.receipts))
+        Ok(ExecutedBlock {
+            recovered_block: block.into(),
+            execution_output: Arc::new(ExecutionOutcome {
+                receipts: vec![execution_result.receipts],
+                ..Default::default()
+            }),
+            hashed_state: Arc::new(hashed_state),
+        })
+    }
+
+    /// Returns the pending state by combining with latest state.
+    fn get_pending_state(
+        &self,
+    ) -> impl std::future::Future<Output = Result<StateProviderBox, Self::Error>> + Send {
+        async move {
+            // First get the latest state from database
+            let latest_header =
+                self.provider().latest_header().map_err(Self::Error::from_eth_err)?.ok_or_else(
+                    || {
+                        Self::Error::from_eth_err(EthApiError::HeaderNotFound(
+                            BlockNumberOrTag::Latest.into(),
+                        ))
+                    },
+                )?;
+            let historical_state = self
+                .provider()
+                .history_by_block_hash(latest_header.hash())
+                .map_err(Self::Error::from_eth_err)?;
+
+            let pending_block = self.pending_block().lock().await;
+            if let Some(_pending_block) = pending_block.as_ref() {
+                let ex_block = self.build_block(&latest_header);
+                let overlay = MemoryOverlayStateProviderRef::new(
+                    historical_state,
+                    vec![ExecutedBlockWithTrieUpdates {
+                        block: ex_block.unwrap(),
+                        trie: ExecutedTrieUpdates::Missing,
+                    }],
+                );
+                Ok(Box::new(overlay) as StateProviderBox)
+            } else {
+                Ok(historical_state)
+            }
+        }
     }
 }
 
