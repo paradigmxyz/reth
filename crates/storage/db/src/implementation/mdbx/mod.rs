@@ -173,7 +173,7 @@ impl DatabaseArguments {
         self
     }
 
-    /// Set max_readers flag.
+    /// Set `max_readers` flag.
     pub const fn with_max_readers(mut self, max_readers: Option<u64>) -> Self {
         self.max_readers = max_readers;
         self
