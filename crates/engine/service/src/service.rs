@@ -87,7 +87,7 @@ where
         evm_config: C,
     ) -> Self
     where
-        V: EngineValidator<N::Payload, Block = BlockTy<N>>,
+        V: EngineValidator<N::Payload>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let engine_kind =
@@ -150,7 +150,10 @@ mod tests {
     use super::*;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::BeaconEngineMessage;
-    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
+    use reth_engine_tree::{
+        test_utils::TestPipelineBuilder,
+        tree::{BasicEngineValidator, NoopInvalidBlockHook},
+    };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::EthEvmConfig;
@@ -195,6 +198,15 @@ mod tests {
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
+        let engine_validator = BasicEngineValidator::new(
+            blockchain_db.clone(),
+            consensus.clone(),
+            evm_config.clone(),
+            engine_payload_validator,
+            TreeConfig::default(),
+            Box::new(NoopInvalidBlockHook::default()),
+        );
+
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let (tx, _rx) = unbounded_channel();
         let _eth_service = EngineService::new(
@@ -208,7 +220,7 @@ mod tests {
             blockchain_db,
             pruner,
             PayloadBuilderHandle::new(tx),
-            engine_payload_validator,
+            engine_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
             sync_metrics_tx,

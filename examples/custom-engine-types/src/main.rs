@@ -29,15 +29,14 @@ use alloy_rpc_types::{
     Withdrawal,
 };
 use reth_basic_payload_builder::{BuildArguments, BuildOutcome, PayloadBuilder, PayloadConfig};
-use reth_engine_tree::tree::EngineValidator;
 use reth_ethereum::{
     chainspec::{Chain, ChainSpec, ChainSpecProvider},
     node::{
         api::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
-            validate_version_specific_fields, AddOnsContext, EngineTypes, FullNodeComponents,
-            FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError, NodeTypes,
-            PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
+            validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
+            FullNodeComponents, FullNodeTypes, NewPayloadError, NodeTypes, PayloadAttributes,
+            PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
@@ -237,15 +236,6 @@ where
             ))
         }
 
-        Ok(())
-    }
-
-    fn validate_payload_attributes_against_header(
-        &self,
-        _attr: &<T as PayloadTypes>::PayloadAttributes,
-        _header: &<Self::Block as reth_ethereum::primitives::Block>::Header,
-    ) -> Result<(), InvalidPayloadAttributesError> {
-        // skip default timestamp validation
         Ok(())
     }
 }

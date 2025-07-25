@@ -12,7 +12,10 @@
 extern crate alloc;
 
 use reth_errors::ConsensusError;
-use reth_payload_primitives::{NewPayloadError, PayloadTypes};
+use reth_payload_primitives::{
+    EngineApiMessageVersion, EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
+    PayloadTypes,
+};
 use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
@@ -98,6 +101,26 @@ pub trait EngineTypes:
         + Send
         + Sync
         + 'static;
+}
+
+/// Type that validates the payloads processed by the engine.
+pub trait EngineValidator<Types: PayloadTypes>:
+    PayloadValidator<ExecutionData = Types::ExecutionData>
+{
+    /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
+    /// and the message version.
+    fn validate_version_specific_fields(
+        &self,
+        version: EngineApiMessageVersion,
+        payload_or_attrs: PayloadOrAttributes<'_, Types::ExecutionData, Types::PayloadAttributes>,
+    ) -> Result<(), EngineObjectValidationError>;
+
+    /// Ensures that the payload attributes are valid for the given [`EngineApiMessageVersion`].
+    fn ensure_well_formed_attributes(
+        &self,
+        version: EngineApiMessageVersion,
+        attributes: &Types::PayloadAttributes,
+    ) -> Result<(), EngineObjectValidationError>;
 }
 
 /// Type that validates an [`ExecutionPayload`].
