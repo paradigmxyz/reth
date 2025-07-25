@@ -6,7 +6,7 @@ use op_alloy_rpc_types_engine::{
     OpPayloadAttributes,
 };
 use reth_consensus::ConsensusError;
-use reth_engine_tree::tree::EngineValidator;
+use reth_engine_primitives::EngineValidator;
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
@@ -290,7 +290,7 @@ mod test {
     use alloy_primitives::{b64, Address, B256, B64};
     use alloy_rpc_types_engine::PayloadAttributes;
     use reth_chainspec::ChainSpec;
-    use reth_engine_tree::tree::EngineValidator;
+    use reth_engine_primitives::EngineValidator;
     use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
     use reth_provider::noop::NoopProvider;
     use reth_trie_common::KeccakKeyHasher;

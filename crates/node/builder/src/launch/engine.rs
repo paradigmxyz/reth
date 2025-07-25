@@ -15,7 +15,7 @@ use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::TreeConfig,
+    tree::{BasicEngineValidator, TreeConfig},
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -207,6 +207,15 @@ where
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
+        let engine_validator = BasicEngineValidator::new(
+            ctx.blockchain_db().clone(),
+            consensus.clone(),
+            ctx.components().evm_config().clone(),
+            engine_payload_validator,
+            engine_tree_config.clone(),
+            ctx.invalid_block_hook().await?,
+        );
+
         let mut engine_service = EngineService::new(
             consensus.clone(),
             ctx.chain_spec(),
@@ -218,7 +227,7 @@ where
             ctx.blockchain_db().clone(),
             pruner,
             ctx.components().payload_builder_handle().clone(),
-            engine_payload_validator,
+            engine_validator,
             engine_tree_config,
             ctx.invalid_block_hook().await?,
             ctx.sync_metrics_tx(),
