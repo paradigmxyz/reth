@@ -181,7 +181,7 @@ mod tests {
         let target_dir = file.path().parent().unwrap();
         match fetch(filename, target_dir, url, 4, Some(b3sum)).await {
             Ok(_) | Err(DownloaderError::EmptyContentLength) => {
-                // the testfil API can be flaky, so we ignore this error
+                // the testfile API can be flaky, so we ignore this error
             }
             Err(error) => {
                 panic!("Unexpected download error: {error:?}");
