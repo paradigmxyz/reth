@@ -31,6 +31,10 @@ impl Hardforks for CustomChainSpec {
         self.inner.forks_iter()
     }
 
+    fn fork_timestamps(&self) -> Vec<u64> {
+        self.inner.fork_timestamps()
+    }
+
     fn fork_id(&self, head: &reth_ethereum::chainspec::Head) -> reth_ethereum::chainspec::ForkId {
         self.inner.fork_id(head)
     }
@@ -76,8 +80,11 @@ impl EthChainSpec for CustomChainSpec {
         self.inner.chain()
     }
 
-    fn chain_config_at_timestamp(&self, timestamp: u64) -> Option<alloy_eips::eip7910::EthConfig> {
-        self.inner.chain_config_at_timestamp(timestamp)
+    fn fork_config_at_timestamp(
+        &self,
+        timestamp: u64,
+    ) -> Option<alloy_eips::eip7910::EthBaseForkConfig> {
+        self.inner.fork_config_at_timestamp(timestamp)
     }
 
     fn deposit_contract(&self) -> Option<&reth_ethereum::chainspec::DepositContract> {
