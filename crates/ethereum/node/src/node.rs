@@ -5,7 +5,6 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
-use alloy_rpc_types_eth::TransactionRequest;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
@@ -153,14 +152,13 @@ where
         Types: NodeTypes<ChainSpec: EthereumHardforks>,
         Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
     >,
-    NetworkT: RpcTypes,
+    NetworkT: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<N::Types>>>,
     EthRpcConverterFor<N, NetworkT>: RpcConvert<
         Primitives = PrimitivesTy<N::Types>,
         TxEnv = TxEnvFor<N::Evm>,
         Error = EthApiError,
         Network = NetworkT,
     >,
-    TransactionRequest: SignableTxRequest<TxTy<N::Types>>,
     EthApiError: FromEvmError<N::Evm>,
 {
     type EthApi = EthApiFor<N, NetworkT>;
