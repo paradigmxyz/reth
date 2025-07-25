@@ -236,7 +236,15 @@ impl<N: NodePrimitives> CanonicalInMemoryStateInner<N> {
         //
         // This can happen if the persistence task takes a long time, while a reorg is happening.
         {
-            if self.inner.in_memory_state.inner.read().blocks.get(&persisted_num_hash.hash).is_none() {
+            if self
+                .inner
+                .in_memory_state
+                .inner
+                .read()
+                .blocks
+                .get(&persisted_num_hash.hash)
+                .is_none() 
+            {
                 // do nothing
                 return
             }
