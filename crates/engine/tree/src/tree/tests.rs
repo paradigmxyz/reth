@@ -28,13 +28,12 @@ use std::{
 #[derive(Debug, Clone)]
 struct MockEngineValidator;
 
-impl reth_engine_primitives::PayloadValidator for MockEngineValidator {
+impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
     type Block = Block;
-    type ExecutionData = alloy_rpc_types_engine::ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
-        payload: Self::ExecutionData,
+        payload: ExecutionData,
     ) -> Result<
         reth_primitives_traits::RecoveredBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,

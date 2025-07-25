@@ -11,10 +11,11 @@
 
 extern crate alloc;
 
+use alloy_consensus::BlockHeader;
 use reth_errors::ConsensusError;
 use reth_payload_primitives::{
-    EngineApiMessageVersion, EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
-    PayloadTypes,
+    EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
+    NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
 use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_trie_common::HashedPostState;
@@ -104,9 +105,7 @@ pub trait EngineTypes:
 }
 
 /// Type that validates the payloads processed by the engine.
-pub trait EngineValidator<Types: PayloadTypes>:
-    PayloadValidator<ExecutionData = Types::ExecutionData>
-{
+pub trait EngineValidator<Types: PayloadTypes>: PayloadValidator<Types> {
     /// Validates the presence or exclusion of fork-specific fields based on the payload attributes
     /// and the message version.
     fn validate_version_specific_fields(
@@ -125,12 +124,9 @@ pub trait EngineValidator<Types: PayloadTypes>:
 
 /// Type that validates an [`ExecutionPayload`].
 #[auto_impl::auto_impl(&, Arc)]
-pub trait PayloadValidator: Send + Sync + Unpin + 'static {
+pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
-
-    /// The execution payload type used by the engine.
-    type ExecutionData;
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
@@ -142,7 +138,7 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
     /// engine-API specification.
     fn ensure_well_formed_payload(
         &self,
-        payload: Self::ExecutionData,
+        payload: Types::ExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
@@ -152,6 +148,26 @@ pub trait PayloadValidator: Send + Sync + Unpin + 'static {
         _block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
         // method not used by l1
+        Ok(())
+    }
+
+    /// Validates the payload attributes with respect to the header.
+    ///
+    /// By default, this enforces that the payload attributes timestamp is greater than the
+    /// timestamp according to:
+    ///   > 7. Client software MUST ensure that payloadAttributes.timestamp is greater than
+    ///   > timestamp
+    ///   > of a block referenced by forkchoiceState.headBlockHash.
+    ///
+    /// See also: <https://github.com/ethereum/execution-apis/blob/647a677b7b97e09145b8d306c0eaf51c32dae256/src/engine/common.md#specification-1>
+    fn validate_payload_attributes_against_header(
+        &self,
+        attr: &Types::PayloadAttributes,
+        header: &<Self::Block as Block>::Header,
+    ) -> Result<(), InvalidPayloadAttributesError> {
+        if attr.timestamp() <= header.timestamp() {
+            return Err(InvalidPayloadAttributesError::InvalidTimestamp);
+        }
         Ok(())
     }
 }

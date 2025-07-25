@@ -22,7 +22,7 @@ use reth_engine_primitives::{InvalidBlockHook, PayloadValidator};
 use reth_errors::ProviderResult;
 use reth_evm::{ConfigureEvm, SpecFor};
 use reth_payload_primitives::{
-    BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadAttributes, PayloadTypes,
+    BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
     AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
@@ -143,7 +143,6 @@ where
         + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
-    V: PayloadValidator<Block = N::Block>,
 {
     /// Creates a new `TreePayloadValidator`.
     #[allow(clippy::too_many_arguments)]
@@ -183,11 +182,14 @@ where
     /// - Block execution
     /// - State root computation
     /// - Fork detection
-    pub fn validate_block_with_state(
+    pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         block: RecoveredBlock<N::Block>,
         mut ctx: TreeCtx<'_, N>,
-    ) -> ValidationOutcome<N, (InsertBlockErrorKind, RecoveredBlock<N::Block>)> {
+    ) -> ValidationOutcome<N, (InsertBlockErrorKind, RecoveredBlock<N::Block>)>
+    where
+        V: PayloadValidator<T, Block = N::Block>,
+    {
         /// A helper macro that returns the block in case there was an error
         macro_rules! ensure_ok {
             ($expr:expr) => {
@@ -799,12 +801,7 @@ pub trait EngineValidator<
         &self,
         attr: &Types::PayloadAttributes,
         header: &N::BlockHeader,
-    ) -> Result<(), InvalidPayloadAttributesError> {
-        if attr.timestamp() <= header.timestamp() {
-            return Err(InvalidPayloadAttributesError::InvalidTimestamp);
-        }
-        Ok(())
-    }
+    ) -> Result<(), InvalidPayloadAttributesError>;
 
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
@@ -823,14 +820,14 @@ pub trait EngineValidator<
     fn validate_payload(
         &mut self,
         payload: Types::ExecutionData,
-        _ctx: TreeCtx<'_, N>,
+        ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>;
 
     /// Validates a block downloaded from the network.
     fn validate_block(
         &mut self,
-        _block: RecoveredBlock<N::Block>,
-        _ctx: TreeCtx<'_, N>,
+        block: RecoveredBlock<N::Block>,
+        ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N>;
 }
 
@@ -847,8 +844,16 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: PayloadValidator<ExecutionData = Types::ExecutionData, Block = N::Block>,
+    V: PayloadValidator<Types, Block = N::Block>,
 {
+    fn validate_payload_attributes_against_header(
+        &self,
+        attr: &Types::PayloadAttributes,
+        header: &N::BlockHeader,
+    ) -> Result<(), InvalidPayloadAttributesError> {
+        self.validator.validate_payload_attributes_against_header(attr, header)
+    }
+
     fn ensure_well_formed_payload(
         &self,
         payload: Types::ExecutionData,
