@@ -7,7 +7,7 @@ pub enum StorageLockError {
     #[error("storage directory is currently in use as read-write by another process: PID {_0}")]
     Taken(usize),
     /// Indicates other unspecified errors.
-    #[error("{_0}")]
+    #[error("storage lock error: {_0}")]
     Other(String),
 }
 
