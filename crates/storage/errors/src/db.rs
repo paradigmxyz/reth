@@ -46,7 +46,7 @@ pub enum DatabaseError {
     #[error("log level {_0:?} is not available")]
     LogLevelUnavailable(LogLevel),
     /// Other unspecified error.
-    #[error("{_0}")]
+    #[error("database error: {_0}")]
     Other(String),
 }
 
