@@ -10625,6 +10625,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "reth-trie-sp1-zkvm"
+version = "1.5.1"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-rpc-types-debug",
+ "alloy-trie",
+ "nybbles",
+ "reth-ethereum",
+ "reth-stateless",
+ "reth-trie-common",
+ "revm",
+ "rlp 0.6.1",
+ "serde",
+]
+
+[[package]]
 name = "reth-trie-sparse"
 version = "1.6.0"
 dependencies = [
@@ -10959,6 +10976,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rlp"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa24e92bb2a83198bb76d661a71df9f7076b8c420b8696e4d3d97d50d94479e3"
+dependencies = [
+ "bytes",
+ "rustc-hex",
+]
+
+[[package]]
 name = "rmp"
 version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11068,7 +11095,7 @@ dependencies = [
  "proptest",
  "rand 0.8.5",
  "rand 0.9.1",
- "rlp",
+ "rlp 0.5.2",
  "ruint-macro",
  "serde",
  "valuable",
@@ -12680,7 +12707,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1631b201eb031b563d2e85ca18ec8092508e262a3196ce9bd10a67ec87b9f5c"
 dependencies = [
  "hash-db",
- "rlp",
+ "rlp 0.5.2",
 ]
 
 [[package]]

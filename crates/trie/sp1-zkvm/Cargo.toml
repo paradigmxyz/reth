@@ -1,0 +1,32 @@
+[package]
+name = "reth-trie-sp1-zkvm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "MPT implementation from SP1, integrated with execution witness"
+
+[dependencies]
+
+# alloy
+alloy-primitives = { workspace = true }
+alloy-rlp = { workspace = true }
+alloy-rpc-types-debug = { workspace = true }
+alloy-trie = { workspace = true }
+
+# reth
+reth-ethereum = { workspace = true, features = ["evm"] }
+reth-stateless = { workspace = true }
+reth-trie-common = { workspace = true }
+
+# revm
+revm = { workspace = true }
+
+# misc
+nybbles = { workspace = true }
+serde = { workspace = true }
+
+# to be deprecated in favor of alloy-rlp
+rlp = { version = "0.6.1", default-features = false }
