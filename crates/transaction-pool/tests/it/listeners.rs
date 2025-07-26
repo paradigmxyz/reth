@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use reth_transaction_pool::{
     noop::MockTransactionValidator,
     test_utils::{MockTransactionFactory, TestPoolBuilder},
-    FullTransactionEvent, PoolTransaction, TransactionEvent, TransactionListenerKind,
+    BlobPoolExt, FullTransactionEvent, PoolTransaction, TransactionEvent, TransactionListenerKind,
     TransactionOrigin, TransactionPool,
 };
 use std::{future::poll_fn, task::Poll};

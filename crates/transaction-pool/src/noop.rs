@@ -117,10 +117,6 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         mpsc::channel(1).1
     }
 
-    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
-        mpsc::channel(1).1
-    }
-
     fn new_transactions_listener_for(
         &self,
         _kind: TransactionListenerKind,
@@ -303,44 +299,6 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
     fn unique_senders(&self) -> HashSet<Address> {
         Default::default()
     }
-
-    fn get_blob(
-        &self,
-        _tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
-        Ok(None)
-    }
-
-    fn get_all_blobs(
-        &self,
-        _tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
-        Ok(vec![])
-    }
-
-    fn get_all_blobs_exact(
-        &self,
-        tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
-        if tx_hashes.is_empty() {
-            return Ok(vec![])
-        }
-        Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
-    }
-
-    fn get_blobs_for_versioned_hashes_v1(
-        &self,
-        versioned_hashes: &[B256],
-    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
-        Ok(vec![None; versioned_hashes.len()])
-    }
-
-    fn get_blobs_for_versioned_hashes_v2(
-        &self,
-        _versioned_hashes: &[B256],
-    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
-        Ok(None)
-    }
 }
 
 /// A [`TransactionValidator`] that does nothing.
@@ -418,4 +376,54 @@ impl<T: EthPoolTransaction> NoopInsertError<T> {
     pub fn into_inner(self) -> T {
         self.tx
     }
+}
+
+impl<T: EthPoolTransaction> crate::traits::BlobPoolExt for NoopTransactionPool<T> {
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
+        mpsc::channel(1).1
+    }
+
+    fn get_blob(
+        &self,
+        _tx_hash: TxHash,
+    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        Ok(None)
+    }
+
+    fn get_all_blobs(
+        &self,
+        _tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError> {
+        Ok(vec![])
+    }
+
+    fn get_all_blobs_exact(
+        &self,
+        tx_hashes: Vec<TxHash>,
+    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        if tx_hashes.is_empty() {
+            return Ok(vec![])
+        }
+        Err(BlobStoreError::MissingSidecar(tx_hashes[0]))
+    }
+
+    fn get_blobs_for_versioned_hashes_v1(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
+    }
+
+    fn get_blobs_for_versioned_hashes_v2(
+        &self,
+        _versioned_hashes: &[B256],
+    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
+        Ok(None)
+    }
+
+    fn delete_blob(&self, _tx: B256) {}
+
+    fn delete_blobs(&self, _txs: Vec<B256>) {}
+
+    fn cleanup_blobs(&self) {}
 }

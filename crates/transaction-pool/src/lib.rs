@@ -518,10 +518,6 @@ where
         self.pool.add_pending_listener(kind)
     }
 
-    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
-        self.pool.add_blob_sidecar_listener()
-    }
-
     fn new_transactions_listener_for(
         &self,
         kind: TransactionListenerKind,
@@ -714,6 +710,50 @@ where
     fn unique_senders(&self) -> HashSet<Address> {
         self.pool.unique_senders()
     }
+}
+
+impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
+where
+    V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore,
+{
+    #[instrument(skip(self), target = "txpool")]
+    fn set_block_info(&self, info: BlockInfo) {
+        trace!(target: "txpool", "updating pool block info");
+        self.pool.set_block_info(info)
+    }
+
+    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
+    where
+        B: Block,
+    {
+        self.pool.on_canonical_state_change(update);
+    }
+
+    fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
+        self.pool.update_accounts(accounts);
+    }
+}
+
+impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
+    fn clone(&self) -> Self {
+        Self { pool: Arc::clone(&self.pool) }
+    }
+}
+
+#[cfg(feature = "blob")]
+impl<V, T, S> crate::traits::BlobPoolExt for Pool<V, T, S>
+where
+    V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: blobstore::BlobStore,
+{
+    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar> {
+        self.pool.add_blob_sidecar_listener()
+    }
 
     fn get_blob(
         &self,
@@ -749,31 +789,6 @@ where
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v2(versioned_hashes)
     }
-}
-
-impl<V, T, S> TransactionPoolExt for Pool<V, T, S>
-where
-    V: TransactionValidator,
-    <V as TransactionValidator>::Transaction: EthPoolTransaction,
-    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
-    S: BlobStore,
-{
-    #[instrument(skip(self), target = "txpool")]
-    fn set_block_info(&self, info: BlockInfo) {
-        trace!(target: "txpool", "updating pool block info");
-        self.pool.set_block_info(info)
-    }
-
-    fn on_canonical_state_change<B>(&self, update: CanonicalStateUpdate<'_, B>)
-    where
-        B: Block,
-    {
-        self.pool.on_canonical_state_change(update);
-    }
-
-    fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
-        self.pool.update_accounts(accounts);
-    }
 
     fn delete_blob(&self, tx: TxHash) {
         self.pool.delete_blob(tx)
@@ -785,11 +800,5 @@ where
 
     fn cleanup_blobs(&self) {
         self.pool.cleanup_blobs()
-    }
-}
-
-impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
-    fn clone(&self) -> Self {
-        Self { pool: Arc::clone(&self.pool) }
     }
 }

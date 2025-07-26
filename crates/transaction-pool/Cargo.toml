@@ -73,6 +73,8 @@ serde_json.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [features]
+default = ["serde", "blob"]
+blob = []
 serde = [
     "dep:serde",
     "reth-execution-types/serde",

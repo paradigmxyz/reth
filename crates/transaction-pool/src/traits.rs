@@ -64,9 +64,7 @@ use alloy_consensus::{error::ValueError, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
     eip2718::{Encodable2718, WithEncoded},
     eip2930::AccessList,
-    eip4844::{
-        env_settings::KzgSettings, BlobAndProofV1, BlobAndProofV2, BlobTransactionValidationError,
-    },
+    eip4844::{env_settings::KzgSettings, BlobTransactionValidationError},
     eip7594::BlobTransactionSidecarVariant,
     eip7702::SignedAuthorization,
 };
@@ -89,6 +87,13 @@ use std::{
 };
 use tokio::sync::mpsc::Receiver;
 
+#[cfg(feature = "blob")]
+pub use crate::traits::blob::BlobPoolExt;
+
+#[path = "traits/blob.rs"]
+#[cfg(feature = "blob")]
+mod blob;
+
 /// The `PeerId` type.
 pub type PeerId = alloy_primitives::B512;
 
@@ -99,6 +104,12 @@ pub type PoolConsensusTx<P> = <<P as TransactionPool>::Transaction as PoolTransa
 
 /// Helper type alias to access [`PoolTransaction::Pooled`] for a given [`TransactionPool`].
 pub type PoolPooledTx<P> = <<P as TransactionPool>::Transaction as PoolTransaction>::Pooled;
+
+#[cfg(not(feature = "blob"))]
+pub trait BlobPoolExt: TransactionPool {}
+
+#[cfg(not(feature = "blob"))]
+impl<T: TransactionPool + ?Sized> BlobPoolExt for T {}
 
 /// General purpose abstraction of a transaction-pool.
 ///
@@ -239,10 +250,6 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn new_transactions_listener(&self) -> Receiver<NewTransactionEvent<Self::Transaction>> {
         self.new_transactions_listener_for(TransactionListenerKind::PropagateOnly)
     }
-
-    /// Returns a new [Receiver] that yields blob "sidecars" (blobs w/ assoc. kzg
-    /// commitments/proofs) for eip-4844 transactions inserted into the pool
-    fn blob_transaction_sidecars_listener(&self) -> Receiver<NewBlobSidecar>;
 
     /// Returns a new stream that yields new valid transactions added to the pool
     /// depending on the given [`TransactionListenerKind`] argument.
@@ -558,46 +565,6 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
 
     /// Returns a set of all senders of transactions in the pool
     fn unique_senders(&self) -> HashSet<Address>;
-
-    /// Returns the [`BlobTransactionSidecarVariant`] for the given transaction hash if it exists in
-    /// the blob store.
-    fn get_blob(
-        &self,
-        tx_hash: TxHash,
-    ) -> Result<Option<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
-
-    /// Returns all [`BlobTransactionSidecarVariant`] for the given transaction hashes if they
-    /// exists in the blob store.
-    ///
-    /// This only returns the blobs that were found in the store.
-    /// If there's no blob it will not be returned.
-    fn get_all_blobs(
-        &self,
-        tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<(TxHash, Arc<BlobTransactionSidecarVariant>)>, BlobStoreError>;
-
-    /// Returns the exact [`BlobTransactionSidecarVariant`] for the given transaction hashes in the
-    /// order they were requested.
-    ///
-    /// Returns an error if any of the blobs are not found in the blob store.
-    fn get_all_blobs_exact(
-        &self,
-        tx_hashes: Vec<TxHash>,
-    ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError>;
-
-    /// Return the [`BlobAndProofV1`]s for a list of blob versioned hashes.
-    fn get_blobs_for_versioned_hashes_v1(
-        &self,
-        versioned_hashes: &[B256],
-    ) -> Result<Vec<Option<BlobAndProofV1>>, BlobStoreError>;
-
-    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
-    /// Blobs and proofs are returned only if they are present for _all_ of the requested versioned
-    /// hashes.
-    fn get_blobs_for_versioned_hashes_v2(
-        &self,
-        versioned_hashes: &[B256],
-    ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.
@@ -627,15 +594,6 @@ pub trait TransactionPoolExt: TransactionPool {
 
     /// Updates the accounts in the pool
     fn update_accounts(&self, accounts: Vec<ChangedAccount>);
-
-    /// Deletes the blob sidecar for the given transaction from the blob store
-    fn delete_blob(&self, tx: B256);
-
-    /// Deletes multiple blob sidecars from the blob store
-    fn delete_blobs(&self, txs: Vec<B256>);
-
-    /// Maintenance function to cleanup blobs that are no longer needed.
-    fn cleanup_blobs(&self);
 }
 
 /// A Helper type that bundles all transactions in the pool.

@@ -82,6 +82,8 @@ metrics.workspace = true
 reth-optimism-chainspec.workspace = true
 
 [features]
+default = ["blob"]
+blob = ["reth-transaction-pool/blob"]
 client = [
     "jsonrpsee/client",
     "jsonrpsee/async-client",

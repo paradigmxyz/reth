@@ -19,7 +19,7 @@ use reth_node_api::EngineTypes;
 use reth_rpc_api::IntoEngineApiRpcModule;
 use reth_rpc_engine_api::EngineApi;
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{BlobPoolExt, TransactionPool};
 use tracing::{debug, info, trace};
 
 /// The list of all supported Engine capabilities available over the engine endpoint.
@@ -269,7 +269,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> OpEngineApiServer<EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = OpExecutionData>,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + BlobPoolExt + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {

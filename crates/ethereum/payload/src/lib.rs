@@ -31,7 +31,7 @@ use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
     error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
-    BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
+    BestTransactions, BestTransactionsAttributes, BlobPoolExt, PoolTransaction, TransactionPool,
     ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
@@ -78,7 +78,8 @@ impl<Pool, Client, EvmConfig> PayloadBuilder for EthereumPayloadBuilder<Pool, Cl
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks> + Clone,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    Pool:
+        TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>> + BlobPoolExt,
 {
     type Attributes = EthPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
@@ -144,7 +145,8 @@ pub fn default_ethereum_payload<EvmConfig, Client, Pool, F>(
 where
     EvmConfig: ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec: EthereumHardforks>,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    Pool:
+        TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>> + BlobPoolExt,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
     let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;

@@ -92,7 +92,8 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
-default = []
+default = ["blob"]
+blob = ["reth-transaction-pool/blob"]
 js-tracer = ["reth-rpc/js-tracer"]
 test-utils = [
     "dep:reth-db",

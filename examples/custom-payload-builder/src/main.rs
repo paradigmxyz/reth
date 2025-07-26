@@ -47,6 +47,7 @@ where
         >,
     >,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + reth_transaction_pool::BlobPoolExt
         + Unpin
         + 'static,
 {

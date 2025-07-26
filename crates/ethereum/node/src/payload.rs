@@ -11,7 +11,7 @@ use reth_node_api::{FullNodeTypes, NodeTypes, PrimitivesTy, TxTy};
 use reth_node_builder::{
     components::PayloadBuilderBuilder, BuilderContext, PayloadBuilderConfig, PayloadTypes,
 };
-use reth_transaction_pool::{PoolTransaction, TransactionPool};
+use reth_transaction_pool::{BlobPoolExt, PoolTransaction, TransactionPool};
 
 /// A basic ethereum payload service.
 #[derive(Clone, Default, Debug)]
@@ -23,6 +23,7 @@ where
     Types: NodeTypes<ChainSpec: EthereumHardforks, Primitives = EthPrimitives>,
     Node: FullNodeTypes<Types = Types>,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>>
+        + BlobPoolExt
         + Unpin
         + 'static,
     Evm: ConfigureEvm<

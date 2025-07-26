@@ -3249,6 +3249,7 @@ dependencies = [
  "futures-util",
  "reqwest",
  "reth-ethereum",
+ "reth-transaction-pool",
  "serde",
  "serde_json",
  "thiserror 2.0.12",
@@ -3341,6 +3342,7 @@ dependencies = [
  "reth-ethereum-payload-builder",
  "reth-payload-builder",
  "reth-tracing",
+ "reth-transaction-pool",
  "reth-trie-db",
  "serde",
  "thiserror 2.0.12",
@@ -3436,6 +3438,7 @@ dependencies = [
  "reth-ethereum",
  "reth-ethereum-payload-builder",
  "reth-payload-builder",
+ "reth-transaction-pool",
  "tracing",
 ]
 

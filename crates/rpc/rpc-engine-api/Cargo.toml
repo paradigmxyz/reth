@@ -56,3 +56,7 @@ alloy-rlp.workspace = true
 reth-node-ethereum.workspace = true
 
 assert_matches.workspace = true
+
+[features]
+default = ["blob"]
+blob = ["reth-transaction-pool/blob"]
