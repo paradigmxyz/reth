@@ -28,7 +28,7 @@ reth-storage-api.workspace = true
 reth-primitives-traits.workspace = true
 
 # async
-tokio = { workspace = true, features = ["fs", "io-util",  "macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt-multi-thread"] }
 futures-util.workspace = true
 
 # errors
