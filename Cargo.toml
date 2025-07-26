@@ -155,6 +155,7 @@ members = [
     "examples/exex-hello-world",
     "examples/exex-subscription",
     "examples/exex-test",
+    "examples/full-contract-state",
     "examples/manual-p2p/",
     "examples/network-txpool/",
     "examples/network/",
