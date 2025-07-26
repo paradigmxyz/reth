@@ -12,7 +12,7 @@ use tracing::info;
 pub struct Metadata {
     /// Total file size
     pub total_size: usize,
-    /// Total file size
+    /// Total downloaded bytes
     pub downloaded: usize,
     /// Download chunk size. Default 150MB.
     pub chunk_size: usize,
@@ -141,7 +141,7 @@ impl MetadataBuilder {
         self
     }
 
-    /// Returns a [Metadata] if
+    /// Returns a [Metadata] if total size is valid
     pub fn build(&self) -> Result<Metadata, DownloaderError> {
         match &self.total_size {
             Some(total_size) if *total_size > 0 => {
@@ -173,7 +173,7 @@ impl MetadataBuilder {
 struct MetadataFile {
     /// Total file size
     total_size: usize,
-    /// Total file size
+    /// Total downloaded bytes
     downloaded: usize,
     /// Download chunk size. Default 150MB.
     chunk_size: usize,
