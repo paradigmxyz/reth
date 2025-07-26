@@ -1,1 +1,268 @@
+---
+description: Complete guide to networks supported by Reth, including Ethereum mainnet, testnets, and OP Stack chains.
+---
+
 # Networks
+
+Reth is a highly versatile Ethereum execution client that supports a wide range of networks. Whether you're running a node on Ethereum mainnet, testing on testnets, or exploring Layer 2 solutions with OP Stack chains, Reth has you covered.
+
+## Supported Network Types
+
+Reth supports three main categories of networks:
+
+1. **[Ethereum Networks](#ethereum-networks)** - Mainnet and official testnets
+2. **[OP Stack Chains](#op-stack-chains)** - Layer 2 solutions including Base, Optimism, and more
+3. **[Development Networks](#development-networks)** - Local development and private testnets
+
+## Ethereum Networks
+
+### Mainnet
+The main Ethereum network where real value transactions occur.
+
+```bash
+# Default behavior - runs on mainnet
+reth node
+
+# Explicitly specify mainnet
+reth node --chain mainnet
+```
+
+### Testnets
+Ethereum testnets provide safe environments for testing applications and smart contracts.
+
+#### Sepolia
+The primary Ethereum testnet, recommended for most development work.
+
+```bash
+reth node --chain sepolia
+```
+
+#### Holesky
+A newer testnet designed for staking and validator testing.
+
+```bash
+reth node --chain holesky
+```
+
+#### Hoodi (Internal Testnet)
+A specialized testnet used for Reth development and testing.
+
+```bash
+reth node --chain hoodi
+```
+
+### Ethereum Networks Summary
+
+| Network | Chain ID | Type | Command | Status |
+|---------|----------|------|---------|--------|
+| Mainnet | 1 | Production | `--chain mainnet` | ✅ Stable |
+| Sepolia | 11155111 | Testnet | `--chain sepolia` | ✅ Stable |
+| Holesky | 17000 | Testnet | `--chain holesky` | ✅ Stable |
+| Hoodi | - | Internal Testnet | `--chain hoodi` | ✅ Stable |
+
+## OP Stack Chains
+
+Reth provides native support for OP Stack (Optimism) Layer 2 networks through the `op-reth` binary. These networks offer faster transactions and lower fees while inheriting Ethereum's security.
+
+### Installation
+First, install `op-reth`:
+
+```bash
+git clone https://github.com/paradigmxyz/reth.git
+cd reth
+make install-op
+```
+
+### Major OP Stack Networks
+
+#### Base
+Base is a secure, low-cost, builder-friendly Ethereum L2 built by Coinbase.
+
+```bash
+# Base Mainnet
+op-reth node --chain base
+
+# Base Sepolia (Testnet)
+op-reth node --chain base-sepolia
+```
+
+#### Optimism
+The original and leading Ethereum L2 solution.
+
+```bash
+# Optimism Mainnet
+op-reth node --chain optimism
+
+# Optimism Sepolia (Testnet)
+op-reth node --chain optimism-sepolia
+```
+
+#### Unichain
+Unichain is designed for DeFi with faster, cheaper transactions.
+
+```bash
+# Unichain Mainnet
+op-reth node --chain unichain
+
+# Unichain Sepolia (Testnet)
+op-reth node --chain unichain-sepolia
+```
+
+#### World Chain
+Worldcoin's dedicated blockchain for identity and financial inclusion.
+
+```bash
+# World Chain Mainnet
+op-reth node --chain worldchain
+
+# World Chain Sepolia (Testnet)
+op-reth node --chain worldchain-sepolia
+```
+
+### Complete OP Stack Networks List
+
+Reth supports all networks in the [Superchain Registry](https://github.com/ethereum-optimism/superchain-registry). Here are the currently supported chains:
+
+| Network | Mainnet Command | Testnet Command | Description |
+|---------|----------------|-----------------|-------------|
+| Base | `--chain base` | `--chain base-sepolia` | Coinbase's L2 |
+| Optimism | `--chain optimism` | `--chain optimism-sepolia` | Original OP Stack L2 |
+| Unichain | `--chain unichain` | `--chain unichain-sepolia` | Uniswap's L2 |
+| World Chain | `--chain worldchain` | `--chain worldchain-sepolia` | Worldcoin's L2 |
+| Zora | `--chain zora` | `--chain zora-sepolia` | NFT-focused L2 |
+| Mode | `--chain mode` | `--chain mode-sepolia` | DeFi-optimized L2 |
+| Cyber | `--chain cyber` | `--chain cyber-sepolia` | Social network L2 |
+| Lisk | `--chain lisk` | `--chain lisk-sepolia` | Application-focused L2 |
+| Metal | `--chain metal` | `--chain metal-sepolia` | Banking-focused L2 |
+| Redstone | `--chain redstone` | - | Gaming-focused L2 |
+| Ink | `--chain ink` | `--chain ink-sepolia` | Creative tools L2 |
+| Mint | `--chain mint` | - | NFT marketplace L2 |
+| Bob | `--chain bob` | - | Bitcoin-focused L2 |
+| Race | `--chain race` | `--chain race-sepolia` | Gaming L2 |
+| Swan | `--chain swan` | - | AI-focused L2 |
+| Swell | `--chain swell` | - | Liquid staking L2 |
+| Lyra | `--chain lyra` | - | Options trading L2 |
+| Snax | `--chain snax` | - | Gaming rewards L2 |
+
+:::info Superchain Support
+Since Reth v1.4.0, all chains in the Superchain Registry are automatically supported. Use `--chain <network-name>` for mainnets or `--chain <network-name>-sepolia` for testnets.
+:::
+
+## Development Networks
+
+### Dev Network
+A local development network perfect for testing and development.
+
+```bash
+reth node --chain dev --dev
+```
+
+The dev network features:
+- Instant block mining
+- Pre-funded accounts
+- No consensus requirements
+- Perfect for local development
+
+### Custom Networks
+You can also run Reth with custom chainspec files:
+
+```bash
+reth node --chain /path/to/custom-chainspec.json
+```
+
+## Network Configuration Examples
+
+### Running with RPC Enabled
+Enable HTTP and WebSocket RPC for interaction with your node:
+
+```bash
+# Ethereum mainnet with RPC
+reth node --chain mainnet --http --ws
+
+# Base with RPC on custom ports
+op-reth node --chain base --http --http.port 8546 --ws --ws.port 8547
+```
+
+### Running Multiple Networks
+Use the `--instance` flag to run multiple nodes without port conflicts:
+
+```bash
+# First instance on mainnet
+reth node --chain mainnet --instance 1
+
+# Second instance on sepolia
+reth node --chain sepolia --instance 2
+```
+
+### Archive vs Full Nodes
+Choose between different sync modes:
+
+```bash
+# Archive node (stores all historical state)
+reth node --chain mainnet
+
+# Full node (prunes old state)
+reth node --chain mainnet --full
+```
+
+## Network-Specific Requirements
+
+### OP Stack Requirements
+When running OP Stack chains, you need:
+
+1. **L1 Node**: An Ethereum L1 node (Reth, Geth, etc.)
+2. **Rollup Node**: Such as `op-node`, `magi`, or `hildr`
+3. **op-reth**: The OP Stack-compatible Reth binary
+
+Example for Base Mainnet:
+
+```bash
+# Start op-reth
+op-reth node --chain base \
+  --rollup.sequencer-http https://mainnet-sequencer.base.org
+
+# Start rollup node (op-node example)
+op-node \
+  --l1=<your-l1-node-url> \
+  --l2=http://localhost:8551 \
+  --network=base-mainnet
+```
+
+## Useful Commands
+
+### View Supported Chains
+```bash
+# For Ethereum networks
+reth node --help | grep -A 10 "chain"
+
+# For OP Stack networks
+op-reth node --help | grep -A 10 "chain"
+```
+
+### Check Chain Information
+```bash
+# Dump genesis configuration
+reth dump-genesis --chain sepolia
+
+# For OP Stack chains
+op-reth dump-genesis --chain base
+```
+
+### Network Status Verification
+```bash
+# Check node status via RPC
+curl -X POST -H "Content-Type: application/json" \
+  --data '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' \
+  http://localhost:8545
+```
+
+## Getting Help
+
+- For Ethereum network issues, see the [Ethereum documentation](/run/ethereum)
+- For OP Stack network issues, see the [OP Stack documentation](/run/opstack)
+- For development setup, see [Private testnets](/run/private-testnets)
+- Join the [Reth Discord](https://discord.gg/TYWjN8LbqJ) for community support
+
+:::tip Contributing
+Found a network that Reth supports but isn't listed here? Feel free to [contribute](https://github.com/paradigmxyz/reth/edit/main/docs/vocs/docs/pages/run/networks.mdx) by submitting a PR to update this documentation!
+:::
