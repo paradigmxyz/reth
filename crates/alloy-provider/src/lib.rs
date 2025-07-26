@@ -1068,18 +1068,6 @@ where
     }
 }
 
-impl<P, Node, N> reth_storage_api::HashedPostStateProvider for AlloyRethStateProvider<P, Node, N>
-where
-    P: Provider<N> + Clone + 'static,
-    N: Network,
-    Node: NodeTypes,
-{
-    fn hashed_post_state(&self, _bundle_state: &revm::database::BundleState) -> HashedPostState {
-        // Return empty hashed post state for RPC provider
-        HashedPostState::default()
-    }
-}
-
 impl<P, Node, N> StateReader for AlloyRethStateProvider<P, Node, N>
 where
     P: Provider<N> + Clone + 'static,

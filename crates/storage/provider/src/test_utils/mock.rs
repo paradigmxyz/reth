@@ -29,8 +29,8 @@ use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader,
-    StateCommitmentProvider, StateProofProvider, StorageRootProvider,
+    NodePrimitivesProvider, StageCheckpointReader, StateCommitmentProvider, StateProofProvider,
+    StorageRootProvider,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -851,14 +851,6 @@ where
 
     fn witness(&self, _input: TrieInput, _target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         Ok(Vec::default())
-    }
-}
-
-impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> HashedPostStateProvider
-    for MockEthProvider<T, ChainSpec>
-{
-    fn hashed_post_state(&self, _state: &revm_database::BundleState) -> HashedPostState {
-        HashedPostState::default()
     }
 }
 
