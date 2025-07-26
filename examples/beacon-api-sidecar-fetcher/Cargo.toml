@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 reth-ethereum = { workspace = true, features = ["node", "pool", "cli"] }
+reth-transaction-pool.workspace = true
 
 alloy-rpc-types-beacon.workspace = true
 alloy-primitives.workspace = true
@@ -20,3 +21,7 @@ reqwest.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+
+[features]
+default = ["blob"]
+blob = ["reth-transaction-pool/blob"]

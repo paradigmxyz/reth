@@ -88,13 +88,14 @@ futures.workspace = true
 alloy-eips.workspace = true
 
 [features]
-default = ["reth-codec"]
+default = ["blob", "reth-codec"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-optimism-node/asm-keccak",
     "reth-node-core/asm-keccak",
     "revm/asm-keccak",
 ]
+blob = ["reth-transaction-pool/blob"]
 js-tracer = ["reth-node-builder/js-tracer"]
 test-utils = [
     "reth-tasks",

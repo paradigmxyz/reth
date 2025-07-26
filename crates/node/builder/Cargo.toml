@@ -87,7 +87,8 @@ tracing.workspace = true
 tempfile.workspace = true
 
 [features]
-default = []
+default = ["blob"]
+blob = ["reth-transaction-pool/blob"]
 js-tracer = ["reth-rpc/js-tracer"]
 test-utils = [
     "dep:reth-db",

@@ -39,3 +39,7 @@ alloy-primitives.workspace = true
 
 # misc
 tracing.workspace = true
+
+[features]
+default = ["blob"]
+blob = ["reth-transaction-pool/blob"]

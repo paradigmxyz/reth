@@ -28,6 +28,7 @@ where
         >,
     >,
     EV: EngineValidatorBuilder<N>,
+    <N as FullNodeComponents>::Pool: reth_transaction_pool::BlobPoolExt,
 {
     type EngineApi = OpEngineApi<
         N::Provider,
@@ -37,7 +38,12 @@ where
         <N::Types as NodeTypes>::ChainSpec,
     >;
 
-    async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi> {
+    async fn build_engine_api(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::EngineApi>
+    where
+        N: FullNodeComponents,
+        EV: EngineValidatorBuilder<N>,
+        <N as FullNodeComponents>::Pool: reth_transaction_pool::BlobPoolExt,
+    {
         let Self { engine_validator_builder } = self;
 
         let engine_validator = engine_validator_builder.build(ctx).await?;

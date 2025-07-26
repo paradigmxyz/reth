@@ -61,6 +61,7 @@ use reth_ethereum::{
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
 use reth_tracing::{RethTracer, Tracer};
+use reth_transaction_pool::BlobPoolExt;
 use reth_trie_db::MerklePatriciaTrie;
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
@@ -335,6 +336,7 @@ where
         >,
     >,
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>
+        + BlobPoolExt
         + Unpin
         + 'static,
 {
@@ -368,7 +370,8 @@ pub struct CustomPayloadBuilder<Pool, Client> {
 impl<Pool, Client> PayloadBuilder for CustomPayloadBuilder<Pool, Client>
 where
     Client: StateProviderFactory + ChainSpecProvider<ChainSpec = ChainSpec> + Clone,
-    Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
+    Pool:
+        TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>> + BlobPoolExt,
 {
     type Attributes = CustomPayloadBuilderAttributes;
     type BuiltPayload = EthBuiltPayload;
