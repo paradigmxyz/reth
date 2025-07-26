@@ -11,7 +11,7 @@ use crate::{
 
 #[cfg(feature = "db-api")]
 use crate::{DBProvider, DatabaseProviderFactory};
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
@@ -39,7 +39,6 @@ use reth_trie_common::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use std::collections::BTreeMap;
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug)]
