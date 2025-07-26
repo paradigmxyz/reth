@@ -4,14 +4,13 @@ use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, Stora
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, BytecodeReader, StateProofProvider, StateProvider,
+    StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
-use revm_database::BundleState;
 use std::sync::OnceLock;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
@@ -199,12 +198,6 @@ impl<N: NodePrimitives> StateProofProvider for MemoryOverlayStateProviderRef<'_,
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
         input.prepend_self(self.trie_input().clone());
         self.historical.witness(input, target)
-    }
-}
-
-impl<N: NodePrimitives> HashedPostStateProvider for MemoryOverlayStateProviderRef<'_, N> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState {
-        self.historical.hashed_post_state(bundle_state)
     }
 }
 

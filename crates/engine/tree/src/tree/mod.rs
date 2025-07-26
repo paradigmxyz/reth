@@ -38,13 +38,12 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     providers::ConsistentDbView, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    ExecutionOutcome, HashedPostStateProvider, ProviderError, StateCommitmentProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateReader, StateRootProvider,
-    TransactionVariant,
+    ExecutionOutcome, ProviderError, StateCommitmentProvider, StateProvider, StateProviderBox,
+    StateProviderFactory, StateReader, StateRootProvider, TransactionVariant,
 };
 use reth_revm::{database::StateProviderDatabase, State};
 use reth_stages_api::ControlFlow;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use state::TreeState;
@@ -317,7 +316,6 @@ where
         + StateProviderFactory
         + StateReader<Receipt = N::Receipt>
         + StateCommitmentProvider
-        + HashedPostStateProvider
         + Clone
         + 'static,
     <P as DatabaseProviderFactory>::Provider:
@@ -1528,7 +1526,8 @@ where
             .provider
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
-        let hashed_state = self.provider.hashed_post_state(execution_output.state());
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(execution_output.state().state());
 
         Ok(Some(ExecutedBlock {
             recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
@@ -2283,7 +2282,8 @@ where
             return Err((err.into(), block))
         }
 
-        let hashed_state = self.provider.hashed_post_state(&output.state);
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
 
         if let Err(err) = self
             .payload_validator
