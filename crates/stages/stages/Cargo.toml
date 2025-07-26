@@ -76,7 +76,6 @@ reth-execution-errors.workspace = true
 reth-consensus = { workspace = true, features = ["test-utils"] }
 reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
-reth-revm.workspace = true
 reth-static-file.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
@@ -87,7 +86,7 @@ reth-tracing.workspace = true
 
 alloy-primitives = { workspace = true, features = ["getrandom", "rand"] }
 alloy-rlp.workspace = true
-itertools.workspace = true
+
 tokio = { workspace = true, features = ["rt", "sync", "macros"] }
 assert_matches.workspace = true
 rand.workspace = true
