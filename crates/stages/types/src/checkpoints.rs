@@ -1,6 +1,6 @@
 use super::StageId;
 use alloc::{format, string::String, vec::Vec};
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_primitives::{Address, BlockNumber, B256, U256};
 use core::ops::RangeInclusive;
 use reth_trie_common::{hash_builder::HashBuilderState, StoredSubNode};
 
@@ -15,6 +15,8 @@ pub struct MerkleCheckpoint {
     pub walker_stack: Vec<StoredSubNode>,
     /// The hash builder state.
     pub state: HashBuilderState,
+    /// Optional storage root checkpoint for the last processed account.
+    pub storage_root_checkpoint: Option<StorageRootMerkleCheckpoint>,
 }
 
 impl MerkleCheckpoint {
@@ -25,7 +27,7 @@ impl MerkleCheckpoint {
         walker_stack: Vec<StoredSubNode>,
         state: HashBuilderState,
     ) -> Self {
-        Self { target_block, last_account_key, walker_stack, state }
+        Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint: None }
     }
 }
 
@@ -50,6 +52,22 @@ impl reth_codecs::Compact for MerkleCheckpoint {
         }
 
         len += self.state.to_compact(buf);
+
+        // Encode the optional storage root checkpoint
+        match &self.storage_root_checkpoint {
+            Some(checkpoint) => {
+                // one means Some
+                buf.put_u8(1);
+                len += 1;
+                len += checkpoint.to_compact(buf);
+            }
+            None => {
+                // zero means None
+                buf.put_u8(0);
+                len += 1;
+            }
+        }
+
         len
     }
 
@@ -68,8 +86,133 @@ impl reth_codecs::Compact for MerkleCheckpoint {
             buf = rest;
         }
 
-        let (state, buf) = HashBuilderState::from_compact(buf, 0);
-        (Self { target_block, last_account_key, walker_stack, state }, buf)
+        let (state, mut buf) = HashBuilderState::from_compact(buf, 0);
+
+        // Decode the storage root checkpoint if it exists
+        let (storage_root_checkpoint, buf) = if buf.is_empty() {
+            (None, buf)
+        } else {
+            match buf.get_u8() {
+                1 => {
+                    let (checkpoint, rest) = StorageRootMerkleCheckpoint::from_compact(buf, 0);
+                    (Some(checkpoint), rest)
+                }
+                _ => (None, buf),
+            }
+        };
+
+        (Self { target_block, last_account_key, walker_stack, state, storage_root_checkpoint }, buf)
+    }
+}
+
+/// Saves the progress of a storage root computation.
+///
+/// This contains the walker stack, hash builder state, and the last storage key processed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageRootMerkleCheckpoint {
+    /// The last storage key processed.
+    pub last_storage_key: B256,
+    /// Previously recorded walker stack.
+    pub walker_stack: Vec<StoredSubNode>,
+    /// The hash builder state.
+    pub state: HashBuilderState,
+    /// The account nonce.
+    pub account_nonce: u64,
+    /// The account balance.
+    pub account_balance: U256,
+    /// The account bytecode hash.
+    pub account_bytecode_hash: B256,
+}
+
+impl StorageRootMerkleCheckpoint {
+    /// Creates a new storage root merkle checkpoint.
+    pub const fn new(
+        last_storage_key: B256,
+        walker_stack: Vec<StoredSubNode>,
+        state: HashBuilderState,
+        account_nonce: u64,
+        account_balance: U256,
+        account_bytecode_hash: B256,
+    ) -> Self {
+        Self {
+            last_storage_key,
+            walker_stack,
+            state,
+            account_nonce,
+            account_balance,
+            account_bytecode_hash,
+        }
+    }
+}
+
+#[cfg(any(test, feature = "reth-codec"))]
+impl reth_codecs::Compact for StorageRootMerkleCheckpoint {
+    fn to_compact<B>(&self, buf: &mut B) -> usize
+    where
+        B: bytes::BufMut + AsMut<[u8]>,
+    {
+        let mut len = 0;
+
+        buf.put_slice(self.last_storage_key.as_slice());
+        len += self.last_storage_key.len();
+
+        buf.put_u16(self.walker_stack.len() as u16);
+        len += 2;
+        for item in &self.walker_stack {
+            len += item.to_compact(buf);
+        }
+
+        len += self.state.to_compact(buf);
+
+        // Encode account fields
+        buf.put_u64(self.account_nonce);
+        len += 8;
+
+        let balance_len = self.account_balance.byte_len() as u8;
+        buf.put_u8(balance_len);
+        len += 1;
+        len += self.account_balance.to_compact(buf);
+
+        buf.put_slice(self.account_bytecode_hash.as_slice());
+        len += 32;
+
+        len
+    }
+
+    fn from_compact(mut buf: &[u8], _len: usize) -> (Self, &[u8]) {
+        use bytes::Buf;
+
+        let last_storage_key = B256::from_slice(&buf[..32]);
+        buf.advance(32);
+
+        let walker_stack_len = buf.get_u16() as usize;
+        let mut walker_stack = Vec::with_capacity(walker_stack_len);
+        for _ in 0..walker_stack_len {
+            let (item, rest) = StoredSubNode::from_compact(buf, 0);
+            walker_stack.push(item);
+            buf = rest;
+        }
+
+        let (state, mut buf) = HashBuilderState::from_compact(buf, 0);
+
+        // Decode account fields
+        let account_nonce = buf.get_u64();
+        let balance_len = buf.get_u8() as usize;
+        let (account_balance, mut buf) = U256::from_compact(buf, balance_len);
+        let account_bytecode_hash = B256::from_slice(&buf[..32]);
+        buf.advance(32);
+
+        (
+            Self {
+                last_storage_key,
+                walker_stack,
+                state,
+                account_nonce,
+                account_balance,
+                account_bytecode_hash,
+            },
+            buf,
+        )
     }
 }
 
@@ -407,6 +550,7 @@ stage_unit_checkpoints!(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::b256;
     use rand::Rng;
     use reth_codecs::Compact;
 
@@ -422,6 +566,68 @@ mod tests {
                 node: None,
             }],
             state: HashBuilderState::default(),
+            storage_root_checkpoint: None,
+        };
+
+        let mut buf = Vec::new();
+        let encoded = checkpoint.to_compact(&mut buf);
+        let (decoded, _) = MerkleCheckpoint::from_compact(&buf, encoded);
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn storage_root_merkle_checkpoint_roundtrip() {
+        let mut rng = rand::rng();
+        let checkpoint = StorageRootMerkleCheckpoint {
+            last_storage_key: rng.random(),
+            walker_stack: vec![StoredSubNode {
+                key: B256::random_with(&mut rng).to_vec(),
+                nibble: Some(rng.random()),
+                node: None,
+            }],
+            state: HashBuilderState::default(),
+            account_nonce: 0,
+            account_balance: U256::ZERO,
+            account_bytecode_hash: B256::ZERO,
+        };
+
+        let mut buf = Vec::new();
+        let encoded = checkpoint.to_compact(&mut buf);
+        let (decoded, _) = StorageRootMerkleCheckpoint::from_compact(&buf, encoded);
+        assert_eq!(decoded, checkpoint);
+    }
+
+    #[test]
+    fn merkle_checkpoint_with_storage_root_roundtrip() {
+        let mut rng = rand::rng();
+
+        // Create a storage root checkpoint
+        let storage_checkpoint = StorageRootMerkleCheckpoint {
+            last_storage_key: rng.random(),
+            walker_stack: vec![StoredSubNode {
+                key: B256::random_with(&mut rng).to_vec(),
+                nibble: Some(rng.random()),
+                node: None,
+            }],
+            state: HashBuilderState::default(),
+            account_nonce: 1,
+            account_balance: U256::from(1),
+            account_bytecode_hash: b256!(
+                "0x0fffffffffffffffffffffffffffffff0fffffffffffffffffffffffffffffff"
+            ),
+        };
+
+        // Create a merkle checkpoint with the storage root checkpoint
+        let checkpoint = MerkleCheckpoint {
+            target_block: rng.random(),
+            last_account_key: rng.random(),
+            walker_stack: vec![StoredSubNode {
+                key: B256::random_with(&mut rng).to_vec(),
+                nibble: Some(rng.random()),
+                node: None,
+            }],
+            state: HashBuilderState::default(),
+            storage_root_checkpoint: Some(storage_checkpoint),
         };
 
         let mut buf = Vec::new();
