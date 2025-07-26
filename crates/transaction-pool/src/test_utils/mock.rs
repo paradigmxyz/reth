@@ -799,21 +799,24 @@ impl alloy_consensus::Transaction for MockTransaction {
     }
 
     fn effective_gas_price(&self, base_fee: Option<u64>) -> u128 {
-        base_fee.map_or(self.max_fee_per_gas(), |base_fee| {
-            // if the tip is greater than the max priority fee per gas, set it to the max
-            // priority fee per gas + base fee
-            let tip = self.max_fee_per_gas().saturating_sub(base_fee as u128);
-            if let Some(max_tip) = self.max_priority_fee_per_gas() {
-                if tip > max_tip {
-                    max_tip + base_fee as u128
+        base_fee.map_or_else(
+            || self.max_fee_per_gas(),
+            |base_fee| {
+                // if the tip is greater than the max priority fee per gas, set it to the max
+                // priority fee per gas + base fee
+                let tip = self.max_fee_per_gas().saturating_sub(base_fee as u128);
+                if let Some(max_tip) = self.max_priority_fee_per_gas() {
+                    if tip > max_tip {
+                        max_tip + base_fee as u128
+                    } else {
+                        // otherwise return the max fee per gas
+                        self.max_fee_per_gas()
+                    }
                 } else {
-                    // otherwise return the max fee per gas
                     self.max_fee_per_gas()
                 }
-            } else {
-                self.max_fee_per_gas()
-            }
-        })
+            },
+        )
     }
 
     fn is_dynamic_fee(&self) -> bool {
