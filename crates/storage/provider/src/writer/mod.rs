@@ -1083,6 +1083,7 @@ mod tests {
             receipts: vec![vec![Receipt::default(); 2]; 7],
             first_block: 10,
             requests: Vec::new(),
+            snapshots: Vec::new(),
         };
 
         let mut this = base.clone();
@@ -1304,6 +1305,7 @@ mod tests {
             receipts: vec![vec![Receipt::default(); 2]; 1],
             first_block: 2,
             requests: Vec::new(),
+            snapshots: Vec::new(),
         };
 
         test.prepend_state(previous_state);

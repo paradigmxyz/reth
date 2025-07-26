@@ -16,7 +16,8 @@ use reth_ethereum_primitives::TransactionSigned;
 use reth_primitives_traits::{Block, SignedTransaction};
 
 /// This informs peers of new blocks that have appeared on the network.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper, Default)]
+// Removed `RlpDecodableWrapper` derive to provide custom tolerant decoder for BSC extended
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
@@ -37,6 +38,47 @@ impl NewBlockHashes {
             }
             Some(block)
         })
+    }
+}
+
+// --- tolerant RLP decoding for BSC ---
+use bytes::Buf as _;
+use alloy_rlp::{Header as RlpHeader, Error as RlpError};
+
+impl Decodable for NewBlockHashes {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        // Decode outer list header
+        let header = RlpHeader::decode(buf)?;
+        if !header.list {
+            return Err(RlpError::UnexpectedString);
+        }
+
+        let mut payload = &buf[..header.payload_length];
+        let mut items = Vec::new();
+
+        while !payload.is_empty() {
+            // Each entry is itself a list (hash, number, ...optional fields)
+            let entry_header = RlpHeader::decode(&mut payload)?;
+            if !entry_header.list {
+                return Err(RlpError::UnexpectedString);
+            }
+
+            let mut entry_buf = &payload[..entry_header.payload_length];
+
+            let hash = B256::decode(&mut entry_buf)?;
+            let number = u64::decode(&mut entry_buf)?;
+            // Ignore any extra fields BSC might append (e.g. timestamp, proposer)
+
+            items.push(BlockHashNumber { hash, number });
+
+            // Advance payload past this entry
+            payload.advance(entry_header.payload_length);
+        }
+
+        // Advance original buffer past outer list
+        buf.advance(header.payload_length);
+
+        Ok(NewBlockHashes(items))
     }
 }
 
@@ -77,7 +119,8 @@ pub trait NewBlockPayload:
 
 /// A new block with the current total difficulty, which includes the difficulty of the returned
 /// block.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable, Default)]
+// Custom tolerant decoder -> remove derived Decodable
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 pub struct NewBlock<B = reth_ethereum_primitives::Block> {
@@ -92,6 +135,29 @@ impl<B: Block + 'static> NewBlockPayload for NewBlock<B> {
 
     fn block(&self) -> &Self::Block {
         &self.block
+    }
+}
+
+impl<B> Decodable for NewBlock<B>
+where
+    B: Block + Decodable,
+{
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let header = RlpHeader::decode(buf)?;
+        if !header.list {
+            return Err(RlpError::UnexpectedString);
+        }
+
+        let mut payload = &buf[..header.payload_length];
+
+        let block = B::decode(&mut payload)?;
+        let td = U128::decode(&mut payload)?;
+        // Ignore any extra trailing fields (e.g. sidecars)
+
+        // Advance original buf
+        buf.advance(header.payload_length);
+
+        Ok(NewBlock { block, td })
     }
 }
 

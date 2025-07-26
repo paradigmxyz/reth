@@ -11,6 +11,8 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+tracing.workspace = true
+
 # reth
 reth-chainspec.workspace = true
 reth-consensus.workspace = true
