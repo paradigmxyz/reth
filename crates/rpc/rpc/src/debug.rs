@@ -1,7 +1,7 @@
 use alloy_consensus::{transaction::SignerRecoverable, BlockHeader};
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{uint, Address, Bytes, B256};
+use alloy_primitives::{uint, Address, Bytes, StorageKey, StorageValue, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
@@ -34,7 +34,7 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProviderFactory, StateRootProvider, StorageReader, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
@@ -1265,13 +1265,24 @@ where
 
     async fn debug_storage_range_at(
         &self,
-        _block_hash: B256,
+        block_hash: B256,
         _tx_idx: usize,
-        _contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
-    ) -> RpcResult<()> {
-        Ok(())
+        contract_address: Address,
+        key_start: B256,
+        max_result: u64,
+    ) -> RpcResult<(Vec<(B256, StorageKey, StorageValue)>, Option<B256>)> {
+        let state_provider =
+            self.provider().state_by_block_hash(block_hash).map_err(|e| EthApiError::from(e))?;
+
+        let _account =
+            state_provider.basic_account(&contract_address).map_err(|e| EthApiError::from(e))?;
+
+        let result = self
+            .provider()
+            .storage_range_at(contract_address, key_start, max_result)
+            .map_err(|e| EthApiError::from(e))?;
+
+        Ok(result)
     }
 
     async fn debug_trace_bad_block(

@@ -1240,6 +1240,41 @@ impl<N: ProviderNodeTypes> ChainSpecProvider for ConsistentProvider<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> crate::StorageReader for ConsistentProvider<N> {
+    fn plain_state_storages(
+        &self,
+        addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
+    ) -> ProviderResult<Vec<(Address, Vec<reth_primitives_traits::StorageEntry>)>> {
+        self.storage_provider.plain_state_storages(addresses_with_keys)
+    }
+
+    fn changed_storages_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<Address, std::collections::BTreeSet<B256>>> {
+        self.storage_provider.changed_storages_with_range(range)
+    }
+
+    fn changed_storages_and_blocks_with_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<(Address, B256), Vec<u64>>> {
+        self.storage_provider.changed_storages_and_blocks_with_range(range)
+    }
+
+    fn storage_range_at(
+        &self,
+        _contract_address: Address,
+        _key_start: B256,
+        _max_result: u64,
+    ) -> ProviderResult<(
+        Vec<(B256, alloy_primitives::StorageKey, alloy_primitives::StorageValue)>,
+        Option<B256>,
+    )> {
+        self.storage_provider.storage_range_at(_contract_address, _key_start, _max_result)
+    }
+}
+
 impl<N: ProviderNodeTypes> BlockReaderIdExt for ConsistentProvider<N> {
     fn block_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Block>> {
         match id {

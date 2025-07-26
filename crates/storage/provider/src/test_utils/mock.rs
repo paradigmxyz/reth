@@ -199,6 +199,40 @@ impl Default for MockEthProvider {
     }
 }
 
+impl<T: NodePrimitives, ChainSpec: Send + Sync> reth_storage_api::StorageReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn plain_state_storages(
+        &self,
+        _addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
+    ) -> ProviderResult<Vec<(Address, Vec<reth_primitives_traits::StorageEntry>)>> {
+        Ok(Vec::new())
+    }
+
+    fn changed_storages_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<Address, std::collections::BTreeSet<B256>>> {
+        Ok(BTreeMap::new())
+    }
+
+    fn changed_storages_and_blocks_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<(Address, B256), Vec<u64>>> {
+        Ok(BTreeMap::new())
+    }
+
+    fn storage_range_at(
+        &self,
+        _contract_address: Address,
+        _key_start: B256,
+        _max_result: u64,
+    ) -> ProviderResult<(Vec<(B256, StorageKey, StorageValue)>, Option<B256>)> {
+        Ok((Vec::new(), None))
+    }
+}
+
 /// An extended account for local store
 #[derive(Debug, Clone)]
 pub struct ExtendedAccount {
