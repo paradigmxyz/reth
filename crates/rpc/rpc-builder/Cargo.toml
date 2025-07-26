@@ -52,10 +52,7 @@ alloy-provider = { workspace = true, features = ["ws", "ipc"] }
 alloy-network.workspace = true
 
 [dev-dependencies]
-reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
-reth-chainspec.workspace = true
-reth-network-api.workspace = true
 reth-network-peers.workspace = true
 reth-evm-ethereum.workspace = true
 reth-ethereum-engine-primitives.workspace = true
@@ -76,6 +73,5 @@ alloy-rpc-types-trace.workspace = true
 alloy-eips.workspace = true
 alloy-rpc-types-engine.workspace = true
 
-tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }

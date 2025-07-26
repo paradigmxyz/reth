@@ -66,10 +66,7 @@ reth-tracing.workspace = true
 
 assert_matches.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-alloy-rlp.workspace = true
-itertools.workspace = true
 rand.workspace = true
-
 tempfile.workspace = true
 
 [features]
