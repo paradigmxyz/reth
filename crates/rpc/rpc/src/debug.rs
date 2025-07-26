@@ -34,7 +34,7 @@ use reth_rpc_eth_types::{EthApiError, StateCacheDb};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
-    StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
+    StateProofProvider, StateProviderFactory, StateRootProvider, StorageReader, TransactionVariant,
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
@@ -1268,14 +1268,21 @@ where
         block_hash: B256,
         _tx_idx: usize,
         contract_address: Address,
-        _key_start: B256,
-        _max_result: u64,
+        key_start: B256,
+        max_result: u64,
     ) -> RpcResult<(Vec<(B256, StorageKey, StorageValue)>, Option<B256>)> {
-        let state_provider = self.provider().state_by_block_hash(block_hash);
+        let state_provider =
+            self.provider().state_by_block_hash(block_hash).map_err(|e| EthApiError::from(e))?;
 
-        let _account = state_provider.unwrap().basic_account(&contract_address).unwrap().unwrap();
+        let _account =
+            state_provider.basic_account(&contract_address).map_err(|e| EthApiError::from(e))?;
 
-        Ok((Vec::new(), None))
+        let result = self
+            .provider()
+            .storage_range_at(contract_address, key_start, max_result)
+            .map_err(|e| EthApiError::from(e))?;
+
+        Ok(result)
     }
 
     async fn debug_trace_bad_block(

@@ -5,8 +5,8 @@ use crate::{
     BlockReader, BlockReaderIdExt, BlockSource, BytecodeReader, ChangeSetReader,
     HashedPostStateProvider, HeaderProvider, NodePrimitivesProvider, PruneCheckpointReader,
     ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProofProvider,
-    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageRootProvider,
-    TransactionVariant, TransactionsProvider,
+    StateProvider, StateProviderBox, StateProviderFactory, StateRootProvider, StorageReader,
+    StorageRootProvider, TransactionVariant, TransactionsProvider,
 };
 
 #[cfg(feature = "db-api")]
@@ -27,7 +27,9 @@ use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, MAINNET};
 use reth_db_api::mock::{DatabaseMock, TxMock};
 use reth_db_models::{AccountBeforeTx, StoredBlockBodyIndices};
 use reth_ethereum_primitives::EthPrimitives;
-use reth_primitives_traits::{Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader};
+use reth_primitives_traits::{
+    Account, Bytecode, NodePrimitives, RecoveredBlock, SealedHeader, StorageEntry,
+};
 #[cfg(feature = "db-api")]
 use reth_prune_types::PruneModes;
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
@@ -37,6 +39,7 @@ use reth_trie_common::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
+use std::collections::BTreeMap;
 
 /// Supports various api interfaces for testing purposes.
 #[derive(Debug)]
@@ -235,6 +238,39 @@ impl<C: Send + Sync, N: NodePrimitives> BlockReader for NoopProvider<C, N> {
         _range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         Ok(Vec::new())
+    }
+}
+
+impl StorageReader for NoopProvider {
+    fn plain_state_storages(
+        &self,
+        _addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
+    ) -> ProviderResult<Vec<(Address, Vec<StorageEntry>)>> {
+        Ok(Vec::new())
+    }
+
+    fn changed_storages_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<alloc::collections::BTreeMap<Address, alloc::collections::BTreeSet<B256>>>
+    {
+        Ok(BTreeMap::new())
+    }
+
+    fn changed_storages_and_blocks_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<alloc::collections::BTreeMap<(Address, B256), Vec<u64>>> {
+        Ok(BTreeMap::new())
+    }
+
+    fn storage_range_at(
+        &self,
+        _contract_address: Address,
+        _key_start: B256,
+        _max_result: u64,
+    ) -> ProviderResult<(Vec<(B256, StorageKey, StorageValue)>, Option<B256>)> {
+        Ok((Vec::new(), None))
     }
 }
 
