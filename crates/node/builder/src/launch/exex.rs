@@ -10,7 +10,7 @@ use reth_exex::{
 };
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_provider::CanonStateSubscriptions;
-use reth_tracing::tracing::{debug, info, error};
+use reth_tracing::tracing::{debug, error, info};
 use std::{fmt, fmt::Debug};
 use tracing::Instrument;
 
