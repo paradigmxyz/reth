@@ -4,8 +4,9 @@ use crate::{execute::Executor, Database, OnStateHook};
 
 // re-export Either
 pub use futures_util::future::Either;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_execution_types::{BlockExecutionInput, BlockExecutionOutput, BlockExecutionResult};
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{NodePrimitives, Recovered, RecoveredBlock};
 
 impl<A, B, DB> Executor<DB> for Either<A, B>
 where
@@ -77,6 +78,18 @@ where
         match self {
             Self::Left(a) => a.size_hint(),
             Self::Right(b) => b.size_hint(),
+        }
+    }
+
+    fn validate_block_inclusion_list(
+        &mut self,
+        block: &RecoveredBlock<<Self::Primitives as NodePrimitives>::Block>,
+        exec_output: &BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>,
+        il: impl AsRef<[Recovered<TransactionSigned>]>,
+    ) -> Result<(), Self::Error> {
+        match self {
+            Self::Left(a) => a.validate_block_inclusion_list(block, exec_output, il),
+            Self::Right(b) => b.validate_block_inclusion_list(block, exec_output, il),
         }
     }
 }
