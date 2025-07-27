@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn test_precompile_cache_basic() {
         let dyn_precompile: DynPrecompile = |_input: PrecompileInput<'_>| -> PrecompileResult {
-            Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default() })
+            Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default(), reverted: false })
         }
         .into();
 
@@ -276,6 +276,7 @@ mod tests {
         let output = PrecompileOutput {
             gas_used: 50,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
+            reverted: false,
         };
 
         let key = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
@@ -307,6 +308,7 @@ mod tests {
                 Ok(PrecompileOutput {
                     gas_used: 5000,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
+                    reverted: false,
                 })
             }
         }
@@ -320,6 +322,7 @@ mod tests {
                 Ok(PrecompileOutput {
                     gas_used: 7000,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
+                    reverted: false,
                 })
             }
         }
