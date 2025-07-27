@@ -5,10 +5,10 @@
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
 use reth_revm::{database::StateProviderDatabase, DatabaseRef};
-use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider};
+use reth_storage_api::{BytecodeReader, StateProvider};
 use reth_trie::{HashedStorage, MultiProofTargets};
 use revm::{
-    database::{BundleState, CacheDB},
+    database::CacheDB,
     primitives::HashMap,
     state::{AccountInfo, Bytecode},
     Database, DatabaseCommit,
@@ -137,12 +137,6 @@ impl reth_storage_api::BlockHashReader for StateProviderTraitObjWrapper<'_> {
         end: alloy_primitives::BlockNumber,
     ) -> reth_errors::ProviderResult<Vec<B256>> {
         self.0.canonical_hashes_range(start, end)
-    }
-}
-
-impl HashedPostStateProvider for StateProviderTraitObjWrapper<'_> {
-    fn hashed_post_state(&self, bundle_state: &BundleState) -> reth_trie::HashedPostState {
-        self.0.hashed_post_state(bundle_state)
     }
 }
 

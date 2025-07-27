@@ -26,11 +26,11 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
-    HashedPostStateProvider, HeaderProvider, ProviderError, StateCommitmentProvider, StateProvider,
-    StateProviderFactory, StateReader,
+    HeaderProvider, ProviderError, StateCommitmentProvider, StateProvider, StateProviderFactory,
+    StateReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
+use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
@@ -196,7 +196,6 @@ where
         + StateProviderFactory
         + StateReader
         + StateCommitmentProvider
-        + HashedPostStateProvider
         + HeaderProvider<Header = N::BlockHeader>
         + Clone
         + 'static,
@@ -336,7 +335,8 @@ where
         }
 
         // Compute hashed post state
-        let hashed_state = self.provider.hashed_post_state(&output.state);
+        let hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(output.state.state());
 
         debug!(target: "engine::tree", block=?block.num_hash(), "Calculating block state root");
 

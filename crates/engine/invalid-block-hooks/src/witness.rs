@@ -10,7 +10,7 @@ use reth_provider::{BlockExecutionOutput, ChainSpecProvider, StateProviderFactor
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::AccountInfo};
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedStorage};
+use reth_trie::{updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher};
 use revm_bytecode::Bytecode;
 use revm_database::states::{
     reverts::{AccountInfoRevert, RevertToSlot},
@@ -190,7 +190,8 @@ where
         //
         // Note: We grab *all* accounts in the cache here, as the `BundleState` prunes
         // referenced accounts + storage slots.
-        let mut hashed_state = db.database.hashed_post_state(&bundle_state);
+        let mut hashed_state =
+            HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state());
         for (address, account) in db.cache.accounts {
             let hashed_address = keccak256(address);
             hashed_state

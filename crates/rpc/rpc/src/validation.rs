@@ -36,6 +36,7 @@ use reth_rpc_api::BlockSubmissionValidationApiServer;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -205,8 +206,9 @@ where
 
         self.ensure_payment(&block, &output, &message)?;
 
-        let state_root =
-            state_provider.state_root(state_provider.hashed_post_state(&output.state))?;
+        let state_root = state_provider.state_root(HashedPostState::from_bundle_state::<
+            KeccakKeyHasher,
+        >(output.state.state()))?;
 
         if state_root != block.header().state_root() {
             return Err(ConsensusError::BodyStateRootDiff(
