@@ -395,11 +395,11 @@ pub enum ConsensusError {
         /// The block's timestamp.
         timestamp: u64,
     },
-    
+
     /// Error when the block does not comply with the inclusion list (IL).
     #[error("block did not satisfy inclusion list")]
     InclusionList,
-    
+
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),

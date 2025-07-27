@@ -505,7 +505,7 @@ where
         exec_output: &BlockExecutionResult<<Self::Primitives as NodePrimitives>::Receipt>,
         il: impl AsRef<[Recovered<TransactionSigned>]>,
     ) -> Result<(), Self::Error> {
-        use std::collections::HashSet;
+        use alloc::collections::BTreeSet;
 
         // Early return if inclusion list is empty - nothing to validate
         if il.as_ref().is_empty() {
@@ -522,7 +522,7 @@ where
         }
 
         // 1) Gather all tx hashes already in the block
-        let included: HashSet<_> =
+        let included: BTreeSet<_> =
             block.transactions_recovered().map(|tx| tx.inner().tx_hash()).collect();
 
         // 2) Compute remaining gas after block execution

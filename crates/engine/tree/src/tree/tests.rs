@@ -514,7 +514,7 @@ fn test_disconnected_block() {
     let sealed = block.seal_slow().try_recover().unwrap();
 
     let mut test_harness = TestHarness::new(HOLESKY.clone());
-    
+
     // TODO Pelle:
     let outcome = test_harness.tree.insert_block(sealed.clone(), None).unwrap();
     assert_eq!(

@@ -1,6 +1,6 @@
-use revm::database::BundleState;
-use reth_primitives_traits::Recovered;
 use reth_ethereum_primitives::TransactionSigned;
+use reth_primitives_traits::Recovered;
+use revm::database::BundleState;
 
 pub use alloy_evm::block::BlockExecutionResult;
 

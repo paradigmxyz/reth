@@ -432,7 +432,7 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {
         hasher.update(parent_beacon_block);
     }
-    
+
     if let Some(il) = &attributes.il {
         // NOTE
         //

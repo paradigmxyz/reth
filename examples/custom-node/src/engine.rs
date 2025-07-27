@@ -67,7 +67,7 @@ impl ExecutionPayload for CustomExecutionData {
     fn gas_used(&self) -> u64 {
         self.inner.gas_used()
     }
-   
+
     fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
         self.inner.inclusion_list()
     }

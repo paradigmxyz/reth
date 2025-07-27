@@ -259,6 +259,14 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Fetch the inclusion list (IL).
     #[method(name = "getInclusionListV1")]
     async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>>;
+
+    /// Update the given payload with the given inclusion list (IL).
+    #[method(name = "updatePayloadWithInclusionListV1")]
+    async fn update_payload_with_inclusion_list_v1(
+        &self,
+        payload_id: PayloadId,
+        inclusion_list: Vec<Bytes>,
+    ) -> RpcResult<()>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/docs/reference/json-rpc-api>

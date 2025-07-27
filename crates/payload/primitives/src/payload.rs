@@ -30,7 +30,7 @@ pub trait ExecutionPayload:
 
     /// Gas used by the payload
     fn gas_used(&self) -> u64;
-    
+
     /// Returns the (optional) inclusion list for the block.
     fn inclusion_list(&self) -> Option<&Vec<Bytes>>;
 }
@@ -63,7 +63,7 @@ impl ExecutionPayload for ExecutionData {
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
     }
-    
+
     fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
         self.sidecar.il()
     }
@@ -178,8 +178,8 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
     }
-   
-   // TODO Pelle: Impl the OP payloads 
+
+    // TODO Pelle: Impl the OP payloads
     fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
         None
     }
