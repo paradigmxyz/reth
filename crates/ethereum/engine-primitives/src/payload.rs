@@ -432,6 +432,15 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     if let Some(parent_beacon_block) = attributes.parent_beacon_block_root {
         hasher.update(parent_beacon_block);
     }
+    
+    if let Some(il) = &attributes.il {
+        // NOTE
+        //
+        // perhaps we want to only update the digest a single time after flattening the IL
+        for tx in il {
+            hasher.update(tx);
+        }
+    }
 
     let out = hasher.finalize();
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
