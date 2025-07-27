@@ -237,11 +237,11 @@ where
 
         ctx.task_executor().spawn_critical(
             "events task",
-            node::handle_events(
+            Box::pin(node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-            ),
+            )),
         );
 
         let RpcHandle { rpc_server_handles, rpc_registry, engine_events, beacon_engine_handle } =
@@ -264,7 +264,7 @@ where
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor().spawn_critical("consensus engine", async move {
+        ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
@@ -327,7 +327,7 @@ where
             }
 
             let _ = exit.send(res);
-        });
+        }));
 
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),
