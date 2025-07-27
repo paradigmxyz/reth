@@ -126,7 +126,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     ) -> eyre::Result<()>
     where
         N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
+            Primitives: NodePrimitives<BlockHeader: From<Header>>,
             ChainSpec: Hardforks,
         >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
@@ -182,9 +182,11 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives, ChainSpec: Hardforks>,
+        N: CliNodeTypes<
+            Primitives: NodePrimitives<BlockHeader: From<Header>>,
+            ChainSpec: Hardforks,
+        >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
-        <<N as NodeTypes>::Primitives as NodePrimitives>::BlockHeader: From<Header>,
     {
         // Add network name if available to the logs dir
         if let Some(chain_spec) = self.command.chain_spec() {
