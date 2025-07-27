@@ -205,6 +205,7 @@ where
             let (suggest_tip_cap_result, is_at_capacity) = self
                 .gas_oracle()
                 .calculate_suggest_tip_cap(
+                    newest_block,
                     U256::from(self.inner.min_suggested_priority_fee),
                     self.inner.payload_size_limit,
                 )

@@ -366,7 +366,7 @@ where
         payload_size_limit: u64,
     ) -> EthResult<U256> {
         let (result, _) =
-            self.calculate_suggest_tip_cap(min_suggested_priority_fee, payload_size_limit).await;
+            self.calculate_suggest_tip_cap(BlockNumberOrTag::Latest, min_suggested_priority_fee, payload_size_limit).await;
         result
     }
 
@@ -377,10 +377,11 @@ where
     /// whether the latest block is at capacity (gas limit or payload size limit).
     pub async fn calculate_suggest_tip_cap(
         &self,
+        block_number_or_tag: BlockNumberOrTag,
         min_suggested_priority_fee: U256,
         payload_size_limit: u64,
     ) -> (EthResult<U256>, bool) {
-        let header = match self.provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest) {
+        let header = match self.provider.sealed_header_by_number_or_tag(block_number_or_tag) {
             Ok(Some(header)) => header,
             Ok(None) => return (Err(EthApiError::HeaderNotFound(BlockId::latest())), false),
             Err(e) => return (Err(e.into()), false),
@@ -468,9 +469,11 @@ where
             }
         }
 
-        inner.last_price =
-            GasPriceOracleResult { block_hash: header.hash(), price: suggestion, is_at_capacity };
-
+        // update the cache only if it's latest block header
+        if block_number_or_tag == BlockNumberOrTag::Latest {
+            inner.last_price =
+                GasPriceOracleResult { block_hash: header.hash(), price: suggestion, is_at_capacity };
+        }
         (Ok(suggestion), is_at_capacity)
     }
 
