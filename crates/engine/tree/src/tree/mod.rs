@@ -2077,7 +2077,12 @@ where
                 let block = convert_to_block(self, input)?;
                 return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
             }
-            Ok(Some(_)) => return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid)),
+            Ok(Some(_)) => {
+                // We now assume that we already have this block in the tree. However, we need to
+                // run the conversion to ensure that the block hash is valid.
+                convert_to_block(self, input)?;
+                return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
+            }
             _ => {}
         };
 
