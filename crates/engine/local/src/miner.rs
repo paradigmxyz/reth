@@ -69,7 +69,7 @@ impl Future for MiningMode {
     }
 }
 
-/// Local miner advancing the chain/
+/// Local miner advancing the chain
 #[derive(Debug)]
 pub struct LocalMiner<T: PayloadTypes, B> {
     /// The payload attribute builder for the engine
