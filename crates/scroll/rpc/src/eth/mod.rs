@@ -13,7 +13,7 @@ use reth_provider::{
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
     helpers::{
-        AddDevSigners, EthApiSpec, EthFees, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
+        AddDevSigners, EthApiSpec, EthSigner, EthState, LoadBlock, LoadFee, LoadState,
         SpawnBlocking, Trace,
     },
     EthApiTypes, FullEthApiServer, RpcConverter, RpcNodeCore, RpcNodeCoreExt,
@@ -36,6 +36,7 @@ use scroll_alloy_network::{Network, Scroll};
 
 mod block;
 mod call;
+mod fee;
 mod pending_block;
 pub mod receipt;
 pub mod transaction;
@@ -273,17 +274,6 @@ where
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_api.eth_proof_window()
     }
-}
-
-impl<N, NetworkT> EthFees for ScrollEthApi<N, NetworkT>
-where
-    Self: LoadFee<
-        Provider: ChainSpecProvider<
-            ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>,
-        >,
-    >,
-    N: ScrollNodeCore,
-{
 }
 
 impl<N, NetworkT> Trace for ScrollEthApi<N, NetworkT>

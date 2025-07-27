@@ -205,7 +205,8 @@ where
             }
         }
 
-        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price };
+        inner.last_price =
+            GasPriceOracleResult { block_hash: header.hash(), price, ..Default::default() };
 
         Ok(price)
     }
@@ -340,7 +341,11 @@ where
             }
         }
 
-        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };
+        inner.last_price = GasPriceOracleResult {
+            block_hash: header.hash(),
+            price: suggestion,
+            ..Default::default()
+        };
 
         Ok(suggestion)
     }
@@ -353,35 +358,54 @@ where
     /// - 10% above the median effective priority fee from the last block when at capacity
     ///
     /// A block is considered at capacity if its total gas used plus the maximum single transaction
-    /// gas would exceed the block's gas limit, or the total block payload size  plus the maximum
+    /// gas would exceed the block's gas limit, or the total block payload size plus the maximum
     /// single transaction would exceed the block's payload size limit.
     pub async fn scroll_suggest_tip_cap(
         &self,
         min_suggested_priority_fee: U256,
         payload_size_limit: u64,
     ) -> EthResult<U256> {
-        let header = self
-            .provider
-            .sealed_header_by_number_or_tag(BlockNumberOrTag::Latest)?
-            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+        let (result, _) =
+            self.calculate_suggest_tip_cap(min_suggested_priority_fee, payload_size_limit).await;
+        result
+    }
+
+    /// Calculates a gas price suggestion and returns whether the block is at capacity.
+    ///
+    /// This method implements the core logic for suggesting gas prices based on block capacity.
+    /// It returns a tuple containing the suggested gas price and a boolean indicating
+    /// whether the latest block is at capacity (gas limit or payload size limit).
+    pub async fn calculate_suggest_tip_cap(
+        &self,
+        min_suggested_priority_fee: U256,
+        payload_size_limit: u64,
+    ) -> (EthResult<U256>, bool) {
+        let header = match self.provider.sealed_header_by_number_or_tag(BlockNumberOrTag::Latest) {
+            Ok(Some(header)) => header,
+            Ok(None) => return (Err(EthApiError::HeaderNotFound(BlockId::latest())), false),
+            Err(e) => return (Err(e.into()), false),
+        };
 
         let mut inner = self.inner.lock().await;
 
         // if we have stored a last price, then we check whether or not it was for the same head
         if inner.last_price.block_hash == header.hash() {
-            return Ok(inner.last_price.price);
+            return (Ok(inner.last_price.price), inner.last_price.is_at_capacity);
         }
 
         let mut suggestion = min_suggested_priority_fee;
+        let mut is_at_capacity = false;
 
         // find the maximum gas used by any of the transactions in the block to use as the
         // capacity margin for the block, if no receipts are found return the
         // suggested_min_priority_fee
-        let Some(max_tx_gas_used) = self
-            .cache
-            .get_receipts(header.hash())
-            .await?
-            .ok_or(EthApiError::ReceiptsNotFound(BlockId::latest()))?
+        let receipts = match self.cache.get_receipts(header.hash()).await {
+            Ok(Some(receipts)) => receipts,
+            Ok(None) => return (Ok(suggestion), false),
+            Err(e) => return (Err(e.into()), false),
+        };
+
+        let Some(max_tx_gas_used) = receipts
             // get the gas used by each transaction in the block, by subtracting the
             // cumulative gas used of the previous transaction from the cumulative gas used of the
             // current transaction. This is because there is no gas_used() method on the Receipt
@@ -394,17 +418,17 @@ where
             })
             .max()
         else {
-            return Ok(suggestion);
+            return (Ok(suggestion), is_at_capacity);
         };
 
         // find the maximum and total payload size used by the transactions in the block to use as
         // the capacity margin for the block, if no block is found return the
         // suggested_min_priority_fee
-        let block = self
-            .cache
-            .get_recovered_block(header.hash())
-            .await?
-            .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
+        let block = match self.cache.get_recovered_block(header.hash()).await {
+            Ok(Some(block)) => block,
+            Ok(None) => return (Ok(suggestion), false),
+            Err(e) => return (Err(e.into()), false),
+        };
 
         let transactions = block.transactions_recovered();
 
@@ -423,8 +447,10 @@ where
         if header.gas_used() + max_tx_gas_used > header.gas_limit() ||
             total_payload_size + max_tx_payload_size > payload_size_limit
         {
-            let Some(median_tip) = self.get_block_median_tip(header.hash()).await? else {
-                return Ok(suggestion);
+            let median_tip = match self.get_block_median_tip(header.hash()).await {
+                Ok(Some(median_tip)) => median_tip,
+                Ok(None) => return (Ok(suggestion), is_at_capacity),
+                Err(e) => return (Err(e), is_at_capacity),
             };
 
             let new_suggestion = median_tip + median_tip / U256::from(10);
@@ -432,6 +458,7 @@ where
             if new_suggestion > suggestion {
                 suggestion = new_suggestion;
             }
+            is_at_capacity = true;
         }
 
         // constrain to the max price
@@ -441,9 +468,10 @@ where
             }
         }
 
-        inner.last_price = GasPriceOracleResult { block_hash: header.hash(), price: suggestion };
+        inner.last_price =
+            GasPriceOracleResult { block_hash: header.hash(), price: suggestion, is_at_capacity };
 
-        Ok(suggestion)
+        (Ok(suggestion), is_at_capacity)
     }
 
     /// Get the median tip value for the given block. This is useful for determining
@@ -510,11 +538,13 @@ pub struct GasPriceOracleResult {
     pub block_hash: B256,
     /// The price that the oracle calculated
     pub price: U256,
+    /// Whether the latest block is at capacity
+    pub is_at_capacity: bool,
 }
 
 impl Default for GasPriceOracleResult {
     fn default() -> Self {
-        Self { block_hash: B256::ZERO, price: U256::from(GWEI_TO_WEI) }
+        Self { block_hash: B256::ZERO, price: U256::from(GWEI_TO_WEI), is_at_capacity: false }
     }
 }
 

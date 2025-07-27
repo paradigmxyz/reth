@@ -10476,9 +10476,11 @@ name = "reth-scroll-rpc"
 version = "1.5.0"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-eth",
  "eyre",
+ "futures",
  "jsonrpsee-types",
  "parking_lot",
  "reth-chainspec",
@@ -10506,6 +10508,7 @@ dependencies = [
  "scroll-alloy-rpc-types",
  "thiserror 2.0.12",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

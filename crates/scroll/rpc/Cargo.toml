@@ -42,11 +42,14 @@ scroll-alloy-rpc-types.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
+alloy-eips.workspace = true
 revm.workspace = true
 
 # async
 parking_lot.workspace = true
 tokio.workspace = true
+futures = "0.3"
+tracing.workspace = true
 
 # rpc
 jsonrpsee-types.workspace = true
