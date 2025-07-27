@@ -365,8 +365,13 @@ where
         min_suggested_priority_fee: U256,
         payload_size_limit: u64,
     ) -> EthResult<U256> {
-        let (result, _) =
-            self.calculate_suggest_tip_cap(BlockNumberOrTag::Latest, min_suggested_priority_fee, payload_size_limit).await;
+        let (result, _) = self
+            .calculate_suggest_tip_cap(
+                BlockNumberOrTag::Latest,
+                min_suggested_priority_fee,
+                payload_size_limit,
+            )
+            .await;
         result
     }
 
@@ -471,8 +476,11 @@ where
 
         // update the cache only if it's latest block header
         if block_number_or_tag == BlockNumberOrTag::Latest {
-            inner.last_price =
-                GasPriceOracleResult { block_hash: header.hash(), price: suggestion, is_at_capacity };
+            inner.last_price = GasPriceOracleResult {
+                block_hash: header.hash(),
+                price: suggestion,
+                is_at_capacity,
+            };
         }
         (Ok(suggestion), is_at_capacity)
     }
