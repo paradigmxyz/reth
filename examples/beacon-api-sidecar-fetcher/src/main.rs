@@ -60,7 +60,7 @@ fn main() {
                         }
                         Err(e) => {
                             // Handle errors specifically
-                            eprintln!("Failed to process transaction: {e:?}");
+                            println!("Failed to process transaction: {e:?}");
                         }
                     }
                 }
