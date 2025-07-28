@@ -10,7 +10,7 @@ use reth_exex::{
 };
 use reth_node_api::{FullNodeComponents, NodeTypes, PrimitivesTy};
 use reth_provider::CanonStateSubscriptions;
-use reth_tracing::tracing::{debug, error, info};
+use reth_tracing::tracing::{debug, info};
 use std::{fmt, fmt::Debug};
 use tracing::Instrument;
 
@@ -90,13 +90,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 let span = reth_tracing::tracing::info_span!("exex", id);
 
                 // init the exex
-                let exex = match exex.launch(context).instrument(span.clone()).await {
-                    Ok(exex) => exex,
-                    Err(err) => {
-                        error!(target: "reth::cli", id, "Failed to launch ExEx: {err}");
-                        return;
-                    }
-                };
+                let exex = exex.launch(context).instrument(span.clone()).await.unwrap();
 
                 // spawn it as a crit task
                 executor.spawn_critical(
@@ -126,9 +120,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         );
         let exex_manager_handle = exex_manager.handle();
         components.task_executor().spawn_critical("exex manager", async move {
-            if let Err(err) = exex_manager.await {
-                error!(target: "reth::cli", "ExEx manager crashed: {err}");
-            }
+            exex_manager.await.expect("exex manager crashed");
         });
 
         // send notifications from the blockchain tree to exex manager
@@ -138,13 +130,10 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
             "exex manager blockchain tree notifications",
             async move {
                 while let Ok(notification) = canon_state_notifications.recv().await {
-                    if let Err(err) = handle
+                    handle
                         .send_async(ExExNotificationSource::BlockchainTree, notification.into())
                         .await
-                        {
-                        error!(target: "reth::cli", "Failed to send blockchain tree notification to exex manager: {err}");
-                        break;
-                    }
+                        .expect("blockchain tree notification could not be sent to exex manager");
                 }
             },
         );
