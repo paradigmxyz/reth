@@ -647,7 +647,7 @@ enum RangeResponseResult<H, B> {
 }
 
 /// A headers+bodies client implementation that does nothing.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct NoopFullBlockClient<Net = EthNetworkPrimitives>(PhantomData<Net>);
 
@@ -741,6 +741,12 @@ where
     Net: NetworkPrimitives,
 {
     type Block = Net::Block;
+}
+
+impl<Net> Default for NoopFullBlockClient<Net> {
+    fn default() -> Self {
+        Self(PhantomData::<Net>)
+    }
 }
 
 #[cfg(test)]

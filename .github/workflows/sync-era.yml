@@ -53,7 +53,7 @@ jobs:
             --chain ${{ matrix.chain.chain }} \
             --debug.tip ${{ matrix.chain.tip }} \
             --debug.max-block ${{ matrix.chain.block }} \
-            --debug.terminate
+            --debug.terminate \
             --era.enable
       - name: Verify the target block hash
         run: |

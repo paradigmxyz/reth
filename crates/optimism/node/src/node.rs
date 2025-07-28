@@ -7,7 +7,7 @@ use crate::{
     OpEngineApiBuilder, OpEngineTypes,
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
-use op_alloy_rpc_types_engine::{OpExecutionData, OpPayloadAttributes};
+use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_evm::ConfigureEvm;
@@ -16,8 +16,8 @@ use reth_network::{
     PeersInfo,
 };
 use reth_node_api::{
-    AddOnsContext, EngineTypes, FullNodeComponents, KeyHasherTy, NodeAddOns, NodePrimitives,
-    PayloadAttributesBuilder, PayloadTypes, PrimitivesTy, TxTy,
+    AddOnsContext, BuildNextEnv, EngineTypes, FullNodeComponents, HeaderTy, KeyHasherTy,
+    NodeAddOns, NodePrimitives, PayloadAttributesBuilder, PayloadTypes, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -34,12 +34,12 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder};
+use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
     config::{OpBuilderConfig, OpDAConfig},
-    OpBuiltPayload, OpPayloadBuilderAttributes, OpPayloadPrimitives,
+    OpAttributes, OpBuiltPayload, OpPayloadPrimitives,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
 use reth_optimism_rpc::{
@@ -55,7 +55,7 @@ use reth_optimism_txpool::{
     OpPooledTx,
 };
 use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions};
-use reth_rpc_api::{DebugApiServer, L2EthApiExtServer};
+use reth_rpc_api::{eth::RpcTypes, DebugApiServer, L2EthApiExtServer};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
@@ -63,6 +63,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
+use serde::de::DeserializeOwned;
 use std::{marker::PhantomData, sync::Arc};
 
 /// Marker trait for Optimism node types with standard engine, chain spec, and primitives.
@@ -164,6 +165,17 @@ impl OpNode {
             .consensus(OpConsensusBuilder::default())
     }
 
+    /// Returns [`OpAddOnsBuilder`] with configured arguments.
+    pub fn add_ons_builder<NetworkT: RpcTypes>(&self) -> OpAddOnsBuilder<NetworkT> {
+        OpAddOnsBuilder::default()
+            .with_sequencer(self.args.sequencer.clone())
+            .with_sequencer_headers(self.args.sequencer_headers.clone())
+            .with_da_config(self.da_config.clone())
+            .with_enable_tx_conditional(self.args.enable_tx_conditional)
+            .with_min_suggested_priority_fee(self.args.min_suggested_priority_fee)
+            .with_historical_rpc(self.args.historical_rpc.clone())
+    }
+
     /// Instantiates the [`ProviderFactoryBuilder`] for an opstack node.
     ///
     /// # Open a Providerfactory in read-only mode from a datadir
@@ -224,14 +236,7 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        Self::AddOns::builder()
-            .with_sequencer(self.args.sequencer.clone())
-            .with_sequencer_headers(self.args.sequencer_headers.clone())
-            .with_da_config(self.da_config.clone())
-            .with_enable_tx_conditional(self.args.enable_tx_conditional)
-            .with_min_suggested_priority_fee(self.args.min_suggested_priority_fee)
-            .with_historical_rpc(self.args.historical_rpc.clone())
-            .build()
+        self.add_ons_builder().build()
     }
 }
 
@@ -425,18 +430,29 @@ where
     }
 }
 
-impl<N, EthB, EV, EB, RpcMiddleware> NodeAddOns<N> for OpAddOns<N, EthB, EV, EB, RpcMiddleware>
+impl<N, EthB, EV, EB, Attrs, RpcMiddleware> NodeAddOns<N>
+    for OpAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents<
-        Types: OpFullNodeTypes,
-        Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        Types: NodeTypes<
+            ChainSpec: OpHardforks,
+            Primitives: OpPayloadPrimitives,
+            Payload: PayloadTypes<PayloadBuilderAttributes = Attrs>,
+        >,
+        Evm: ConfigureEvm<
+            NextBlockEnvCtx: BuildNextEnv<
+                Attrs,
+                HeaderTy<N::Types>,
+                <N::Types as NodeTypes>::ChainSpec,
+            >,
+        >,
+        Pool: TransactionPool<Transaction: OpPooledTx>,
     >,
-    N::Types: NodeTypes<Primitives: OpPayloadPrimitives>,
     EthB: EthApiBuilder<N>,
-    <N::Pool as TransactionPool>::Transaction: OpPooledTx,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    Attrs: OpAttributes<Transaction = TxTy<N::Types>, RpcPayloadAttributes: DeserializeOwned>,
 {
     type Handle = RpcHandle<N, EthB::EthApi>;
 
@@ -482,7 +498,7 @@ where
             ctx.node.evm_config().clone(),
         );
         // install additional OP specific rpc methods
-        let debug_ext = OpDebugWitnessApi::new(
+        let debug_ext = OpDebugWitnessApi::<_, _, _, Attrs>::new(
             ctx.node.provider().clone(),
             Box::new(ctx.node.task_executor().clone()),
             builder,
@@ -541,17 +557,29 @@ where
     }
 }
 
-impl<N, EthB, EV, EB, RpcMiddleware> RethRpcAddOns<N> for OpAddOns<N, EthB, EV, EB, RpcMiddleware>
+impl<N, EthB, EV, EB, Attrs, RpcMiddleware> RethRpcAddOns<N>
+    for OpAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents<
-        Types: OpFullNodeTypes,
-        Evm: ConfigureEvm<NextBlockEnvCtx = OpNextBlockEnvAttributes>,
+        Types: NodeTypes<
+            ChainSpec: OpHardforks,
+            Primitives: OpPayloadPrimitives,
+            Payload: PayloadTypes<PayloadBuilderAttributes = Attrs>,
+        >,
+        Evm: ConfigureEvm<
+            NextBlockEnvCtx: BuildNextEnv<
+                Attrs,
+                HeaderTy<N::Types>,
+                <N::Types as NodeTypes>::ChainSpec,
+            >,
+        >,
     >,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
     EthB: EthApiBuilder<N>,
     EV: EngineValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
+    Attrs: OpAttributes<Transaction = TxTy<N::Types>, RpcPayloadAttributes: DeserializeOwned>,
 {
     type EthApi = EthB::EthApi;
 
@@ -938,7 +966,7 @@ impl<Txs> OpPayloadBuilder<Txs> {
     }
 }
 
-impl<Node, Pool, Txs, Evm> PayloadBuilderBuilder<Node, Pool, Evm> for OpPayloadBuilder<Txs>
+impl<Node, Pool, Txs, Evm, Attrs> PayloadBuilderBuilder<Node, Pool, Evm> for OpPayloadBuilder<Txs>
 where
     Node: FullNodeTypes<
         Provider: ChainSpecProvider<ChainSpec: OpHardforks>,
@@ -946,20 +974,24 @@ where
             Primitives: OpPayloadPrimitives,
             Payload: PayloadTypes<
                 BuiltPayload = OpBuiltPayload<PrimitivesTy<Node::Types>>,
-                PayloadAttributes = OpPayloadAttributes,
-                PayloadBuilderAttributes = OpPayloadBuilderAttributes<TxTy<Node::Types>>,
+                PayloadBuilderAttributes = Attrs,
             >,
         >,
     >,
     Evm: ConfigureEvm<
             Primitives = PrimitivesTy<Node::Types>,
-            NextBlockEnvCtx = OpNextBlockEnvAttributes,
+            NextBlockEnvCtx: BuildNextEnv<
+                Attrs,
+                HeaderTy<Node::Types>,
+                <Node::Types as NodeTypes>::ChainSpec,
+            >,
         > + 'static,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = TxTy<Node::Types>>> + Unpin + 'static,
     Txs: OpPayloadTransactions<Pool::Transaction>,
+    Attrs: OpAttributes<Transaction = TxTy<Node::Types>>,
 {
     type PayloadBuilder =
-        reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, Evm, Txs>;
+        reth_optimism_payload_builder::OpPayloadBuilder<Pool, Node::Provider, Evm, Txs, Attrs>;
 
     async fn build_payload_builder(
         self,

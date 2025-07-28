@@ -557,17 +557,22 @@ pub mod op {
     use op_alloy_rpc_types::OpTransactionRequest;
     use op_revm::OpTransaction;
     use reth_optimism_primitives::DepositReceipt;
+    use reth_primitives_traits::SignedTransaction;
     use reth_storage_api::{errors::ProviderError, ReceiptProvider};
 
     /// Creates [`OpTransactionInfo`] by adding [`OpDepositInfo`] to [`TransactionInfo`] if `tx` is
     /// a deposit.
-    pub fn try_into_op_tx_info<T: ReceiptProvider<Receipt: DepositReceipt>>(
+    pub fn try_into_op_tx_info<Tx, T>(
         provider: &T,
-        tx: &OpTxEnvelope,
+        tx: &Tx,
         tx_info: TransactionInfo,
-    ) -> Result<OpTransactionInfo, ProviderError> {
+    ) -> Result<OpTransactionInfo, ProviderError>
+    where
+        Tx: op_alloy_consensus::OpTransaction + SignedTransaction,
+        T: ReceiptProvider<Receipt: DepositReceipt>,
+    {
         let deposit_meta = if tx.is_deposit() {
-            provider.receipt_by_hash(tx.tx_hash())?.and_then(|receipt| {
+            provider.receipt_by_hash(*tx.tx_hash())?.and_then(|receipt| {
                 receipt.as_deposit_receipt().map(|receipt| OpDepositInfo {
                     deposit_receipt_version: receipt.deposit_receipt_version,
                     deposit_nonce: receipt.deposit_nonce,
