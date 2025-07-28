@@ -19,6 +19,8 @@ pub struct ScrollPayloadBuilderBuilder<Txs = ()> {
     pub best_transactions: Txs,
     /// The payload building time limit.
     pub payload_building_time_limit: Duration,
+    /// The block DA size limit.
+    pub block_da_size_limit: Option<u64>,
 }
 
 impl Default for ScrollPayloadBuilderBuilder {
@@ -26,12 +28,14 @@ impl Default for ScrollPayloadBuilderBuilder {
         Self {
             best_transactions: (),
             payload_building_time_limit: SCROLL_PAYLOAD_BUILDING_DURATION,
+            block_da_size_limit: Some(SCROLL_DEFAULT_PAYLOAD_SIZE_LIMIT),
         }
     }
 }
 
 const SCROLL_GAS_LIMIT: u64 = 20_000_000;
 const SCROLL_PAYLOAD_BUILDING_DURATION: Duration = Duration::from_secs(1);
+const SCROLL_DEFAULT_PAYLOAD_SIZE_LIMIT: u64 = 122_880;
 
 impl<Txs> ScrollPayloadBuilderBuilder<Txs> {
     /// A helper method to initialize [`reth_scroll_payload::ScrollPayloadBuilder`] with the
@@ -65,7 +69,11 @@ impl<Txs> ScrollPayloadBuilderBuilder<Txs> {
             pool,
             evm_config,
             ctx.provider().clone(),
-            ScrollBuilderConfig::new(gas_limit, self.payload_building_time_limit),
+            ScrollBuilderConfig::new(
+                gas_limit,
+                self.payload_building_time_limit,
+                self.block_da_size_limit,
+            ),
         )
         .with_transactions(self.best_transactions);
 
