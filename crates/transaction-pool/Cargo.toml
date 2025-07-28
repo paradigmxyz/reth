@@ -137,8 +137,3 @@ harness = false
 name = "canonical_state_change"
 required-features = ["test-utils", "arbitrary"]
 harness = false
-
-[[bench]]
-name = "profile_canonical_state_change"
-required-features = ["test-utils", "arbitrary"]
-harness = false
