@@ -19,7 +19,9 @@ use reth_primitives_traits::{
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
-use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_rpc_eth_types::{
+    EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin, PendingBlockMode,
+};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     ReceiptProvider, StateProviderFactory,
@@ -52,6 +54,9 @@ pub trait LoadPendingBlock:
 
     /// Returns a [`PendingEnvBuilder`] for the pending block.
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
+
+    /// Returns the configured pending block mode.
+    fn pending_block_mode(&self) -> PendingBlockMode;
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
@@ -129,6 +134,11 @@ pub trait LoadPendingBlock:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
+            // Check pending block mode
+            let mode = self.pending_block_mode();
+            if mode == PendingBlockMode::None {
+                return Ok(None);
+            }
             let pending = self.pending_block_env_and_cfg()?;
             let parent = match pending.origin {
                 PendingBlockEnvOrigin::ActualPending(block, receipts) => {
@@ -157,7 +167,7 @@ pub trait LoadPendingBlock:
             let (sealed_block, receipts) = match self
                 .spawn_blocking_io(move |this| {
                     // we rebuild the block
-                    this.build_block(&parent)
+                    this.build_block(&parent, mode)
                 })
                 .await
             {
@@ -192,6 +202,7 @@ pub trait LoadPendingBlock:
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
+        mode: PendingBlockMode,
     ) -> Result<
         (RecoveredBlock<ProviderBlock<Self::Provider>>, Vec<ProviderReceipt<Self::Provider>>),
         Self::Error,
@@ -217,6 +228,13 @@ pub trait LoadPendingBlock:
         builder.apply_pre_execution_changes().map_err(Self::Error::from_eth_err)?;
 
         let block_env = builder.evm_mut().block().clone();
+
+        // Skip transaction processing in Empty mode
+        if mode == PendingBlockMode::Empty {
+            let BlockBuilderOutcome { execution_result, block, .. } =
+                builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
+            return Ok((block, execution_result.receipts));
+        }
 
         let blob_params = self
             .provider()

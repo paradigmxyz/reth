@@ -21,7 +21,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasCap,
-    GasPriceOracle, PendingBlock,
+    GasPriceOracle, PendingBlock, PendingBlockMode,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -161,6 +161,7 @@ where
             proof_permits,
             rpc_converter,
             (),
+            PendingBlockMode::default(),
         );
 
         Self { inner: Arc::new(inner) }
@@ -290,6 +291,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
+
+    /// Pending block mode configuration.
+    pending_block_mode: PendingBlockMode,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -312,6 +316,7 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
+        pending_block_mode: PendingBlockMode,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -344,6 +349,7 @@ where
             raw_tx_sender,
             tx_resp_builder,
             next_env_builder: Box::new(next_env),
+            pending_block_mode,
         }
     }
 }
@@ -460,6 +466,12 @@ where
     #[inline]
     pub const fn blocking_task_guard(&self) -> &BlockingTaskGuard {
         &self.blocking_task_guard
+    }
+
+    /// Returns the pending block mode.
+    #[inline]
+    pub const fn pending_block_mode(&self) -> PendingBlockMode {
+        self.pending_block_mode
     }
 
     /// Returns [`broadcast::Receiver`] of new raw transactions

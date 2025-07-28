@@ -6,7 +6,7 @@ use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
     FromEvmError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, PendingBlock};
+use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockMode};
 
 impl<N, Rpc> LoadPendingBlock for EthApi<N, Rpc>
 where
@@ -22,5 +22,10 @@ where
     #[inline]
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm> {
         self.inner.pending_env_builder()
+    }
+
+    #[inline]
+    fn pending_block_mode(&self) -> PendingBlockMode {
+        self.inner.pending_block_mode()
     }
 }
