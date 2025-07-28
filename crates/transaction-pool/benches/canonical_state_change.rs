@@ -65,38 +65,6 @@ async fn fill_pool(pool: &TestPoolBuilder, txs: Vec<MockTransaction>) -> HashMap
     sender_nonces
 }
 
-/// Create a canonical state update with changed accounts for all senders
-fn create_canonical_update(
-    sender_nonces: HashMap<Address, u64>,
-) -> (Box<SealedBlock<Block>>, CanonicalStateUpdate<'static, Block>) {
-    // Create a mock block - using default Ethereum block
-    let header = Header::default();
-    let body = BlockBody::default();
-    let block = Block { header, body };
-    let sealed_block = Box::new(SealedBlock::seal_slow(block));
-    let sealed_block_ref = Box::leak(sealed_block.clone());
-
-    let changed_accounts: Vec<ChangedAccount> = sender_nonces
-        .into_iter()
-        .map(|(address, nonce)| ChangedAccount {
-            address,
-            nonce: nonce + 1, // Increment nonce as if transactions were mined
-            balance: U256::from(9_000_000_000_000_000u64), // Decrease balance
-        })
-        .collect();
-
-    let update = CanonicalStateUpdate {
-        new_tip: sealed_block_ref,
-        pending_block_base_fee: 1_000_000_000,   // 1 gwei
-        pending_block_blob_fee: Some(1_000_000), // 0.001 gwei
-        changed_accounts,
-        mined_transactions: vec![], // No transactions mined in this benchmark
-        update_kind: PoolUpdateKind::Commit,
-    };
-    
-    (sealed_block, update)
-}
-
 fn canonical_state_change_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("Transaction Pool Canonical State Change");
     group.measurement_time(Duration::from_secs(10));
@@ -111,12 +79,19 @@ fn canonical_state_change_bench(c: &mut Criterion) {
                 num_senders, txs_per_sender, total_txs
             );
 
-            group.bench_function(group_id, |b| {
+            // Create the update
+            // Create a mock block - using default Ethereum block
+            let header = Header::default();
+            let body = BlockBody::default();
+            let block = Block { header, body };
+            let sealed_block = SealedBlock::seal_slow(block);
+
+            group.bench_with_input(group_id, &sealed_block, |b, sealed_block| {
                 b.iter_batched(
                     || {
                         // Setup phase - create pool and transactions
                         let rt = tokio::runtime::Runtime::new().unwrap();
-                        
+
                         let pool = TestPoolBuilder::default().with_config(PoolConfig {
                             pending_limit: SubPoolLimit::max(),
                             basefee_limit: SubPoolLimit::max(),
@@ -138,9 +113,24 @@ fn canonical_state_change_bench(c: &mut Criterion) {
                         let txs = generate_transactions(num_senders, txs_per_sender);
                         let sender_nonces = rt.block_on(fill_pool(&pool, txs));
 
-                        // Create the update
-                        let (_sealed_block, update) = create_canonical_update(sender_nonces);
-                        
+                        let changed_accounts: Vec<ChangedAccount> = sender_nonces
+                            .into_iter()
+                            .map(|(address, nonce)| ChangedAccount {
+                                address,
+                                nonce: nonce + 1, // Increment nonce as if transactions were mined
+                                balance: U256::from(9_000_000_000_000_000u64), // Decrease balance
+                            })
+                            .collect();
+
+                        let update = CanonicalStateUpdate {
+                            new_tip: sealed_block,
+                            pending_block_base_fee: 1_000_000_000, // 1 gwei
+                            pending_block_blob_fee: Some(1_000_000), // 0.001 gwei
+                            changed_accounts,
+                            mined_transactions: vec![], // No transactions mined in this benchmark
+                            update_kind: PoolUpdateKind::Commit,
+                        };
+
                         (pool, update)
                     },
                     |(pool, update)| {
