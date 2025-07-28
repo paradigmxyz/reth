@@ -968,6 +968,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> 
             .fee_history_cache_config(self.config.fee_history_cache)
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
+            .raw_tx_forwarder(self.config.raw_tx_forwarder)
     }
 }
 
