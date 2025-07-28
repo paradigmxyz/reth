@@ -1191,6 +1191,22 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         self
     }
 
+    /// Configures a custom tokio runtime for the rpc server.
+    pub fn with_tokio_runtime(mut self, tokio_runtime: tokio::runtime::Handle) -> Self {
+        if let Some(http_server_config) = self.http_server_config {
+            self.http_server_config =
+                Some(http_server_config.custom_tokio_runtime(tokio_runtime.clone()));
+        }
+        if let Some(ws_server_config) = self.ws_server_config {
+            self.ws_server_config =
+                Some(ws_server_config.custom_tokio_runtime(tokio_runtime.clone()));
+        }
+        if let Some(ipc_server_config) = self.ipc_server_config {
+            self.ipc_server_config = Some(ipc_server_config.custom_tokio_runtime(tokio_runtime));
+        }
+        self
+    }
+
     /// Returns true if any server is configured.
     ///
     /// If no server is configured, no server will be launched on [`RpcServerConfig::start`].

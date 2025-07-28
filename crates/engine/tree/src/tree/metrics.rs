@@ -7,7 +7,7 @@ use reth_trie::updates::TrieUpdates;
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
-pub struct EngineApiMetrics {
+pub(crate) struct EngineApiMetrics {
     /// Engine API-specific metrics.
     pub(crate) engine: EngineMetrics,
     /// Block executor metrics.
@@ -21,7 +21,7 @@ pub struct EngineApiMetrics {
 /// Metrics for the entire blockchain tree
 #[derive(Metrics)]
 #[metrics(scope = "blockchain_tree")]
-pub struct TreeMetrics {
+pub(crate) struct TreeMetrics {
     /// The highest block number in the canonical chain
     pub canonical_chain_height: Gauge,
     /// The number of reorgs

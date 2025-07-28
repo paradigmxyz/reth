@@ -287,3 +287,51 @@ where
         })
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::components::Components;
+    use reth_consensus::noop::NoopConsensus;
+    use reth_db_api::mock::DatabaseMock;
+    use reth_ethereum_engine_primitives::EthEngineTypes;
+    use reth_evm::noop::NoopEvmConfig;
+    use reth_evm_ethereum::MockEvmConfig;
+    use reth_network::EthNetworkPrimitives;
+    use reth_network_api::noop::NoopNetwork;
+    use reth_node_api::FullNodeTypesAdapter;
+    use reth_node_ethereum::EthereumNode;
+    use reth_payload_builder::PayloadBuilderHandle;
+    use reth_provider::noop::NoopProvider;
+    use reth_tasks::TaskManager;
+    use reth_transaction_pool::noop::NoopTransactionPool;
+
+    #[test]
+    fn test_noop_components() {
+        let components = Components::<
+            FullNodeTypesAdapter<EthereumNode, DatabaseMock, NoopProvider>,
+            NoopNetwork<EthNetworkPrimitives>,
+            _,
+            NoopEvmConfig<MockEvmConfig>,
+            _,
+        > {
+            transaction_pool: NoopTransactionPool::default(),
+            evm_config: NoopEvmConfig::default(),
+            consensus: NoopConsensus::default(),
+            network: NoopNetwork::default(),
+            payload_builder_handle: PayloadBuilderHandle::<EthEngineTypes>::noop(),
+        };
+
+        let task_executor = {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let handle = runtime.handle().clone();
+            let manager = TaskManager::new(handle);
+            manager.executor()
+        };
+
+        let node = NodeAdapter { components, task_executor, provider: NoopProvider::default() };
+
+        // test that node implements `FullNodeComponents``
+        <NodeAdapter<_, _> as FullNodeComponents>::pool(&node);
+    }
+}
