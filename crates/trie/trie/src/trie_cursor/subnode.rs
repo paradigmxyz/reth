@@ -93,7 +93,7 @@ impl CursorSubNode {
     /// - The branch node has more than 2 children
     ///
     /// Otherwise returns the full path of the branch node's child which is not the current one.
-    pub fn only_sibling_full_key(&self) -> Option<Nibbles> {
+    pub fn sole_sibling_full_key(&self) -> Option<Nibbles> {
         self.position.as_child().zip(self.node.as_ref()).and_then(|(nibble, node)| {
             let mut mask = node.state_mask;
             mask.unset_bit(nibble);

@@ -158,8 +158,8 @@ impl<C> TrieWalker<C> {
             //
             // See documentation within the hash builder's proof retainer, specifically within
             // `retain_branch_proof`, for more details on what this is intended to be handling.
-            let only_sibling_has_changes =
-                node.only_sibling_full_key().is_some_and(|sibling_full_key| {
+            let sole_sibling_has_changes =
+                node.sole_sibling_full_key().is_some_and(|sibling_full_key| {
                     let res = self.changes.contains(&sibling_full_key);
                     trace!(
                         target: "trie::walker",
@@ -169,7 +169,7 @@ impl<C> TrieWalker<C> {
                     );
                     res
                 });
-            !self.changes.contains(node.full_key()) && node.hash_flag() && !only_sibling_has_changes
+            !self.changes.contains(node.full_key()) && node.hash_flag() && !sole_sibling_has_changes
         });
         trace!(
             target: "trie::walker",
