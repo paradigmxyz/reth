@@ -110,6 +110,12 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
         self.all_events_broadcaster.broadcast(pool_event);
     }
 
+    /// Returns true if no listeners are installed
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.all_events_broadcaster.is_empty() && self.broadcasters_by_hash.is_empty()
+    }
+
     /// Create a new subscription for the given transaction hash.
     pub(crate) fn subscribe(&mut self, tx_hash: TxHash) -> TransactionEvents {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -167,6 +173,17 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
         );
     }
 
+    /// Notify listeners about all discarded transactions.
+    #[inline]
+    pub(crate) fn discarded_many(&mut self, discarded: &[Arc<ValidPoolTransaction<T>>]) {
+        if self.is_empty() {
+            return
+        }
+        for tx in discarded {
+            self.discarded(tx.hash());
+        }
+    }
+
     /// Notify listeners about a transaction that was discarded.
     pub(crate) fn discarded(&mut self, tx: &TxHash) {
         self.broadcast_event(tx, TransactionEvent::Discarded, FullTransactionEvent::Discarded(*tx));
@@ -209,6 +226,12 @@ impl<T: PoolTransaction> AllPoolEventsBroadcaster<T> {
             Ok(_) | Err(TrySendError::Full(_)) => true,
             Err(TrySendError::Closed(_)) => false,
         })
+    }
+
+    /// Returns true if there are no listeners installed.
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.senders.is_empty()
     }
 }
 
