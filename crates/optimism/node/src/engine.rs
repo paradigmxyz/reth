@@ -172,6 +172,8 @@ where
     Tx: SignedTransaction + Unpin + 'static,
     ChainSpec: OpHardforks + Send + Sync + 'static,
 {
+    type Block = alloy_consensus::Block<Tx>;
+
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
