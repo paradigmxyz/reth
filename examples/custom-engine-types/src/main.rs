@@ -213,8 +213,6 @@ impl PayloadValidator<CustomEngineTypes> for CustomEngineValidator {
 }
 
 impl EngineValidator<CustomEngineTypes> for CustomEngineValidator {
-    type Block = reth_ethereum::Block;
-
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,

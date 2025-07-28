@@ -48,8 +48,6 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
 }
 
 impl EngineValidator<EthEngineTypes> for MockEngineValidator {
-    type Block = Block;
-
     fn validate_version_specific_fields(
         &self,
         _version: reth_payload_primitives::EngineApiMessageVersion,

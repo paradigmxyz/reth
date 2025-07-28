@@ -57,8 +57,6 @@ where
     ChainSpec: EthChainSpec + EthereumHardforks + 'static,
     Types: PayloadTypes<PayloadAttributes = EthPayloadAttributes, ExecutionData = ExecutionData>,
 {
-    type Block = Block;
-
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,

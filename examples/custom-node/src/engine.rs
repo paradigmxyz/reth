@@ -254,8 +254,6 @@ impl<P> EngineValidator<CustomPayloadTypes> for CustomEngineValidator<P>
 where
     P: StateProviderFactory + Send + Sync + Unpin + 'static,
 {
-    type Block = crate::primitives::block::Block;
-
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
