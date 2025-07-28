@@ -175,11 +175,11 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
 
     /// Notify listeners about all discarded transactions.
     #[inline]
-    pub(crate) fn discarded_many(&mut self, discared: &[Arc<ValidPoolTransaction<T>>]) {
+    pub(crate) fn discarded_many(&mut self, discarded: &[Arc<ValidPoolTransaction<T>>]) {
         if self.is_empty() {
             return
         }
-        for tx in discared {
+        for tx in discarded {
             self.discarded(tx.hash());
         }
     }
