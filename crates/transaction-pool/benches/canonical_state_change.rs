@@ -6,9 +6,12 @@ use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Header, SealedBlock};
-use reth_transaction_pool::{test_utils::{MockTransaction, TestPoolBuilder}, BlockInfo, CanonicalStateUpdate, PoolConfig, PoolTransaction, PoolUpdateKind, SubPoolLimit, TransactionOrigin, TransactionPool, TransactionPoolExt};
-use std::collections::HashMap;
-use std::time::Duration;
+use reth_transaction_pool::{
+    test_utils::{MockTransaction, TestPoolBuilder},
+    BlockInfo, CanonicalStateUpdate, PoolConfig, PoolTransaction, PoolUpdateKind, SubPoolLimit,
+    TransactionOrigin, TransactionPool, TransactionPoolExt,
+};
+use std::{collections::HashMap, time::Duration};
 
 /// Generates a set of transactions for multiple senders
 fn generate_transactions(num_senders: usize, txs_per_sender: usize) -> Vec<MockTransaction> {
@@ -18,10 +21,7 @@ fn generate_transactions(num_senders: usize, txs_per_sender: usize) -> Vec<MockT
     for sender_idx in 0..num_senders {
         // Create a unique sender address
         let sender_bytes = sender_idx.to_be_bytes();
-        let addr_slice = [0u8; 12]
-            .into_iter()
-            .chain(sender_bytes.into_iter())
-            .collect::<Vec<_>>();
+        let addr_slice = [0u8; 12].into_iter().chain(sender_bytes.into_iter()).collect::<Vec<_>>();
         let sender = Address::from_slice(&addr_slice);
 
         // Generate transactions for this sender
@@ -29,7 +29,7 @@ fn generate_transactions(num_senders: usize, txs_per_sender: usize) -> Vec<MockT
             let mut tx = any::<MockTransaction>().new_tree(&mut runner).unwrap().current();
             tx.set_sender(sender);
             tx.set_nonce(nonce as u64);
-            
+
             // Ensure it's not a legacy transaction
             if tx.is_legacy() || tx.is_eip2930() {
                 tx = MockTransaction::eip1559();
@@ -38,7 +38,7 @@ fn generate_transactions(num_senders: usize, txs_per_sender: usize) -> Vec<MockT
                 tx.set_sender(sender);
                 tx.set_nonce(nonce as u64);
             }
-            
+
             txs.push(tx);
         }
     }
@@ -54,14 +54,14 @@ async fn fill_pool(pool: &TestPoolBuilder, txs: Vec<MockTransaction>) -> HashMap
     for tx in txs {
         let sender = tx.sender();
         let nonce = tx.nonce();
-        
+
         // Track the highest nonce for each sender
         sender_nonces.insert(sender, nonce.max(sender_nonces.get(&sender).copied().unwrap_or(0)));
-        
+
         // Add transaction to the pool
         let _ = pool.add_transaction(TransactionOrigin::External, tx).await;
     }
-    
+
     sender_nonces
 }
 
@@ -74,7 +74,7 @@ fn create_canonical_update(
     let body = BlockBody::default();
     let block = Block { header, body };
     let sealed_block = Box::leak(Box::new(SealedBlock::seal_slow(block)));
-    
+
     let changed_accounts: Vec<ChangedAccount> = sender_nonces
         .into_iter()
         .map(|(address, nonce)| ChangedAccount {
@@ -86,7 +86,7 @@ fn create_canonical_update(
 
     CanonicalStateUpdate {
         new_tip: sealed_block,
-        pending_block_base_fee: 1_000_000_000, // 1 gwei
+        pending_block_base_fee: 1_000_000_000,   // 1 gwei
         pending_block_blob_fee: Some(1_000_000), // 0.001 gwei
         changed_accounts,
         mined_transactions: vec![], // No transactions mined in this benchmark
@@ -102,7 +102,7 @@ fn canonical_state_change_bench(c: &mut Criterion) {
     for num_senders in [100, 500, 1000, 2000, 50000] {
         for txs_per_sender in [1, 5, 10] {
             let total_txs = num_senders * txs_per_sender;
-            
+
             let group_id = format!(
                 "txpool | canonical_state_change | senders: {} | txs_per_sender: {} | total: {}",
                 num_senders, txs_per_sender, total_txs
@@ -111,18 +111,17 @@ fn canonical_state_change_bench(c: &mut Criterion) {
             group.bench_function(group_id, |b| {
                 // Use tokio runtime for async operations
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                
+
                 // Setup phase - create pool and transactions
-                let pool = TestPoolBuilder::default()
-                    .with_config(PoolConfig {
-                        pending_limit: SubPoolLimit::max(),
-                        basefee_limit: SubPoolLimit::max(),
-                        queued_limit:  SubPoolLimit::max(),
-                        blob_limit: SubPoolLimit::max(),
-                        max_account_slots: 50,
-                        ..Default::default()
-                    });
-                
+                let pool = TestPoolBuilder::default().with_config(PoolConfig {
+                    pending_limit: SubPoolLimit::max(),
+                    basefee_limit: SubPoolLimit::max(),
+                    queued_limit: SubPoolLimit::max(),
+                    blob_limit: SubPoolLimit::max(),
+                    max_account_slots: 50,
+                    ..Default::default()
+                });
+
                 // Set initial block info
                 pool.set_block_info(BlockInfo {
                     last_seen_block_number: 0,
@@ -134,10 +133,10 @@ fn canonical_state_change_bench(c: &mut Criterion) {
 
                 let txs = generate_transactions(num_senders, txs_per_sender);
                 let sender_nonces = rt.block_on(fill_pool(&pool, txs));
-                
+
                 // Pre-create the update to avoid allocation in the benchmark loop
                 let update = create_canonical_update(sender_nonces);
-                
+
                 // Benchmark the canonical state change
                 b.iter(|| {
                     pool.on_canonical_state_change(update.clone());
@@ -145,7 +144,7 @@ fn canonical_state_change_bench(c: &mut Criterion) {
             });
         }
     }
-    
+
     group.finish();
 }
 
