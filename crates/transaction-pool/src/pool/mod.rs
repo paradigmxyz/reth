@@ -435,12 +435,13 @@ where
 
         {
             let mut listener = self.event_listener.write();
-
-            for tx in &promoted {
-                listener.pending(tx.hash(), None);
-            }
-            for tx in &discarded {
-                listener.discarded(tx.hash());
+            if !listener.is_empty() {
+                for tx in &promoted {
+                    listener.pending(tx.hash(), None);
+                }
+                for tx in &discarded {
+                    listener.discarded(tx.hash());
+                }
             }
         }
 
@@ -589,16 +590,10 @@ where
         if !discarded.is_empty() {
             // Delete any blobs associated with discarded blob transactions
             self.delete_discarded_blobs(discarded.iter());
+            self.event_listener.write().discarded_many(&discarded);
 
             let discarded_hashes =
                 discarded.into_iter().map(|tx| *tx.hash()).collect::<HashSet<_>>();
-
-            {
-                let mut listener = self.event_listener.write();
-                for hash in &discarded_hashes {
-                    listener.discarded(hash);
-                }
-            }
 
             // A newly added transaction may be immediately discarded, so we need to
             // adjust the result here
@@ -692,20 +687,26 @@ where
         // broadcast specific transaction events
         let mut listener = self.event_listener.write();
 
-        for tx in &mined {
-            listener.mined(tx, block_hash);
-        }
-        for tx in &promoted {
-            listener.pending(tx.hash(), None);
-        }
-        for tx in &discarded {
-            listener.discarded(tx.hash());
+        if !listener.is_empty() {
+            for tx in &mined {
+                listener.mined(tx, block_hash);
+            }
+            for tx in &promoted {
+                listener.pending(tx.hash(), None);
+            }
+            for tx in &discarded {
+                listener.discarded(tx.hash());
+            }
         }
     }
 
     /// Fire events for the newly added transaction if there are any.
     fn notify_event_listeners(&self, tx: &AddedTransaction<T::Transaction>) {
         let mut listener = self.event_listener.write();
+        if listener.is_empty() {
+            // nothing to notify
+            return
+        }
 
         match tx {
             AddedTransaction::Pending(tx) => {
@@ -783,11 +784,7 @@ where
         }
         let removed = self.pool.write().remove_transactions(hashes);
 
-        let mut listener = self.event_listener.write();
-
-        for tx in &removed {
-            listener.discarded(tx.hash());
-        }
+        self.event_listener.write().discarded_many(&removed);
 
         removed
     }
@@ -820,11 +817,7 @@ where
         let sender_id = self.get_sender_id(sender);
         let removed = self.pool.write().remove_transactions_by_sender(sender_id);
 
-        let mut listener = self.event_listener.write();
-
-        for tx in &removed {
-            listener.discarded(tx.hash());
-        }
+        self.event_listener.write().discarded_many(&removed);
 
         removed
     }
