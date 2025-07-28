@@ -57,6 +57,47 @@ where
     }
 }
 
+impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
+    /// Converts the RPC converter type of this builder
+    pub fn map_converter<F, R>(self, f: F) -> EthApiBuilder<N, R, NextEnv>
+    where
+        F: FnOnce(Rpc) -> R,
+    {
+        let Self {
+            components,
+            rpc_converter,
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle_config,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            next_env,
+        } = self;
+        EthApiBuilder {
+            components,
+            rpc_converter: f(rpc_converter),
+            gas_cap,
+            max_simulate_blocks,
+            eth_proof_window,
+            fee_history_cache_config,
+            proof_permits,
+            eth_state_cache_config,
+            eth_cache,
+            gas_oracle_config,
+            gas_oracle,
+            blocking_task_pool,
+            task_spawner,
+            next_env,
+        }
+    }
+}
+
 impl<N, ChainSpec> EthApiBuilder<N, RpcConverter<Ethereum, N::Evm, EthReceiptConverter<ChainSpec>>>
 where
     N: RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>>,

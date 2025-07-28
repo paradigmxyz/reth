@@ -7,12 +7,15 @@
 //! - Writing the data back to a new file
 //! - Confirming that all original data is preserved throughout the process
 
-use alloy_consensus::{BlockBody, BlockHeader, Header};
+use alloy_consensus::{BlockBody, BlockHeader, Header, ReceiptWithBloom};
 use rand::{prelude::IndexedRandom, rng};
 use reth_era::{
+    e2s_types::IndexEntry,
     era1_file::{Era1File, Era1Reader, Era1Writer},
     era1_types::{Era1Group, Era1Id},
-    execution_types::{BlockTuple, CompressedBody, CompressedHeader, TotalDifficulty},
+    execution_types::{
+        BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts, TotalDifficulty,
+    },
 };
 use reth_ethereum_primitives::TransactionSigned;
 use std::io::Cursor;
@@ -71,7 +74,7 @@ async fn test_file_roundtrip(
     for &block_id in &test_block_indices {
         let original_block = &original_file.group.blocks[block_id];
         let roundtrip_block = &roundtrip_file.group.blocks[block_id];
-        let block_number = original_file.group.block_index.starting_number + block_id as u64;
+        let block_number = original_file.group.block_index.starting_number() + block_id as u64;
 
         println!("Testing roundtrip for block {block_number}");
 
@@ -143,6 +146,21 @@ async fn test_file_roundtrip(
             "Ommers count should match after roundtrip"
         );
 
+        // Decode receipts
+        let original_receipts_decoded =
+            original_block.receipts.decode::<Vec<ReceiptWithBloom>>()?;
+        let roundtrip_receipts_decoded =
+            roundtrip_block.receipts.decode::<Vec<ReceiptWithBloom>>()?;
+
+        assert_eq!(
+            original_receipts_decoded, roundtrip_receipts_decoded,
+            "Block {block_number} decoded receipts should be identical after roundtrip"
+        );
+        assert_eq!(
+            original_receipts_data, roundtrip_receipts_data,
+            "Block {block_number} receipts data should be identical after roundtrip"
+        );
+
         // Check withdrawals presence/absence matches
         assert_eq!(
             original_decoded_body.withdrawals.is_some(),
@@ -178,11 +196,21 @@ async fn test_file_roundtrip(
             "Transaction count should match after re-compression"
         );
 
+        // Re-encore and re-compress the receipts
+        let recompressed_receipts =
+            CompressedReceipts::from_encodable(&roundtrip_receipts_decoded)?;
+        let recompressed_receipts_data = recompressed_receipts.decompress()?;
+
+        assert_eq!(
+            original_receipts_data.len(),
+            recompressed_receipts_data.len(),
+            "Receipts length should match after re-compression"
+        );
+
         let recompressed_block = BlockTuple::new(
             recompressed_header,
             recompressed_body,
-            original_block.receipts.clone(), /* reuse original receipts directly as it not
-                                              * possible to decode them */
+            recompressed_receipts,
             TotalDifficulty::new(original_block.total_difficulty.value),
         );
 

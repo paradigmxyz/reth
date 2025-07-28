@@ -1,5 +1,6 @@
 //! RPC receipt response builder, extends a layer one receipt with layer two data.
 
+use crate::EthApiError;
 use alloy_consensus::{ReceiptEnvelope, Transaction, TxReceipt};
 use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{Address, TxKind};
@@ -9,8 +10,6 @@ use reth_ethereum_primitives::Receipt;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_convert::transaction::{ConvertReceiptInput, ReceiptConverter};
 use std::{borrow::Cow, sync::Arc};
-
-use crate::EthApiError;
 
 /// Builds an [`TransactionReceipt`] obtaining the inner receipt envelope from the given closure.
 pub fn build_receipt<N, E>(
@@ -33,27 +32,11 @@ where
     let cumulative_gas_used = receipt.cumulative_gas_used();
     let logs_bloom = receipt.bloom();
 
-    macro_rules! build_rpc_logs {
-        ($logs:expr) => {
-            $logs
-                .enumerate()
-                .map(|(tx_log_idx, log)| Log {
-                    inner: log,
-                    block_hash: Some(meta.block_hash),
-                    block_number: Some(meta.block_number),
-                    block_timestamp: Some(meta.timestamp),
-                    transaction_hash: Some(meta.tx_hash),
-                    transaction_index: Some(meta.index),
-                    log_index: Some((next_log_index + tx_log_idx) as u64),
-                    removed: false,
-                })
-                .collect()
-        };
-    }
-
     let logs = match receipt {
-        Cow::Borrowed(r) => build_rpc_logs!(r.logs().iter().cloned()),
-        Cow::Owned(r) => build_rpc_logs!(r.into_logs().into_iter()),
+        Cow::Borrowed(r) => {
+            Log::collect_for_receipt(*next_log_index, *meta, r.logs().iter().cloned())
+        }
+        Cow::Owned(r) => Log::collect_for_receipt(*next_log_index, *meta, r.into_logs()),
     };
 
     let rpc_receipt = alloy_rpc_types_eth::Receipt { status, cumulative_gas_used, logs };
@@ -104,8 +87,8 @@ where
     N: NodePrimitives<Receipt = Receipt>,
     ChainSpec: EthChainSpec + 'static,
 {
-    type Error = EthApiError;
     type RpcReceipt = TransactionReceipt;
+    type Error = EthApiError;
 
     fn convert_receipts(
         &self,
