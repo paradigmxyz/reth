@@ -37,7 +37,7 @@ pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 /// The trie is divided into two tiers for efficient parallel processing:
 /// - **Upper subtrie**: Contains nodes with paths shorter than [`UPPER_TRIE_MAX_DEPTH`]
 /// - **Lower subtries**: An array of [`NUM_LOWER_SUBTRIES`] subtries, each handling nodes with
-///   paths of [`UPPER_TRIE_MAX_DEPTH`]+ nibbles
+///   paths of at least [`UPPER_TRIE_MAX_DEPTH`] nibbles
 ///
 /// Node placement is determined by path depth:
 /// - Paths with < [`UPPER_TRIE_MAX_DEPTH`] nibbles go to the upper subtrie
