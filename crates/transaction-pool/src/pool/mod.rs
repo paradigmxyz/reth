@@ -941,7 +941,9 @@ where
         }
         let mut listener = self.event_listener.write();
 
-        txs.0.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers))
+        if !listener.is_empty() {
+            txs.0.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
+        }
     }
 
     /// Number of transactions in the entire pool
