@@ -99,7 +99,7 @@ fn canonical_state_change_bench(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(10));
 
     // Test different pool sizes
-    for num_senders in [100, 500, 1000, 2000, 50000] {
+    for num_senders in [100, 500, 1000, 2000] {
         for txs_per_sender in [1, 5, 10] {
             let total_txs = num_senders * txs_per_sender;
 
