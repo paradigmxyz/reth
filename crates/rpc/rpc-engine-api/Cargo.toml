@@ -21,7 +21,6 @@ reth-payload-builder-primitives.workspace = true
 reth-payload-primitives.workspace = true
 reth-tasks.workspace = true
 reth-engine-primitives.workspace = true
-reth-engine-tree.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
 
@@ -50,7 +49,6 @@ parking_lot.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-ethereum-primitives.workspace = true
-reth-primitives-traits.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-rlp.workspace = true

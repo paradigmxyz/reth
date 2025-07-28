@@ -89,7 +89,6 @@ reth-tracing.workspace = true
 reth-transaction-pool = { workspace = true, features = ["test-utils"] }
 
 # alloy deps for testing against nodes
-alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 
 # misc

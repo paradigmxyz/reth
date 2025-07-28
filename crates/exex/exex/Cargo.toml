@@ -54,13 +54,11 @@ tracing.workspace = true
 [dev-dependencies]
 reth-db-common.workspace = true
 reth-evm-ethereum.workspace = true
-reth-node-api.workspace = true
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 
 alloy-genesis.workspace = true
-alloy-consensus.workspace = true
 
 rand.workspace = true
 secp256k1.workspace = true
