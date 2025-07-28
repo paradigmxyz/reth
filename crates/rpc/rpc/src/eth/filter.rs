@@ -1011,6 +1011,10 @@ impl<
     }
 }
 
+/// Type alias for the complex future type used in `RangeBlockMode`
+type ReceiptFetchFuture<P> =
+    Pin<Box<dyn Future<Output = Result<Vec<ReceiptBlockResult<P>>, EthFilterError>> + Send>>;
+
 /// Mode for processing blocks using range queries for older blocks
 struct RangeBlockMode<
     Eth: RpcNodeCoreExt<Provider: BlockIdReader, Pool: TransactionPool> + EthApiTypes + 'static,
@@ -1020,9 +1024,7 @@ struct RangeBlockMode<
     next: VecDeque<ReceiptBlockResult<Eth::Provider>>,
     max_range: usize,
     // Stream of ongoing receipt fetching tasks
-    pending_tasks: FuturesOrdered<
-        Pin<Box<dyn Future<Output = Result<Vec<ReceiptBlockResult<Eth::Provider>>, EthFilterError>> + Send>>
-    >,
+    pending_tasks: FuturesOrdered<ReceiptFetchFuture<Eth::Provider>>,
 }
 
 impl<
@@ -1108,13 +1110,11 @@ impl<
         let filter_inner = self.filter_inner.clone();
         let task = Box::pin(async move {
             let mut results = Vec::new();
-            
+
             for header in range_headers {
                 // First check if already cached to avoid unnecessary provider calls
-                let (maybe_block, maybe_receipts) = filter_inner
-                    .eth_cache()
-                    .maybe_cached_block_and_receipts(header.hash())
-                    .await?;
+                let (maybe_block, maybe_receipts) =
+                    filter_inner.eth_cache().maybe_cached_block_and_receipts(header.hash()).await?;
 
                 let receipts = match maybe_receipts {
                     Some(receipts) => receipts,
@@ -1138,7 +1138,7 @@ impl<
 
             Ok(results)
         });
-        
+
         self.pending_tasks.push_back(task);
     }
 
@@ -1164,13 +1164,15 @@ impl<
                     let mut chunk_results = Vec::new();
 
                     for header in chunk_headers {
-                        // Fetch directly from provider - RangeMode is used for older blocks unlikely to
-                        // be cached
-                        let receipts =
-                            match filter_inner.provider().receipts_by_block(header.hash().into())? {
-                                Some(receipts) => Arc::new(receipts),
-                                None => continue, // No receipts found
-                            };
+                        // Fetch directly from provider - RangeMode is used for older blocks
+                        // unlikely to be cached
+                        let receipts = match filter_inner
+                            .provider()
+                            .receipts_by_block(header.hash().into())?
+                        {
+                            Some(receipts) => Arc::new(receipts),
+                            None => continue, // No receipts found
+                        };
 
                         if !receipts.is_empty() {
                             chunk_results.push(ReceiptBlockResult {
@@ -1191,7 +1193,7 @@ impl<
                     Err(_join_err) => Err(EthFilterError::InternalError),
                 }
             });
-            
+
             self.pending_tasks.push_back(chunk_task);
         }
     }
