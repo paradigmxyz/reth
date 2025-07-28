@@ -83,8 +83,12 @@ impl<N: ScrollNodeCore, NetworkT> ScrollEthApi<N, NetworkT> {
         payload_size_limit: u64,
         sequencer_client: Option<SequencerClient>,
     ) -> Self {
-        let inner =
-            Arc::new(ScrollEthApiInner { eth_api, min_suggested_priority_fee, payload_size_limit, sequencer_client });
+        let inner = Arc::new(ScrollEthApiInner {
+            eth_api,
+            min_suggested_priority_fee,
+            payload_size_limit,
+            sequencer_client,
+        });
         Self {
             inner: inner.clone(),
             _nt: PhantomData,
@@ -357,7 +361,7 @@ pub struct ScrollEthApiBuilder {
 impl ScrollEthApiBuilder {
     /// Creates a [`ScrollEthApiBuilder`] instance.
     pub const fn new() -> Self {
-        Self { min_suggested_priority_fee: 0, payload_size_limit: 0 }
+        Self { min_suggested_priority_fee: 0, payload_size_limit: 0, sequencer_url: None }
     }
 
     /// With minimum suggested priority fee (tip)
@@ -369,7 +373,7 @@ impl ScrollEthApiBuilder {
     /// With payload size limit
     pub const fn with_payload_size_limit(mut self, limit: u64) -> Self {
         self.payload_size_limit = limit;
-        Self { sequencer_url: None }
+        self
     }
 
     /// With a [`SequencerClient`].
@@ -414,6 +418,11 @@ where
             None
         };
 
-        Ok(ScrollEthApi::new(eth_api, U256::from(min_suggested_priority_fee), payload_size_limit, sequencer_client))
+        Ok(ScrollEthApi::new(
+            eth_api,
+            U256::from(min_suggested_priority_fee),
+            payload_size_limit,
+            sequencer_client,
+        ))
     }
 }

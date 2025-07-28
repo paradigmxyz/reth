@@ -23,6 +23,7 @@ where
     >,
     N: ScrollNodeCore,
 {
+    #[allow(clippy::manual_async_fn)]
     fn fee_history(
         &self,
         mut block_count: u64,
@@ -211,13 +212,14 @@ where
                 )
                 .await;
 
-            let reward = if is_at_capacity && suggest_tip_cap_result.is_ok() {
-                let suggest_tip_cap = suggest_tip_cap_result.expect("checked result is Ok").saturating_to::<u128>();
-                reward_percentiles.map(|percentiles| {
-                    vec![vec![suggest_tip_cap; percentiles.len()]; block_count as usize]
-                })
-            } else {
-                reward_percentiles.map(|_| rewards)
+            let reward = match (is_at_capacity, suggest_tip_cap_result) {
+                (true, Ok(suggest_tip_cap_value)) => {
+                    let suggest_tip_cap = suggest_tip_cap_value.saturating_to::<u128>();
+                    reward_percentiles.map(|percentiles| {
+                        vec![vec![suggest_tip_cap; percentiles.len()]; block_count as usize]
+                    })
+                }
+                _ => reward_percentiles.map(|_| rewards),
             };
 
             Ok(FeeHistory {

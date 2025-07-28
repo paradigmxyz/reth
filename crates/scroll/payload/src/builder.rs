@@ -487,7 +487,6 @@ where
         breaker: PayloadBuildingBreaker,
     ) -> Result<Option<()>, PayloadBuilderError> {
         let block_gas_limit = builder.evm_mut().block().gas_limit;
-        let block_da_limit = builder_config.max_da_block_size();
         let base_fee = builder.evm_mut().block().basefee;
 
         while let Some(tx) = best_txs.next(()) {

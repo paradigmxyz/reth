@@ -59,7 +59,6 @@ tracing.workspace = true
 parking_lot.workspace = true
 tokio.workspace = true
 futures = "0.3"
-tracing.workspace = true
 
 # rpc
 jsonrpsee-types.workspace = true
