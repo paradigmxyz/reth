@@ -134,7 +134,7 @@ where
     pub fn root(self) -> Result<B256, StateRootError> {
         match self.calculate(false)? {
             StateRootProgress::Complete(root, _, _) => Ok(root),
-            StateRootProgress::Progress(..) => unreachable!(), // update retenion is disabled
+            StateRootProgress::Progress(..) => unreachable!(), // update retention is disabled
         }
     }
 

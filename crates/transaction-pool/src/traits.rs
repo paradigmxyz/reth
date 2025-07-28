@@ -52,13 +52,13 @@
 
 use crate::{
     blobstore::BlobStoreError,
-    error::{InvalidPoolTransactionError, PoolResult},
+    error::{InvalidPoolTransactionError, PoolError, PoolResult},
     pool::{
         state::SubPool, BestTransactionFilter, NewTransactionEvent, TransactionEvents,
         TransactionListenerKind,
     },
     validate::ValidPoolTransaction,
-    AllTransactionsEvents,
+    AddedTransactionOutcome, AllTransactionsEvents,
 };
 use alloy_consensus::{error::ValueError, BlockHeader, Signed, Typed2718};
 use alloy_eips::{
@@ -130,7 +130,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn add_external_transaction(
         &self,
         transaction: Self::Transaction,
-    ) -> impl Future<Output = PoolResult<TxHash>> + Send {
+    ) -> impl Future<Output = PoolResult<AddedTransactionOutcome>> + Send {
         self.add_transaction(TransactionOrigin::External, transaction)
     }
 
@@ -140,7 +140,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     fn add_external_transactions(
         &self,
         transactions: Vec<Self::Transaction>,
-    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send {
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
         self.add_transactions(TransactionOrigin::External, transactions)
     }
 
@@ -163,7 +163,7 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transaction: Self::Transaction,
-    ) -> impl Future<Output = PoolResult<TxHash>> + Send;
+    ) -> impl Future<Output = PoolResult<AddedTransactionOutcome>> + Send;
 
     /// Adds the given _unvalidated_ transaction into the pool.
     ///
@@ -174,7 +174,43 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         origin: TransactionOrigin,
         transactions: Vec<Self::Transaction>,
-    ) -> impl Future<Output = Vec<PoolResult<TxHash>>> + Send;
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send;
+
+    /// Submit a consensus transaction directly to the pool
+    fn add_consensus_transaction(
+        &self,
+        tx: Recovered<<Self::Transaction as PoolTransaction>::Consensus>,
+        origin: TransactionOrigin,
+    ) -> impl Future<Output = PoolResult<AddedTransactionOutcome>> + Send {
+        async move {
+            let tx_hash = *tx.tx_hash();
+
+            let pool_transaction = match Self::Transaction::try_from_consensus(tx) {
+                Ok(tx) => tx,
+                Err(e) => return Err(PoolError::other(tx_hash, e.to_string())),
+            };
+
+            self.add_transaction(origin, pool_transaction).await
+        }
+    }
+
+    /// Submit a consensus transaction and subscribe to event stream
+    fn add_consensus_transaction_and_subscribe(
+        &self,
+        tx: Recovered<<Self::Transaction as PoolTransaction>::Consensus>,
+        origin: TransactionOrigin,
+    ) -> impl Future<Output = PoolResult<TransactionEvents>> + Send {
+        async move {
+            let tx_hash = *tx.tx_hash();
+
+            let pool_transaction = match Self::Transaction::try_from_consensus(tx) {
+                Ok(tx) => tx,
+                Err(e) => return Err(PoolError::other(tx_hash, e.to_string())),
+            };
+
+            self.add_transaction_and_subscribe(origin, pool_transaction).await
+        }
+    }
 
     /// Returns a new transaction change event stream for the given transaction.
     ///

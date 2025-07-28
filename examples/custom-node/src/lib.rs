@@ -8,18 +8,26 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{
-    evm::CustomExecutorBuilder, pool::CustomPooledTransaction, primitives::CustomTransaction,
+    engine::{CustomEngineValidatorBuilder, CustomPayloadTypes},
+    engine_api::CustomEngineApiBuilder,
+    evm::CustomExecutorBuilder,
+    pool::CustomPooledTransaction,
+    primitives::CustomTransaction,
+    rpc::CustomRpcTypes,
 };
 use chainspec::CustomChainSpec;
 use primitives::CustomNodePrimitives;
 use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
-    Node,
+    Node, NodeAdapter,
 };
-use reth_op::node::{
-    node::{OpConsensusBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder},
-    txpool, OpNode, OpPayloadTypes,
+use reth_op::{
+    node::{
+        node::{OpConsensusBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder},
+        txpool, OpAddOns, OpNode,
+    },
+    rpc::OpEthApiBuilder,
 };
 
 pub mod chainspec;
@@ -28,16 +36,19 @@ pub mod engine_api;
 pub mod evm;
 pub mod pool;
 pub mod primitives;
+pub mod rpc;
 
 #[derive(Debug, Clone)]
-pub struct CustomNode {}
+pub struct CustomNode {
+    inner: OpNode,
+}
 
 impl NodeTypes for CustomNode {
     type Primitives = CustomNodePrimitives;
     type ChainSpec = CustomChainSpec;
     type StateCommitment = <OpNode as NodeTypes>::StateCommitment;
     type Storage = <OpNode as NodeTypes>::Storage;
-    type Payload = OpPayloadTypes<CustomNodePrimitives>;
+    type Payload = CustomPayloadTypes;
 }
 
 impl<N> Node<N> for CustomNode
@@ -53,7 +64,12 @@ where
         OpConsensusBuilder,
     >;
 
-    type AddOns = ();
+    type AddOns = OpAddOns<
+        NodeAdapter<N>,
+        OpEthApiBuilder<CustomRpcTypes>,
+        CustomEngineValidatorBuilder,
+        CustomEngineApiBuilder,
+    >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
@@ -65,5 +81,7 @@ where
             .consensus(OpConsensusBuilder::default())
     }
 
-    fn add_ons(&self) -> Self::AddOns {}
+    fn add_ons(&self) -> Self::AddOns {
+        self.inner.add_ons_builder().build()
+    }
 }

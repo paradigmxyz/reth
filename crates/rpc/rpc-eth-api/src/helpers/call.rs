@@ -26,8 +26,8 @@ use reth_evm::{
     ConfigureEvm, Evm, EvmEnv, EvmEnvFor, HaltReasonFor, InspectorFor, SpecFor, TransactionEnv,
     TxEnvFor,
 };
-use reth_node_api::{BlockBody, NodePrimitives};
-use reth_primitives_traits::{Recovered, SealedHeader, SignedTransaction};
+use reth_node_api::BlockBody;
+use reth_primitives_traits::{Recovered, SignedTransaction};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{CacheDB, State},
@@ -39,7 +39,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, RevertError, RpcInvalidTransactionError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderHeader, ProviderTx};
+use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
     context_interface::{
         result::{ExecutionResult, ResultAndState},
@@ -193,17 +193,14 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         )?
                     };
 
+                    parent = result.block.clone_sealed_header();
+
                     let block = simulate::build_simulated_block(
                         result.block,
                         results,
                         return_full_transactions.into(),
                         this.tx_resp_builder(),
                     )?;
-
-                    parent = SealedHeader::new(
-                        block.inner.header.inner.clone(),
-                        block.inner.header.hash,
-                    );
 
                     blocks.push(block);
                 }
@@ -456,12 +453,6 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 /// Executes code on state.
 pub trait Call:
     LoadState<
-        Evm: ConfigureEvm<
-            Primitives: NodePrimitives<
-                BlockHeader = ProviderHeader<Self::Provider>,
-                SignedTx = ProviderTx<Self::Provider>,
-            >,
-        >,
         RpcConvert: RpcConvert<TxEnv = TxEnvFor<Self::Evm>>,
         Error: FromEvmError<Self::Evm>
                    + From<<Self::RpcConvert as RpcConvert>::Error>
@@ -770,6 +761,11 @@ pub trait Call:
 
         let request_gas = request.as_ref().gas_limit();
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut *db)?;
+
+        // lower the basefee to 0 to avoid breaking EVM invariants (basefee < gasprice): <https://github.com/ethereum/go-ethereum/blob/355228b011ef9a85ebc0f21e7196f892038d49f0/internal/ethapi/api.go#L700-L704>
+        if tx_env.gas_price() == 0 {
+            evm_env.block_env.basefee = 0;
+        }
 
         if request_gas.is_none() {
             // No gas limit was provided in the request, so we need to cap the transaction gas limit

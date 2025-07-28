@@ -71,7 +71,7 @@ pub enum StatelessValidationError {
     HeaderDeserializationFailed,
 
     /// Error when the computed state root does not match the one in the block header.
-    #[error("mismatched post- state root: {got}\n {expected}")]
+    #[error("mismatched post-state root: {got}\n {expected}")]
     PostStateRootMismatch {
         /// The computed post-state root
         got: B256,

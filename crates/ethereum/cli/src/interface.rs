@@ -1,6 +1,7 @@
 //! CLI definition and entrypoint to executable
 
 use crate::chainspec::EthereumChainSpecParser;
+use alloy_consensus::Header;
 use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
@@ -125,7 +126,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     ) -> eyre::Result<()>
     where
         N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
+            Primitives: NodePrimitives<BlockHeader: From<Header>>,
             ChainSpec: Hardforks,
         >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
@@ -182,7 +183,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Cli<C, Ext> {
     ) -> eyre::Result<()>
     where
         N: CliNodeTypes<
-            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
+            Primitives: NodePrimitives<BlockHeader: From<Header>>,
             ChainSpec: Hardforks,
         >,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,

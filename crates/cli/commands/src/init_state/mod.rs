@@ -1,14 +1,14 @@
 //! Command that initializes the node from a genesis file.
 
 use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader as AlloyBlockHeader, Header};
 use alloy_primitives::{B256, U256};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db_common::init::init_from_state_dump;
 use reth_node_api::NodePrimitives;
-use reth_primitives_traits::SealedHeader;
+use reth_primitives_traits::{BlockHeader, SealedHeader};
 use reth_provider::{
     BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
@@ -72,7 +72,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
     where
         N: CliNodeTypes<
             ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<BlockHeader = alloy_consensus::Header>,
+            Primitives: NodePrimitives<BlockHeader: BlockHeader + From<Header>>,
         >,
     {
         info!(target: "reth::cli", "Reth init-state starting");
@@ -85,7 +85,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
         if self.without_evm {
             // ensure header, total difficulty and header hash are provided
             let header = self.header.ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
-            let header = without_evm::read_header_from_file(header)?;
+            let header = without_evm::read_header_from_file::<
+                <N::Primitives as NodePrimitives>::BlockHeader,
+            >(header)?;
 
             let header_hash =
                 self.header_hash.ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
@@ -103,7 +105,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
                     &provider_rw,
                     SealedHeader::new(header, header_hash),
                     total_difficulty,
-                    |number| Header { number, ..Default::default() },
+                    |number| {
+                        let header = Header { number, ..Default::default() };
+                        <<N::Primitives as NodePrimitives>::BlockHeader>::from(header)
+                    },
                 )?;
 
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they
@@ -112,7 +117,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
                 // Necessary to commit, so the header is accessible to provider_rw and
                 // init_state_dump
                 static_file_provider.commit()?;
-            } else if last_block_number > 0 && last_block_number < header.number {
+            } else if last_block_number > 0 && last_block_number < header.number() {
                 return Err(eyre::eyre!(
                     "Data directory should be empty when calling init-state with --without-evm-history."
                 ));

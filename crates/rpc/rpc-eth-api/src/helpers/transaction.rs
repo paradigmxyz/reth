@@ -29,7 +29,9 @@ use reth_storage_api::{
     BlockNumReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ProviderTx, ReceiptProvider,
     TransactionsProvider,
 };
-use reth_transaction_pool::{PoolTransaction, TransactionOrigin, TransactionPool};
+use reth_transaction_pool::{
+    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+};
 use std::sync::Arc;
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
@@ -223,8 +225,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     where
         Self: 'static,
     {
-        let provider = self.provider().clone();
-        self.spawn_blocking_io(move |_| {
+        self.spawn_blocking_io(move |this| {
+            let provider = this.provider();
             let (tx, meta) = match provider
                 .transaction_by_hash_with_meta(hash)
                 .map_err(Self::Error::from_eth_err)?
@@ -417,7 +419,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .map_err(|_| EthApiError::TransactionConversionError)?;
 
             // submit the transaction to the pool with a `Local` origin
-            let hash = self
+            let AddedTransactionOutcome { hash, .. } = self
                 .pool()
                 .add_transaction(TransactionOrigin::Local, pool_transaction)
                 .await

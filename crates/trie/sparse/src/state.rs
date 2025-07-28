@@ -1,7 +1,7 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::SparseTrieInterface,
-    SerialSparseTrie, SparseTrie, TrieMasks,
+    RevealedSparseNode, SerialSparseTrie, SparseTrie, TrieMasks,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -10,7 +10,6 @@ use alloy_primitives::{
 };
 use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::proof::DecodedProofNodes;
-use core::iter::Peekable;
 use reth_execution_errors::{SparseStateTrieErrorKind, SparseStateTrieResult, SparseTrieErrorKind};
 use reth_primitives_traits::Account;
 use reth_trie_common::{
@@ -20,6 +19,36 @@ use reth_trie_common::{
     TrieAccount, TrieMask, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use tracing::trace;
+
+/// Provides type-safe re-use of cleared [`SparseStateTrie`]s, which helps to save allocations
+/// across payload runs.
+#[derive(Debug)]
+pub struct ClearedSparseStateTrie<
+    A = SerialSparseTrie, // Account trie implementation
+    S = SerialSparseTrie, // Storage trie implementation
+>(SparseStateTrie<A, S>);
+
+impl<A, S> ClearedSparseStateTrie<A, S>
+where
+    A: SparseTrieInterface + Default,
+    S: SparseTrieInterface + Default,
+{
+    /// Creates a [`ClearedSparseStateTrie`] by clearing all the existing internal state of a
+    /// [`SparseStateTrie`] and then storing that instance for later re-use.
+    pub fn from_state_trie(mut trie: SparseStateTrie<A, S>) -> Self {
+        trie.state = trie.state.clear();
+        trie.cleared_storages.extend(trie.storages.drain().map(|(_, trie)| trie.clear()));
+        trie.revealed_account_paths.clear();
+        trie.revealed_storage_paths.clear();
+        trie.account_rlp_buf.clear();
+        Self(trie)
+    }
+
+    /// Returns the cleared [`SparseStateTrie`], consuming this instance.
+    pub fn into_inner(self) -> SparseStateTrie<A, S> {
+        self.0
+    }
+}
 
 #[derive(Debug)]
 /// Sparse state trie representing lazy-loaded Ethereum state trie.
@@ -31,6 +60,8 @@ pub struct SparseStateTrie<
     state: SparseTrie<A>,
     /// Sparse storage tries.
     storages: B256Map<SparseTrie<S>>,
+    /// Cleared storage tries, kept for re-use
+    cleared_storages: Vec<SparseTrie<S>>,
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// Collection of revealed storage trie paths, per account.
@@ -53,6 +84,7 @@ where
         Self {
             state: Default::default(),
             storages: Default::default(),
+            cleared_storages: Default::default(),
             revealed_account_paths: Default::default(),
             revealed_storage_paths: Default::default(),
             retain_updates: false,
@@ -71,16 +103,7 @@ impl SparseStateTrie {
     }
 }
 
-impl<A, S> SparseStateTrie<A, S>
-where
-    A: SparseTrieInterface + Default,
-    S: SparseTrieInterface + Default,
-{
-    /// Create new [`SparseStateTrie`]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
+impl<A, S> SparseStateTrie<A, S> {
     /// Set the retention of branch node updates and deletions.
     pub const fn with_updates(mut self, retain_updates: bool) -> Self {
         self.retain_updates = retain_updates;
@@ -92,10 +115,16 @@ where
         self.state = trie;
         self
     }
+}
 
-    /// Takes the accounts trie.
-    pub fn take_accounts_trie(&mut self) -> SparseTrie<A> {
-        core::mem::take(&mut self.state)
+impl<A, S> SparseStateTrie<A, S>
+where
+    A: SparseTrieInterface + Default,
+    S: SparseTrieInterface + Default,
+{
+    /// Create new [`SparseStateTrie`]
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Returns `true` if account was already revealed.
@@ -167,88 +196,14 @@ where
         self.storages.insert(address, storage_trie);
     }
 
-    /// Reveal unknown trie paths from provided leaf path and its proof for the account.
+    /// Retrieves the storage trie for the given address, creating a new one if it doesn't exist.
     ///
-    /// Panics if trie updates retention is enabled.
-    ///
-    /// NOTE: This method does not extensively validate the proof.
-    pub fn reveal_account(
-        &mut self,
-        account: B256,
-        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
-    ) -> SparseStateTrieResult<()> {
-        assert!(!self.retain_updates);
-
-        if self.is_account_revealed(account) {
-            return Ok(());
-        }
-
-        let mut proof = proof.into_iter().peekable();
-
-        let Some(root_node) = self.validate_root_node(&mut proof)? else { return Ok(()) };
-
-        // Reveal root node if it wasn't already.
-        let trie = self.state.reveal_root(root_node, TrieMasks::none(), self.retain_updates)?;
-
-        // Reveal the remaining proof nodes.
-        for (path, bytes) in proof {
-            if self.revealed_account_paths.contains(&path) {
-                continue
-            }
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(path, node, TrieMasks::none())?;
-
-            // Track the revealed path.
-            self.revealed_account_paths.insert(path);
-        }
-
-        Ok(())
-    }
-
-    /// Reveal unknown trie paths from provided leaf path and its proof for the storage slot.
-    ///
-    /// Panics if trie updates retention is enabled.
-    ///
-    /// NOTE: This method does not extensively validate the proof.
-    pub fn reveal_storage_slot(
-        &mut self,
-        account: B256,
-        slot: B256,
-        proof: impl IntoIterator<Item = (Nibbles, Bytes)>,
-    ) -> SparseStateTrieResult<()> {
-        assert!(!self.retain_updates);
-
-        if self.is_storage_slot_revealed(account, slot) {
-            return Ok(());
-        }
-
-        let mut proof = proof.into_iter().peekable();
-
-        let Some(root_node) = self.validate_root_node(&mut proof)? else { return Ok(()) };
-
-        // Reveal root node if it wasn't already.
-        let trie = self.storages.entry(account).or_default().reveal_root(
-            root_node,
-            TrieMasks::none(),
-            self.retain_updates,
-        )?;
-
-        let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
-
-        // Reveal the remaining proof nodes.
-        for (path, bytes) in proof {
-            // If the node is already revealed, skip it.
-            if revealed_nodes.contains(&path) {
-                continue
-            }
-            let node = TrieNode::decode(&mut &bytes[..])?;
-            trie.reveal_node(path, node, TrieMasks::none())?;
-
-            // Track the revealed path.
-            revealed_nodes.insert(path);
-        }
-
-        Ok(())
+    /// This method should always be used to create a storage trie, as it will re-use previously
+    /// allocated and cleared storage tries when possible.
+    fn get_or_create_storage_trie(&mut self, address: B256) -> &mut SparseTrie<S> {
+        self.storages
+            .entry(address)
+            .or_insert_with(|| self.cleared_storages.pop().unwrap_or_default())
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -312,47 +267,36 @@ where
         branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
         branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
     ) -> SparseStateTrieResult<()> {
-        let FilteredProofNodes {
+        let FilterMappedProofNodes {
+            root_node,
             nodes,
-            new_nodes: _,
+            new_nodes,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
-        } = filter_revealed_nodes(account_subtree, &self.revealed_account_paths)?;
+        } = filter_map_revealed_nodes(
+            account_subtree,
+            &mut self.revealed_account_paths,
+            &branch_node_hash_masks,
+            &branch_node_tree_masks,
+        )?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_account_nodes(_total_nodes as u64);
             self.metrics.increment_skipped_account_nodes(_skipped_nodes as u64);
         }
-        let mut account_nodes = nodes.into_iter().peekable();
 
-        if let Some(root_node) = Self::validate_root_node_decoded(&mut account_nodes)? {
+        if let Some(root_node) = root_node {
             // Reveal root node if it wasn't already.
-            let trie = self.state.reveal_root(
-                root_node,
-                TrieMasks {
-                    hash_mask: branch_node_hash_masks.get(&Nibbles::default()).copied(),
-                    tree_mask: branch_node_tree_masks.get(&Nibbles::default()).copied(),
-                },
-                self.retain_updates,
-            )?;
+            trace!(target: "trie::sparse", ?root_node, "Revealing root account node");
+            let trie =
+                self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?;
 
-            // Reveal the remaining proof nodes.
-            for (path, node) in account_nodes {
-                let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
-                    (
-                        branch_node_hash_masks.get(&path).copied(),
-                        branch_node_tree_masks.get(&path).copied(),
-                    )
-                } else {
-                    (None, None)
-                };
+            // Reserve the capacity for new nodes ahead of time, if the trie implementation
+            // supports doing so.
+            trie.reserve_nodes(new_nodes);
 
-                trace!(target: "trie::sparse", ?path, ?node, ?hash_mask, ?tree_mask, "Revealing account node");
-                trie.reveal_node(path, node, TrieMasks { hash_mask, tree_mask })?;
-
-                // Track the revealed path.
-                self.revealed_account_paths.insert(path);
-            }
+            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing account nodes");
+            trie.reveal_nodes(nodes)?;
         }
 
         Ok(())
@@ -377,56 +321,40 @@ where
     ) -> SparseStateTrieResult<()> {
         let revealed_nodes = self.revealed_storage_paths.entry(account).or_default();
 
-        let FilteredProofNodes {
+        let FilterMappedProofNodes {
+            root_node,
             nodes,
             new_nodes,
             total_nodes: _total_nodes,
             skipped_nodes: _skipped_nodes,
-        } = filter_revealed_nodes(storage_subtree.subtree, revealed_nodes)?;
+        } = filter_map_revealed_nodes(
+            storage_subtree.subtree,
+            revealed_nodes,
+            &storage_subtree.branch_node_hash_masks,
+            &storage_subtree.branch_node_tree_masks,
+        )?;
         #[cfg(feature = "metrics")]
         {
             self.metrics.increment_total_storage_nodes(_total_nodes as u64);
             self.metrics.increment_skipped_storage_nodes(_skipped_nodes as u64);
         }
-        let mut nodes = nodes.into_iter().peekable();
 
-        if let Some(root_node) = Self::validate_root_node_decoded(&mut nodes)? {
+        if let Some(root_node) = root_node {
             // Reveal root node if it wasn't already.
-            let trie = self.storages.entry(account).or_default().reveal_root(
-                root_node,
-                TrieMasks {
-                    hash_mask: storage_subtree
-                        .branch_node_hash_masks
-                        .get(&Nibbles::default())
-                        .copied(),
-                    tree_mask: storage_subtree
-                        .branch_node_tree_masks
-                        .get(&Nibbles::default())
-                        .copied(),
-                },
-                self.retain_updates,
+            trace!(target: "trie::sparse", ?account, ?root_node, "Revealing root storage node");
+            let retain_updates = self.retain_updates;
+            let trie = self.get_or_create_storage_trie(account).reveal_root(
+                root_node.node,
+                root_node.masks,
+                retain_updates,
             )?;
 
-            // Reserve the capacity for new nodes ahead of time.
+            // Reserve the capacity for new nodes ahead of time, if the trie implementation
+            // supports doing so.
             trie.reserve_nodes(new_nodes);
 
-            // Reveal the remaining proof nodes.
-            for (path, node) in nodes {
-                let (hash_mask, tree_mask) = if let TrieNode::Branch(_) = node {
-                    (
-                        storage_subtree.branch_node_hash_masks.get(&path).copied(),
-                        storage_subtree.branch_node_tree_masks.get(&path).copied(),
-                    )
-                } else {
-                    (None, None)
-                };
-
-                trace!(target: "trie::sparse", ?account, ?path, ?node, ?hash_mask, ?tree_mask, "Revealing storage node");
-                trie.reveal_node(path, node, TrieMasks { hash_mask, tree_mask })?;
-
-                // Track the revealed path.
-                revealed_nodes.insert(path);
-            }
+            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing storage nodes");
+            trie.reveal_nodes(nodes)?;
         }
 
         Ok(())
@@ -493,13 +421,14 @@ where
                     .get(&account)
                     .is_none_or(|paths| !paths.contains(&path))
                 {
-                    let storage_trie_entry = self.storages.entry(account).or_default();
+                    let retain_updates = self.retain_updates;
+                    let storage_trie_entry = self.get_or_create_storage_trie(account);
                     if path.is_empty() {
                         // Handle special storage state root node case.
                         storage_trie_entry.reveal_root(
                             trie_node,
                             TrieMasks::none(),
-                            self.retain_updates,
+                            retain_updates,
                         )?;
                     } else {
                         // Reveal non-root storage trie node.
@@ -533,52 +462,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Validates the root node of the proof and returns it if it exists and is valid.
-    fn validate_root_node<I: Iterator<Item = (Nibbles, Bytes)>>(
-        &self,
-        proof: &mut Peekable<I>,
-    ) -> SparseStateTrieResult<Option<TrieNode>> {
-        // Validate root node.
-        let Some((path, node)) = proof.next() else { return Ok(None) };
-        if !path.is_empty() {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
-        }
-
-        // Decode root node and perform sanity check.
-        let root_node = TrieNode::decode(&mut &node[..])?;
-        if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode { path, node }.into())
-        }
-
-        Ok(Some(root_node))
-    }
-
-    /// Validates the decoded root node of the proof and returns it if it exists and is valid.
-    fn validate_root_node_decoded<I: Iterator<Item = (Nibbles, TrieNode)>>(
-        proof: &mut Peekable<I>,
-    ) -> SparseStateTrieResult<Option<TrieNode>> {
-        // Validate root node.
-        let Some((path, root_node)) = proof.next() else { return Ok(None) };
-        if !path.is_empty() {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode {
-                path,
-                node: alloy_rlp::encode(&root_node).into(),
-            }
-            .into())
-        }
-
-        // Perform sanity check.
-        if matches!(root_node, TrieNode::EmptyRoot) && proof.peek().is_some() {
-            return Err(SparseStateTrieErrorKind::InvalidRootNode {
-                path,
-                node: alloy_rlp::encode(&root_node).into(),
-            }
-            .into())
-        }
-
-        Ok(Some(root_node))
     }
 
     /// Wipe the storage trie at the provided address.
@@ -853,11 +736,13 @@ where
     }
 }
 
-/// Result of [`filter_revealed_nodes`].
+/// Result of [`filter_map_revealed_nodes`].
 #[derive(Debug, PartialEq, Eq)]
-struct FilteredProofNodes {
-    /// Filtered, decoded and sorted proof nodes.
-    nodes: Vec<(Nibbles, TrieNode)>,
+struct FilterMappedProofNodes {
+    /// Root node which was pulled out of the original node set to be handled specially.
+    root_node: Option<RevealedSparseNode>,
+    /// Filtered, decoded and unsorted proof nodes. Root node is removed.
+    nodes: Vec<RevealedSparseNode>,
     /// Number of nodes in the proof.
     total_nodes: usize,
     /// Number of nodes that were skipped because they were already revealed.
@@ -867,38 +752,78 @@ struct FilteredProofNodes {
     new_nodes: usize,
 }
 
-/// Filters the decoded nodes that are already revealed and returns additional information about the
-/// number of total, skipped, and new nodes.
-fn filter_revealed_nodes(
+/// Filters the decoded nodes that are already revealed, maps them to `RevealedSparseNodes`,
+/// separates the root node if present, and returns additional information about the number of
+/// total, skipped, and new nodes.
+fn filter_map_revealed_nodes(
     proof_nodes: DecodedProofNodes,
-    revealed_nodes: &HashSet<Nibbles>,
-) -> alloy_rlp::Result<FilteredProofNodes> {
-    let mut result = FilteredProofNodes {
+    revealed_nodes: &mut HashSet<Nibbles>,
+    branch_node_hash_masks: &HashMap<Nibbles, TrieMask>,
+    branch_node_tree_masks: &HashMap<Nibbles, TrieMask>,
+) -> SparseStateTrieResult<FilterMappedProofNodes> {
+    let mut result = FilterMappedProofNodes {
+        root_node: None,
         nodes: Vec::with_capacity(proof_nodes.len()),
         total_nodes: 0,
         skipped_nodes: 0,
         new_nodes: 0,
     };
 
-    for (path, node) in proof_nodes.into_inner() {
+    let proof_nodes_len = proof_nodes.len();
+    for (path, proof_node) in proof_nodes.into_inner() {
         result.total_nodes += 1;
-        // If the node is already revealed, skip it.
-        if revealed_nodes.contains(&path) {
+
+        let is_root = path.is_empty();
+
+        // If the node is already revealed, skip it. We don't ever skip the root node, nor do we add
+        // it to `revealed_nodes`.
+        if !is_root && !revealed_nodes.insert(path) {
             result.skipped_nodes += 1;
             continue
         }
 
         result.new_nodes += 1;
-        // If it's a branch node, increase the number of new nodes by the number of children
-        // according to the state mask.
-        if let TrieNode::Branch(branch) = &node {
-            result.new_nodes += branch.state_mask.count_ones() as usize;
+
+        // Extract hash/tree masks based on the node type (only branch nodes have masks). At the
+        // same time increase the new_nodes counter if the node is a type which has children.
+        let masks = match &proof_node {
+            TrieNode::Branch(branch) => {
+                // If it's a branch node, increase the number of new nodes by the number of children
+                // according to the state mask.
+                result.new_nodes += branch.state_mask.count_ones() as usize;
+                TrieMasks {
+                    hash_mask: branch_node_hash_masks.get(&path).copied(),
+                    tree_mask: branch_node_tree_masks.get(&path).copied(),
+                }
+            }
+            TrieNode::Extension(_) => {
+                // There is always exactly one child of an extension node.
+                result.new_nodes += 1;
+                TrieMasks::none()
+            }
+            _ => TrieMasks::none(),
+        };
+
+        let node = RevealedSparseNode { path, node: proof_node, masks };
+
+        if is_root {
+            // Perform sanity check.
+            if matches!(node.node, TrieNode::EmptyRoot) && proof_nodes_len > 1 {
+                return Err(SparseStateTrieErrorKind::InvalidRootNode {
+                    path,
+                    node: alloy_rlp::encode(&node.node).into(),
+                }
+                .into())
+            }
+
+            result.root_node = Some(node);
+
+            continue
         }
 
-        result.nodes.push((path, node));
+        result.nodes.push(node);
     }
 
-    result.nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     Ok(result)
 }
 
@@ -909,11 +834,9 @@ mod tests {
     use alloy_primitives::{
         b256,
         map::{HashMap, HashSet},
-        Bytes, U256,
+        U256,
     };
-    use alloy_rlp::EMPTY_STRING_CODE;
     use arbitrary::Arbitrary;
-    use assert_matches::assert_matches;
     use rand::{rngs::StdRng, Rng, SeedableRng};
     use reth_primitives_traits::Account;
     use reth_trie::{updates::StorageTrieUpdates, HashBuilder, MultiProof, EMPTY_ROOT_HASH};
@@ -921,64 +844,6 @@ mod tests {
         proof::{ProofNodes, ProofRetainer},
         BranchNode, LeafNode, StorageMultiProof, TrieMask,
     };
-
-    #[test]
-    fn validate_root_node_first_node_not_root() {
-        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        let proof = [(Nibbles::from_nibbles([0x1]), Bytes::from([EMPTY_STRING_CODE]))];
-        assert_matches!(
-            sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
-            Err(SparseStateTrieErrorKind::InvalidRootNode { .. })
-        );
-    }
-
-    #[test]
-    fn validate_root_node_invalid_proof_with_empty_root() {
-        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        let proof = [
-            (Nibbles::default(), Bytes::from([EMPTY_STRING_CODE])),
-            (Nibbles::from_nibbles([0x1]), Bytes::new()),
-        ];
-        assert_matches!(
-            sparse.validate_root_node(&mut proof.into_iter().peekable()).map_err(|e| e.into_kind()),
-            Err(SparseStateTrieErrorKind::InvalidRootNode { .. })
-        );
-    }
-
-    #[test]
-    fn reveal_account_empty() {
-        let retainer = ProofRetainer::from_iter([Nibbles::default()]);
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        hash_builder.root();
-        let proofs = hash_builder.take_proof_nodes();
-        assert_eq!(proofs.len(), 1);
-
-        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        assert_eq!(sparse.state, SparseTrie::Blind(None));
-
-        sparse.reveal_account(Default::default(), proofs.into_inner()).unwrap();
-        assert_eq!(sparse.state, SparseTrie::revealed_empty());
-    }
-
-    #[test]
-    fn reveal_storage_slot_empty() {
-        let retainer = ProofRetainer::from_iter([Nibbles::default()]);
-        let mut hash_builder = HashBuilder::default().with_proof_retainer(retainer);
-        hash_builder.root();
-        let proofs = hash_builder.take_proof_nodes();
-        assert_eq!(proofs.len(), 1);
-
-        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
-        assert!(sparse.storages.is_empty());
-
-        sparse
-            .reveal_storage_slot(Default::default(), Default::default(), proofs.into_inner())
-            .unwrap();
-        assert_eq!(
-            sparse.storages,
-            HashMap::from_iter([(Default::default(), SparseTrie::revealed_empty())])
-        );
-    }
 
     #[test]
     fn reveal_account_path_twice() {
@@ -1287,8 +1152,8 @@ mod tests {
     }
 
     #[test]
-    fn test_filter_revealed_nodes() {
-        let revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
+    fn test_filter_map_revealed_nodes() {
+        let mut revealed_nodes = HashSet::from_iter([Nibbles::from_nibbles([0x0])]);
         let leaf = TrieNode::Leaf(LeafNode::new(Nibbles::default(), alloy_rlp::encode([])));
         let leaf_encoded = alloy_rlp::encode(&leaf);
         let branch = TrieNode::Branch(BranchNode::new(
@@ -1301,12 +1166,30 @@ mod tests {
             (Nibbles::from_nibbles([0x1]), leaf.clone()),
         ]);
 
-        let decoded = filter_revealed_nodes(proof_nodes, &revealed_nodes).unwrap();
+        let branch_node_hash_masks = HashMap::default();
+        let branch_node_tree_masks = HashMap::default();
+
+        let decoded = filter_map_revealed_nodes(
+            proof_nodes,
+            &mut revealed_nodes,
+            &branch_node_hash_masks,
+            &branch_node_tree_masks,
+        )
+        .unwrap();
 
         assert_eq!(
             decoded,
-            FilteredProofNodes {
-                nodes: vec![(Nibbles::default(), branch), (Nibbles::from_nibbles([0x1]), leaf)],
+            FilterMappedProofNodes {
+                root_node: Some(RevealedSparseNode {
+                    path: Nibbles::default(),
+                    node: branch,
+                    masks: TrieMasks::none(),
+                }),
+                nodes: vec![RevealedSparseNode {
+                    path: Nibbles::from_nibbles([0x1]),
+                    node: leaf,
+                    masks: TrieMasks::none(),
+                }],
                 // Branch, leaf, leaf
                 total_nodes: 3,
                 // Revealed leaf node with path 0x1
