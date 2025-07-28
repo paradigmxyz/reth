@@ -7,7 +7,11 @@ use alloy_rpc_types_eth::{
     PendingTransactionFilterKind,
 };
 use async_trait::async_trait;
-use futures::future::TryFutureExt;
+use futures::{
+    future::TryFutureExt,
+    stream::{FuturesOrdered, StreamExt},
+    Future,
+};
 use itertools::Itertools;
 use jsonrpsee::{core::RpcResult, server::IdProvider};
 use reth_errors::ProviderError;
@@ -30,9 +34,9 @@ use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, Transa
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
-    future::Future,
     iter::{Peekable, StepBy},
     ops::RangeInclusive,
+    pin::Pin,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -934,6 +938,7 @@ impl<
                 iter: sealed_headers.into_iter().peekable(),
                 next: VecDeque::new(),
                 max_range: max_headers_range as usize,
+                pending_tasks: FuturesOrdered::new(),
             })
         }
     }
@@ -1014,6 +1019,10 @@ struct RangeBlockMode<
     iter: Peekable<std::vec::IntoIter<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>>,
     next: VecDeque<ReceiptBlockResult<Eth::Provider>>,
     max_range: usize,
+    // Stream of ongoing receipt fetching tasks
+    pending_tasks: FuturesOrdered<
+        Pin<Box<dyn Future<Output = Result<Vec<ReceiptBlockResult<Eth::Provider>>, EthFilterError>> + Send>>
+    >,
 }
 
 impl<
@@ -1021,82 +1030,123 @@ impl<
     > RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
+        // First, try to return any already processed results
         if let Some(result) = self.next.pop_front() {
             return Ok(Some(result));
         }
 
-        let Some(next_header) = self.iter.next() else {
-            return Ok(None);
-        };
-
-        let mut range_headers = Vec::with_capacity(self.max_range);
-        range_headers.push(next_header);
-
-        // Collect consecutive blocks up to max_range size
-        while range_headers.len() < self.max_range {
-            let Some(peeked) = self.iter.peek() else { break };
-            let Some(last_header) = range_headers.last() else { break };
-
-            let expected_next = last_header.header().number() + 1;
-            if peeked.header().number() != expected_next {
-                break; // Non-consecutive block, stop here
-            }
-
-            let Some(next_header) = self.iter.next() else { break };
-            range_headers.push(next_header);
-        }
-
-        // Check if we should use parallel processing for large ranges
-        let remaining_headers = self.iter.len() + range_headers.len();
-        if remaining_headers >= PARALLEL_PROCESSING_THRESHOLD as usize {
-            self.process_large_range(range_headers).await
-        } else {
-            self.process_small_range(range_headers).await
-        }
-    }
-
-    /// Process small range headers
-    async fn process_small_range(
-        &mut self,
-        range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
-    ) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
-        // Process each header individually to avoid queuing for all receipts
-        for header in range_headers {
-            // First check if already cached to avoid unnecessary provider calls
-            let (maybe_block, maybe_receipts) = self
-                .filter_inner
-                .eth_cache()
-                .maybe_cached_block_and_receipts(header.hash())
-                .await?;
-
-            let receipts = match maybe_receipts {
-                Some(receipts) => receipts,
-                None => {
-                    // Not cached - fetch directly from provider without queuing
-                    match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
-                        Some(receipts) => Arc::new(receipts),
-                        None => continue, // No receipts found
+        // Next, try to get a completed task result if there are pending tasks
+        if !self.pending_tasks.is_empty() {
+            if let Some(task_result) = self.pending_tasks.next().await {
+                match task_result {
+                    Ok(chunk_results) => {
+                        for result in chunk_results {
+                            self.next.push_back(result);
+                        }
+                        return Ok(self.next.pop_front());
                     }
+                    Err(e) => return Err(e),
                 }
+            }
+        }
+
+        // If no pending tasks and no queued results, try to start new tasks
+        if self.pending_tasks.is_empty() {
+            // Try to get the next header(s) to process
+            let Some(next_header) = self.iter.next() else {
+                return Ok(None);
             };
 
-            if !receipts.is_empty() {
-                self.next.push_back(ReceiptBlockResult {
-                    receipts,
-                    recovered_block: maybe_block,
-                    header,
-                });
+            let mut range_headers = Vec::with_capacity(self.max_range);
+            range_headers.push(next_header);
+
+            // Collect consecutive blocks up to max_range size
+            while range_headers.len() < self.max_range {
+                let Some(peeked) = self.iter.peek() else { break };
+                let Some(last_header) = range_headers.last() else { break };
+
+                let expected_next = last_header.number() + 1;
+                if peeked.number() != expected_next {
+                    break; // Non-consecutive block, stop here
+                }
+
+                let Some(next_header) = self.iter.next() else { break };
+                range_headers.push(next_header);
+            }
+
+            // Check if we should use parallel processing for large ranges
+            let remaining_headers = self.iter.len() + range_headers.len();
+            if remaining_headers >= PARALLEL_PROCESSING_THRESHOLD as usize {
+                self.spawn_parallel_tasks(range_headers);
+            } else {
+                self.spawn_sequential_task(range_headers);
+            }
+
+            // Now wait for the newly spawned task to complete
+            if let Some(task_result) = self.pending_tasks.next().await {
+                match task_result {
+                    Ok(chunk_results) => {
+                        for result in chunk_results {
+                            self.next.push_back(result);
+                        }
+                        return Ok(self.next.pop_front());
+                    }
+                    Err(e) => return Err(e),
+                }
             }
         }
 
-        Ok(self.next.pop_front())
+        // If we reach here, something unexpected happened
+        Ok(None)
     }
 
-    /// Process large range headers
-    async fn process_large_range(
+    /// Spawn a sequential task for processing a small range of headers
+    fn spawn_sequential_task(
         &mut self,
         range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
-    ) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
+    ) {
+        let filter_inner = self.filter_inner.clone();
+        let task = Box::pin(async move {
+            let mut results = Vec::new();
+            
+            for header in range_headers {
+                // First check if already cached to avoid unnecessary provider calls
+                let (maybe_block, maybe_receipts) = filter_inner
+                    .eth_cache()
+                    .maybe_cached_block_and_receipts(header.hash())
+                    .await?;
+
+                let receipts = match maybe_receipts {
+                    Some(receipts) => receipts,
+                    None => {
+                        // Not cached - fetch directly from provider
+                        match filter_inner.provider().receipts_by_block(header.hash().into())? {
+                            Some(receipts) => Arc::new(receipts),
+                            None => continue, // No receipts found
+                        }
+                    }
+                };
+
+                if !receipts.is_empty() {
+                    results.push(ReceiptBlockResult {
+                        receipts,
+                        recovered_block: maybe_block,
+                        header,
+                    });
+                }
+            }
+
+            Ok(results)
+        });
+        
+        self.pending_tasks.push_back(task);
+    }
+
+    /// Spawn parallel tasks for processing a large range of headers
+    fn spawn_parallel_tasks(
+        &mut self,
+        range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
+    ) {
         // Split headers into chunks
         let chunk_size = std::cmp::max(range_headers.len() / DEFAULT_PARALLEL_CONCURRENCY, 1);
         let header_chunks = range_headers
@@ -1106,52 +1156,44 @@ impl<
             .map(|chunk| chunk.collect::<Vec<_>>())
             .collect::<Vec<_>>();
 
-        // Process chunks in parallel
-        let mut tasks = Vec::new();
+        // Spawn each chunk as a separate task directly into the FuturesOrdered stream
         for chunk_headers in header_chunks {
             let filter_inner = self.filter_inner.clone();
-            let task = tokio::task::spawn_blocking(move || {
-                let mut chunk_results = Vec::new();
+            let chunk_task = Box::pin(async move {
+                let chunk_task = tokio::task::spawn_blocking(move || {
+                    let mut chunk_results = Vec::new();
 
-                for header in chunk_headers {
-                    // Fetch directly from provider - RangeMode is used for older blocks unlikely to
-                    // be cached
-                    let receipts =
-                        match filter_inner.provider().receipts_by_block(header.hash().into())? {
-                            Some(receipts) => Arc::new(receipts),
-                            None => continue, // No receipts found
-                        };
+                    for header in chunk_headers {
+                        // Fetch directly from provider - RangeMode is used for older blocks unlikely to
+                        // be cached
+                        let receipts =
+                            match filter_inner.provider().receipts_by_block(header.hash().into())? {
+                                Some(receipts) => Arc::new(receipts),
+                                None => continue, // No receipts found
+                            };
 
-                    if !receipts.is_empty() {
-                        chunk_results.push(ReceiptBlockResult {
-                            receipts,
-                            recovered_block: None,
-                            header,
-                        });
+                        if !receipts.is_empty() {
+                            chunk_results.push(ReceiptBlockResult {
+                                receipts,
+                                recovered_block: None,
+                                header,
+                            });
+                        }
                     }
-                }
 
-                Ok::<Vec<ReceiptBlockResult<Eth::Provider>>, EthFilterError>(chunk_results)
+                    Ok::<Vec<ReceiptBlockResult<Eth::Provider>>, EthFilterError>(chunk_results)
+                });
+
+                // Await the blocking task and handle the result
+                match chunk_task.await {
+                    Ok(Ok(chunk_results)) => Ok(chunk_results),
+                    Ok(Err(e)) => Err(e),
+                    Err(_join_err) => Err(EthFilterError::InternalError),
+                }
             });
-            tasks.push(task);
+            
+            self.pending_tasks.push_back(chunk_task);
         }
-
-        let results = futures::future::join_all(tasks).await;
-        for result in results {
-            match result {
-                Ok(Ok(chunk_results)) => {
-                    for result in chunk_results {
-                        self.next.push_back(result);
-                    }
-                }
-                Ok(Err(e)) => return Err(e),
-                Err(_join_err) => {
-                    return Err(EthFilterError::InternalError);
-                }
-            }
-        }
-
-        Ok(self.next.pop_front())
     }
 }
 
@@ -1234,6 +1276,7 @@ mod tests {
             iter: headers.into_iter().peekable(),
             next: VecDeque::new(),
             max_range,
+            pending_tasks: FuturesOrdered::new(),
         };
 
         let result = range_mode.next().await;
@@ -1311,6 +1354,7 @@ mod tests {
             iter: headers.into_iter().peekable(),
             next: VecDeque::from([mock_result_1, mock_result_2]), // Queue two results
             max_range: 100,
+            pending_tasks: FuturesOrdered::new(),
         };
 
         // first call should return the first queued result (FIFO order)
@@ -1380,6 +1424,7 @@ mod tests {
             iter: headers.into_iter().peekable(),
             next: VecDeque::new(),
             max_range: 100,
+            pending_tasks: FuturesOrdered::new(),
         };
 
         let result = range_mode.next().await;
@@ -1450,6 +1495,7 @@ mod tests {
             iter: headers.into_iter().peekable(),
             next: VecDeque::new(),
             max_range: 3, // include the 3 blocks in the first queried results
+            pending_tasks: FuturesOrdered::new(),
         };
 
         // first call should fetch receipts from provider and return first block with receipts
@@ -1527,6 +1573,7 @@ mod tests {
             iter: headers.into_iter().peekable(),
             next: VecDeque::new(),
             max_range: 1,
+            pending_tasks: FuturesOrdered::new(),
         };
 
         let result1 = range_mode.next().await;
