@@ -132,3 +132,13 @@ harness = false
 name = "priority"
 required-features = ["arbitrary"]
 harness = false
+
+[[bench]]
+name = "canonical_state_change"
+required-features = ["test-utils", "arbitrary"]
+harness = false
+
+[[bench]]
+name = "profile_canonical_state_change"
+required-features = ["test-utils", "arbitrary"]
+harness = false
