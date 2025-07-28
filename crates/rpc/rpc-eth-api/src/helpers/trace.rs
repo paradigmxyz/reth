@@ -327,11 +327,13 @@ pub trait Trace:
 
                 // prepare transactions, we do everything upfront to reduce time spent with open
                 // state
-                let max_transactions =
-                    highest_index.map_or(block.body().transaction_count(), |highest| {
+                let max_transactions = highest_index.map_or_else(
+                    || block.body().transaction_count(),
+                    |highest| {
                         // we need + 1 because the index is 0-based
                         highest as usize + 1
-                    });
+                    },
+                );
 
                 let mut idx = 0;
 
