@@ -18,8 +18,11 @@ use scroll_alloy_hardforks::ScrollHardfork;
 /// Includes 20 prefunded accounts with `10_000` ETH each derived from mnemonic "test test test test
 /// test test test test test test test junk".
 pub static SCROLL_DEV: LazyLock<Arc<ScrollChainSpec>> = LazyLock::new(|| {
+    // In order to have Feynman activated at block 0, we set the `baseFeePerGas` field of the devnet
+    // genesis to 0.
     let genesis = serde_json::from_str(include_str!("../res/genesis/dev.json"))
         .expect("Can't deserialize Dev testnet genesis json");
+
     ScrollChainSpec {
         inner: ChainSpec {
             chain: Chain::dev(),

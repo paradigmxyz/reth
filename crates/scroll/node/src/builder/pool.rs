@@ -65,6 +65,9 @@ where
             .no_eip4844()
             .with_head_timestamp(ctx.head().timestamp)
             .kzg_settings(ctx.kzg_settings()?)
+            .with_local_transactions_config(
+                pool_config_overrides.clone().apply(ctx.pool_config()).local_transactions_config,
+            )
             .with_additional_tasks(
                 pool_config_overrides
                     .additional_validation_tasks

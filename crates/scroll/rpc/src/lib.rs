@@ -10,6 +10,8 @@
 
 pub mod error;
 pub mod eth;
+pub mod sequencer;
 
-pub use error::ScrollEthApiError;
+pub use error::{ScrollEthApiError, SequencerClientError};
 pub use eth::{ScrollEthApi, ScrollReceiptBuilder};
+pub use sequencer::SequencerClient;

@@ -2,7 +2,7 @@
 
 use crate::{
     eth::{ScrollEthApiInner, ScrollNodeCore},
-    ScrollEthApi,
+    ScrollEthApi, ScrollEthApiError, SequencerClient,
 };
 use alloy_consensus::transaction::TransactionInfo;
 use alloy_primitives::{Bytes, B256};
@@ -11,10 +11,10 @@ use reth_node_api::FullNodeComponents;
 use reth_provider::{
     BlockReader, BlockReaderIdExt, ProviderTx, ReceiptProvider, TransactionsProvider,
 };
-use reth_rpc_convert::try_into_scroll_tx_info;
 use reth_rpc_eth_api::{
     helpers::{EthSigner, EthTransactions, LoadTransaction, SpawnBlocking},
-    FromEthApiError, FullEthApiTypes, RpcNodeCore, RpcNodeCoreExt, TxInfoMapper,
+    try_into_scroll_tx_info, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcNodeCore,
+    RpcNodeCoreExt, TxInfoMapper,
 };
 use reth_rpc_eth_types::utils::recover_raw_transaction;
 use reth_scroll_primitives::ScrollReceipt;
@@ -27,7 +27,7 @@ use std::{
 
 impl<N> EthTransactions for ScrollEthApi<N>
 where
-    Self: LoadTransaction<Provider: BlockReaderIdExt>,
+    Self: LoadTransaction<Provider: BlockReaderIdExt> + EthApiTypes<Error = ScrollEthApiError>,
     N: ScrollNodeCore<Provider: BlockReader<Transaction = ProviderTx<Self::Provider>>>,
 {
     fn signers(&self) -> &parking_lot::RwLock<Vec<Box<dyn EthSigner<ProviderTx<Self::Provider>>>>> {
@@ -40,6 +40,33 @@ where
     async fn send_raw_transaction(&self, tx: Bytes) -> Result<B256, Self::Error> {
         let recovered = recover_raw_transaction(&tx)?;
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
+
+        // On scroll, transactions are forwarded directly to the sequencer to be included in
+        // blocks that it builds.
+        if let Some(client) = self.raw_tx_forwarder().as_ref() {
+            tracing::debug!(target: "scroll::rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to sequencer");
+
+            // Retain tx in local tx pool before forwarding to sequencer rpc, for local RPC usage.
+            let hash = self
+                .pool()
+                .add_transaction(TransactionOrigin::Local, pool_transaction.clone())
+                .await
+                .map_err(Self::Error::from_eth_err)?;
+
+            tracing::debug!(target: "scroll::rpc::eth", %hash, "successfully added transaction to local tx pool");
+
+            // Forward to remote sequencer RPC.
+            match client.forward_raw_transaction(&tx).await {
+                Ok(sequencer_hash) => {
+                    tracing::debug!(target: "scroll::rpc::eth", local_hash=%hash, sequencer_hash=%sequencer_hash, "successfully forwarded transaction to sequencer");
+                }
+                Err(err) => {
+                    tracing::warn!(target: "scroll::rpc::eth", %err, %hash, "failed to forward transaction to sequencer, but transaction is in local pool");
+                }
+            }
+
+            return Ok(hash);
+        }
 
         // submit the transaction to the pool with a `Local` origin
         let hash = self
@@ -58,6 +85,16 @@ where
     N: ScrollNodeCore<Provider: TransactionsProvider, Pool: TransactionPool>,
     Self::Pool: TransactionPool,
 {
+}
+
+impl<N> ScrollEthApi<N>
+where
+    N: ScrollNodeCore,
+{
+    /// Returns the [`SequencerClient`] if one is set.
+    pub fn raw_tx_forwarder(&self) -> Option<SequencerClient> {
+        self.inner.sequencer_client.clone()
+    }
 }
 
 /// Scroll implementation of [`TxInfoMapper`].

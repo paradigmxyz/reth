@@ -1,6 +1,7 @@
 //! Scroll-Reth `eth_` endpoint implementation.
 
 use alloy_primitives::U256;
+use eyre::WrapErr;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_network_api::NetworkInfo;
@@ -41,6 +42,8 @@ mod pending_block;
 pub mod receipt;
 pub mod transaction;
 
+use crate::SequencerClient;
+
 /// Adapter for [`EthApiInner`], which holds all the data required to serve core `eth_` API.
 pub type EthApiNodeBackend<N> = EthApiInner<
     <N as RpcNodeCore>::Provider,
@@ -78,9 +81,10 @@ impl<N: ScrollNodeCore, NetworkT> ScrollEthApi<N, NetworkT> {
         eth_api: EthApiNodeBackend<N>,
         min_suggested_priority_fee: U256,
         payload_size_limit: u64,
+        sequencer_client: Option<SequencerClient>,
     ) -> Self {
         let inner =
-            Arc::new(ScrollEthApiInner { eth_api, min_suggested_priority_fee, payload_size_limit });
+            Arc::new(ScrollEthApiInner { eth_api, min_suggested_priority_fee, payload_size_limit, sequencer_client });
         Self {
             inner: inner.clone(),
             _nt: PhantomData,
@@ -102,6 +106,11 @@ where
     /// Returns a reference to the [`EthApiNodeBackend`].
     pub fn eth_api(&self) -> &EthApiNodeBackend<N> {
         self.inner.eth_api()
+    }
+
+    /// Returns the configured sequencer client, if any.
+    pub fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.inner.sequencer_client()
     }
 
     /// Return a builder for the [`ScrollEthApi`].
@@ -316,12 +325,20 @@ pub struct ScrollEthApiInner<N: ScrollNodeCore> {
     min_suggested_priority_fee: U256,
     /// Maximum payload size
     payload_size_limit: u64,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given Scroll
+    /// network.
+    sequencer_client: Option<SequencerClient>,
 }
 
 impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
     /// Returns a reference to the [`EthApiNodeBackend`].
     const fn eth_api(&self) -> &EthApiNodeBackend<N> {
         &self.eth_api
+    }
+
+    /// Returns the configured sequencer client, if any.
+    const fn sequencer_client(&self) -> Option<&SequencerClient> {
+        self.sequencer_client.as_ref()
     }
 }
 
@@ -332,6 +349,9 @@ pub struct ScrollEthApiBuilder {
     min_suggested_priority_fee: u64,
     /// Maximum payload size
     payload_size_limit: u64,
+    /// Sequencer client, configured to forward submitted transactions to sequencer of given Scroll
+    /// network.
+    sequencer_url: Option<String>,
 }
 
 impl ScrollEthApiBuilder {
@@ -349,6 +369,12 @@ impl ScrollEthApiBuilder {
     /// With payload size limit
     pub const fn with_payload_size_limit(mut self, limit: u64) -> Self {
         self.payload_size_limit = limit;
+        Self { sequencer_url: None }
+    }
+
+    /// With a [`SequencerClient`].
+    pub fn with_sequencer(mut self, sequencer_url: Option<String>) -> Self {
+        self.sequencer_url = sequencer_url;
         self
     }
 }
@@ -361,7 +387,7 @@ where
     type EthApi = ScrollEthApi<N>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
-        let Self { min_suggested_priority_fee, payload_size_limit } = self;
+        let Self { min_suggested_priority_fee, payload_size_limit, sequencer_url } = self;
 
         let eth_api = reth_rpc::EthApiBuilder::new(
             ctx.components.provider().clone(),
@@ -378,6 +404,16 @@ where
         .proof_permits(ctx.config.proof_permits)
         .build_inner();
 
-        Ok(ScrollEthApi::new(eth_api, U256::from(min_suggested_priority_fee), payload_size_limit))
+        let sequencer_client = if let Some(url) = sequencer_url {
+            Some(
+                SequencerClient::new(&url)
+                    .await
+                    .wrap_err_with(|| "Failed to init sequencer client with: {url}")?,
+            )
+        } else {
+            None
+        };
+
+        Ok(ScrollEthApi::new(eth_api, U256::from(min_suggested_priority_fee), payload_size_limit, sequencer_client))
     }
 }
