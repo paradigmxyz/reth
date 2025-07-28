@@ -2,6 +2,7 @@
 
 use crate::{eth::core::EthApiInner, EthApi};
 use alloy_network::Ethereum;
+use alloy_rpc_client::RpcClient;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::HeaderTy;
@@ -42,6 +43,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     next_env: NextEnv,
     max_batch_size: usize,
     pending_block_kind: PendingBlockKind,
+    raw_tx_forwarder: Option<RpcClient>,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -82,6 +84,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -100,6 +103,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 }
@@ -129,6 +133,7 @@ where
             next_env: Default::default(),
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
+            raw_tx_forwarder: None,
         }
     }
 }
@@ -165,6 +170,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -183,6 +189,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 
@@ -208,6 +215,7 @@ where
             next_env: _,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         } = self;
         EthApiBuilder {
             components,
@@ -226,6 +234,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         }
     }
 
@@ -309,6 +318,15 @@ where
         self
     }
 
+    /// Sets the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<String>) -> Self {
+        if let Some(tx_forwarder) = tx_forwarder {
+            self.raw_tx_forwarder =
+                Some(RpcClient::new_http(reqwest::Url::parse(&tx_forwarder).unwrap()));
+        }
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -339,6 +357,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         } = self;
 
         let provider = components.provider().clone();
@@ -377,6 +396,7 @@ where
             next_env,
             max_batch_size,
             pending_block_kind,
+            raw_tx_forwarder,
         )
     }
 

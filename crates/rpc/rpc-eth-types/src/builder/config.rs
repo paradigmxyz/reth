@@ -56,7 +56,7 @@ impl PendingBlockKind {
 }
 
 /// Additional config values for the eth namespace.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EthConfig {
     /// Settings for the caching layer
     pub cache: EthStateCacheConfig,
@@ -89,6 +89,8 @@ pub struct EthConfig {
     pub max_batch_size: usize,
     /// Controls how pending blocks are built when requested via RPC methods
     pub pending_block_kind: PendingBlockKind,
+    /// The raw transaction forwarder.
+    pub raw_tx_forwarder: Option<String>,
 }
 
 impl EthConfig {
@@ -118,6 +120,7 @@ impl Default for EthConfig {
             proof_permits: DEFAULT_PROOF_PERMITS,
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
+            raw_tx_forwarder: None,
         }
     }
 }
@@ -192,6 +195,12 @@ impl EthConfig {
     /// Configures the pending block config
     pub const fn pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
         self.pending_block_kind = pending_block_kind;
+        self
+    }
+
+    /// Configures the raw transaction forwarder.
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<String>) -> Self {
+        self.raw_tx_forwarder = tx_forwarder;
         self
     }
 }

@@ -7,6 +7,7 @@ use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
+use alloy_transport::{RpcError, TransportErrorKind};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
 use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
@@ -36,6 +37,28 @@ pub trait ToRpcError: core::error::Error + Send + Sync + 'static {
 impl ToRpcError for jsonrpsee_types::ErrorObject<'static> {
     fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
         self.clone()
+    }
+}
+
+impl ToRpcError for RpcError<TransportErrorKind> {
+    fn to_rpc_error(&self) -> jsonrpsee_types::ErrorObject<'static> {
+        match self {
+            Self::ErrorResp(payload) => jsonrpsee_types::error::ErrorObject::owned(
+                payload.code as i32,
+                payload.message.clone(),
+                payload.data.clone(),
+            ),
+            Self::NullResp => internal_rpc_err("null response"),
+            Self::UnsupportedFeature(feature) => {
+                internal_rpc_err(format!("unsupported feature: {feature}"))
+            }
+            Self::LocalUsageError(err) => internal_rpc_err(err.to_string()),
+            Self::SerError(err) => internal_rpc_err(format!("serialization error: {err}")),
+            Self::DeserError { err, text } => {
+                internal_rpc_err(format!("deserialization error: {err} (text: {text})"))
+            }
+            Self::Transport(_) => internal_rpc_err(self.to_string()),
+        }
     }
 }
 

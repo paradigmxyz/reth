@@ -227,6 +227,10 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.pending-block", default_value = "full", value_name = "KIND")]
     pub rpc_pending_block: PendingBlockKind,
 
+    /// Forwarder configuration.
+    #[arg(long = "rpc.forwarder", alias = "rpc-forwarder", value_name = "FORWARDER")]
+    pub rpc_forwarder: Option<String>,
+
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
     #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
@@ -375,6 +379,7 @@ impl Default for RpcServerArgs {
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
+            rpc_forwarder: None,
             builder_disallow: Default::default(),
         }
     }
