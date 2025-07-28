@@ -212,7 +212,7 @@ where
                 .await;
 
             let reward = if is_at_capacity && suggest_tip_cap_result.is_ok() {
-                let suggest_tip_cap = suggest_tip_cap_result.unwrap().saturating_to::<u128>();
+                let suggest_tip_cap = suggest_tip_cap_result.expect("checked result is Ok").saturating_to::<u128>();
                 reward_percentiles.map(|percentiles| {
                     vec![vec![suggest_tip_cap; percentiles.len()]; block_count as usize]
                 })
