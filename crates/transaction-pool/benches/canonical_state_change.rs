@@ -1,7 +1,7 @@
 #![allow(missing_docs)]
 use alloy_consensus::Transaction;
 use alloy_primitives::{Address, B256, U256};
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_execution_types::ChangedAccount;
@@ -68,12 +68,13 @@ async fn fill_pool(pool: &TestPoolBuilder, txs: Vec<MockTransaction>) -> HashMap
 /// Create a canonical state update with changed accounts for all senders
 fn create_canonical_update(
     sender_nonces: HashMap<Address, u64>,
-) -> CanonicalStateUpdate<'static, Block> {
+) -> (Box<SealedBlock<Block>>, CanonicalStateUpdate<'static, Block>) {
     // Create a mock block - using default Ethereum block
     let header = Header::default();
     let body = BlockBody::default();
     let block = Block { header, body };
-    let sealed_block = Box::leak(Box::new(SealedBlock::seal_slow(block)));
+    let sealed_block = Box::new(SealedBlock::seal_slow(block));
+    let sealed_block_ref = Box::leak(sealed_block.clone());
 
     let changed_accounts: Vec<ChangedAccount> = sender_nonces
         .into_iter()
@@ -84,14 +85,16 @@ fn create_canonical_update(
         })
         .collect();
 
-    CanonicalStateUpdate {
-        new_tip: sealed_block,
+    let update = CanonicalStateUpdate {
+        new_tip: sealed_block_ref,
         pending_block_base_fee: 1_000_000_000,   // 1 gwei
         pending_block_blob_fee: Some(1_000_000), // 0.001 gwei
         changed_accounts,
         mined_transactions: vec![], // No transactions mined in this benchmark
         update_kind: PoolUpdateKind::Commit,
-    }
+    };
+    
+    (sealed_block, update)
 }
 
 fn canonical_state_change_bench(c: &mut Criterion) {
@@ -109,38 +112,43 @@ fn canonical_state_change_bench(c: &mut Criterion) {
             );
 
             group.bench_function(group_id, |b| {
-                // Use tokio runtime for async operations
-                let rt = tokio::runtime::Runtime::new().unwrap();
+                b.iter_batched(
+                    || {
+                        // Setup phase - create pool and transactions
+                        let rt = tokio::runtime::Runtime::new().unwrap();
+                        
+                        let pool = TestPoolBuilder::default().with_config(PoolConfig {
+                            pending_limit: SubPoolLimit::max(),
+                            basefee_limit: SubPoolLimit::max(),
+                            queued_limit: SubPoolLimit::max(),
+                            blob_limit: SubPoolLimit::max(),
+                            max_account_slots: 50,
+                            ..Default::default()
+                        });
 
-                // Setup phase - create pool and transactions
-                let pool = TestPoolBuilder::default().with_config(PoolConfig {
-                    pending_limit: SubPoolLimit::max(),
-                    basefee_limit: SubPoolLimit::max(),
-                    queued_limit: SubPoolLimit::max(),
-                    blob_limit: SubPoolLimit::max(),
-                    max_account_slots: 50,
-                    ..Default::default()
-                });
+                        // Set initial block info
+                        pool.set_block_info(BlockInfo {
+                            last_seen_block_number: 0,
+                            last_seen_block_hash: B256::ZERO,
+                            pending_basefee: 1_000_000_000,
+                            pending_blob_fee: Some(1_000_000),
+                            block_gas_limit: 30_000_000,
+                        });
 
-                // Set initial block info
-                pool.set_block_info(BlockInfo {
-                    last_seen_block_number: 0,
-                    last_seen_block_hash: B256::ZERO,
-                    pending_basefee: 1_000_000_000,
-                    pending_blob_fee: Some(1_000_000),
-                    block_gas_limit: 30_000_000,
-                });
+                        let txs = generate_transactions(num_senders, txs_per_sender);
+                        let sender_nonces = rt.block_on(fill_pool(&pool, txs));
 
-                let txs = generate_transactions(num_senders, txs_per_sender);
-                let sender_nonces = rt.block_on(fill_pool(&pool, txs));
-
-                // Pre-create the update to avoid allocation in the benchmark loop
-                let update = create_canonical_update(sender_nonces);
-
-                // Benchmark the canonical state change
-                b.iter(|| {
-                    pool.on_canonical_state_change(update.clone());
-                });
+                        // Create the update
+                        let (_sealed_block, update) = create_canonical_update(sender_nonces);
+                        
+                        (pool, update)
+                    },
+                    |(pool, update)| {
+                        // The actual operation being benchmarked
+                        pool.on_canonical_state_change(update);
+                    },
+                    BatchSize::LargeInput,
+                );
             });
         }
     }
