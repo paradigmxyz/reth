@@ -275,7 +275,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         &self,
         basefee: u64,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let ids = self.satisfy_base_fee_ids(basefee);
+        let ids = self.satisfy_base_fee_ids(basefee as u128);
         let mut txs = Vec::with_capacity(ids.len());
         for id in ids {
             txs.push(self.get(&id).expect("transaction exists").transaction.clone().into());
@@ -284,13 +284,13 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     }
 
     /// Returns all transactions that satisfy the given basefee.
-    fn satisfy_base_fee_ids(&self, basefee: u64) -> Vec<TransactionId> {
+    fn satisfy_base_fee_ids(&self, basefee: u128) -> Vec<TransactionId> {
         let mut transactions = Vec::new();
         {
             let mut iter = self.by_id.iter().peekable();
 
             while let Some((id, tx)) = iter.next() {
-                if tx.transaction.transaction.max_fee_per_gas() < basefee as u128 {
+                if tx.transaction.transaction.max_fee_per_gas() < basefee {
                     // still parked -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
@@ -311,7 +311,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     ///
     /// Note: the transactions are not returned in a particular order.
     pub(crate) fn enforce_basefee(&mut self, basefee: u64) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let to_remove = self.satisfy_base_fee_ids(basefee);
+        let to_remove = self.satisfy_base_fee_ids(basefee as u128);
 
         let mut removed = Vec::with_capacity(to_remove.len());
         for id in to_remove {
