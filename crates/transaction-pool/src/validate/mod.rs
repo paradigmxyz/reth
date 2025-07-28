@@ -66,6 +66,14 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
         }
     }
 
+    /// Returns the [`InvalidPoolTransactionError`] if this is an invalid variant.
+    pub const fn as_invalid(&self) -> Option<&InvalidPoolTransactionError> {
+        match self {
+            Self::Invalid(_, err) => Some(err),
+            _ => None,
+        }
+    }
+
     /// Returns true if the transaction is valid.
     pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid { .. })

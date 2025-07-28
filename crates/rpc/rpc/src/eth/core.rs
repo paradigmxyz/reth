@@ -38,17 +38,18 @@ use tokio::sync::{broadcast, Mutex};
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
 /// Helper type alias for [`RpcConverter`] with components from the given [`FullNodeComponents`].
-pub type EthRpcConverterFor<N> = RpcConverter<
-    Ethereum,
+pub type EthRpcConverterFor<N, NetworkT = Ethereum> = RpcConverter<
+    NetworkT,
     <N as FullNodeComponents>::Evm,
     EthReceiptConverter<<<N as FullNodeTypes>::Provider as ChainSpecProvider>::ChainSpec>,
 >;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
-pub type EthApiFor<N> = EthApi<N, EthRpcConverterFor<N>>;
+pub type EthApiFor<N, NetworkT = Ethereum> = EthApi<N, EthRpcConverterFor<N, NetworkT>>;
 
 /// Helper type alias for [`EthApi`] with components from the given [`FullNodeComponents`].
-pub type EthApiBuilderFor<N> = EthApiBuilder<N, EthRpcConverterFor<N>>;
+pub type EthApiBuilderFor<N, NetworkT = Ethereum> =
+    EthApiBuilder<N, EthRpcConverterFor<N, NetworkT>>;
 
 /// `Eth` API implementation.
 ///

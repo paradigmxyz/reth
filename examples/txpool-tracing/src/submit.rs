@@ -7,7 +7,10 @@ use alloy_primitives::{Address, TxHash, U256};
 use futures_util::StreamExt;
 use reth_ethereum::{
     node::api::{FullNodeComponents, NodeTypes},
-    pool::{PoolTransaction, TransactionEvent, TransactionOrigin, TransactionPool},
+    pool::{
+        AddedTransactionOutcome, PoolTransaction, TransactionEvent, TransactionOrigin,
+        TransactionPool,
+    },
     primitives::SignerRecoverable,
     rpc::eth::primitives::TransactionRequest,
     EthPrimitives, TransactionSigned,
@@ -93,7 +96,7 @@ pub async fn submit_eth_transfer<FC>(
     gas_limit: u64,
     max_priority_fee_per_gas: u128,
     max_fee_per_gas: u128,
-) -> eyre::Result<TxHash>
+) -> eyre::Result<AddedTransactionOutcome>
 where
     FC: FullNodeComponents<Types: NodeTypes<Primitives = EthPrimitives>>,
 {

@@ -43,7 +43,6 @@ tracing.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-alloy-consensus.workspace = true
 
 [lints]
 workspace = true

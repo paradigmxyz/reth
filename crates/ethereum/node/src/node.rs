@@ -5,7 +5,6 @@ use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
 use alloy_rpc_types_engine::ExecutionData;
-use alloy_rpc_types_eth::TransactionRequest;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
@@ -42,7 +41,9 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
-use reth_rpc_eth_api::{helpers::pending_block::BuildPendingEnv, RpcConvert, SignableTxRequest};
+use reth_rpc_eth_api::{
+    helpers::pending_block::BuildPendingEnv, RpcConvert, RpcTypes, SignableTxRequest,
+};
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -52,7 +53,7 @@ use reth_transaction_pool::{
 };
 use reth_trie_db::MerklePatriciaTrie;
 use revm::context::TxEnv;
-use std::{default::Default, sync::Arc, time::SystemTime};
+use std::{default::Default, marker::PhantomData, sync::Arc, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]
@@ -136,25 +137,31 @@ impl NodeTypes for EthereumNode {
 }
 
 /// Builds [`EthApi`](reth_rpc::EthApi) for Ethereum.
-#[derive(Debug, Default)]
-pub struct EthereumEthApiBuilder;
+#[derive(Debug)]
+pub struct EthereumEthApiBuilder<NetworkT = Ethereum>(PhantomData<NetworkT>);
 
-impl<N> EthApiBuilder<N> for EthereumEthApiBuilder
+impl<NetworkT> Default for EthereumEthApiBuilder<NetworkT> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<N, NetworkT> EthApiBuilder<N> for EthereumEthApiBuilder<NetworkT>
 where
     N: FullNodeComponents<
         Types: NodeTypes<ChainSpec: EthereumHardforks>,
         Evm: ConfigureEvm<NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>>,
     >,
-    EthRpcConverterFor<N>: RpcConvert<
+    NetworkT: RpcTypes<TransactionRequest: SignableTxRequest<TxTy<N::Types>>>,
+    EthRpcConverterFor<N, NetworkT>: RpcConvert<
         Primitives = PrimitivesTy<N::Types>,
         TxEnv = TxEnvFor<N::Evm>,
         Error = EthApiError,
-        Network = Ethereum,
+        Network = NetworkT,
     >,
-    TransactionRequest: SignableTxRequest<TxTy<N::Types>>,
     EthApiError: FromEvmError<N::Evm>,
 {
-    type EthApi = EthApiFor<N>;
+    type EthApi = EthApiFor<N, NetworkT>;
 
     async fn build_eth_api(self, ctx: EthApiCtx<'_, N>) -> eyre::Result<Self::EthApi> {
         let api = reth_rpc::EthApiBuilder::new(
@@ -197,7 +204,7 @@ where
     fn default() -> Self {
         Self {
             inner: RpcAddOns::new(
-                EthereumEthApiBuilder,
+                EthereumEthApiBuilder::default(),
                 EthereumEngineValidatorBuilder::default(),
                 BasicEngineApiBuilder::default(),
                 Default::default(),
