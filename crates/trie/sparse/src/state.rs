@@ -60,7 +60,7 @@ pub struct SparseStateTrie<
     /// Collection of revealed account trie paths.
     revealed_account_paths: HashSet<Nibbles>,
     /// State related to storage tries.
-    storage: SparseStoragesStateTrie<S>,
+    storage: StorageTries<S>,
     /// Flag indicating whether trie updates should be retained.
     retain_updates: bool,
     /// Reusable buffer for RLP encoding of trie accounts.
@@ -235,20 +235,6 @@ where
         {
             use rayon::iter::{ParallelBridge, ParallelIterator};
 
-            struct ParallelRevealInput<S> {
-                account: B256,
-                storage_subtree: DecodedStorageMultiProof,
-                revealed_nodes: HashSet<Nibbles>,
-                trie: SparseTrie<S>,
-            }
-
-            struct ParallelRevealOutput<S> {
-                account: B256,
-                revealed_nodes: HashSet<Nibbles>,
-                trie: SparseTrie<S>,
-                result: SparseStateTrieResult<ProofNodesMetricValues>,
-            }
-
             let (tx, rx) = std::sync::mpsc::channel();
             let retain_updates = self.retain_updates;
 
@@ -260,27 +246,20 @@ where
                 .map(|(account, storage_subtree)| {
                     let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
                     let trie = self.storage.take_or_create_trie(&account);
-                    ParallelRevealInput { account, storage_subtree, revealed_nodes, trie }
+                    (account, storage_subtree, revealed_nodes, trie)
                 })
                 .par_bridge()
-                .map(
-                    |ParallelRevealInput {
-                         account,
-                         storage_subtree,
-                         mut revealed_nodes,
-                         mut trie,
-                     }| {
-                        let result = Self::reveal_decoded_storage_multiproof_inner(
-                            account,
-                            storage_subtree,
-                            &mut revealed_nodes,
-                            &mut trie,
-                            retain_updates,
-                        );
+                .map(|(account, storage_subtree, mut revealed_nodes, mut trie)| {
+                    let result = Self::reveal_decoded_storage_multiproof_inner(
+                        account,
+                        storage_subtree,
+                        &mut revealed_nodes,
+                        &mut trie,
+                        retain_updates,
+                    );
 
-                        ParallelRevealOutput { account, revealed_nodes, trie, result }
-                    },
-                )
+                    (account, revealed_nodes, trie, result)
+                })
                 .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
 
             drop(tx);
@@ -288,7 +267,7 @@ where
             // Return `revealed_nodes` and `SparseTrie` for each account, incrementing metrics and
             // returning the last error seen if any.
             let mut any_err = Ok(());
-            for ParallelRevealOutput { account, revealed_nodes, trie, result } in rx {
+            for (account, revealed_nodes, trie, result) in rx {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 if let Ok(_metric_values) = result {
@@ -813,7 +792,7 @@ where
 /// of [`SparseStateTrie`] both to help enforce allocation re-use and to allow us to implement
 /// methods like `get_trie_and_revealed_paths` which return multiple mutable borrows.
 #[derive(Debug, Default)]
-struct SparseStoragesStateTrie<S = SerialSparseTrie> {
+struct StorageTries<S = SerialSparseTrie> {
     /// Sparse storage tries.
     tries: B256Map<SparseTrie<S>>,
     /// Cleared storage tries, kept for re-use.
@@ -824,7 +803,7 @@ struct SparseStoragesStateTrie<S = SerialSparseTrie> {
     cleared_revealed_paths: Vec<HashSet<Nibbles>>,
 }
 
-impl<S: SparseTrieInterface + Default> SparseStoragesStateTrie<S> {
+impl<S: SparseTrieInterface + Default> StorageTries<S> {
     /// Returns all fields to a cleared state, equivalent to the default state, keeping cleared
     /// collections for re-use later when possible.
     fn clear(&mut self) {
