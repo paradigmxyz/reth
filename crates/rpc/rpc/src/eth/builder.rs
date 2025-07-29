@@ -18,7 +18,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{TxBatchConfig, TxBatchProcessor};
+use reth_transaction_pool::{TxBatchConfig, BatchTxProcessor};
 use std::sync::Arc;
 
 /// A helper to build the `EthApi` handler instance.
@@ -348,7 +348,7 @@ where
 
         // Create tx pool insertion batcher if configured
         let tx_batch_sender = tx_batch_config.map(|config| {
-            let (processor, request_tx) = TxBatchProcessor::new(
+            let (processor, request_tx) = BatchTxProcessor::new(
                 components.pool().clone(),
                 config.max_batch_size,
                 config.channel_buffer_size,

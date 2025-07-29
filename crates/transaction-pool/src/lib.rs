@@ -271,7 +271,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub use crate::{
-    batcher::{BatchTxRequest, TxBatchConfig, TxBatchError, TxBatchProcessor},
+    batcher::{BatchTxRequest, TxBatchConfig, TxBatchError, BatchTxProcessor},
     blobstore::{BlobStore, BlobStoreError},
     config::{
         LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,

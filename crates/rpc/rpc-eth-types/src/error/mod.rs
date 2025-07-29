@@ -169,7 +169,7 @@ pub enum EthApiError {
         /// Duration that was waited before timing out
         duration: Duration,
     },
-    /// Error thrown when `TxBatchProcessor` fails
+    /// Error thrown when `BatchTxProcessor` fails
     #[error(transparent)]
     TxBatchError(#[from] TxBatchError),
     /// Any other error
