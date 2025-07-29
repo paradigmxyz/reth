@@ -3,15 +3,13 @@
 //! This module provides transaction batching to reduce lock contention when processing
 //! many concurrent `send_raw_transaction` calls.
 
-use std::{collections::HashMap, time::Duration};
-
-use itertools::Itertools;
-
 use alloy_primitives::B256;
+use itertools::Itertools;
 use reth_rpc_eth_types::EthApiError;
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
+use std::time::Duration;
 use tokio::{
     sync::{mpsc, oneshot},
     task::JoinHandle,

@@ -331,6 +331,7 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
+        // TODO: use the task spawner to spawn batch processor
         tx_batcher: Option<TxBatcher<N::Pool>>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
