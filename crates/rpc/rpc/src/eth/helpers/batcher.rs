@@ -38,8 +38,6 @@ impl Default for TxBatchConfig {
 pub struct BatchTxRequest<T: PoolTransaction> {
     /// Tx to be inserted in to the pool
     pool_tx: T,
-    /// Origin of the transaction
-    origin: TransactionOrigin,
     /// Channel to send result back to caller
     response_tx: oneshot::Sender<Result<B256, EthApiError>>,
 }
@@ -80,13 +78,9 @@ where
     }
 
     /// Add transaction to the pool via batching
-    pub async fn add_transaction(
-        &self,
-        origin: TransactionOrigin,
-        pool_tx: Pool::Transaction,
-    ) -> Result<B256, EthApiError> {
+    pub async fn add_transaction(&self, pool_tx: Pool::Transaction) -> Result<B256, EthApiError> {
         let (response_tx, response_rx) = oneshot::channel();
-        let request = BatchTxRequest { pool_tx, origin, response_tx };
+        let request = BatchTxRequest { pool_tx, response_tx };
 
         self.request_tx.send(request).await.map_err(|_| {
             EthApiError::Internal(RethError::Other("Transaction batcher tx closed".into()))
@@ -123,27 +117,20 @@ where
 
     /// Process a batch of transaction requests, grouped by origin
     async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
-        // Group requests by origin
-        // TODO: can we simplify by knowing all txs will be marked as local
-        let origin_groups = batch.into_iter().into_group_map_by(|request| request.origin);
+        let batch_size = batch.len();
+        trace!(target = "", batch_size, "Processing batch");
 
-        // Process each origin group separately
-        for (origin, requests) in origin_groups {
-            let batch_size = requests.len();
-            trace!(origin = ?origin, batch_size, "Processing batch");
+        // NOTE: remove clone
+        let pool_transactions = batch.iter().map(|req| req.pool_tx.clone()).collect();
+        let pool_results = pool.add_transactions(TransactionOrigin::Local, pool_transactions).await;
 
-            // NOTE: remove clone
-            let pool_transactions = requests.iter().map(|req| req.pool_tx.clone()).collect();
-            let pool_results = pool.add_transactions(origin, pool_transactions).await;
+        for (request, pool_result) in batch.into_iter().zip(pool_results) {
+            let final_result = match pool_result {
+                Ok(AddedTransactionOutcome { hash, .. }) => Ok(hash),
+                Err(e) => Err(EthApiError::from(e)),
+            };
 
-            for (request, pool_result) in requests.into_iter().zip(pool_results) {
-                let final_result = match pool_result {
-                    Ok(AddedTransactionOutcome { hash, .. }) => Ok(hash),
-                    Err(e) => Err(EthApiError::from(e)),
-                };
-
-                let _ = request.response_tx.send(final_result);
-            }
+            request.response_tx.send(final_result).expect("TODO: handle errror");
         }
     }
 }
@@ -151,10 +138,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_transaction_pool::{
-        test_utils::{testing_pool, MockTransaction, TransactionGenerator},
-        TransactionOrigin,
-    };
+    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -169,11 +153,7 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-            batch_requests.push(BatchTxRequest {
-                pool_tx: tx,
-                origin: TransactionOrigin::Local,
-                response_tx,
-            });
+            batch_requests.push(BatchTxRequest { pool_tx: tx, response_tx });
             responses.push(response_rx);
         }
 
