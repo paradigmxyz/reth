@@ -29,7 +29,8 @@ impl Default for TxBatchConfig {
 }
 
 /// A single batch transaction request
-// TODO: note that all txs are considiered local when processed via that batcher
+///  All transactions processed through the batcher are considered local
+/// transactions (`TransactionOrigin::Local`) when inserted into the pool.
 #[derive(Debug)]
 pub struct BatchTxRequest<T: PoolTransaction> {
     /// Tx to be inserted in to the pool
@@ -42,7 +43,10 @@ impl<T> BatchTxRequest<T>
 where
     T: PoolTransaction,
 {
-    // TODO: new
+    /// Create a new batch transaction request
+    pub const fn new(pool_tx: T, response_tx: oneshot::Sender<Result<B256, EthApiError>>) -> Self {
+        Self { pool_tx, response_tx }
+    }
 }
 
 /// Transaction batcher responsible for batch inserting txs into the pool
@@ -76,7 +80,7 @@ where
     /// Add transaction to the pool via batching
     pub async fn add_transaction(&self, pool_tx: Pool::Transaction) -> Result<B256, EthApiError> {
         let (response_tx, response_rx) = oneshot::channel();
-        let request = BatchTxRequest { pool_tx, response_tx };
+        let request = BatchTxRequest::new(pool_tx, response_tx);
 
         self.request_tx.send(request).await.map_err(|_| {
             EthApiError::Internal(RethError::Other("Transaction batcher tx closed".into()))
@@ -149,7 +153,7 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-            batch_requests.push(BatchTxRequest { pool_tx: tx, response_tx });
+            batch_requests.push(BatchTxRequest::new(tx, response_tx));
             responses.push(response_rx);
         }
 
@@ -182,7 +186,7 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-            request_tx.send(BatchTxRequest { pool_tx: tx, response_tx }).await.unwrap();
+            request_tx.send(BatchTxRequest::new(tx, response_tx)).await.unwrap();
             responses.push(response_rx);
         }
 
