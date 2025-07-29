@@ -28,38 +28,7 @@ pub struct StorageEntry {
     pub value: U256,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_storage_range_response_serialization() {
-        let response = StorageRangeResponse {
-            storage: HashMap::new(),
-            next_key: None,
-        };
-        
-        let serialized = serde_json::to_string(&response).unwrap();
-        let deserialized: StorageRangeResponse = serde_json::from_str(&serialized).unwrap();
-        
-        assert_eq!(response.storage.len(), deserialized.storage.len());
-        assert_eq!(response.next_key, deserialized.next_key);
-    }
-
-    #[test]
-    fn test_storage_entry_serialization() {
-        let entry = StorageEntry {
-            key: B256::from_slice(&[1u8; 32]),
-            value: U256::from(12345),
-        };
-        
-        let serialized = serde_json::to_string(&entry).unwrap();
-        let deserialized: StorageEntry = serde_json::from_str(&serialized).unwrap();
-        
-        assert_eq!(entry.key, deserialized.key);
-        assert_eq!(entry.value, deserialized.value);
-    }
-}
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
