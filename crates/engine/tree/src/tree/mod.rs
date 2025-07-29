@@ -18,7 +18,6 @@ use reth_chain_state::{
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
-pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload,
     ForkchoiceStateTracker, OnForkChoiceUpdated,
@@ -58,7 +57,6 @@ mod block_buffer;
 mod cached_state;
 pub mod error;
 mod instrumented_state;
-mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
@@ -73,7 +71,6 @@ mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
-pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};

@@ -3,6 +3,7 @@
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
+    launch::invalid_block_hook::InvalidBlockHookExt,
     rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
@@ -213,7 +214,7 @@ where
             ctx.components().evm_config().clone(),
             engine_payload_validator,
             engine_tree_config.clone(),
-            ctx.invalid_block_hook().await?,
+            add_ons_ctx.create_invalid_block_hook(ctx.data_dir()).await?,
         );
 
         let mut engine_service = EngineService::new(
