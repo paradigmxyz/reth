@@ -20,7 +20,7 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{InvalidBlockHook, PayloadValidator};
-use reth_errors::ProviderResult;
+use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{block::BlockExecutor, execute::OwnedExecutableTxFor, ConfigureEvm, SpecFor};
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
@@ -37,7 +37,7 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -320,7 +320,11 @@ where
         );
 
         // use prewarming background task
-        let txs = block.clone_transactions_recovered().collect::<Vec<_>>().into_iter();
+        let txs = block
+            .clone_transactions_recovered()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(Ok::<_, Infallible>);
         let mut handle = if use_state_root_task {
             // use background tasks for state root calc
             let consistent_view =
@@ -553,12 +557,12 @@ where
     }
 
     /// Executes a block with the given state provider
-    fn execute_block<S: StateProvider>(
+    fn execute_block<S: StateProvider, Err: core::error::Error + Send + Sync + 'static>(
         &mut self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
         block: &RecoveredBlock<N::Block>,
-        handle: &mut PayloadHandle<impl OwnedExecutableTxFor<Evm>>,
+        handle: &mut PayloadHandle<impl OwnedExecutableTxFor<Evm>, Err>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind> {
         let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
         debug!(target: "engine::tree", block=?num_hash, "Executing block");
@@ -592,7 +596,7 @@ where
         let state_hook = Box::new(handle.state_hook());
         let output = self.metrics.executor.execute_metered(
             executor,
-            handle.iter_transactions(),
+            handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
         )?;
         let execution_finish = Instant::now();

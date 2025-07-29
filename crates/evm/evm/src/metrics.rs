@@ -104,7 +104,12 @@ impl ExecutorMetrics {
     pub fn execute_metered<E, DB>(
         &self,
         executor: E,
-        transactions: impl Iterator<Item = impl OwnedExecutableTx<<E::Evm as Evm>::Tx, E::Transaction>>,
+        transactions: impl Iterator<
+            Item = Result<
+                impl OwnedExecutableTx<<E::Evm as Evm>::Tx, E::Transaction>,
+                BlockExecutionError,
+            >,
+        >,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
@@ -121,7 +126,7 @@ impl ExecutorMetrics {
         let f = || {
             executor.apply_pre_execution_changes()?;
             for tx in transactions {
-                executor.execute_transaction(tx.as_executable())?;
+                executor.execute_transaction(tx?.as_executable())?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
@@ -303,7 +308,7 @@ mod tests {
         let _result = metrics
             .execute_metered::<_, EmptyDB>(
                 executor,
-                input.clone_transactions_recovered(),
+                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
                 state_hook,
             )
             .unwrap();
@@ -341,7 +346,7 @@ mod tests {
         let _result = metrics
             .execute_metered::<_, EmptyDB>(
                 executor,
-                input.clone_transactions_recovered(),
+                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
                 state_hook,
             )
             .unwrap();

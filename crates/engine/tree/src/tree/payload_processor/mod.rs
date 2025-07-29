@@ -142,15 +142,15 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    pub fn spawn<P, T: OwnedExecutableTxFor<Evm>>(
+    pub fn spawn<P, I: ExecutableTxIterator<Evm>>(
         &mut self,
         env: ExecutionEnv<Evm>,
-        transactions: impl ExactSizeIterator<Item = T> + Send + 'static,
+        transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle<T>
+    ) -> PayloadHandle<I::Tx, I::Error>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -231,12 +231,12 @@ where
     /// Spawn cache prewarming exclusively.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
-    pub(super) fn spawn_cache_exclusive<P, T: OwnedExecutableTxFor<Evm>>(
+    pub(super) fn spawn_cache_exclusive<P, I: ExecutableTxIterator<Evm>>(
         &self,
         env: ExecutionEnv<Evm>,
-        transactions: impl ExactSizeIterator<Item = T> + Send + 'static,
+        transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle<T>
+    ) -> PayloadHandle<I::Tx, I::Error>
     where
         P: BlockReader
             + StateProviderFactory
@@ -256,29 +256,31 @@ where
     }
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
-    fn spawn_tx_iterator<T: OwnedExecutableTxFor<Evm>>(
+    #[expect(clippy::type_complexity)]
+    fn spawn_tx_iterator<I: ExecutableTxIterator<Evm>>(
         &self,
-        transactions: impl ExactSizeIterator<Item = T> + Send + 'static,
-    ) -> (ExecutableTxReceiver<T>, mpsc::Receiver<T>) {
-        let len = transactions.len();
-
+        transactions: I,
+    ) -> (mpsc::Receiver<I::Tx>, mpsc::Receiver<Result<I::Tx, I::Error>>) {
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
             for transaction in transactions {
-                let _ = prewarm_tx.send(transaction.clone());
+                // only send Ok(_) variants to prewarming task
+                if let Ok(tx) = &transaction {
+                    let _ = prewarm_tx.send(tx.clone());
+                }
                 let _ = execute_tx.send(transaction);
             }
         });
 
-        (ExecutableTxReceiver { rx: prewarm_rx, len }, execute_rx)
+        (prewarm_rx, execute_rx)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: ExecutableTxReceiver<impl OwnedExecutableTxFor<Evm>>,
+        mut transactions: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle
@@ -293,7 +295,7 @@ where
         if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
-            transactions.clear();
+            transactions = mpsc::channel().1;
         }
 
         let (cache, cache_metrics) = self.cache_for(env.parent_hash).split();
@@ -389,7 +391,7 @@ where
 
 /// Handle to all the spawned tasks.
 #[derive(Debug)]
-pub struct PayloadHandle<Tx> {
+pub struct PayloadHandle<Tx, Err> {
     /// Channel for evm state updates
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
@@ -397,10 +399,10 @@ pub struct PayloadHandle<Tx> {
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Stream of block transactions
-    transactions: mpsc::Receiver<Tx>,
+    transactions: mpsc::Receiver<Result<Tx, Err>>,
 }
 
-impl<Tx> PayloadHandle<Tx> {
+impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// Awaits the state root
     ///
     /// # Panics
@@ -452,7 +454,7 @@ impl<Tx> PayloadHandle<Tx> {
     }
 
     /// Returns iterator yielding transactions from the stream.
-    pub fn iter_transactions(&mut self) -> impl Iterator<Item = Tx> + '_ {
+    pub fn iter_transactions(&mut self) -> impl Iterator<Item = Result<Tx, Err>> + '_ {
         core::iter::repeat_with(|| self.transactions.recv())
             .take_while(|res| res.is_ok())
             .map(|res| res.unwrap())
@@ -531,36 +533,6 @@ impl ExecutionCache {
     }
 }
 
-/// Container for receiving end of executable transactions stream.
-#[derive(Debug)]
-pub struct ExecutableTxReceiver<T> {
-    rx: mpsc::Receiver<T>,
-    len: usize,
-}
-
-impl<T> ExecutableTxReceiver<T> {
-    /// Number of transactions underlying stream will emit.
-    pub const fn len(&self) -> usize {
-        self.len
-    }
-
-    /// Returns true if the underlying stream will not emit any more transactions.
-    pub const fn is_empty(&self) -> bool {
-        self.len == 0
-    }
-
-    /// Blocks and waits for new transaction to be emitted.
-    pub fn recv(&mut self) -> Result<T, mpsc::RecvError> {
-        self.rx.recv().inspect(|_| self.len -= 1)
-    }
-
-    /// Drops the receiver and sets length to 0.
-    pub fn clear(&mut self) {
-        self.rx = mpsc::channel().1;
-        self.len = 0;
-    }
-}
-
 /// EVM context required to execute a block.
 #[derive(Debug, Clone)]
 pub struct ExecutionEnv<Evm: ConfigureEvm> {
@@ -583,6 +555,26 @@ where
             parent_hash: Default::default(),
         }
     }
+}
+
+/// Iterator over executable transactions.
+pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
+    ExactSizeIterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
+{
+    /// The executable transaction type iterator yields.
+    type Tx: OwnedExecutableTxFor<Evm>;
+    /// Errors that may occur while recovering or decoding transactions.
+    type Error: core::error::Error + Send + 'static;
+}
+
+impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
+where
+    Tx: OwnedExecutableTxFor<Evm>,
+    Err: core::error::Error + Send + 'static,
+    T: ExactSizeIterator<Item = Result<Tx, Err>> + Send + 'static,
+{
+    type Tx = Tx;
+    type Error = Err;
 }
 
 #[cfg(test)]
@@ -722,7 +714,7 @@ mod tests {
         let provider = BlockchainProvider::new(factory).unwrap();
         let mut handle = payload_processor.spawn(
             Default::default(),
-            core::iter::empty::<Recovered<TransactionSigned>>(),
+            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
             StateProviderBuilder::new(provider.clone(), genesis_hash, None),
             ConsistentDbView::new_with_latest_tip(provider).unwrap(),
             TrieInput::from_state(hashed_state),

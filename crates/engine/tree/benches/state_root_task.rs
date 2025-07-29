@@ -234,7 +234,9 @@ fn bench_state_root(c: &mut Criterion) {
                         black_box({
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
-                                core::iter::empty::<Recovered<TransactionSigned>>(),
+                                core::iter::empty::<
+                                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                                >(),
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
                                 ConsistentDbView::new_with_latest_tip(provider).unwrap(),
                                 TrieInput::default(),

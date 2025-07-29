@@ -6,7 +6,7 @@ use crate::tree::{
         executor::WorkloadExecutor, multiproof::MultiProofMessage, ExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
-    ExecutableTxReceiver, ExecutionEnv, StateProviderBuilder,
+    ExecutionEnv, StateProviderBuilder,
 };
 use alloy_evm::{Database, RecoveredTx};
 use alloy_primitives::{keccak256, map::B256Set, B256};
@@ -80,7 +80,7 @@ where
     /// Spawns all pending transactions as blocking tasks by first chunking them.
     fn spawn_all(
         &self,
-        mut pending: ExecutableTxReceiver<impl OwnedExecutableTxFor<Evm>>,
+        pending: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
         actions_tx: Sender<PrewarmTaskEvent>,
     ) {
         let executor = self.executor.clone();
@@ -109,6 +109,9 @@ where
 
                 executing += 1;
             }
+
+            let _ = actions_tx
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: executing });
         });
     }
 
@@ -146,18 +149,14 @@ where
     /// was cancelled.
     pub(super) fn run(
         self,
-        pending: ExecutableTxReceiver<impl OwnedExecutableTxFor<Evm>>,
+        pending: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
         actions_tx: Sender<PrewarmTaskEvent>,
     ) {
-        self.ctx.metrics.transactions.set(pending.len() as f64);
-        self.ctx.metrics.transactions_histogram.record(pending.len() as f64);
-
-        let mut num_txs = pending.len();
-
         // spawn execution tasks.
         self.spawn_all(pending, actions_tx);
 
         let mut final_block_output = None;
+        let mut finished_execution = false;
         while let Ok(event) = self.actions_rx.recv() {
             match event {
                 PrewarmTaskEvent::TerminateTransactionExecution => {
@@ -167,19 +166,22 @@ where
                 PrewarmTaskEvent::Outcome { proof_targets } => {
                     // completed executing a set of transactions
                     self.send_multi_proof_targets(proof_targets);
-
-                    // decrement the number of tasks left
-                    num_txs -= 1;
-
-                    if num_txs == 0 && final_block_output.is_some() {
-                        // all tasks are done, and we have the block output, we can exit
-                        break
-                    }
                 }
                 PrewarmTaskEvent::Terminate { block_output } => {
                     final_block_output = Some(block_output);
 
-                    if num_txs == 0 {
+                    if finished_execution {
+                        // all tasks are done, we can exit, which will save caches and exit
+                        break
+                    }
+                }
+                PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
+                    self.ctx.metrics.transactions.set(executed_transactions as f64);
+                    self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);
+
+                    finished_execution = true;
+
+                    if final_block_output.is_some() {
                         // all tasks are done, we can exit, which will save caches and exit
                         break
                     }
@@ -374,6 +376,11 @@ pub(super) enum PrewarmTaskEvent {
     Outcome {
         /// The prepared proof targets based on the evm state outcome
         proof_targets: Option<MultiProofTargets>,
+    },
+    /// Finished executing all transactions
+    FinishedTxExecution {
+        /// Number of transactions executed
+        executed_transactions: usize,
     },
 }
 
