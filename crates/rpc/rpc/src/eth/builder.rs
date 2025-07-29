@@ -1,6 +1,12 @@
 //! `EthApiBuilder` implementation
 
-use crate::{eth::core::EthApiInner, EthApi};
+use crate::{
+    eth::{
+        core::EthApiInner,
+        helpers::batcher::{TxBatchConfig, TxBatcher},
+    },
+    EthApi,
+};
 use alloy_network::Ethereum;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
@@ -40,6 +46,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
+    tx_batch_config: Option<TxBatchConfig>,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -78,6 +85,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             blocking_task_pool,
             task_spawner,
             next_env,
+            tx_batch_config,
         } = self;
         EthApiBuilder {
             components,
@@ -94,6 +102,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             blocking_task_pool,
             task_spawner,
             next_env,
+            tx_batch_config,
         }
     }
 }
@@ -121,6 +130,7 @@ where
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
+            tx_batch_config: None,
         }
     }
 }
@@ -155,6 +165,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            tx_batch_config,
         } = self;
         EthApiBuilder {
             components,
@@ -171,6 +182,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            tx_batch_config,
         }
     }
 
@@ -194,6 +206,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env: _,
+            tx_batch_config,
         } = self;
         EthApiBuilder {
             components,
@@ -210,6 +223,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
+            tx_batch_config,
         }
     }
 
@@ -281,6 +295,12 @@ where
         self
     }
 
+    /// Sets the transaction batch config for batching transaction insertions.
+    pub const fn tx_batch_config(mut self, tx_batch_config: TxBatchConfig) -> Self {
+        self.tx_batch_config = Some(tx_batch_config);
+        self
+    }
+
     /// Builds the [`EthApiInner`] instance.
     ///
     /// If not configured, this will spawn the cache backend: [`EthStateCache::spawn`].
@@ -309,6 +329,7 @@ where
             proof_permits,
             task_spawner,
             next_env,
+            tx_batch_config,
         } = self;
 
         let provider = components.provider().clone();
@@ -330,6 +351,10 @@ where
             }),
         );
 
+        // Create transaction batcher if configured
+        let tx_batcher =
+            tx_batch_config.map(|config| TxBatcher::new(components.pool().clone(), config));
+
         EthApiInner::new(
             components,
             eth_cache,
@@ -345,6 +370,7 @@ where
             proof_permits,
             rpc_converter,
             next_env,
+            tx_batcher,
         )
     }
 

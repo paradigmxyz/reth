@@ -3,7 +3,10 @@
 
 use std::sync::Arc;
 
-use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
+use crate::{
+    eth::helpers::{batcher::TxBatcher, types::EthRpcConverter},
+    EthApiBuilder,
+};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
@@ -161,6 +164,7 @@ where
             proof_permits,
             rpc_converter,
             (),
+            None,
         );
 
         Self { inner: Arc::new(inner) }
@@ -217,6 +221,18 @@ where
     #[inline]
     fn cache(&self) -> &EthStateCache<N::Primitives> {
         self.inner.cache()
+    }
+}
+
+impl<N, Rpc> EthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    Rpc: RpcConvert,
+{
+    /// Returns the transaction batcher if configured
+    #[inline]
+    pub fn tx_batcher(&self) -> Option<&TxBatcher<N::Pool>> {
+        self.inner.tx_batcher()
     }
 }
 
@@ -290,6 +306,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
+
+    /// Optional transaction batcher for batching tx insertions
+    tx_batcher: Option<TxBatcher<N::Pool>>,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -312,6 +331,7 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
+        tx_batcher: Option<TxBatcher<N::Pool>>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -344,6 +364,7 @@ where
             raw_tx_sender,
             tx_resp_builder,
             next_env_builder: Box::new(next_env),
+            tx_batcher,
         }
     }
 }
@@ -472,6 +493,12 @@ where
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
         let _ = self.raw_tx_sender.send(raw_tx);
+    }
+
+    /// Returns the transaction batcher if configured
+    #[inline]
+    pub const fn tx_batcher(&self) -> Option<&TxBatcher<N::Pool>> {
+        self.tx_batcher.as_ref()
     }
 }
 

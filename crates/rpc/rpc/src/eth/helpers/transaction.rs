@@ -34,11 +34,16 @@ where
 
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
-        // submit the transaction to the pool with a `Local` origin
-        let AddedTransactionOutcome { hash, .. } =
-            self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
-
-        Ok(hash)
+        // Use batcher if available, otherwise submit directly
+        // TODO: determine if throughput is high enough to use the batcher or submit directly
+        if let Some(batcher) = self.tx_batcher() {
+            batcher.add_transaction(TransactionOrigin::Local, pool_transaction).await
+        } else {
+            // submit the transaction to the pool with a `Local` origin
+            let AddedTransactionOutcome { hash, .. } =
+                self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+            Ok(hash)
+        }
     }
 }
 

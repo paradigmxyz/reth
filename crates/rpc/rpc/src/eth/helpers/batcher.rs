@@ -3,11 +3,7 @@
 //! This module provides transaction batching to reduce lock contention when processing
 //! many concurrent `send_raw_transaction` calls.
 
-use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, time::Duration};
 
 use itertools::Itertools;
 
@@ -21,7 +17,7 @@ use tokio::{
     task::JoinHandle,
     time::Interval,
 };
-use tracing::{debug, trace, warn};
+use tracing::trace;
 
 /// Configuration for tx pool batch insertion
 #[derive(Debug, Clone)]
@@ -127,16 +123,15 @@ where
 
     /// Process a batch of transaction requests, grouped by origin
     async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
+        // Group requests by origin
         let origin_groups = batch.into_iter().into_group_map_by(|request| request.origin);
 
         // Process each origin group separately
         for (origin, requests) in origin_groups {
             let batch_size = requests.len();
-            trace!(origin = ?origin, batch_size, "Processing origin batch");
+            trace!(origin = ?origin, batch_size, "Processing batch");
 
-            let pool_transactions: Vec<Pool::Transaction> =
-                requests.iter().map(|req| req.pool_tx.clone()).collect();
-
+            let pool_transactions = requests.iter().map(|req| req.pool_tx.clone()).collect();
             let pool_results = pool.add_transactions(origin, pool_transactions).await;
 
             for (request, pool_result) in requests.into_iter().zip(pool_results) {
