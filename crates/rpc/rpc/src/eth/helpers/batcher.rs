@@ -4,18 +4,13 @@
 //! many concurrent `send_raw_transaction` calls.
 
 use alloy_primitives::B256;
-use itertools::Itertools;
 use reth_errors::RethError;
 use reth_rpc_eth_types::EthApiError;
-use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 use std::time::Duration;
-use tokio::{
-    sync::{mpsc, oneshot},
-    time::Interval,
-};
+use tokio::sync::{mpsc, oneshot};
 use tracing::trace;
 
 /// Configuration for tx pool batch insertion
@@ -161,14 +156,78 @@ mod tests {
         TxBatcher::process_batch(&pool, batch_requests).await;
 
         for response_rx in responses {
-            let result = timeout(Duration::from_millis(5), response_rx).await.unwrap().unwrap();
+            let result = timeout(Duration::from_millis(5), response_rx)
+                .await
+                .expect("Timeout waiting for response")
+                .expect("Response channel was closed unexpectedly");
             assert!(result.is_ok());
         }
     }
 
-    #[test]
-    fn test_process_batches() {}
+    #[tokio::test]
+    async fn test_process_batches() {
+        let pool = testing_pool();
+        let (request_tx, request_rx) = tokio::sync::mpsc::channel(100);
+        let interval = Duration::from_millis(5);
 
-    #[test]
-    fn test_add_transaction() {}
+        // Spawn task to process batch requests
+        let pool_clone = pool.clone();
+        let handle = tokio::spawn(async move {
+            TxBatcher::<_>::process_batches(pool_clone, interval, request_rx).await;
+        });
+
+        let mut responses = Vec::new();
+
+        for i in 0..50 {
+            let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+            request_tx.send(BatchTxRequest { pool_tx: tx, response_tx }).await.unwrap();
+            responses.push(response_rx);
+        }
+
+        // Wait for interval to process first batch
+        tokio::time::sleep(Duration::from_millis(5)).await;
+
+        // Verify all responses are received and successful
+        for rx in responses {
+            let result = timeout(Duration::from_millis(5), rx)
+                .await
+                .expect("Timeout waiting for response")
+                .expect("Response channel was closed unexpectedly");
+            assert!(result.is_ok());
+        }
+
+        drop(request_tx);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_add_transaction() {
+        let pool = testing_pool();
+        let (batcher, request_rx) = TxBatcher::new(pool.clone(), Duration::from_millis(5), 100);
+
+        // Spawn task to process batch requests
+        let pool_clone = pool.clone();
+        let handle = tokio::spawn(async move {
+            TxBatcher::<_>::process_batches(pool_clone, Duration::from_millis(5), request_rx).await;
+        });
+
+        let mut results = Vec::new();
+        for i in 0..10 {
+            let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
+            let result_future = batcher.add_transaction(tx);
+            results.push(result_future);
+        }
+
+        for res in results {
+            let result = timeout(Duration::from_millis(10), res)
+                .await
+                .expect("Timeout waiting for transaction result");
+            assert!(result.is_ok());
+        }
+
+        drop(batcher);
+        handle.abort();
+    }
 }
