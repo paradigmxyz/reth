@@ -200,6 +200,13 @@ impl OpChainSpecBuilder {
         self
     }
 
+    /// Enable Jovian at genesis
+    pub fn jovian_activated(mut self) -> Self {
+        self = self.interop_activated();
+        self.inner = self.inner.with_fork(OpHardfork::Jovian, ForkCondition::Timestamp(0));
+        self
+    }
+
     /// Build the resulting [`OpChainSpec`].
     ///
     /// # Panics
@@ -388,6 +395,7 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
             (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
             (OpHardfork::Interop.boxed(), genesis_info.interop_time),
+            (OpHardfork::Jovian.boxed(), genesis_info.jovian_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
