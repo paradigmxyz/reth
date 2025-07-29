@@ -193,17 +193,17 @@ impl OpChainSpecBuilder {
         self
     }
 
-    /// Enable Interop at genesis
-    pub fn interop_activated(mut self) -> Self {
+    /// Enable Jovian at genesis
+    pub fn jovian_activated(mut self) -> Self {
         self = self.isthmus_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Interop, ForkCondition::Timestamp(0));
+        self.inner = self.inner.with_fork(OpHardfork::Jovian, ForkCondition::Timestamp(0));
         self
     }
 
-    /// Enable Jovian at genesis
-    pub fn jovian_activated(mut self) -> Self {
-        self = self.interop_activated();
-        self.inner = self.inner.with_fork(OpHardfork::Jovian, ForkCondition::Timestamp(0));
+    /// Enable Interop at genesis
+    pub fn interop_activated(mut self) -> Self {
+        self = self.jovian_activated();
+        self.inner = self.inner.with_fork(OpHardfork::Interop, ForkCondition::Timestamp(0));
         self
     }
 
@@ -1101,8 +1101,8 @@ mod tests {
             OpHardfork::Holocene.boxed(),
             EthereumHardfork::Prague.boxed(),
             OpHardfork::Isthmus.boxed(),
-            OpHardfork::Interop.boxed(),
             OpHardfork::Jovian.boxed(),
+            OpHardfork::Interop.boxed(),
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
