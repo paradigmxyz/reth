@@ -1111,7 +1111,7 @@ impl<
     }
 
     /// Spawn a sequential task for processing a small range of headers
-    /// 
+    ///
     /// This is used when the remaining headers count is below [`PARALLEL_PROCESSING_THRESHOLD`].
     fn spawn_sequential_task(
         &mut self,
@@ -1153,8 +1153,9 @@ impl<
     }
 
     /// Spawn parallel tasks for processing a large range of headers
-    /// 
-    /// This is used when the remaining headers count is at or above [`PARALLEL_PROCESSING_THRESHOLD`].
+    ///
+    /// This is used when the remaining headers count is at or above
+    /// [`PARALLEL_PROCESSING_THRESHOLD`].
     fn spawn_parallel_tasks(
         &mut self,
         range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
