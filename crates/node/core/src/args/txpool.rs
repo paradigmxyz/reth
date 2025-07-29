@@ -10,7 +10,7 @@ use reth_transaction_pool::{
     maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
-    LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, BatchTxConfig,
+    BatchTxConfig, LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
     DEFAULT_PRICE_BUMP, DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
     MAX_NEW_PENDING_TXS_NOTIFICATIONS, REPLACE_BLOB_PRICE_BUMP,
     TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,

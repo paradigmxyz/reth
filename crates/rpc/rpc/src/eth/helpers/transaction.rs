@@ -9,8 +9,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{
-    AddedTransactionOutcome, BatchTxRequest, PoolTransaction, TransactionOrigin, TransactionPool,
-    BatchTxError,
+    AddedTransactionOutcome, BatchTxError, BatchTxRequest, PoolTransaction, TransactionOrigin,
+    TransactionPool,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
