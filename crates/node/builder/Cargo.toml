@@ -114,10 +114,12 @@ test-utils = [
     "reth-transaction-pool/test-utils",
     "reth-evm-ethereum/test-utils",
     "reth-node-ethereum/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
 op = [
     "reth-db?/op",
     "reth-db-api/op",
     "reth-engine-local/op",
     "reth-evm/op",
+    "reth-primitives-traits/op",
 ]
