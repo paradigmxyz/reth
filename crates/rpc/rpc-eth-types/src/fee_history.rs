@@ -108,7 +108,7 @@ where
         if entries.is_empty() {
             self.inner.upper_bound.store(0, SeqCst);
             self.inner.lower_bound.store(0, SeqCst);
-            return
+            return;
         }
 
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
@@ -147,7 +147,7 @@ where
     ) -> Option<Vec<FeeHistoryEntry<H>>> {
         if end_block < start_block {
             // invalid range, return None
-            return None
+            return None;
         }
         let lower_bound = self.lower_bound();
         let upper_bound = self.upper_bound();
@@ -159,7 +159,7 @@ where
                 .collect::<Vec<_>>();
 
             if result.is_empty() {
-                return None
+                return None;
             }
 
             Some(result)
@@ -323,7 +323,7 @@ where
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
             rewards_in_block.push(0);
-            continue
+            continue;
         }
 
         let threshold = (gas_used as f64 * percentile / 100.) as u64;
@@ -376,12 +376,18 @@ where
             base_fee_per_blob_gas: header
                 .excess_blob_gas()
                 .and_then(|excess_blob_gas| Some(blob_params?.calc_blob_fee(excess_blob_gas))),
-            blob_gas_used_ratio: block.body().blob_gas_used() as f64 /
-                blob_params
-                    .as_ref()
-                    .map(|params| params.max_blob_gas_per_block())
-                    .unwrap_or(alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK_DENCUN)
-                    as f64,
+            blob_gas_used_ratio: if block.body().blob_gas_used() == 0 {
+                // Prevent returning NaN when blob_params is defined with a max_blob_gas_per_block
+                // equal to zero.
+                0.0
+            } else {
+                block.body().blob_gas_used() as f64 /
+                    blob_params
+                        .as_ref()
+                        .map(|params| params.max_blob_gas_per_block())
+                        .unwrap_or(alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK_DENCUN)
+                        as f64
+            },
             rewards: Vec::new(),
             blob_params,
         }
