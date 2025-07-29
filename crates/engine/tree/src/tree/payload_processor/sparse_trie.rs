@@ -199,7 +199,13 @@ where
                 }
             }
 
+            let start = std::time::Instant::now();
             storage_trie.root();
+            let root_elapsed = start.elapsed();
+            // if greater than 1 millisecond, log
+            if root_elapsed > std::time::Duration::new(0, 1_000_000) {
+                tracing::info!(target: "engine::root::sparse", ?root_elapsed, ?address, "Storage root took longer than 1ms");
+            }
 
             SparseStateTrieResult::Ok((address, storage_trie))
         })
