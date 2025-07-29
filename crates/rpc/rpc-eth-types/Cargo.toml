@@ -62,6 +62,7 @@ itertools.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+reth-chain-state = { workspace = true, features = ["test-utils"]}
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer"]
