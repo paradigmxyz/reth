@@ -31,7 +31,6 @@ use reth_storage_api::{
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
-use core::task;
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -1042,7 +1041,8 @@ impl<
         if !self.pending_tasks.is_empty() {
             if let Some(task_result) = self.pending_tasks.next().await {
                 let mut chunk_results = task_result?;
-                if let Some(first_result) = chunk_results.drain(..1).next() {
+                if !chunk_results.is_empty() {
+                    let first_result = chunk_results.remove(0);
                     self.next.extend(chunk_results);
                     return Ok(Some(first_result));
                 }
@@ -1091,7 +1091,8 @@ impl<
             // Now wait for the newly spawned task to complete
             if let Some(task_result) = self.pending_tasks.next().await {
                 let mut chunk_results = task_result?;
-                if let Some(first_result) = chunk_results.drain(..1).next() {
+                if !chunk_results.is_empty() {
+                    let first_result = chunk_results.remove(0);
                     self.next.extend(chunk_results);
                     return Ok(Some(first_result));
                 }
