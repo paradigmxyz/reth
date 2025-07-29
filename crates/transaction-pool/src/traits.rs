@@ -1824,3 +1824,9 @@ mod tests {
         assert!(size_limit_2mb.exceeds(3 * 1024 * 1024));
     }
 }
+
+#[cfg(feature = "blob")]
+mod blob;
+
+#[cfg(feature = "blob")]
+pub use blob::BlobPoolExt;
