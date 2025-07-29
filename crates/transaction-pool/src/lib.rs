@@ -63,7 +63,7 @@
 //!
 //! ## Validation Process
 //!
-//! ### Stateless Checks  
+//! ### Stateless Checks
 //!
 //! Ethereum transactions undergo several stateless checks:
 //!
@@ -271,7 +271,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 pub use crate::{
-    batcher::{BatchTxRequest, TxBatchConfig, TxBatcher, TxBatchError},
+    batcher::{BatchTxRequest, TxBatchConfig, TxBatchError, TxBatcher},
     blobstore::{BlobStore, BlobStoreError},
     config::{
         LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
@@ -501,7 +501,7 @@ where
         transactions: Vec<Self::Transaction>,
     ) -> Vec<PoolResult<AddedTransactionOutcome>> {
         if transactions.is_empty() {
-            return Vec::new()
+            return Vec::new();
         }
         let validated = self.validate_all(origin, transactions).await;
 

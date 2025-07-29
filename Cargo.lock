@@ -10513,7 +10513,6 @@ dependencies = [
  "rand 0.9.2",
  "reth-chain-state",
  "reth-chainspec",
- "reth-errors",
  "reth-eth-wire-types",
  "reth-ethereum-primitives",
  "reth-execution-types",
