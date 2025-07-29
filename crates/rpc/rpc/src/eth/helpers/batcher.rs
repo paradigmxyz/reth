@@ -6,13 +6,13 @@
 use alloy_primitives::B256;
 use itertools::Itertools;
 use reth_rpc_eth_types::EthApiError;
+use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 use std::time::Duration;
 use tokio::{
     sync::{mpsc, oneshot},
-    task::JoinHandle,
     time::Interval,
 };
 use tracing::trace;
@@ -59,10 +59,12 @@ where
 /// Transaction batcher responsible for batch inserting txs into the pool
 #[derive(Debug)]
 pub struct TxBatcher<Pool: TransactionPool> {
-    /// Channel for sending batch requests
+    /// Pool for tx insertions
+    pool: Pool,
+    /// Batch insertion configuration
+    config: TxBatchConfig,
+    /// Channel for batch tx requests
     request_tx: mpsc::Sender<BatchTxRequest<Pool::Transaction>>,
-    /// Handle to the background batch processor task
-    processor_handle: JoinHandle<()>,
 }
 
 impl<Pool> TxBatcher<Pool>
@@ -71,14 +73,13 @@ where
     Pool::Transaction: Send + Sync,
 {
     /// Create a new `TxBatcher`
-    pub fn new(pool: Pool, config: TxBatchConfig) -> Self {
+    pub fn new(
+        pool: Pool,
+        config: TxBatchConfig,
+    ) -> (Self, mpsc::Receiver<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::channel(config.channel_buffer_size);
-
-        // Spawn the background batching task
-        let interval = tokio::time::interval(config.max_wait_time);
-        let processor_handle = Self::spawn_batch_processor(pool, interval, request_rx);
-
-        Self { request_tx, processor_handle }
+        let batcher = Self { pool, config, request_tx };
+        (batcher, request_rx)
     }
 
     /// Add transaction to the pool via batching
@@ -95,32 +96,31 @@ where
         response_rx.await.expect("TODO: handle error ")
     }
 
-    /// Spawns the batch tx processor
-    fn spawn_batch_processor(
-        pool: Pool,
+    /// Process batch transaction insertions
+    pub async fn process_batches(
+        &self,
         mut interval: Interval,
         mut request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
-    ) -> JoinHandle<()> {
-        tokio::spawn(async move {
-            loop {
-                interval.tick().await;
+    ) {
+        loop {
+            interval.tick().await;
 
-                // Drain all pending requests from the channel
-                let mut batch = Vec::new();
-                while let Ok(request) = request_rx.try_recv() {
-                    batch.push(request);
-                }
-
-                if !batch.is_empty() {
-                    trace!(batch_size = batch.len(), "Processing drained batch");
-                    Self::process_batch(&pool, batch).await;
-                }
+            // Drain all pending requests from the channel
+            let mut batch = Vec::new();
+            // TODO: drain without overhead
+            while let Ok(request) = request_rx.try_recv() {
+                batch.push(request);
             }
-        })
+
+            if !batch.is_empty() {
+                trace!(batch_size = batch.len(), "Processing drained batch");
+                self.process_batch(batch).await;
+            }
+        }
     }
 
     /// Process a batch of transaction requests, grouped by origin
-    async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
+    async fn process_batch(&self, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         // Group requests by origin
         let origin_groups = batch.into_iter().into_group_map_by(|request| request.origin);
 
@@ -130,7 +130,7 @@ where
             trace!(origin = ?origin, batch_size, "Processing batch");
 
             let pool_transactions = requests.iter().map(|req| req.pool_tx.clone()).collect();
-            let pool_results = pool.add_transactions(origin, pool_transactions).await;
+            let pool_results = self.pool.add_transactions(origin, pool_transactions).await;
 
             for (request, pool_result) in requests.into_iter().zip(pool_results) {
                 let final_result = match pool_result {
@@ -141,12 +141,6 @@ where
                 let _ = request.response_tx.send(final_result);
             }
         }
-    }
-}
-
-impl<Pool: TransactionPool> Drop for TxBatcher<Pool> {
-    fn drop(&mut self) {
-        self.processor_handle.abort();
     }
 }
 
