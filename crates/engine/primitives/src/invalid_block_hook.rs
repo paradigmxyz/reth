@@ -1,3 +1,4 @@
+use alloc::{boxed::Box, fmt, vec::Vec};
 use alloy_primitives::B256;
 use reth_execution_types::BlockExecutionOutput;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
@@ -56,8 +57,8 @@ impl<N: NodePrimitives> InvalidBlockHook<N> for NoopInvalidBlockHook {
 /// Multiple [`InvalidBlockHook`]s that are executed in order.
 pub struct InvalidBlockHooks<N: NodePrimitives>(pub Vec<Box<dyn InvalidBlockHook<N>>>);
 
-impl<N: NodePrimitives> std::fmt::Debug for InvalidBlockHooks<N> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl<N: NodePrimitives> fmt::Debug for InvalidBlockHooks<N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("InvalidBlockHooks").field("len", &self.0.len()).finish()
     }
 }
