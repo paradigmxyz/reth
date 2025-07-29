@@ -31,7 +31,7 @@ alloy-eips.workspace = true
 alloy-hardforks.workspace = true
 
 # op
-op-alloy-rpc-types = { git = "https://github.com/lean-apple/op-alloy.git", branch = "jovian-time"}
+op-alloy-rpc-types = { git = "https://github.com/lean-apple/op-alloy.git", branch = "jovian-time" }
 
 serde = { workspace = true, optional = true }
 serde_json.workspace = true
