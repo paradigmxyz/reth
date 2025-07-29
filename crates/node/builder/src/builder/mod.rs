@@ -826,15 +826,15 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             .request_handler(self.provider().clone())
             .split_with_handle();
 
-        self.executor.spawn_critical("p2p txpool", txpool);
-        self.executor.spawn_critical("p2p eth request handler", eth);
+        self.executor.spawn_critical("p2p txpool", Box::pin(txpool));
+        self.executor.spawn_critical("p2p eth request handler", Box::pin(eth));
 
         let default_peers_path = self.config().datadir().known_peers();
         let known_peers_file = self.config().network.persistent_peers_file(default_peers_path);
         self.executor.spawn_critical_with_graceful_shutdown_signal(
             "p2p network task",
             |shutdown| {
-                network.run_until_graceful_shutdown(shutdown, |network| {
+                Box::pin(network.run_until_graceful_shutdown(shutdown, |network| {
                     if let Some(peers_file) = known_peers_file {
                         let num_known_peers = network.num_known_peers();
                         trace!(target: "reth::cli", peers_file=?peers_file, num_peers=%num_known_peers, "Saving current peers");
@@ -847,7 +847,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
                             }
                         }
                     }
-                })
+                }))
             },
         );
 
