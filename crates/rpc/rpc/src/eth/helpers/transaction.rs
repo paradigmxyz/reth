@@ -40,13 +40,10 @@ where
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             let request = BatchTxRequest::new(pool_transaction, response_tx);
 
-            batch_sender.send(request).await.map_err(|_| {
-                EthApiError::Internal(reth_errors::RethError::Other(
-                    TxBatchError::BatcherChannelClosed.into(),
-                ))
-            })?;
+            batch_sender.send(request).await.map_err(|_| TxBatchError::BatcherChannelClosed)?;
+            let hash = response_rx.await.map_err(|_| TxBatchError::ResponseChannelClosed)??;
 
-            response_rx.await??
+            Ok(hash)
         } else {
             // submit the transaction to the pool with a `Local` origin
             let AddedTransactionOutcome { hash, .. } =

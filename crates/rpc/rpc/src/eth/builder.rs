@@ -350,10 +350,10 @@ where
         let tx_batch_sender = tx_batch_config.map(|config| {
             let (processor, request_tx) = TxBatchProcessor::new(
                 components.pool().clone(),
-                config.batch_threshold,
+                config.max_batch_size,
                 config.channel_buffer_size,
             );
-            
+
             task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
             request_tx
         });

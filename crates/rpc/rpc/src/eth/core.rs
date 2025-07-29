@@ -27,9 +27,8 @@ use reth_tasks::{
     TaskSpawner, TokioTaskExecutor,
 };
 use reth_transaction_pool::{noop::NoopTransactionPool, BatchTxRequest, TransactionPool};
-use tokio::sync::mpsc;
 use std::sync::Arc;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -228,7 +227,9 @@ where
 {
     /// Returns the transaction batch sender if configured
     #[inline]
-    pub fn tx_batch_sender(&self) -> Option<&mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>> {
+    pub fn tx_batch_sender(
+        &self,
+    ) -> Option<&mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>> {
         self.inner.tx_batch_sender()
     }
 }
@@ -305,7 +306,8 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
 
     /// Optional transaction batch sender for batching tx insertions
-    tx_batch_sender: Option<mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>,
+    tx_batch_sender:
+        Option<mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -328,7 +330,9 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
-        tx_batch_sender: Option<mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>,
+        tx_batch_sender: Option<
+            mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
+        >,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -494,7 +498,9 @@ where
 
     /// Returns the transaction batch sender if configured
     #[inline]
-    pub const fn tx_batch_sender(&self) -> Option<&mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>> {
+    pub const fn tx_batch_sender(
+        &self,
+    ) -> Option<&mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>> {
         self.tx_batch_sender.as_ref()
     }
 }

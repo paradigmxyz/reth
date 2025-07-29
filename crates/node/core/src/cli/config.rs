@@ -83,7 +83,7 @@ impl<N: NetworkPrimitives> RethNetworkConfig for reth_network::NetworkManager<N>
 pub trait RethTransactionPoolConfig {
     /// Returns transaction pool configuration.
     fn pool_config(&self) -> PoolConfig;
-    
+
     /// Returns transaction batcher configuration if enabled.
     fn tx_batch_config(&self) -> Option<TxBatchConfig>;
 }
