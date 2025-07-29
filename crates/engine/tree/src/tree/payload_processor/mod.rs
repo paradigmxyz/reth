@@ -192,14 +192,10 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let transactions = self.spawn_tx_iterator(transactions);
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
 
-        let prewarm_handle = self.spawn_caching_with(
-            env,
-            transactions.clone(),
-            provider_builder,
-            to_multi_proof.clone(),
-        );
+        let prewarm_handle =
+            self.spawn_caching_with(env, prewarm_rx, provider_builder, to_multi_proof.clone());
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -228,7 +224,7 @@ where
             to_multi_proof,
             prewarm_handle,
             state_root: Some(state_root_rx),
-            transactions,
+            transactions: execution_rx,
         }
     }
 
@@ -249,26 +245,33 @@ where
             + Clone
             + 'static,
     {
-        let transactions = self.spawn_tx_iterator(transactions);
-        let prewarm_handle =
-            self.spawn_caching_with(env, transactions.clone(), provider_builder, None);
-        PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None, transactions }
+        let (prewarm_rx, execution_rx) = self.spawn_tx_iterator(transactions);
+        let prewarm_handle = self.spawn_caching_with(env, prewarm_rx, provider_builder, None);
+        PayloadHandle {
+            to_multi_proof: None,
+            prewarm_handle,
+            state_root: None,
+            transactions: execution_rx,
+        }
     }
 
     /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
     fn spawn_tx_iterator<T: OwnedExecutableTxFor<Evm>>(
         &self,
         transactions: impl ExactSizeIterator<Item = T> + Send + 'static,
-    ) -> ExecutableTxReceiver<T> {
+    ) -> (ExecutableTxReceiver<T>, mpsc::Receiver<T>) {
         let len = transactions.len();
 
-        let (tx, rx) = crossbeam_channel::unbounded();
+        let (prewarm_tx, prewarm_rx) = mpsc::channel();
+        let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
             for transaction in transactions {
-                let _ = tx.send(transaction);
+                let _ = prewarm_tx.send(transaction.clone());
+                let _ = execute_tx.send(transaction);
             }
         });
-        ExecutableTxReceiver { rx, len }
+
+        (ExecutableTxReceiver { rx: prewarm_rx, len }, execute_rx)
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
@@ -394,7 +397,7 @@ pub struct PayloadHandle<Tx> {
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Stream of block transactions
-    transactions: ExecutableTxReceiver<Tx>,
+    transactions: mpsc::Receiver<Tx>,
 }
 
 impl<Tx> PayloadHandle<Tx> {
@@ -531,14 +534,8 @@ impl ExecutionCache {
 /// Container for receiving end of executable transactions stream.
 #[derive(Debug)]
 pub struct ExecutableTxReceiver<T> {
-    rx: crossbeam_channel::Receiver<T>,
+    rx: mpsc::Receiver<T>,
     len: usize,
-}
-
-impl<T> Clone for ExecutableTxReceiver<T> {
-    fn clone(&self) -> Self {
-        Self { rx: self.rx.clone(), len: self.len }
-    }
 }
 
 impl<T> ExecutableTxReceiver<T> {
@@ -553,13 +550,13 @@ impl<T> ExecutableTxReceiver<T> {
     }
 
     /// Blocks and waits for new transaction to be emitted.
-    pub fn recv(&mut self) -> Result<T, crossbeam_channel::RecvError> {
+    pub fn recv(&mut self) -> Result<T, mpsc::RecvError> {
         self.rx.recv().inspect(|_| self.len -= 1)
     }
 
     /// Drops the receiver and sets length to 0.
     pub fn clear(&mut self) {
-        self.rx = crossbeam_channel::unbounded().1;
+        self.rx = mpsc::channel().1;
         self.len = 0;
     }
 }
