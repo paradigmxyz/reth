@@ -46,14 +46,7 @@ where
                 ))
             })?;
 
-            response_rx
-                .await
-                .map_err(|_| {
-                    EthApiError::Internal(reth_errors::RethError::Other(
-                        TxBatchError::ResponseChannelClosed.into(),
-                    ))
-                })?
-                .map_err(|e| EthApiError::Internal(reth_errors::RethError::Other(e.into())))
+            response_rx.await??
         } else {
             // submit the transaction to the pool with a `Local` origin
             let AddedTransactionOutcome { hash, .. } =
