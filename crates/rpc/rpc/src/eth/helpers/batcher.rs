@@ -34,6 +34,7 @@ impl Default for TxBatchConfig {
 }
 
 /// A single batch transaction request
+// TODO: note that all txs are considiered local when processed via that batcher
 #[derive(Debug)]
 pub struct BatchTxRequest<T: PoolTransaction> {
     /// Tx to be inserted in to the pool
@@ -150,7 +151,7 @@ mod tests {
         let mut responses = Vec::new();
         //
         for i in 0..100 {
-            let tx = MockTransaction::legacy().with_nonce(i);
+            let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
             batch_requests.push(BatchTxRequest { pool_tx: tx, response_tx });
@@ -160,7 +161,7 @@ mod tests {
         TxBatcher::process_batch(&pool, batch_requests).await;
 
         for response_rx in responses {
-            let result = timeout(Duration::from_millis(100), response_rx).await.unwrap().unwrap();
+            let result = timeout(Duration::from_millis(5), response_rx).await.unwrap().unwrap();
             assert!(result.is_ok());
         }
     }
