@@ -34,7 +34,7 @@ impl Default for TxBatchConfig {
 
 /// A single batch transaction request
 #[derive(Debug)]
-struct BatchTxRequest<T: PoolTransaction> {
+pub struct BatchTxRequest<T: PoolTransaction> {
     /// Tx to be inserted in to the pool
     pool_tx: T,
     /// Origin of the transaction
@@ -54,9 +54,9 @@ where
 #[derive(Debug)]
 pub struct TxBatcher<Pool: TransactionPool> {
     /// Pool for tx insertions
-    pool: Pool,
+    pub pool: Pool,
     /// Channel for batch tx requests
-    request_tx: mpsc::Sender<BatchTxRequest<Pool::Transaction>>,
+    pub request_tx: mpsc::Sender<BatchTxRequest<Pool::Transaction>>,
     /// Batch insertion interval
     pub interval: Duration,
 }
@@ -94,7 +94,7 @@ where
 
     /// Process batch transaction insertions
     pub async fn process_batches(
-        &self,
+        pool: Pool,
         interval: Duration,
         mut request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
     ) {
@@ -111,13 +111,13 @@ where
 
             if !batch.is_empty() {
                 trace!(batch_size = batch.len(), "Processing drained batch");
-                self.process_batch(batch).await;
+                Self::process_batch(&pool, batch).await;
             }
         }
     }
 
     /// Process a batch of transaction requests, grouped by origin
-    async fn process_batch(&self, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
+    async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         // Group requests by origin
         let origin_groups = batch.into_iter().into_group_map_by(|request| request.origin);
 
@@ -126,8 +126,9 @@ where
             let batch_size = requests.len();
             trace!(origin = ?origin, batch_size, "Processing batch");
 
+            // NOTE: remove clone
             let pool_transactions = requests.iter().map(|req| req.pool_tx.clone()).collect();
-            let pool_results = self.pool.add_transactions(origin, pool_transactions).await;
+            let pool_results = pool.add_transactions(origin, pool_transactions).await;
 
             for (request, pool_result) in requests.into_iter().zip(pool_results) {
                 let final_result = match pool_result {

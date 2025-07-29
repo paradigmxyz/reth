@@ -331,7 +331,6 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
-        // TODO: use the task spawner to spawn batch processor
         tx_batcher: Option<TxBatcher<N::Pool>>,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -347,17 +346,6 @@ where
         );
 
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
-
-        // Spawn batch processor if batcher is provided
-        let tx_batcher = if let Some(batcher) = tx_batcher {
-            task_spawner.spawn_critical(
-                "tx-batcher",
-                Box::pin(batcher.process_batches(batcher.interval, request_rx)),
-            );
-            Some(batcher)
-        } else {
-            None
-        };
 
         Self {
             components,
