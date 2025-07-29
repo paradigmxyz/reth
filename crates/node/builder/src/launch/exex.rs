@@ -90,7 +90,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                 let span = reth_tracing::tracing::info_span!("exex", id);
 
                 // init the exex
-                let exex = exex.launch(context).instrument(span.clone()).await.unwrap();
+                let exex = exex.launch(context).instrument(span.clone()).await?;
 
                 // spawn it as a crit task
                 executor.spawn_critical(
@@ -104,6 +104,8 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
                     }
                     .instrument(span),
                 );
+
+                Ok::<(), eyre::Error>(())
             });
         }
 
