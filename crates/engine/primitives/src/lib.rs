@@ -37,7 +37,7 @@ mod event;
 pub use event::*;
 
 mod invalid_block_hook;
-pub use invalid_block_hook::InvalidBlockHook;
+pub use invalid_block_hook::{InvalidBlockHook, InvalidBlockHooks, NoopInvalidBlockHook};
 
 pub mod config;
 pub use config::*;
