@@ -359,6 +359,7 @@ where
                         pool_clone,
                         config.batch_interval,
                         config.batch_threshold,
+                        config.channel_buffer_size,
                         pending_count,
                         request_rx,
                     )

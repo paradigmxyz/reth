@@ -11,7 +11,6 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{mpsc, oneshot};
-use tracing::trace;
 
 /// Configuration for tx pool batch insertion
 #[derive(Debug, Clone)]
@@ -115,6 +114,7 @@ where
         pool: Pool,
         batch_interval: Duration,
         batch_threshold: usize,
+        channel_buffer_size: usize,
         pending_count: Arc<AtomicU64>,
         mut request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
     ) {
@@ -124,14 +124,11 @@ where
             tokio::select! {
                 // Check for batch interval timeout
                 _ = interval.tick() => {
-                    // TODO: drain instead
-                    let mut batch = Vec::new();
-                    while let Ok(request) = request_rx.try_recv() {
-                        batch.push(request);
-                    }
+                    // Drain the entire channel
+                    let mut batch = Vec::with_capacity(channel_buffer_size);
+                    let count = request_rx.recv_many(&mut batch, channel_buffer_size).await;
 
-                    if !batch.is_empty() {
-                        trace!(batch_size = batch.len(), "Processing batch due to timeout");
+                    if count > 0 {
                         pending_count.store(0, Ordering::SeqCst);
                         Self::process_batch(&pool, batch).await;
                     }
@@ -146,17 +143,11 @@ where
                         }
                     }
                 } => {
-                    // TODO: drain instead
-                    let mut batch = Vec::new();
-                    while let Ok(request) = request_rx.try_recv() {
-                        batch.push(request);
-                    }
-
-                    if !batch.is_empty() {
-                        trace!(batch_size = batch.len(), "Processing batch due to threshold");
-                        pending_count.store(0, Ordering::SeqCst);
-                        Self::process_batch(&pool, batch).await;
-                    }
+                    // Drain the entire channel
+                    let mut batch = Vec::with_capacity(channel_buffer_size);
+                    request_rx.recv_many(&mut batch, channel_buffer_size).await;
+                    pending_count.store(0, Ordering::SeqCst);
+                    Self::process_batch(&pool, batch).await;
                 }
             }
         }
@@ -164,9 +155,6 @@ where
 
     /// Process a batch of transaction requests, grouped by origin
     async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
-        let batch_size = batch.len();
-        trace!(target: "reth::txpool::batch", batch_size, "Processing transaction batch");
-
         let (pool_transactions, response_tx): (Vec<_>, Vec<_>) =
             batch.into_iter().map(|req| (req.pool_tx, req.response_tx)).unzip();
 
@@ -227,8 +215,15 @@ mod tests {
         let pool_clone = pool.clone();
         let pending_count = Arc::new(AtomicU64::new(0));
         let handle = tokio::spawn(async move {
-            TxBatcher::<_>::process_batches(pool_clone, interval, 1000, pending_count, request_rx)
-                .await;
+            TxBatcher::<_>::process_batches(
+                pool_clone,
+                interval,
+                1000,
+                100,
+                pending_count,
+                request_rx,
+            )
+            .await;
         });
 
         let mut responses = Vec::new();
@@ -270,6 +265,7 @@ mod tests {
                 pool_clone,
                 Duration::from_millis(5),
                 1000,
+                100,
                 pending_count,
                 request_rx,
             )
@@ -309,6 +305,7 @@ mod tests {
                 pool_clone,
                 Duration::from_secs(1),
                 batch_threshold,
+                100,
                 pending_count,
                 request_rx,
             )
