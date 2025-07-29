@@ -1101,7 +1101,8 @@ mod tests {
             OpHardfork::Holocene.boxed(),
             EthereumHardfork::Prague.boxed(),
             OpHardfork::Isthmus.boxed(),
-            // OpHardfork::Interop.boxed(),
+            OpHardfork::Interop.boxed(),
+            OpHardfork::Jovian.boxed(),
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
