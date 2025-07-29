@@ -350,10 +350,9 @@ where
 
         // Spawn batch processor if batcher is provided
         let tx_batcher = if let Some(batcher) = tx_batcher {
-            let interval = tokio::time::interval(batcher.config.max_wait_time);
             task_spawner.spawn_critical(
                 "tx-batcher",
-                Box::pin(batcher.process_batches(interval, request_rx)),
+                Box::pin(batcher.process_batches(batcher.interval, request_rx)),
             );
             Some(batcher)
         } else {

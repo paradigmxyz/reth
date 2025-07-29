@@ -20,21 +20,15 @@ use tracing::trace;
 /// Configuration for tx pool batch insertion
 #[derive(Debug, Clone)]
 pub struct TxBatchConfig {
-    /// Maximum transactions per batch
-    pub max_batch_size: usize,
-    /// Maximum time to wait before processing batch
-    pub max_wait_time: Duration,
+    /// Interval between processing batches
+    pub interval: Duration,
     /// Channel buffer size for incoming batch tx requests
     pub channel_buffer_size: usize,
 }
 
 impl Default for TxBatchConfig {
     fn default() -> Self {
-        Self {
-            max_batch_size: 1000,
-            max_wait_time: Duration::from_millis(5),
-            channel_buffer_size: 5000,
-        }
+        Self { interval: Duration::from_millis(5), channel_buffer_size: 5000 }
     }
 }
 
@@ -61,10 +55,10 @@ where
 pub struct TxBatcher<Pool: TransactionPool> {
     /// Pool for tx insertions
     pool: Pool,
-    /// Batch insertion configuration
-    config: TxBatchConfig,
     /// Channel for batch tx requests
     request_tx: mpsc::Sender<BatchTxRequest<Pool::Transaction>>,
+    /// Batch insertion interval
+    pub interval: Duration,
 }
 
 impl<Pool> TxBatcher<Pool>
@@ -75,10 +69,12 @@ where
     /// Create a new `TxBatcher`
     pub fn new(
         pool: Pool,
-        config: TxBatchConfig,
+        interval: Duration,
+        channel_buffer_size: usize,
     ) -> (Self, mpsc::Receiver<BatchTxRequest<Pool::Transaction>>) {
-        let (request_tx, request_rx) = mpsc::channel(config.channel_buffer_size);
-        let batcher = Self { pool, config, request_tx };
+        let (request_tx, request_rx) = mpsc::channel(channel_buffer_size);
+
+        let batcher = Self { pool, interval, request_tx };
         (batcher, request_rx)
     }
 
@@ -99,9 +95,10 @@ where
     /// Process batch transaction insertions
     pub async fn process_batches(
         &self,
-        mut interval: Interval,
+        interval: Duration,
         mut request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
     ) {
+        let mut interval = tokio::time::interval(interval);
         loop {
             interval.tick().await;
 

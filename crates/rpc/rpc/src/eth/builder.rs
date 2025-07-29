@@ -352,8 +352,9 @@ where
         );
 
         // Create transaction batcher if configured
-        let tx_batcher =
-            tx_batch_config.map(|config| TxBatcher::new(components.pool().clone(), config));
+        let tx_batcher = tx_batch_config.map(|config| {
+            TxBatcher::new(components.pool().clone(), config.interval, config.channel_buffer_size)
+        });
 
         EthApiInner::new(
             components,
