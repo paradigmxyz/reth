@@ -552,18 +552,6 @@ where
     }
 }
 
-/// A helper trait alias to mark a type that can be used as [`reth_evm::block::ExecutableTx`] for
-/// any block executor produced by [`ConfigureEvm`].
-pub trait ExecutableTxFor<Evm: ConfigureEvm>:
-    IntoTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>> + Copy
-{
-}
-
-impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
-    T: IntoTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>> + Copy
-{
-}
-
 /// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
 /// executor.
 pub trait OwnedExecutableTxFor<Evm: ConfigureEvm>:
