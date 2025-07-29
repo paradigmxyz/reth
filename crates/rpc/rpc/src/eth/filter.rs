@@ -31,6 +31,7 @@ use reth_storage_api::{
 };
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{NewSubpoolTransactionStream, PoolTransaction, TransactionPool};
+use core::task;
 use std::{
     collections::{HashMap, VecDeque},
     fmt,
@@ -77,7 +78,7 @@ const BLOOM_ADJUSTMENT_MIN_BLOCKS: u64 = 100;
 const MAX_HEADERS_RANGE: u64 = 1_000; // with ~530bytes per header this is ~500kb
 
 /// Threshold for enabling parallel processing in range mode
-const PARALLEL_PROCESSING_THRESHOLD: u64 = 1000;
+const PARALLEL_PROCESSING_THRESHOLD: usize = 1000;
 
 /// Default concurrency for parallel processing
 const DEFAULT_PARALLEL_CONCURRENCY: usize = 4;
@@ -1032,7 +1033,7 @@ impl<
     > RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
-        // First, try to return any already processed results
+        // First, try to return any already processed result
         if let Some(result) = self.next.pop_front() {
             return Ok(Some(result));
         }
@@ -1040,14 +1041,10 @@ impl<
         // Next, try to get a completed task result if there are pending tasks
         if !self.pending_tasks.is_empty() {
             if let Some(task_result) = self.pending_tasks.next().await {
-                match task_result {
-                    Ok(chunk_results) => {
-                        for result in chunk_results {
-                            self.next.push_back(result);
-                        }
-                        return Ok(self.next.pop_front());
-                    }
-                    Err(e) => return Err(e),
+                let mut chunk_results = task_result?;
+                if let Some(first_result) = chunk_results.drain(..1).next() {
+                    self.next.extend(chunk_results);
+                    return Ok(Some(first_result));
                 }
             }
         }
@@ -1069,6 +1066,13 @@ impl<
 
                 let expected_next = last_header.number() + 1;
                 if peeked.number() != expected_next {
+                    debug!(
+                        target: "rpc::eth::filter",
+                        last_block = last_header.number(),
+                        next_block = peeked.number(),
+                        expected = expected_next,
+                        "Non-consecutive block detected, stopping range collection"
+                    );
                     break; // Non-consecutive block, stop here
                 }
 
@@ -1078,7 +1082,7 @@ impl<
 
             // Check if we should use parallel processing for large ranges
             let remaining_headers = self.iter.len() + range_headers.len();
-            if remaining_headers >= PARALLEL_PROCESSING_THRESHOLD as usize {
+            if remaining_headers >= PARALLEL_PROCESSING_THRESHOLD {
                 self.spawn_parallel_tasks(range_headers);
             } else {
                 self.spawn_sequential_task(range_headers);
@@ -1086,23 +1090,28 @@ impl<
 
             // Now wait for the newly spawned task to complete
             if let Some(task_result) = self.pending_tasks.next().await {
-                match task_result {
-                    Ok(chunk_results) => {
-                        for result in chunk_results {
-                            self.next.push_back(result);
-                        }
-                        return Ok(self.next.pop_front());
-                    }
-                    Err(e) => return Err(e),
+                let mut chunk_results = task_result?;
+                if let Some(first_result) = chunk_results.drain(..1).next() {
+                    self.next.extend(chunk_results);
+                    return Ok(Some(first_result));
                 }
             }
         }
 
         // If we reach here, something unexpected happened
+        debug!(
+            target: "rpc::eth::filter",
+            pending_tasks_len = self.pending_tasks.len(),
+            queued_results_len = self.next.len(),
+            headers_remaining = self.iter.len(),
+            "RangeBlockMode reached unexpected state - returning None"
+        );
         Ok(None)
     }
 
     /// Spawn a sequential task for processing a small range of headers
+    /// 
+    /// This is used when the remaining headers count is below [`PARALLEL_PROCESSING_THRESHOLD`].
     fn spawn_sequential_task(
         &mut self,
         range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
@@ -1143,6 +1152,8 @@ impl<
     }
 
     /// Spawn parallel tasks for processing a large range of headers
+    /// 
+    /// This is used when the remaining headers count is at or above [`PARALLEL_PROCESSING_THRESHOLD`].
     fn spawn_parallel_tasks(
         &mut self,
         range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
