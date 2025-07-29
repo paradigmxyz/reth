@@ -124,7 +124,6 @@ where
             tokio::select! {
                 // Check for batch interval timeout
                 _ = interval.tick() => {
-                    // Drain the entire channel
                     let mut batch = Vec::with_capacity(channel_buffer_size);
                     let count = request_rx.recv_many(&mut batch, channel_buffer_size).await;
 
@@ -143,7 +142,6 @@ where
                         }
                     }
                 } => {
-                    // Drain the entire channel
                     let mut batch = Vec::with_capacity(channel_buffer_size);
                     request_rx.recv_many(&mut batch, channel_buffer_size).await;
                     pending_count.store(0, Ordering::SeqCst);
