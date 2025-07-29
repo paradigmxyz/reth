@@ -9,15 +9,21 @@ use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reth_consensus::{ConsensusError, FullConsensus};
+use reth_engine_primitives::InvalidBlockHook;
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy,
+    AddOnsContext, BlockTy, ConfigureEvm, EngineApiValidator, EngineTypes, FullNodeComponents,
+    FullNodeTypes, HeaderTy, NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
+use reth_provider::{
+    BlockReader, DatabaseProviderFactory, HashedPostStateProvider, StateCommitmentProvider,
+    StateProviderFactory, StateReader,
+};
 use reth_rpc::eth::{core::EthRpcConverterFor, EthApiTypes, FullEthApiServer};
 use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
@@ -34,6 +40,7 @@ use std::{
     fmt::{self, Debug},
     future::Future,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
 /// Contains the handles to the spawned RPC servers.
@@ -628,7 +635,7 @@ where
     N: FullNodeComponents,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineApiValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
 {
@@ -908,7 +915,7 @@ where
     N: FullNodeComponents,
     <N as FullNodeTypes>::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineApiValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
 {
@@ -987,39 +994,35 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     ) -> impl Future<Output = eyre::Result<Self::EthApi>> + Send;
 }
 
-/// Helper trait that provides the validator for the engine API
+/// Helper trait that provides the validator builder for the engine API
 pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
-    /// The Validator type to use for the engine API.
-    type Validator: EngineValidator<<Node::Types as NodeTypes>::Payload>
-        + PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
-        + Clone;
+    /// The validator builder type to use.
+    type ValidatorBuilder: EngineApiValidatorBuilder<Node> + Clone + Unpin;
 
-    /// Creates the engine validator for an engine API based node.
-    fn engine_validator(
-        &self,
-        ctx: &AddOnsContext<'_, Node>,
-    ) -> impl Future<Output = eyre::Result<Self::Validator>>;
+    /// Returns the validator builder.
+    fn engine_validator_builder(&self) -> Self::ValidatorBuilder;
 }
 
-impl<N, EthB, EV, EB> EngineValidatorAddOn<N> for RpcAddOns<N, EthB, EV, EB>
+impl<N, EthB, EV, EB, RpcMiddleware> EngineValidatorAddOn<N>
+    for RpcAddOns<N, EthB, EV, EB, RpcMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineApiValidatorBuilder<N> + Unpin,
     EB: EngineApiBuilder<N>,
+    RpcMiddleware: RethRpcMiddleware,
 {
-    type Validator = EV::Validator;
+    type ValidatorBuilder = EV;
 
-    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
-        self.engine_validator_builder.clone().build(ctx).await
+    fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
+        self.engine_validator_builder.clone()
     }
 }
 
 /// A type that knows how to build the engine validator.
 pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The consensus implementation to build.
-    type Validator: EngineValidator<<Node::Types as NodeTypes>::Payload>
-        + PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+    type Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
         + Clone;
 
     /// Creates the engine validator.
@@ -1032,8 +1035,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
 impl<Node, F, Fut, Validator> EngineValidatorBuilder<Node> for F
 where
     Node: FullNodeComponents,
-    Validator: EngineValidator<<Node::Types as NodeTypes>::Payload>
-        + PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+    Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
         + Clone
         + Unpin
         + 'static,
@@ -1070,6 +1072,67 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
     ) -> impl Future<Output = eyre::Result<Self::EngineApi>> + Send;
 }
 
+/// Builder trait for creating validators specifically for the Engine API.
+///
+/// This trait is responsible for building validators that the Engine API will use
+/// to validate payloads. Unlike the general `EngineValidatorBuilder`, this is
+/// specifically designed for Engine API validation requirements.
+pub trait EngineApiValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
+    /// The validator type that will be used by the Engine API.
+    type Validator: EngineApiValidator<<Node::Types as NodeTypes>::Payload>
+        + PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+        + Clone;
+
+    /// Builds the payload validator for validating execution payloads.
+    ///
+    /// Returns a validator that validates payload structure and content according to chain rules.
+    fn build(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> impl Future<Output = eyre::Result<Self::Validator>> + Send;
+
+    /// Builds the full engine validator for the consensus engine.
+    ///
+    /// Returns a `BasicEngineValidator` that wraps the payload validator from `build()`
+    /// and adds block execution, state validation, and fork handling.
+    fn build_tree_validator<P, Evm>(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+        provider: P,
+        consensus: Arc<dyn FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError>>,
+        evm_config: Evm,
+        tree_config: reth_engine_primitives::TreeConfig,
+        invalid_block_hook: Box<dyn InvalidBlockHook<PrimitivesTy<Node::Types>>>,
+    ) -> impl Future<
+        Output = eyre::Result<
+            reth_engine_tree::tree::BasicEngineValidator<P, Evm, Self::Validator>,
+        >,
+    > + Send
+    where
+        P: DatabaseProviderFactory<Provider: BlockReader>
+            + BlockReader<Header = HeaderTy<Node::Types>>
+            + StateProviderFactory
+            + StateReader
+            + StateCommitmentProvider
+            + HashedPostStateProvider
+            + Clone
+            + 'static,
+        Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
+    {
+        async move {
+            let inner_validator = self.build(ctx).await?;
+            Ok(reth_engine_tree::tree::BasicEngineValidator::new(
+                provider,
+                consensus,
+                evm_config,
+                inner_validator,
+                tree_config,
+                invalid_block_hook,
+            ))
+        }
+    }
+}
+
 /// Builder for basic [`EngineApi`] implementation.
 ///
 /// This provides a basic default implementation for opstack and ethereum engine API via
@@ -1088,7 +1151,7 @@ where
             Payload: PayloadTypes<ExecutionData = ExecutionData> + EngineTypes,
         >,
     >,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineApiValidatorBuilder<N>,
 {
     type EngineApi = EngineApi<
         N::Provider,

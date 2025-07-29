@@ -27,7 +27,7 @@ use reth_node_builder::{
     },
     node::{FullNodeTypes, NodeTypes},
     rpc::{
-        EngineApiBuilder, EngineValidatorAddOn, EngineValidatorBuilder, EthApiBuilder, Identity,
+        EngineApiBuilder, EngineApiValidatorBuilder, EngineValidatorAddOn, EthApiBuilder, Identity,
         RethRpcAddOns, RethRpcMiddleware, RethRpcServerHandles, RpcAddOns, RpcContext, RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, NodeComponentsBuilder,
@@ -449,7 +449,7 @@ where
         Pool: TransactionPool<Transaction: OpPooledTx>,
     >,
     EthB: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineApiValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
     Attrs: OpAttributes<Transaction = TxTy<N::Types>, RpcPayloadAttributes: DeserializeOwned>,
@@ -576,7 +576,7 @@ where
     >,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
     EthB: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineApiValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
     Attrs: OpAttributes<Transaction = TxTy<N::Types>, RpcPayloadAttributes: DeserializeOwned>,
@@ -593,14 +593,14 @@ impl<N, NetworkT, EV, EB, RpcMiddleware> EngineValidatorAddOn<N>
 where
     N: FullNodeComponents<Types: OpFullNodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N> + Default,
+    EV: EngineApiValidatorBuilder<N> + Default + Unpin,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: Send,
 {
-    type Validator = <EV as EngineValidatorBuilder<N>>::Validator;
+    type ValidatorBuilder = EV;
 
-    async fn engine_validator(&self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
-        EV::default().build(ctx).await
+    fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
+        EV::default()
     }
 }
 
@@ -1132,7 +1132,7 @@ where
 #[non_exhaustive]
 pub struct OpEngineValidatorBuilder;
 
-impl<Node> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
+impl<Node> EngineApiValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
     Node: FullNodeComponents<Types: OpNodeTypes>,
 {

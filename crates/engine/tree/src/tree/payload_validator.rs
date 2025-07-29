@@ -41,7 +41,7 @@ use tracing::{debug, error, info, trace, warn};
 
 /// Context providing access to tree state during validation.
 ///
-/// This context is provided to the [`EngineValidator`] and includes the state of the tree's
+/// This context is provided to the [`EngineApiValidator`] and includes the state of the tree's
 /// internals
 pub struct TreeCtx<'a, N: NodePrimitives> {
     /// The engine API tree state
@@ -130,7 +130,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
 
 /// A helper type that provides reusable payload validation logic for network-specific validators.
 ///
-/// This type satisfies [`EngineValidator`] and is responsible for executing blocks/payloads.
+/// This type satisfies [`EngineApiValidator`] and is responsible for executing blocks/payloads.
 ///
 /// This type contains common validation, execution, and state root computation logic that can be
 /// used by network-specific payload validators (e.g., Ethereum, Optimism). It is not meant to be
@@ -793,7 +793,7 @@ pub type ValidationOutcome<N, E = InsertBlockError<BlockTy<N>>> =
 /// Type that validates the payloads processed by the engine.
 ///
 /// This provides the necessary functions for validating/executing payloads/blocks.
-pub trait EngineValidator<
+pub trait EngineApiValidator<
     Types: PayloadTypes,
     N: NodePrimitives = <<Types as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives,
 >: Send + Sync + 'static
@@ -841,7 +841,7 @@ pub trait EngineValidator<
     ) -> ValidationOutcome<N>;
 }
 
-impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
+impl<N, Types, P, Evm, V> EngineApiValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<Provider: BlockReader>
         + BlockReader<Header = N::BlockHeader>
@@ -878,7 +878,7 @@ where
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N, InsertPayloadError<N::Block>> {
         let block = self.validator.ensure_well_formed_payload(payload)?;
-        Ok(EngineValidator::<Types>::validate_block(self, block, ctx)?)
+        Ok(EngineApiValidator::<Types>::validate_block(self, block, ctx)?)
     }
 
     fn validate_block(

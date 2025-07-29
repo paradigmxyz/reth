@@ -4,7 +4,7 @@ use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
     launch::invalid_block_hook::InvalidBlockHookExt,
-    rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
+    rpc::{EngineApiValidatorBuilder, EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
@@ -16,7 +16,7 @@ use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::{BasicEngineValidator, TreeConfig},
+    tree::TreeConfig,
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -191,7 +191,22 @@ where
             jwt_secret,
             engine_events: event_sender.clone(),
         };
-        let engine_payload_validator = add_ons.engine_validator(&add_ons_ctx).await?;
+        let validator_builder = add_ons.engine_validator_builder();
+
+        // First build the payload validator
+        let payload_validator = validator_builder.clone().build(&add_ons_ctx).await?;
+
+        // Use the builder to create BasicEngineValidator with all required components
+        let engine_validator = validator_builder
+            .build_tree_validator(
+                &add_ons_ctx,
+                ctx.blockchain_db().clone(),
+                consensus.clone(),
+                ctx.components().evm_config().clone(),
+                engine_tree_config.clone(),
+                add_ons_ctx.create_invalid_block_hook(ctx.data_dir()).await?,
+            )
+            .await?;
 
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
@@ -199,7 +214,7 @@ where
             .maybe_reorg(
                 ctx.blockchain_db().clone(),
                 ctx.components().evm_config().clone(),
-                engine_payload_validator.clone(),
+                payload_validator,
                 node_config.debug.reorg_frequency,
                 node_config.debug.reorg_depth,
             )
@@ -207,15 +222,6 @@ where
             // would replay only the messages that were observed by the engine
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
-
-        let engine_validator = BasicEngineValidator::new(
-            ctx.blockchain_db().clone(),
-            consensus.clone(),
-            ctx.components().evm_config().clone(),
-            engine_payload_validator,
-            engine_tree_config.clone(),
-            add_ons_ctx.create_invalid_block_hook(ctx.data_dir()).await?,
-        );
 
         let mut engine_service = EngineService::new(
             consensus.clone(),
