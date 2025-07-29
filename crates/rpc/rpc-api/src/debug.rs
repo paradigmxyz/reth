@@ -1,7 +1,7 @@
 use alloy_eips::{BlockId, BlockNumberOrTag};
 use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{Block, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
@@ -9,6 +9,57 @@ use alloy_rpc_types_trace::geth::{
 };
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+
+/// Response type for `debug_storageRangeAt` method.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StorageRangeResponse {
+    /// Storage entries in the range
+    pub storage: std::collections::HashMap<B256, StorageEntry>,
+    /// Next key to continue pagination, if any
+    pub next_key: Option<B256>,
+}
+
+/// Storage entry for the response.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StorageEntry {
+    /// Storage key
+    pub key: B256,
+    /// Storage value
+    pub value: U256,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_storage_range_response_serialization() {
+        let response = StorageRangeResponse {
+            storage: HashMap::new(),
+            next_key: None,
+        };
+        
+        let serialized = serde_json::to_string(&response).unwrap();
+        let deserialized: StorageRangeResponse = serde_json::from_str(&serialized).unwrap();
+        
+        assert_eq!(response.storage.len(), deserialized.storage.len());
+        assert_eq!(response.next_key, deserialized.next_key);
+    }
+
+    #[test]
+    fn test_storage_entry_serialization() {
+        let entry = StorageEntry {
+            key: B256::from_slice(&[1u8; 32]),
+            value: U256::from(12345),
+        };
+        
+        let serialized = serde_json::to_string(&entry).unwrap();
+        let deserialized: StorageEntry = serde_json::from_str(&serialized).unwrap();
+        
+        assert_eq!(entry.key, deserialized.key);
+        assert_eq!(entry.value, deserialized.value);
+    }
+}
 
 /// Debug rpc interface.
 #[cfg_attr(not(feature = "client"), rpc(server, namespace = "debug"))]
@@ -389,7 +440,7 @@ pub trait DebugApi<TxReq: RpcObject> {
         contract_address: Address,
         key_start: B256,
         max_result: u64,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<StorageRangeResponse>;
 
     /// Returns the structured logs created during the execution of EVM against a block pulled
     /// from the pool of bad ones and returns them as a JSON object. For the second parameter see
