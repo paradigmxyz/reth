@@ -9,15 +9,14 @@ use crate::tree::{
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
-use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::B256;
 use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_evm::{ConfigureEvm, OnStateHook, SpecFor};
-use reth_primitives_traits::{NodePrimitives, SealedHeaderFor};
+use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor};
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
     StateProviderFactory, StateReader,
@@ -32,13 +31,10 @@ use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
-use std::{
-    collections::VecDeque,
-    sync::{
-        atomic::AtomicBool,
-        mpsc::{self, channel, Sender},
-        Arc,
-    },
+use std::sync::{
+    atomic::AtomicBool,
+    mpsc::{self, channel, Sender},
+    Arc,
 };
 
 use super::precompile_cache::PrecompileCacheMap;
@@ -146,15 +142,15 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    pub fn spawn<P>(
+    pub fn spawn<P, T: OwnedExecutableTxFor<Evm>>(
         &mut self,
-        header: SealedHeaderFor<N>,
-        transactions: VecDeque<Recovered<N::SignedTx>>,
+        env: ExecutionEnv<Evm>,
+        transactions: impl ExactSizeIterator<Item = T> + Send + 'static,
         provider_builder: StateProviderBuilder<N, P>,
         consistent_view: ConsistentDbView<P>,
         trie_input: TrieInput,
         config: &TreeConfig,
-    ) -> PayloadHandle
+    ) -> PayloadHandle<T>
     where
         P: DatabaseProviderFactory<Provider: BlockReader>
             + BlockReader
@@ -196,8 +192,14 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let prewarm_handle =
-            self.spawn_caching_with(header, transactions, provider_builder, to_multi_proof.clone());
+        let transactions = self.spawn_tx_iterator(transactions);
+
+        let prewarm_handle = self.spawn_caching_with(
+            env,
+            transactions.clone(),
+            provider_builder,
+            to_multi_proof.clone(),
+        );
 
         // spawn multi-proof task
         self.executor.spawn_blocking(move || {
@@ -222,18 +224,23 @@ where
             }
         });
 
-        PayloadHandle { to_multi_proof, prewarm_handle, state_root: Some(state_root_rx) }
+        PayloadHandle {
+            to_multi_proof,
+            prewarm_handle,
+            state_root: Some(state_root_rx),
+            transactions,
+        }
     }
 
     /// Spawn cache prewarming exclusively.
     ///
     /// Returns a [`PayloadHandle`] to communicate with the task.
-    pub(super) fn spawn_cache_exclusive<P>(
+    pub(super) fn spawn_cache_exclusive<P, T: OwnedExecutableTxFor<Evm>>(
         &self,
-        header: SealedHeaderFor<N>,
-        transactions: VecDeque<Recovered<N::SignedTx>>,
+        env: ExecutionEnv<Evm>,
+        transactions: impl ExactSizeIterator<Item = T> + Send + 'static,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle
+    ) -> PayloadHandle<T>
     where
         P: BlockReader
             + StateProviderFactory
@@ -242,15 +249,33 @@ where
             + Clone
             + 'static,
     {
-        let prewarm_handle = self.spawn_caching_with(header, transactions, provider_builder, None);
-        PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None }
+        let transactions = self.spawn_tx_iterator(transactions);
+        let prewarm_handle =
+            self.spawn_caching_with(env, transactions.clone(), provider_builder, None);
+        PayloadHandle { to_multi_proof: None, prewarm_handle, state_root: None, transactions }
+    }
+
+    /// Spawns a task advancing transaction env iterator and streaming updates through a channel.
+    fn spawn_tx_iterator<T: OwnedExecutableTxFor<Evm>>(
+        &self,
+        transactions: impl ExactSizeIterator<Item = T> + Send + 'static,
+    ) -> ExecutableTxReceiver<T> {
+        let len = transactions.len();
+
+        let (tx, rx) = crossbeam_channel::unbounded();
+        self.executor.spawn_blocking(move || {
+            for transaction in transactions {
+                let _ = tx.send(transaction);
+            }
+        });
+        ExecutableTxReceiver { rx, len }
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
     fn spawn_caching_with<P>(
         &self,
-        header: SealedHeaderFor<N>,
-        mut transactions: VecDeque<Recovered<N::SignedTx>>,
+        env: ExecutionEnv<Evm>,
+        mut transactions: ExecutableTxReceiver<impl OwnedExecutableTxFor<Evm>>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle
@@ -268,10 +293,10 @@ where
             transactions.clear();
         }
 
-        let (cache, cache_metrics) = self.cache_for(header.parent_hash()).split();
+        let (cache, cache_metrics) = self.cache_for(env.parent_hash).split();
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
-            header,
+            env,
             evm_config: self.evm_config.clone(),
             cache: cache.clone(),
             cache_metrics: cache_metrics.clone(),
@@ -282,19 +307,21 @@ where
             precompile_cache_map: self.precompile_cache_map.clone(),
         };
 
-        let prewarm_task = PrewarmCacheTask::new(
+        let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
             self.executor.clone(),
             self.execution_cache.clone(),
             prewarm_ctx,
             to_multi_proof,
-            transactions,
         );
-        let to_prewarm_task = prewarm_task.actions_tx();
 
         // spawn pre-warm task
-        self.executor.spawn_blocking(move || {
-            prewarm_task.run();
-        });
+        {
+            let to_prewarm_task = to_prewarm_task.clone();
+            self.executor.spawn_blocking(move || {
+                prewarm_task.run(transactions, to_prewarm_task);
+            });
+        }
+
         CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
     }
 
@@ -359,16 +386,18 @@ where
 
 /// Handle to all the spawned tasks.
 #[derive(Debug)]
-pub struct PayloadHandle {
+pub struct PayloadHandle<Tx> {
     /// Channel for evm state updates
     to_multi_proof: Option<Sender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Stream of block transactions
+    transactions: ExecutableTxReceiver<Tx>,
 }
 
-impl PayloadHandle {
+impl<Tx> PayloadHandle<Tx> {
     /// Awaits the state root
     ///
     /// # Panics
@@ -417,6 +446,13 @@ impl PayloadHandle {
     /// If the [`BundleState`] is provided it will update the shared cache.
     pub(super) fn terminate_caching(&mut self, block_output: Option<BundleState>) {
         self.prewarm_handle.terminate_caching(block_output)
+    }
+
+    /// Returns iterator yielding transactions from the stream.
+    pub fn iter_transactions(&mut self) -> impl Iterator<Item = Tx> + '_ {
+        core::iter::repeat_with(|| self.transactions.recv())
+            .take_while(|res| res.is_ok())
+            .map(|res| res.unwrap())
     }
 }
 
@@ -492,6 +528,66 @@ impl ExecutionCache {
     }
 }
 
+/// Container for receiving end of executable transactions stream.
+#[derive(Debug)]
+pub struct ExecutableTxReceiver<T> {
+    rx: crossbeam_channel::Receiver<T>,
+    len: usize,
+}
+
+impl<T> Clone for ExecutableTxReceiver<T> {
+    fn clone(&self) -> Self {
+        Self { rx: self.rx.clone(), len: self.len }
+    }
+}
+
+impl<T> ExecutableTxReceiver<T> {
+    /// Number of transactions underlying stream will emit.
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns true if the underlying stream will not emit any more transactions.
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Blocks and waits for new transaction to be emitted.
+    pub fn recv(&mut self) -> Result<T, crossbeam_channel::RecvError> {
+        self.rx.recv().inspect(|_| self.len -= 1)
+    }
+
+    /// Drops the receiver and sets length to 0.
+    pub fn clear(&mut self) {
+        self.rx = crossbeam_channel::unbounded().1;
+        self.len = 0;
+    }
+}
+
+/// EVM context required to execute a block.
+#[derive(Debug, Clone)]
+pub struct ExecutionEnv<Evm: ConfigureEvm> {
+    /// Evm environment.
+    pub evm_env: EvmEnvFor<Evm>,
+    /// Hash of the block being executed.
+    pub hash: B256,
+    /// Hash of the parent block.
+    pub parent_hash: B256,
+}
+
+impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
+where
+    EvmEnvFor<Evm>: Default,
+{
+    fn default() -> Self {
+        Self {
+            evm_env: Default::default(),
+            hash: Default::default(),
+            parent_hash: Default::default(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::tree::{
@@ -505,9 +601,10 @@ mod tests {
     use rand::Rng;
     use reth_chainspec::ChainSpec;
     use reth_db_common::init::init_genesis;
+    use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::OnStateHook;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_primitives_traits::{Account, StorageEntry};
+    use reth_primitives_traits::{Account, Recovered, StorageEntry};
     use reth_provider::{
         providers::{BlockchainProvider, ConsistentDbView},
         test_utils::create_test_provider_factory_with_chain_spec,
@@ -628,7 +725,7 @@ mod tests {
         let provider = BlockchainProvider::new(factory).unwrap();
         let mut handle = payload_processor.spawn(
             Default::default(),
-            Default::default(),
+            core::iter::empty::<Recovered<TransactionSigned>>(),
             StateProviderBuilder::new(provider.clone(), genesis_hash, None),
             ConsistentDbView::new_with_latest_tip(provider).unwrap(),
             TrieInput::from_state(hashed_state),

@@ -1,13 +1,13 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, Database, OnStateHook};
+use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx},
-    Evm, EvmEnv, EvmFactory,
+    Evm, EvmEnv, EvmFactory, IntoTxEnv, RecoveredTx,
 };
 use alloy_primitives::B256;
 use core::fmt::Debug;
@@ -549,6 +549,47 @@ where
 
     fn size_hint(&self) -> usize {
         self.db.bundle_state.size_hint()
+    }
+}
+
+/// A helper trait alias to mark a type that can be used as [`reth_evm::block::ExecutableTx`] for
+/// any block executor produced by [`ConfigureEvm`].
+pub trait ExecutableTxFor<Evm: ConfigureEvm>:
+    IntoTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>> + Copy
+{
+}
+
+impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
+    T: IntoTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>> + Copy
+{
+}
+
+/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
+/// executor.
+pub trait OwnedExecutableTxFor<Evm: ConfigureEvm>:
+    OwnedExecutableTx<TxEnvFor<Evm>, TxTy<Evm::Primitives>>
+{
+}
+
+impl<T, Evm: ConfigureEvm> OwnedExecutableTxFor<Evm> for T where
+    T: OwnedExecutableTx<TxEnvFor<Evm>, TxTy<Evm::Primitives>>
+{
+}
+
+/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
+/// executor.
+pub trait OwnedExecutableTx<TxEnv, Tx>: Send + 'static {
+    /// Converts the type into an [`ExecutableTx`] for block executor.
+    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy;
+}
+
+impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for T
+where
+    T: Send + 'static,
+    for<'a> &'a T: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
+{
+    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
+        self
     }
 }
 

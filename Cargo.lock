@@ -7980,7 +7980,6 @@ dependencies = [
  "derive_more",
  "eyre",
  "futures",
- "itertools 0.14.0",
  "metrics",
  "mini-moka",
  "parking_lot",
