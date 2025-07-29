@@ -925,14 +925,14 @@ pub enum NewCanonicalChain<N: NodePrimitives = EthPrimitives> {
 
 impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     /// Returns the length of the new chain.
-    pub fn new_block_count(&self) -> usize {
+    pub const fn new_block_count(&self) -> usize {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.len(),
         }
     }
 
     /// Returns the length of the reorged chain.
-    pub fn reorged_block_count(&self) -> usize {
+    pub const fn reorged_block_count(&self) -> usize {
         match self {
             Self::Commit { .. } => 0,
             Self::Reorg { old, .. } => old.len(),

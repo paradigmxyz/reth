@@ -755,12 +755,12 @@ mod tests {
         // Create a filter that only returns transactions with even nonces
         let filter =
             BestTransactionFilter::new(best, |tx: &Arc<ValidPoolTransaction<MockTransaction>>| {
-                tx.nonce() % 2 == 0
+                tx.nonce().is_multiple_of(2)
             });
 
         // Verify that the filter only returns transactions with even nonces
         for tx in filter {
-            assert_eq!(tx.nonce() % 2, 0);
+            assert!(tx.nonce().is_multiple_of(2));
         }
     }
 
