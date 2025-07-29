@@ -147,11 +147,8 @@ pub struct EngineServiceError {}
 mod tests {
     use super::*;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_engine_primitives::BeaconEngineMessage;
-    use reth_engine_tree::{
-        test_utils::TestPipelineBuilder,
-        tree::{BasicEngineValidator, NoopInvalidBlockHook},
-    };
+    use reth_engine_primitives::{BeaconEngineMessage, NoopInvalidBlockHook};
+    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::BasicEngineValidator};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::EthEvmConfig;
