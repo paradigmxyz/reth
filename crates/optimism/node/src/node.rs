@@ -356,7 +356,7 @@ where
         }
     }
 
-    /// Maps the [`EngineValidatorBuilder`] builder type.
+    /// Maps the [`EngineApiValidatorBuilder`] builder type.
     pub fn with_engine_validator<T>(
         self,
         engine_validator_builder: T,
