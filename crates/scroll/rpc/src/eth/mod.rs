@@ -118,7 +118,7 @@ where
     }
 
     /// Return a builder for the [`ScrollEthApi`].
-    pub const fn builder() -> ScrollEthApiBuilder {
+    pub fn builder() -> ScrollEthApiBuilder {
         ScrollEthApiBuilder::new()
     }
 }
@@ -346,8 +346,14 @@ impl<N: ScrollNodeCore> ScrollEthApiInner<N> {
     }
 }
 
+/// The default suggested priority fee for the gas price oracle.
+const DEFAULT_MIN_SUGGESTED_PRIORITY_FEE: u64 = 100;
+
+/// The default payload size limit in bytes for the sequencer.
+const DEFAULT_PAYLOAD_SIZE_LIMIT: u64 = 122_880;
+
 /// A type that knows how to build a [`ScrollEthApi`].
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ScrollEthApiBuilder {
     /// Minimum suggested priority fee (tip)
     min_suggested_priority_fee: u64,
@@ -358,10 +364,20 @@ pub struct ScrollEthApiBuilder {
     sequencer_url: Option<String>,
 }
 
+impl Default for ScrollEthApiBuilder {
+    fn default() -> Self {
+        Self {
+            min_suggested_priority_fee: DEFAULT_MIN_SUGGESTED_PRIORITY_FEE,
+            payload_size_limit: DEFAULT_PAYLOAD_SIZE_LIMIT,
+            sequencer_url: None,
+        }
+    }
+}
+
 impl ScrollEthApiBuilder {
     /// Creates a [`ScrollEthApiBuilder`] instance.
-    pub const fn new() -> Self {
-        Self { min_suggested_priority_fee: 0, payload_size_limit: 0, sequencer_url: None }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// With minimum suggested priority fee (tip)

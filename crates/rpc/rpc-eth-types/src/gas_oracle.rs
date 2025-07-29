@@ -3,7 +3,7 @@
 
 use super::{EthApiError, EthResult, EthStateCache, RpcInvalidTransactionError};
 use alloy_consensus::{constants::GWEI_TO_WEI, BlockHeader, Transaction, TxReceipt};
-use alloy_eips::BlockNumberOrTag;
+use alloy_eips::{BlockNumberOrTag, Encodable2718};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use derive_more::{Deref, DerefMut, From, Into};
@@ -402,11 +402,12 @@ where
         let mut suggestion = min_suggested_priority_fee;
         let mut is_at_capacity = false;
 
-        // find the maximum gas used by any of the transactions in the block to use as the
-        // capacity margin for the block, if no receipts are found return the
+        // find the maximum gas used by any of the transactions in the block and
+        // the maximum and total payload size used by the transactions in the block to use as
+        // the capacity margin for the block, if no receipts or block are found return the
         // suggested_min_priority_fee
-        let receipts = match self.cache.get_receipts(header.hash()).await {
-            Ok(Some(receipts)) => receipts,
+        let (block, receipts) = match self.cache.get_block_and_receipts(header.hash()).await {
+            Ok(Some((block, receipts))) => (block, receipts),
             Ok(None) => return (Ok(suggestion), false),
             Err(e) => return (Err(e.into()), false),
         };
@@ -427,15 +428,6 @@ where
             return (Ok(suggestion), is_at_capacity);
         };
 
-        // find the maximum and total payload size used by the transactions in the block to use as
-        // the capacity margin for the block, if no block is found return the
-        // suggested_min_priority_fee
-        let block = match self.cache.get_recovered_block(header.hash()).await {
-            Ok(Some(block)) => block,
-            Ok(None) => return (Ok(suggestion), false),
-            Err(e) => return (Err(e.into()), false),
-        };
-
         let transactions = block.transactions_recovered();
 
         // Calculate payload sizes for all transactions
@@ -444,7 +436,7 @@ where
 
         for tx in transactions {
             // Get the EIP-2718 encoded length as payload size
-            let payload_size = tx.into_encoded().encoded_bytes().len() as u64;
+            let payload_size = tx.encode_2718_len() as u64;
             max_tx_payload_size = max_tx_payload_size.max(payload_size);
             total_payload_size += payload_size;
         }
