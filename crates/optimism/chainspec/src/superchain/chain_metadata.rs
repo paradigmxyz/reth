@@ -162,7 +162,7 @@ mod tests {
         "ecotone_time": 1710374401,
         "fjord_time": 1720627201,
         "granite_time": 1726070401,
-        "holocene_time": 1736445601
+        "holocene_time": 1736445601,
         "isthmus_time": 1746806401
       },
       "optimism": {
@@ -248,7 +248,7 @@ mod tests {
         assert_eq!(chain_config.merge_netsplit_block, Some(0));
         assert_eq!(chain_config.shanghai_time, Some(1704992401));
         assert_eq!(chain_config.cancun_time, Some(1710374401));
-        assert_eq!(chain_config.prague_time, None);
+        assert_eq!(chain_config.prague_time, Some(1746806401));
         assert_eq!(chain_config.osaka_time, None);
         assert_eq!(chain_config.terminal_total_difficulty, Some(U256::ZERO));
         assert!(chain_config.terminal_total_difficulty_passed);
@@ -297,7 +297,7 @@ mod tests {
         assert_eq!(chain_config.chain_id, 10);
         assert_eq!(chain_config.shanghai_time, Some(1704992401));
         assert_eq!(chain_config.cancun_time, Some(1710374401));
-        assert_eq!(chain_config.prague_time, None);
+        assert_eq!(chain_config.prague_time, Some(1746806401));
         assert_eq!(chain_config.berlin_block, Some(3950000));
         assert_eq!(chain_config.london_block, Some(105235063));
         assert_eq!(chain_config.arrow_glacier_block, Some(105235063));
