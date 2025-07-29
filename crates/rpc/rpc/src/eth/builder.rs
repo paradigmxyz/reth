@@ -1,12 +1,6 @@
 //! `EthApiBuilder` implementation
 
-use crate::{
-    eth::{
-        core::EthApiInner,
-        helpers::batcher::{TxBatchConfig, TxBatcher},
-    },
-    EthApi,
-};
+use crate::{eth::core::EthApiInner, EthApi};
 use alloy_network::Ethereum;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
@@ -24,6 +18,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
+use reth_transaction_pool::{TxBatchConfig, TxBatcher};
 use std::sync::Arc;
 
 /// A helper to build the `EthApi` handler instance.

@@ -1,12 +1,7 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`](crate::EthApi) trait
 //! Handles RPC requests for the `eth_` namespace.
 
-use std::sync::Arc;
-
-use crate::{
-    eth::helpers::{batcher::TxBatcher, types::EthRpcConverter},
-    EthApiBuilder,
-};
+use crate::{eth::helpers::types::EthRpcConverter, EthApiBuilder};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
@@ -31,7 +26,8 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
 };
-use reth_transaction_pool::noop::NoopTransactionPool;
+use reth_transaction_pool::{noop::NoopTransactionPool, TxBatcher};
+use std::sync::Arc;
 use tokio::sync::{broadcast, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
