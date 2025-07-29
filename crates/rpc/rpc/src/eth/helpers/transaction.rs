@@ -9,7 +9,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+    AddedTransactionOutcome, BatchTxRequest, PoolTransaction, TransactionOrigin, TransactionPool,
+    TxBatchError,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -34,11 +35,24 @@ where
 
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
-        // Use batcher if available, otherwise submit directly
-        if let Some(batcher) = self.tx_batcher() {
-            batcher
-                .add_transaction(pool_transaction)
+        // Use batch sender if available, otherwise submit directly
+        if let Some(batch_sender) = self.tx_batch_sender() {
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            let request = BatchTxRequest::new(pool_transaction, response_tx);
+
+            batch_sender.send(request).await.map_err(|_| {
+                EthApiError::Internal(reth_errors::RethError::Other(
+                    TxBatchError::BatcherChannelClosed.into(),
+                ))
+            })?;
+
+            response_rx
                 .await
+                .map_err(|_| {
+                    EthApiError::Internal(reth_errors::RethError::Other(
+                        TxBatchError::ResponseChannelClosed.into(),
+                    ))
+                })?
                 .map_err(|e| EthApiError::Internal(reth_errors::RethError::Other(e.into())))
         } else {
             // submit the transaction to the pool with a `Local` origin

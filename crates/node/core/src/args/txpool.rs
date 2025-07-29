@@ -138,10 +138,6 @@ pub struct TxPoolArgs {
     #[arg(long = "txpool.enable-batching")]
     pub enable_batching: bool,
 
-    /// Interval between processing batches in milliseconds.
-    #[arg(long = "txpool.batch-interval", default_value_t = 5)]
-    pub batch_interval_ms: u64,
-
     /// Channel buffer size for incoming batch transaction requests.
     #[arg(long = "txpool.batch-buffer-size", default_value_t = 5000)]
     pub batch_buffer_size: usize,
@@ -183,7 +179,6 @@ impl Default for TxPoolArgs {
             transactions_backup_path: None,
             disable_transactions_backup: false,
             enable_batching: false,
-            batch_interval_ms: 5,
             batch_buffer_size: 5000,
             batch_threshold: 1000,
         }
@@ -234,7 +229,6 @@ impl RethTransactionPoolConfig for TxPoolArgs {
     /// Returns transaction batcher configuration if enabled.
     fn tx_batch_config(&self) -> Option<TxBatchConfig> {
         self.enable_batching.then(|| TxBatchConfig {
-            batch_interval: Duration::from_millis(self.batch_interval_ms),
             channel_buffer_size: self.batch_buffer_size,
             batch_threshold: self.batch_threshold,
         })

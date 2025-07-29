@@ -1,22 +1,21 @@
-//! Transaction batching for high-throughput scenarios
+//! Transaction batching for `Pool` insertion for high-throughput scenarios
 //!
-//! This module provides transaction batching to reduce lock contention when processing
-//! many concurrent transaction insertions.
+//! This module provides transaction batching logic to reduce lock contention when processing
+//! many concurrent transaction pool insertions.
 
 use crate::{AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool};
 use alloy_primitives::B256;
+use pin_project::pin_project;
 use std::{
-    sync::atomic::{AtomicU64, Ordering},
-    sync::Arc,
-    time::Duration,
+    future::Future,
+    pin::Pin,
+    task::{Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
 
 /// Configuration for tx pool batch insertion
 #[derive(Debug, Clone)]
 pub struct TxBatchConfig {
-    /// Interval between processing batches
-    pub batch_interval: Duration,
     /// Channel buffer size for incoming batch tx requests
     pub channel_buffer_size: usize,
     /// Number of transactions that triggers immediate batch processing
@@ -25,11 +24,7 @@ pub struct TxBatchConfig {
 
 impl Default for TxBatchConfig {
     fn default() -> Self {
-        Self {
-            batch_interval: Duration::from_millis(5),
-            channel_buffer_size: 5000,
-            batch_threshold: 1000,
-        }
+        Self { channel_buffer_size: 5000, batch_threshold: 1000 }
     }
 }
 
@@ -65,90 +60,33 @@ where
     }
 }
 
-/// Transaction batcher responsible for batch inserting txs into the pool
+/// Transaction batch processor that handles batch processing
+#[pin_project]
 #[derive(Debug)]
-pub struct TxBatcher<Pool: TransactionPool> {
-    /// Pool for tx insertions
-    pub pool: Pool,
-    /// Channel for batch tx requests
-    pub request_tx: mpsc::Sender<BatchTxRequest<Pool::Transaction>>,
-    /// Atomic counter for pending requests
-    pub pending_count: Arc<AtomicU64>,
+pub struct TxBatchProcessor<Pool: TransactionPool> {
+    pool: Pool,
+    max_batch_size: usize,
+    channel_buffer_size: usize,
+    #[pin]
+    request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
 }
 
-impl<Pool> TxBatcher<Pool>
+impl<Pool> TxBatchProcessor<Pool>
 where
     Pool: TransactionPool + Clone + Send + Sync + 'static,
     Pool::Transaction: Send + Sync,
 {
-    /// Create a new `TxBatcher`
+    /// Create a new `TxBatchProcessor`
     pub fn new(
         pool: Pool,
+        max_batch_size: usize,
         channel_buffer_size: usize,
-    ) -> (Self, mpsc::Receiver<BatchTxRequest<Pool::Transaction>>) {
+    ) -> (Self, mpsc::Sender<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::channel(channel_buffer_size);
-        let pending_count = Arc::new(AtomicU64::new(0));
 
-        let batcher = Self { pool, request_tx, pending_count };
-        (batcher, request_rx)
-    }
+        let processor = Self { pool, max_batch_size, channel_buffer_size, request_rx };
 
-    /// Pending batch transactions
-    pub fn pending_count(&self) -> Arc<AtomicU64> {
-        self.pending_count.clone()
-    }
-
-    /// Add transaction to the pool via batching
-    pub async fn add_transaction(&self, pool_tx: Pool::Transaction) -> Result<B256, TxBatchError> {
-        let (response_tx, response_rx) = oneshot::channel();
-        let request = BatchTxRequest::new(pool_tx, response_tx);
-
-        self.pending_count.fetch_add(1, Ordering::SeqCst);
-        self.request_tx.send(request).await.map_err(|_| TxBatchError::BatcherChannelClosed)?;
-
-        response_rx.await.map_err(|_| TxBatchError::ResponseChannelClosed)?
-    }
-
-    /// Process batch transaction insertions
-    pub async fn process_batches(
-        pool: Pool,
-        batch_interval: Duration,
-        batch_threshold: usize,
-        channel_buffer_size: usize,
-        pending_count: Arc<AtomicU64>,
-        mut request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
-    ) {
-        let mut interval = tokio::time::interval(batch_interval);
-
-        loop {
-            tokio::select! {
-                // Check for batch interval timeout
-                _ = interval.tick() => {
-                    let mut batch = Vec::with_capacity(channel_buffer_size);
-                    let count = request_rx.recv_many(&mut batch, channel_buffer_size).await;
-
-                    if count > 0 {
-                        pending_count.store(0, Ordering::SeqCst);
-                        Self::process_batch(&pool, batch).await;
-                    }
-                }
-                // Process if threshold reached
-                _ = async {
-                    loop {
-                        tokio::task::yield_now().await;
-                        let count = pending_count.load(Ordering::SeqCst);
-                        if count >= batch_threshold as u64 {
-                            break;
-                        }
-                    }
-                } => {
-                    let mut batch = Vec::with_capacity(channel_buffer_size);
-                    request_rx.recv_many(&mut batch, channel_buffer_size).await;
-                    pending_count.store(0, Ordering::SeqCst);
-                    Self::process_batch(&pool, batch).await;
-                }
-            }
-        }
+        (processor, request_tx)
     }
 
     /// Process a batch of transaction requests, grouped by origin
@@ -165,6 +103,43 @@ where
             };
 
             let _ = response_tx.send(final_result);
+        }
+    }
+}
+
+impl<Pool> Future for TxBatchProcessor<Pool>
+where
+    Pool: TransactionPool + Clone + Send + Sync + 'static,
+    Pool::Transaction: Send + Sync,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut this = self.project();
+
+        loop {
+            // Drain all available requests from the receiver
+            let mut batch = Vec::with_capacity(*this.channel_buffer_size);
+            while let Poll::Ready(Some(request)) = this.request_rx.poll_recv(cx) {
+                batch.push(request);
+
+                // Check if the max batch size threshold has been reached
+                if batch.len() >= *this.max_batch_size {
+                    break;
+                }
+            }
+
+            if !batch.is_empty() {
+                let pool = this.pool.clone();
+                tokio::spawn(async move {
+                    Self::process_batch(&pool, batch).await;
+                });
+
+                continue;
+            }
+
+            // No requests available, return Pending to wait for more
+            return Poll::Pending;
         }
     }
 }
@@ -192,7 +167,7 @@ mod tests {
             responses.push(response_rx);
         }
 
-        TxBatcher::process_batch(&pool, batch_requests).await;
+        TxBatchProcessor::process_batch(&pool, batch_requests).await;
 
         for response_rx in responses {
             let result = timeout(Duration::from_millis(5), response_rx)
@@ -204,25 +179,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_process_batches() {
+    async fn test_batch_processor() {
         let pool = testing_pool();
-        let (request_tx, request_rx) = tokio::sync::mpsc::channel(100);
-        let interval = Duration::from_millis(5);
+        let (processor, request_tx) = TxBatchProcessor::new(pool.clone(), 1000, 100);
 
-        // Spawn task to process batch requests
-        let pool_clone = pool.clone();
-        let pending_count = Arc::new(AtomicU64::new(0));
-        let handle = tokio::spawn(async move {
-            TxBatcher::<_>::process_batches(
-                pool_clone,
-                interval,
-                1000,
-                100,
-                pending_count,
-                request_rx,
-            )
-            .await;
-        });
+        // Spawn the processor
+        let handle = tokio::spawn(processor);
 
         let mut responses = Vec::new();
 
@@ -234,12 +196,10 @@ mod tests {
             responses.push(response_rx);
         }
 
-        // Wait for interval to process first batch
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
 
-        // Verify all responses are received and successful
         for rx in responses {
-            let result = timeout(Duration::from_millis(5), rx)
+            let result = timeout(Duration::from_millis(10), rx)
                 .await
                 .expect("Timeout waiting for response")
                 .expect("Response channel was closed unexpectedly");
@@ -253,28 +213,18 @@ mod tests {
     #[tokio::test]
     async fn test_add_transaction() {
         let pool = testing_pool();
-        let (batcher, request_rx) = TxBatcher::new(pool.clone(), 100);
+        let (processor, request_tx) = TxBatchProcessor::new(pool.clone(), 1000, 100);
 
-        // Spawn task to process batch requests
-        let pool_clone = pool.clone();
-        let pending_count = batcher.pending_count();
-        let handle = tokio::spawn(async move {
-            TxBatcher::<_>::process_batches(
-                pool_clone,
-                Duration::from_millis(5),
-                1000,
-                100,
-                pending_count,
-                request_rx,
-            )
-            .await;
-        });
+        // Spawn the processor
+        let handle = tokio::spawn(processor);
 
         let mut results = Vec::new();
         for i in 0..10 {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
-            let result_future = batcher.add_transaction(tx);
-            results.push(result_future);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            let request = BatchTxRequest::new(tx, response_tx);
+            request_tx.send(request).await.unwrap();
+            results.push(response_rx);
         }
 
         for res in results {
@@ -284,36 +234,29 @@ mod tests {
             assert!(result.is_ok());
         }
 
-        drop(batcher);
         handle.abort();
     }
 
     #[tokio::test]
     async fn test_batch_threshold() {
         let pool = testing_pool();
-        let (batcher, request_rx) = TxBatcher::new(pool.clone(), 100);
-
-        let pool_clone = pool.clone();
         let batch_threshold = 10;
-        let pending_count = batcher.pending_count();
+        let (processor, request_tx) = TxBatchProcessor::new(pool.clone(), batch_threshold, 100);
 
-        // Spawn batch processor with long batch interval
-        let handle = tokio::spawn(async move {
-            TxBatcher::<_>::process_batches(
-                pool_clone,
-                Duration::from_secs(1),
-                batch_threshold,
-                100,
-                pending_count,
-                request_rx,
-            )
-            .await;
-        });
+        // Spawn batch processor with threshold
+        let handle = tokio::spawn(processor);
 
         let mut futures = FuturesUnordered::new();
         for i in 0..batch_threshold {
             let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
-            let tx_fut = batcher.add_transaction(tx);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            let request = BatchTxRequest::new(tx, response_tx);
+            let request_tx_clone = request_tx.clone();
+
+            let tx_fut = async move {
+                request_tx_clone.send(request).await.unwrap();
+                response_rx.await.unwrap()
+            };
             futures.push(tx_fut);
         }
 

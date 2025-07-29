@@ -18,7 +18,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{TxBatchConfig, TxBatcher};
+use reth_transaction_pool::{TxBatchConfig, TxBatchProcessor};
 use std::sync::Arc;
 
 /// A helper to build the `EthApi` handler instance.
@@ -347,26 +347,15 @@ where
         );
 
         // Create tx pool insertion batcher if configured
-        let tx_batcher = tx_batch_config.map(|config| {
-            let (batcher, request_rx) =
-                TxBatcher::new(components.pool().clone(), config.channel_buffer_size);
-            let pool_clone = components.pool().clone();
-            let pending_count = batcher.pending_count();
-            task_spawner.spawn_critical(
-                "tx-batcher",
-                Box::pin(async move {
-                    TxBatcher::process_batches(
-                        pool_clone,
-                        config.batch_interval,
-                        config.batch_threshold,
-                        config.channel_buffer_size,
-                        pending_count,
-                        request_rx,
-                    )
-                    .await;
-                }),
+        let tx_batch_sender = tx_batch_config.map(|config| {
+            let (processor, request_tx) = TxBatchProcessor::new(
+                components.pool().clone(),
+                config.batch_threshold,
+                config.channel_buffer_size,
             );
-            batcher
+            
+            task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
+            request_tx
         });
 
         EthApiInner::new(
@@ -384,7 +373,7 @@ where
             proof_permits,
             rpc_converter,
             next_env,
-            tx_batcher,
+            tx_batch_sender,
         )
     }
 
