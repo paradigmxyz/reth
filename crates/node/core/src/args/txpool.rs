@@ -233,15 +233,11 @@ impl RethTransactionPoolConfig for TxPoolArgs {
 
     /// Returns transaction batcher configuration if enabled.
     fn tx_batch_config(&self) -> Option<TxBatchConfig> {
-        if self.enable_batching {
-            Some(TxBatchConfig {
-                batch_interval: Duration::from_millis(self.batch_interval_ms),
-                channel_buffer_size: self.batch_buffer_size,
-                batch_threshold: self.batch_threshold,
-            })
-        } else {
-            None
-        }
+        self.enable_batching.then(|| TxBatchConfig {
+            batch_interval: Duration::from_millis(self.batch_interval_ms),
+            channel_buffer_size: self.batch_buffer_size,
+            batch_threshold: self.batch_threshold,
+        })
     }
 }
 

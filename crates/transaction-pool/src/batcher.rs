@@ -167,17 +167,18 @@ where
         let batch_size = batch.len();
         trace!(target: "reth::txpool::batch", batch_size, "Processing transaction batch");
 
-        // NOTE: remove clone
-        let pool_transactions = batch.iter().map(|req| req.pool_tx.clone()).collect();
+        let (pool_transactions, response_tx): (Vec<_>, Vec<_>) =
+            batch.into_iter().map(|req| (req.pool_tx, req.response_tx)).unzip();
+
         let pool_results = pool.add_transactions(TransactionOrigin::Local, pool_transactions).await;
 
-        for (request, pool_result) in batch.into_iter().zip(pool_results) {
+        for (response_tx, pool_result) in response_tx.into_iter().zip(pool_results) {
             let final_result = match pool_result {
                 Ok(AddedTransactionOutcome { hash, .. }) => Ok(hash),
                 Err(_) => Err(TxBatchError::BatcherChannelClosed),
             };
 
-            let _ = request.response_tx.send(final_result);
+            let _ = response_tx.send(final_result);
         }
     }
 }
