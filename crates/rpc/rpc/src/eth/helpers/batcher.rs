@@ -5,6 +5,7 @@
 
 use alloy_primitives::B256;
 use itertools::Itertools;
+use reth_errors::RethError;
 use reth_rpc_eth_types::EthApiError;
 use reth_tasks::TaskSpawner;
 use reth_transaction_pool::{
@@ -87,9 +88,13 @@ where
         let (response_tx, response_rx) = oneshot::channel();
         let request = BatchTxRequest { pool_tx, origin, response_tx };
 
-        self.request_tx.send(request).await.expect("TODO: handle error");
+        self.request_tx.send(request).await.map_err(|_| {
+            EthApiError::Internal(RethError::Other("Transaction batcher tx closed".into()))
+        })?;
 
-        response_rx.await.expect("TODO: handle error ")
+        response_rx.await.map_err(|_| {
+            EthApiError::Internal(RethError::Other("Transaction response rx closed".into()))
+        })?
     }
 
     /// Process batch transaction insertions
@@ -119,6 +124,7 @@ where
     /// Process a batch of transaction requests, grouped by origin
     async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         // Group requests by origin
+        // TODO: can we simplify by knowing all txs will be marked as local
         let origin_groups = batch.into_iter().into_group_map_by(|request| request.origin);
 
         // Process each origin group separately
@@ -145,6 +151,43 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reth_transaction_pool::test_utils::testing_pool;
+    use reth_transaction_pool::{
+        test_utils::{testing_pool, MockTransaction, TransactionGenerator},
+        TransactionOrigin,
+    };
     use std::time::Duration;
+    use tokio::time::timeout;
+
+    #[tokio::test]
+    async fn test_process_batch() {
+        let pool = testing_pool();
+
+        let mut batch_requests = Vec::new();
+        let mut responses = Vec::new();
+        //
+        for i in 0..100 {
+            let tx = MockTransaction::legacy().with_nonce(i);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+            batch_requests.push(BatchTxRequest {
+                pool_tx: tx,
+                origin: TransactionOrigin::Local,
+                response_tx,
+            });
+            responses.push(response_rx);
+        }
+
+        TxBatcher::process_batch(&pool, batch_requests).await;
+
+        for response_rx in responses {
+            let result = timeout(Duration::from_millis(100), response_rx).await.unwrap().unwrap();
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_process_batches() {}
+
+    #[test]
+    fn test_add_transaction() {}
 }
