@@ -1614,7 +1614,7 @@ impl<Tx: PoolTransaction> NewSubpoolTransactionStream<Tx> {
             match self.st.try_recv() {
                 Ok(event) => {
                     if event.subpool == self.subpool {
-                        return Ok(event);
+                        return Ok(event)
                     }
                 }
                 Err(e) => return Err(e),
