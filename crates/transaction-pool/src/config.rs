@@ -115,6 +115,11 @@ impl SubPoolLimit {
         Self { max_txs, max_size }
     }
 
+    /// Creates a an unlimited [`SubPoolLimit`]
+    pub const fn max() -> Self {
+        Self::new(usize::MAX, usize::MAX)
+    }
+
     /// Returns whether the size or amount constraint is violated.
     #[inline]
     pub const fn is_exceeded(&self, txs: usize, size: usize) -> bool {

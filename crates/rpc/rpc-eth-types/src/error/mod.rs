@@ -3,7 +3,7 @@
 pub mod api;
 use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
-use alloy_evm::{call::CallError, overrides::StateOverrideError, InvalidTxError};
+use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError, BlockError};
 use alloy_sol_types::{ContractError, RevertReason};
@@ -23,21 +23,8 @@ use revm::context_interface::result::{
     EVMError, ExecutionResult, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
 };
 use revm_inspectors::tracing::MuxError;
-use std::{any::Any, convert::Infallible};
+use std::convert::Infallible;
 use tracing::error;
-
-/// Extension trait for `InvalidTxError` to provide casting functionality
-pub trait InvalidTxErrorExt {
-    /// Try to cast the dyn `InvalidTxError` to `InvalidTransaction`
-    fn as_invalid_tx_err(&self) -> Option<&InvalidTransaction>;
-}
-
-impl InvalidTxErrorExt for dyn InvalidTxError {
-    fn as_invalid_tx_err(&self) -> Option<&InvalidTransaction> {
-        let any_ref: &dyn Any = self;
-        any_ref.downcast_ref::<InvalidTransaction>()
-    }
-}
 
 /// A trait to convert an error to an RPC error.
 pub trait ToRpcError: core::error::Error + Send + Sync + 'static {

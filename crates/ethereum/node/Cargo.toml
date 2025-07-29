@@ -46,32 +46,26 @@ alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 # revm with required ethereum features
-# Note: this must be kept to ensure all features are poperly enabled/forwarded
+# Note: this must be kept to ensure all features are properly enabled/forwarded
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 # misc
 eyre.workspace = true
 
 [dev-dependencies]
-reth-chainspec.workspace = true
 reth-db.workspace = true
 reth-exex.workspace = true
 reth-node-core.workspace = true
-reth-payload-primitives.workspace = true
 reth-e2e-test-utils.workspace = true
-reth-rpc-eth-api.workspace = true
 reth-tasks.workspace = true
 
 alloy-primitives.workspace = true
 alloy-provider.workspace = true
 alloy-genesis.workspace = true
 alloy-signer.workspace = true
-alloy-eips.workspace = true
 alloy-sol-types.workspace = true
 alloy-contract.workspace = true
 alloy-rpc-types-beacon = { workspace = true, features = ["ssz"] }
-alloy-rpc-types-engine.workspace = true
-alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 
 futures.workspace = true

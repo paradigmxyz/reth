@@ -5,6 +5,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
 use reth_era::{
+    e2s_types::IndexEntry,
     era1_file::Era1Writer,
     era1_types::{BlockIndex, Era1Id},
     execution_types::{
@@ -151,8 +152,8 @@ where
         let mut writer = Era1Writer::new(file);
         writer.write_version()?;
 
-        let mut offsets = Vec::with_capacity(block_count);
-        let mut position = VERSION_ENTRY_SIZE as i64;
+        let mut offsets = Vec::<u64>::with_capacity(block_count);
+        let mut position = VERSION_ENTRY_SIZE as u64;
         let mut blocks_written = 0;
         let mut final_header_data = Vec::new();
 
@@ -177,7 +178,7 @@ where
             let body_size = compressed_body.data.len() + ENTRY_HEADER_SIZE;
             let receipts_size = compressed_receipts.data.len() + ENTRY_HEADER_SIZE;
             let difficulty_size = 32 + ENTRY_HEADER_SIZE; // U256 is 32 + 8 bytes header overhead
-            let total_size = header_size + body_size + receipts_size + difficulty_size;
+            let total_size = (header_size + body_size + receipts_size + difficulty_size) as u64;
 
             let block_tuple = BlockTuple::new(
                 compressed_header,
@@ -187,7 +188,7 @@ where
             );
 
             offsets.push(position);
-            position += total_size as i64;
+            position += total_size;
 
             writer.write_block(&block_tuple)?;
             blocks_written += 1;

@@ -444,12 +444,12 @@ where
             .add_stage(IndexStorageHistoryStage::new(
                 self.stages_config.index_storage_history,
                 self.stages_config.etl.clone(),
-                self.prune_modes.account_history,
+                self.prune_modes.storage_history,
             ))
             .add_stage(IndexAccountHistoryStage::new(
                 self.stages_config.index_account_history,
                 self.stages_config.etl.clone(),
-                self.prune_modes.storage_history,
+                self.prune_modes.account_history,
             ))
     }
 }

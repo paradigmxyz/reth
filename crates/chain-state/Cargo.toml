@@ -53,7 +53,6 @@ reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
-alloy-consensus.workspace = true
 rand.workspace = true
 
 [features]

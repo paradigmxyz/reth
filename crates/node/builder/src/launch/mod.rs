@@ -2,6 +2,7 @@
 
 pub mod common;
 mod exex;
+pub mod invalid_block_hook;
 
 pub(crate) mod debug;
 pub(crate) mod engine;

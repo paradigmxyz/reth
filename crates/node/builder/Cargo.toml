@@ -24,6 +24,7 @@ reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
 reth-engine-local.workspace = true
+reth-engine-primitives.workspace = true
 reth-engine-service.workspace = true
 reth-engine-tree.workspace = true
 reth-engine-util.workspace = true
@@ -39,6 +40,7 @@ reth-node-core.workspace = true
 reth-node-events.workspace = true
 reth-node-metrics.workspace = true
 reth-payload-builder.workspace = true
+reth-primitives-traits.workspace = true
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-rpc.workspace = true
@@ -75,8 +77,8 @@ secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"]
 ## misc
 aquamarine.workspace = true
 eyre.workspace = true
-fdlimit.workspace = true
 jsonrpsee.workspace = true
+fdlimit.workspace = true
 rayon.workspace = true
 serde_json.workspace = true
 
@@ -85,6 +87,11 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+reth-ethereum-engine-primitives.workspace = true
+reth-payload-builder = { workspace = true, features = ["test-utils"] }
+reth-node-ethereum.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = []
@@ -105,10 +112,14 @@ test-utils = [
     "reth-db-api/test-utils",
     "reth-provider/test-utils",
     "reth-transaction-pool/test-utils",
+    "reth-evm-ethereum/test-utils",
+    "reth-node-ethereum/test-utils",
+    "reth-primitives-traits/test-utils",
 ]
 op = [
     "reth-db?/op",
     "reth-db-api/op",
     "reth-engine-local/op",
     "reth-evm/op",
+    "reth-primitives-traits/op",
 ]

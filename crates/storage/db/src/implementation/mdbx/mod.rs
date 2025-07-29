@@ -99,6 +99,9 @@ pub struct DatabaseArguments {
     ///
     /// This flag affects only at environment opening but can't be changed after.
     exclusive: Option<bool>,
+    /// MDBX allows up to 32767 readers (`MDBX_READERS_LIMIT`). This arg is to configure the max
+    /// readers.
+    max_readers: Option<u64>,
 }
 
 impl Default for DatabaseArguments {
@@ -121,6 +124,7 @@ impl DatabaseArguments {
             log_level: None,
             max_read_transaction_duration: None,
             exclusive: None,
+            max_readers: None,
         }
     }
 
@@ -166,6 +170,12 @@ impl DatabaseArguments {
     /// Set the mdbx exclusive flag.
     pub const fn with_exclusive(mut self, exclusive: Option<bool>) -> Self {
         self.exclusive = exclusive;
+        self
+    }
+
+    /// Set `max_readers` flag.
+    pub const fn with_max_readers(mut self, max_readers: Option<u64>) -> Self {
+        self.max_readers = max_readers;
         self
     }
 
@@ -375,7 +385,7 @@ impl DatabaseEnv {
             ..Default::default()
         });
         // Configure more readers
-        inner_env.set_max_readers(DEFAULT_MAX_READERS);
+        inner_env.set_max_readers(args.max_readers.unwrap_or(DEFAULT_MAX_READERS));
         // This parameter sets the maximum size of the "reclaimed list", and the unit of measurement
         // is "pages". Reclaimed list is the list of freed pages that's populated during the
         // lifetime of DB transaction, and through which MDBX searches when it needs to insert new

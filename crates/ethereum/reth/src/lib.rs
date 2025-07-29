@@ -115,6 +115,15 @@ pub mod node {
     pub use reth_node_ethereum::*;
 }
 
+/// Re-exported ethereum engine types
+#[cfg(feature = "node")]
+pub mod engine {
+    #[doc(inline)]
+    pub use reth_engine_local as local;
+    #[doc(inline)]
+    pub use reth_node_ethereum::engine::*;
+}
+
 /// Re-exported reth trie types
 #[cfg(feature = "trie")]
 pub mod trie {

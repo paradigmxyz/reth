@@ -391,6 +391,11 @@ impl InvalidPoolTransactionError {
         }
     }
 
+    /// Returns `true` if an import failed due to an oversized transaction
+    pub const fn is_oversized(&self) -> bool {
+        matches!(self, Self::OversizedData(_, _))
+    }
+
     /// Returns `true` if an import failed due to nonce gap.
     pub const fn is_nonce_gap(&self) -> bool {
         matches!(self, Self::Consensus(InvalidTransactionError::NonceNotConsistent { .. })) ||

@@ -103,7 +103,7 @@ where
         + StateProviderFactory
         + ChainSpecProvider,
     Evm: ConfigureEvm,
-    Validator: PayloadValidator<ExecutionData = T::ExecutionData, Block = BlockTy<Evm::Primitives>>,
+    Validator: PayloadValidator<T, Block = BlockTy<Evm::Primitives>>,
 {
     type Item = S::Item;
 
@@ -236,19 +236,20 @@ where
     }
 }
 
-fn create_reorg_head<Provider, Evm, Validator>(
+fn create_reorg_head<Provider, Evm, T, Validator>(
     provider: &Provider,
     evm_config: &Evm,
     payload_validator: &Validator,
     mut depth: usize,
-    next_payload: Validator::ExecutionData,
+    next_payload: T::ExecutionData,
 ) -> RethResult<SealedBlock<BlockTy<Evm::Primitives>>>
 where
     Provider: BlockReader<Header = HeaderTy<Evm::Primitives>, Block = BlockTy<Evm::Primitives>>
         + StateProviderFactory
         + ChainSpecProvider<ChainSpec: EthChainSpec>,
     Evm: ConfigureEvm,
-    Validator: PayloadValidator<Block = BlockTy<Evm::Primitives>>,
+    T: PayloadTypes,
+    Validator: PayloadValidator<T, Block = BlockTy<Evm::Primitives>>,
 {
     // Ensure next payload is valid.
     let next_block =
