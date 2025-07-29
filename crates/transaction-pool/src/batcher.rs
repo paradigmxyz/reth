@@ -124,7 +124,7 @@ where
             tokio::select! {
                 // Check for batch interval timeout
                 _ = interval.tick() => {
-                    // Drain all pending requests from the channel
+                    // TODO: drain instead
                     let mut batch = Vec::new();
                     while let Ok(request) = request_rx.try_recv() {
                         batch.push(request);
@@ -146,7 +146,7 @@ where
                         }
                     }
                 } => {
-                    // Drain all pending requests from the channel
+                    // TODO: drain instead
                     let mut batch = Vec::new();
                     while let Ok(request) = request_rx.try_recv() {
                         batch.push(request);
