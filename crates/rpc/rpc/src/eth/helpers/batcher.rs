@@ -103,6 +103,7 @@ where
 
         // Increment pending count after successful send
         self.pending_count.fetch_add(1, Ordering::SeqCst);
+        dbg!(&self.pending_count.load(Ordering::SeqCst));
 
         response_rx.await.map_err(|_| {
             EthApiError::Internal(RethError::Other("Transaction response rx closed".into()))
@@ -139,7 +140,9 @@ where
                 _ = async {
                     loop {
                         tokio::task::yield_now().await;
-                        if pending_count.load(Ordering::SeqCst) >= batch_threshold as u64 {
+                        let count = pending_count.load(Ordering::SeqCst);
+                        dbg!(count, batch_threshold);
+                        if count >= batch_threshold as u64 {
                             break;
                         }
                     }
@@ -183,6 +186,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::stream::{FuturesUnordered, StreamExt};
     use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use std::time::Duration;
     use tokio::time::timeout;
@@ -287,6 +291,45 @@ mod tests {
         }
 
         drop(batcher);
+        handle.abort();
+    }
+
+    #[tokio::test]
+    async fn test_batch_threshold() {
+        let pool = testing_pool();
+        let (batcher, request_rx) = TxBatcher::new(pool.clone(), 100);
+
+        let pool_clone = pool.clone();
+        let batch_threshold = 10;
+        let pending_count = batcher.pending_count();
+
+        // Spawn batch processor with long batch interval
+        let handle = tokio::spawn(async move {
+            TxBatcher::<_>::process_batches(
+                pool_clone,
+                Duration::from_secs(1),
+                batch_threshold,
+                pending_count,
+                request_rx,
+            )
+            .await;
+        });
+
+        let mut futures = FuturesUnordered::new();
+        for i in 0..batch_threshold {
+            dbg!(i);
+            let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
+            let tx_fut = batcher.add_transaction(tx);
+            futures.push(tx_fut);
+        }
+
+        while let Some(result) = timeout(Duration::from_millis(50), futures.next())
+            .await
+            .expect("Timeout waiting for transaction result")
+        {
+            assert!(result.is_ok());
+        }
+
         handle.abort();
     }
 }
