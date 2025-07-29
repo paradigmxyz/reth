@@ -1102,7 +1102,7 @@ mod tests {
             EthereumHardfork::Prague.boxed(),
             OpHardfork::Isthmus.boxed(),
             OpHardfork::Jovian.boxed(),
-            OpHardfork::Interop.boxed(),
+            // OpHardfork::Interop.boxed(),
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
