@@ -9,7 +9,11 @@ use reth_rpc_eth_types::EthApiError;
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
 };
-use std::time::Duration;
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::{mpsc, oneshot};
 use tracing::trace;
 
@@ -17,14 +21,20 @@ use tracing::trace;
 #[derive(Debug, Clone)]
 pub struct TxBatchConfig {
     /// Interval between processing batches
-    pub interval: Duration,
+    pub batch_interval: Duration,
     /// Channel buffer size for incoming batch tx requests
     pub channel_buffer_size: usize,
+    /// Number of transactions that triggers immediate batch processing
+    pub batch_threshold: usize,
 }
 
 impl Default for TxBatchConfig {
     fn default() -> Self {
-        Self { interval: Duration::from_millis(5), channel_buffer_size: 5000 }
+        Self {
+            batch_interval: Duration::from_millis(5),
+            channel_buffer_size: 5000,
+            batch_threshold: 1000,
+        }
     }
 }
 
@@ -56,8 +66,8 @@ pub struct TxBatcher<Pool: TransactionPool> {
     pub pool: Pool,
     /// Channel for batch tx requests
     pub request_tx: mpsc::Sender<BatchTxRequest<Pool::Transaction>>,
-    /// Batch insertion interval
-    pub interval: Duration,
+    /// Atomic counter for pending requests
+    pub pending_count: Arc<AtomicU64>,
 }
 
 impl<Pool> TxBatcher<Pool>
@@ -68,13 +78,18 @@ where
     /// Create a new `TxBatcher`
     pub fn new(
         pool: Pool,
-        interval: Duration,
         channel_buffer_size: usize,
     ) -> (Self, mpsc::Receiver<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::channel(channel_buffer_size);
+        let pending_count = Arc::new(AtomicU64::new(0));
 
-        let batcher = Self { pool, interval, request_tx };
+        let batcher = Self { pool, request_tx, pending_count };
         (batcher, request_rx)
+    }
+
+    /// Pending batch transactions
+    pub fn pending_count(&self) -> Arc<AtomicU64> {
+        self.pending_count.clone()
     }
 
     /// Add transaction to the pool via batching
@@ -86,6 +101,9 @@ where
             EthApiError::Internal(RethError::Other("Transaction batcher tx closed".into()))
         })?;
 
+        // Increment pending count after successful send
+        self.pending_count.fetch_add(1, Ordering::SeqCst);
+
         response_rx.await.map_err(|_| {
             EthApiError::Internal(RethError::Other("Transaction response rx closed".into()))
         })?
@@ -94,23 +112,50 @@ where
     /// Process batch transaction insertions
     pub async fn process_batches(
         pool: Pool,
-        interval: Duration,
+        batch_interval: Duration,
+        batch_threshold: usize,
+        pending_count: Arc<AtomicU64>,
         mut request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
     ) {
-        let mut interval = tokio::time::interval(interval);
+        let mut interval = tokio::time::interval(batch_interval);
+
         loop {
-            interval.tick().await;
+            tokio::select! {
+                // Check for timeout
+                _ = interval.tick() => {
+                    // Drain all pending requests from the channel
+                    let mut batch = Vec::new();
+                    while let Ok(request) = request_rx.try_recv() {
+                        batch.push(request);
+                    }
 
-            // Drain all pending requests from the channel
-            let mut batch = Vec::new();
-            // TODO: drain without overhead
-            while let Ok(request) = request_rx.try_recv() {
-                batch.push(request);
-            }
+                    if !batch.is_empty() {
+                        trace!(batch_size = batch.len(), "Processing batch due to timeout");
+                        pending_count.store(0, Ordering::SeqCst);
+                        Self::process_batch(&pool, batch).await;
+                    }
+                }
+                // Process if threshold reached
+                _ = async {
+                    loop {
+                        tokio::task::yield_now().await;
+                        if pending_count.load(Ordering::SeqCst) >= batch_threshold as u64 {
+                            break;
+                        }
+                    }
+                } => {
+                    // Drain all pending requests from the channel
+                    let mut batch = Vec::new();
+                    while let Ok(request) = request_rx.try_recv() {
+                        batch.push(request);
+                    }
 
-            if !batch.is_empty() {
-                trace!(batch_size = batch.len(), "Processing drained batch");
-                Self::process_batch(&pool, batch).await;
+                    if !batch.is_empty() {
+                        trace!(batch_size = batch.len(), "Processing batch due to threshold");
+                        pending_count.store(0, Ordering::SeqCst);
+                        Self::process_batch(&pool, batch).await;
+                    }
+                }
             }
         }
     }
@@ -176,8 +221,10 @@ mod tests {
 
         // Spawn task to process batch requests
         let pool_clone = pool.clone();
+        let pending_count = Arc::new(AtomicU64::new(0));
         let handle = tokio::spawn(async move {
-            TxBatcher::<_>::process_batches(pool_clone, interval, request_rx).await;
+            TxBatcher::<_>::process_batches(pool_clone, interval, 1000, pending_count, request_rx)
+                .await;
         });
 
         let mut responses = Vec::new();
@@ -209,12 +256,20 @@ mod tests {
     #[tokio::test]
     async fn test_add_transaction() {
         let pool = testing_pool();
-        let (batcher, request_rx) = TxBatcher::new(pool.clone(), Duration::from_millis(5), 100);
+        let (batcher, request_rx) = TxBatcher::new(pool.clone(), 100);
 
         // Spawn task to process batch requests
         let pool_clone = pool.clone();
+        let pending_count = batcher.pending_count();
         let handle = tokio::spawn(async move {
-            TxBatcher::<_>::process_batches(pool_clone, Duration::from_millis(5), request_rx).await;
+            TxBatcher::<_>::process_batches(
+                pool_clone,
+                Duration::from_millis(5),
+                1000,
+                pending_count,
+                request_rx,
+            )
+            .await;
         });
 
         let mut results = Vec::new();

@@ -353,17 +353,21 @@ where
 
         // Create tx pool insertion batcher if configured
         let tx_batcher = tx_batch_config.map(|config| {
-            let (batcher, request_rx) = TxBatcher::new(
-                components.pool().clone(),
-                config.interval,
-                config.channel_buffer_size,
-            );
+            let (batcher, request_rx) =
+                TxBatcher::new(components.pool().clone(), config.channel_buffer_size);
             let pool_clone = components.pool().clone();
-            let interval = config.interval;
+            let pending_count = batcher.pending_count();
             task_spawner.spawn_critical(
                 "tx-batcher",
                 Box::pin(async move {
-                    TxBatcher::process_batches(pool_clone, interval, request_rx).await;
+                    TxBatcher::process_batches(
+                        pool_clone,
+                        config.batch_interval,
+                        config.batch_threshold,
+                        pending_count,
+                        request_rx,
+                    )
+                    .await;
                 }),
             );
             batcher
