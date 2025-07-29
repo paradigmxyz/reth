@@ -97,13 +97,10 @@ where
         let (response_tx, response_rx) = oneshot::channel();
         let request = BatchTxRequest::new(pool_tx, response_tx);
 
+        self.pending_count.fetch_add(1, Ordering::SeqCst);
         self.request_tx.send(request).await.map_err(|_| {
             EthApiError::Internal(RethError::Other("Transaction batcher tx closed".into()))
         })?;
-
-        // Increment pending count after successful send
-        self.pending_count.fetch_add(1, Ordering::SeqCst);
-        dbg!(&self.pending_count.load(Ordering::SeqCst));
 
         response_rx.await.map_err(|_| {
             EthApiError::Internal(RethError::Other("Transaction response rx closed".into()))
@@ -122,7 +119,7 @@ where
 
         loop {
             tokio::select! {
-                // Check for timeout
+                // Check for batch interval timeout
                 _ = interval.tick() => {
                     // Drain all pending requests from the channel
                     let mut batch = Vec::new();
@@ -141,7 +138,6 @@ where
                     loop {
                         tokio::task::yield_now().await;
                         let count = pending_count.load(Ordering::SeqCst);
-                        dbg!(count, batch_threshold);
                         if count >= batch_threshold as u64 {
                             break;
                         }
