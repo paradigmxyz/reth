@@ -18,7 +18,7 @@ use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
 };
 use reth_tasks::{pool::BlockingTaskPool, TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{TxBatchConfig, BatchTxProcessor};
+use reth_transaction_pool::{BatchTxConfig, BatchTxProcessor};
 use std::sync::Arc;
 
 /// A helper to build the `EthApi` handler instance.
@@ -41,7 +41,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
-    tx_batch_config: Option<TxBatchConfig>,
+    tx_batch_config: Option<BatchTxConfig>,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -291,7 +291,7 @@ where
     }
 
     /// Sets the transaction batch config for batching transaction insertions.
-    pub const fn tx_batch_config(mut self, tx_batch_config: TxBatchConfig) -> Self {
+    pub const fn tx_batch_config(mut self, tx_batch_config: BatchTxConfig) -> Self {
         self.tx_batch_config = Some(tx_batch_config);
         self
     }

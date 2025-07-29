@@ -15,14 +15,14 @@ use tokio::sync::{mpsc, oneshot};
 
 /// Configuration for tx pool batch insertion
 #[derive(Debug, Clone)]
-pub struct TxBatchConfig {
+pub struct BatchTxConfig {
     /// Channel buffer size for incoming batch tx requests
     pub channel_buffer_size: usize,
     /// Maximum number of transactions to batch insert at a time
     pub max_batch_size: usize,
 }
 
-impl Default for TxBatchConfig {
+impl Default for BatchTxConfig {
     fn default() -> Self {
         Self { channel_buffer_size: 5000, max_batch_size: 3000 }
     }
@@ -30,7 +30,7 @@ impl Default for TxBatchConfig {
 
 /// Error type for transaction batching operations
 #[derive(Debug, thiserror::Error)]
-pub enum TxBatchError {
+pub enum BatchTxError {
     /// Transaction batcher channel closed
     #[error("Transaction batcher channel closed")]
     BatcherChannelClosed,
@@ -47,7 +47,7 @@ pub struct BatchTxRequest<T: PoolTransaction> {
     /// Tx to be inserted in to the pool
     pool_tx: T,
     /// Channel to send result back to caller
-    response_tx: oneshot::Sender<Result<B256, TxBatchError>>,
+    response_tx: oneshot::Sender<Result<B256, BatchTxError>>,
 }
 
 impl<T> BatchTxRequest<T>
@@ -55,7 +55,7 @@ where
     T: PoolTransaction,
 {
     /// Create a new batch transaction request
-    pub const fn new(pool_tx: T, response_tx: oneshot::Sender<Result<B256, TxBatchError>>) -> Self {
+    pub const fn new(pool_tx: T, response_tx: oneshot::Sender<Result<B256, BatchTxError>>) -> Self {
         Self { pool_tx, response_tx }
     }
 }
@@ -99,7 +99,7 @@ where
         for (response_tx, pool_result) in response_tx.into_iter().zip(pool_results) {
             let final_result = match pool_result {
                 Ok(AddedTransactionOutcome { hash, .. }) => Ok(hash),
-                Err(_) => Err(TxBatchError::BatcherChannelClosed),
+                Err(_) => Err(BatchTxError::BatcherChannelClosed),
             };
 
             let _ = response_tx.send(final_result);

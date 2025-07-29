@@ -20,7 +20,7 @@ use reth_transaction_pool::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
         PoolError, PoolErrorKind, PoolTransactionError,
     },
-    TxBatchError,
+    BatchTxError,
 };
 use revm::context_interface::result::{
     EVMError, ExecutionResult, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
@@ -171,7 +171,7 @@ pub enum EthApiError {
     },
     /// Error thrown when `BatchTxProcessor` fails
     #[error(transparent)]
-    TxBatchError(#[from] TxBatchError),
+    BatchTxError(#[from] BatchTxError),
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -285,7 +285,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
-            EthApiError::TxBatchError(err) => internal_rpc_err(err.to_string()),
+            EthApiError::BatchTxError(err) => internal_rpc_err(err.to_string()),
         }
     }
 }
