@@ -1,10 +1,10 @@
 //! The entire implementation of the namespace is quite large, hence it is divided across several
 //! files.
 
+pub mod batcher;
 pub mod signer;
 pub mod sync_listener;
 pub mod types;
-
 mod block;
 mod call;
 mod fees;
