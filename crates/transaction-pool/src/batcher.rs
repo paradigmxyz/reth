@@ -1,14 +1,11 @@
-//! Transaction batching for high-throughput RPC scenarios
+//! Transaction batching for high-throughput scenarios
 //!
 //! This module provides transaction batching to reduce lock contention when processing
-//! many concurrent `send_raw_transaction` calls.
+//! many concurrent transaction insertions.
 
+use crate::{AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool};
 use alloy_primitives::B256;
 use reth_errors::RethError;
-use reth_rpc_eth_types::EthApiError;
-use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
-};
 use std::{
     sync::atomic::{AtomicU64, Ordering},
     sync::Arc,
@@ -38,15 +35,26 @@ impl Default for TxBatchConfig {
     }
 }
 
+/// Error type for transaction batching operations
+#[derive(Debug, thiserror::Error)]
+pub enum TxBatchError {
+    /// Transaction batcher channel closed
+    #[error("Transaction batcher channel closed")]
+    ChannelClosed,
+    /// Transaction response channel closed
+    #[error("Transaction response channel closed")]
+    ResponseChannelClosed,
+}
+
 /// A single batch transaction request
-///  All transactions processed through the batcher are considered local
+/// All transactions processed through the batcher are considered local
 /// transactions (`TransactionOrigin::Local`) when inserted into the pool.
 #[derive(Debug)]
 pub struct BatchTxRequest<T: PoolTransaction> {
     /// Tx to be inserted in to the pool
     pool_tx: T,
     /// Channel to send result back to caller
-    response_tx: oneshot::Sender<Result<B256, EthApiError>>,
+    response_tx: oneshot::Sender<Result<B256, TxBatchError>>,
 }
 
 impl<T> BatchTxRequest<T>
@@ -54,7 +62,7 @@ where
     T: PoolTransaction,
 {
     /// Create a new batch transaction request
-    pub const fn new(pool_tx: T, response_tx: oneshot::Sender<Result<B256, EthApiError>>) -> Self {
+    pub const fn new(pool_tx: T, response_tx: oneshot::Sender<Result<B256, TxBatchError>>) -> Self {
         Self { pool_tx, response_tx }
     }
 }
@@ -93,18 +101,14 @@ where
     }
 
     /// Add transaction to the pool via batching
-    pub async fn add_transaction(&self, pool_tx: Pool::Transaction) -> Result<B256, EthApiError> {
+    pub async fn add_transaction(&self, pool_tx: Pool::Transaction) -> Result<B256, TxBatchError> {
         let (response_tx, response_rx) = oneshot::channel();
         let request = BatchTxRequest::new(pool_tx, response_tx);
 
         self.pending_count.fetch_add(1, Ordering::SeqCst);
-        self.request_tx.send(request).await.map_err(|_| {
-            EthApiError::Internal(RethError::Other("Transaction batcher tx closed".into()))
-        })?;
+        self.request_tx.send(request).await.map_err(|_| TxBatchError::ChannelClosed)?;
 
-        response_rx.await.map_err(|_| {
-            EthApiError::Internal(RethError::Other("Transaction response rx closed".into()))
-        })?
+        response_rx.await.map_err(|_| TxBatchError::ResponseChannelClosed)?
     }
 
     /// Process batch transaction insertions
@@ -162,7 +166,7 @@ where
     /// Process a batch of transaction requests, grouped by origin
     async fn process_batch(pool: &Pool, batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         let batch_size = batch.len();
-        trace!(target = "", batch_size, "Processing batch");
+        trace!(target: "reth::txpool::batch", batch_size, "Processing transaction batch");
 
         // NOTE: remove clone
         let pool_transactions = batch.iter().map(|req| req.pool_tx.clone()).collect();
@@ -171,10 +175,10 @@ where
         for (request, pool_result) in batch.into_iter().zip(pool_results) {
             let final_result = match pool_result {
                 Ok(AddedTransactionOutcome { hash, .. }) => Ok(hash),
-                Err(e) => Err(EthApiError::from(e)),
+                Err(_) => Err(TxBatchError::ChannelClosed), // Convert pool error to batch error
             };
 
-            request.response_tx.send(final_result).expect("TODO: handle errror");
+            let _ = request.response_tx.send(final_result);
         }
     }
 }
@@ -182,8 +186,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::{testing_pool, MockTransaction};
     use futures::stream::{FuturesUnordered, StreamExt};
-    use reth_transaction_pool::test_utils::{testing_pool, MockTransaction};
     use std::time::Duration;
     use tokio::time::timeout;
 
@@ -193,7 +197,7 @@ mod tests {
 
         let mut batch_requests = Vec::new();
         let mut responses = Vec::new();
-        //
+
         for i in 0..100 {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
@@ -313,7 +317,6 @@ mod tests {
 
         let mut futures = FuturesUnordered::new();
         for i in 0..batch_threshold {
-            dbg!(i);
             let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
             let tx_fut = batcher.add_transaction(tx);
             futures.push(tx_fut);
@@ -329,3 +332,4 @@ mod tests {
         handle.abort();
     }
 }
+

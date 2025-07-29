@@ -5,6 +5,7 @@ use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
 use reth_cli_util::parse_duration_from_secs_or_ms;
+use reth_transaction_pool::TxBatchConfig;
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
     maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
@@ -132,6 +133,22 @@ pub struct TxPoolArgs {
         conflicts_with = "transactions_backup_path"
     )]
     pub disable_transactions_backup: bool,
+
+    /// Enable batch processing for transaction pool insertions.
+    #[arg(long = "txpool.enable-batching")]
+    pub enable_batching: bool,
+
+    /// Interval between processing batches in milliseconds.
+    #[arg(long = "txpool.batch-interval", default_value_t = 5)]
+    pub batch_interval_ms: u64,
+
+    /// Channel buffer size for incoming batch transaction requests.
+    #[arg(long = "txpool.batch-buffer-size", default_value_t = 5000)]
+    pub batch_buffer_size: usize,
+
+    /// Number of transactions that triggers immediate batch processing.
+    #[arg(long = "txpool.batch-threshold", default_value_t = 1000)]
+    pub batch_threshold: usize,
 }
 
 impl Default for TxPoolArgs {
@@ -165,6 +182,10 @@ impl Default for TxPoolArgs {
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             transactions_backup_path: None,
             disable_transactions_backup: false,
+            enable_batching: false,
+            batch_interval_ms: 5,
+            batch_buffer_size: 5000,
+            batch_threshold: 1000,
         }
     }
 }
@@ -207,6 +228,19 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             new_tx_listener_buffer_size: self.new_tx_listener_buffer_size,
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
+        }
+    }
+
+    /// Returns transaction batcher configuration if enabled.
+    fn tx_batch_config(&self) -> Option<TxBatchConfig> {
+        if self.enable_batching {
+            Some(TxBatchConfig {
+                batch_interval: Duration::from_millis(self.batch_interval_ms),
+                channel_buffer_size: self.batch_buffer_size,
+                batch_threshold: self.batch_threshold,
+            })
+        } else {
+            None
         }
     }
 }
