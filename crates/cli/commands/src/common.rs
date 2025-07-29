@@ -143,7 +143,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         {
             if factory.db_ref().is_read_only()? {
                 warn!(target: "reth::cli", ?unwind_target, "Inconsistent storage. Restart node to heal.");
-                return Ok(factory)
+                return Ok(factory);
             }
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
@@ -215,6 +215,17 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
     Arc<DatabaseEnv>,
     BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
 >;
+
+/// Trait for block headers that can be modified through CLI operations.
+pub trait CliHeader {
+    fn set_number(&mut self, number: u64);
+}
+
+impl CliHeader for alloy_consensus::Header {
+    fn set_number(&mut self, number: u64) {
+        self.number = number;
+    }
+}
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.

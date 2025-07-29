@@ -8245,7 +8245,6 @@ dependencies = [
 name = "reth-ethereum-cli"
 version = "1.6.0"
 dependencies = [
- "alloy-consensus",
  "clap",
  "eyre",
  "reth-chainspec",

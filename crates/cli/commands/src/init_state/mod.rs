@@ -1,7 +1,7 @@
 //! Command that initializes the node from a genesis file.
 
-use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
-use alloy_consensus::{BlockHeader as AlloyBlockHeader, Header};
+use crate::common::{AccessRights, CliHeader, CliNodeTypes, Environment, EnvironmentArgs};
+use alloy_consensus::BlockHeader as AlloyBlockHeader;
 use alloy_primitives::{B256, U256};
 use clap::Parser;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
@@ -72,7 +72,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
     where
         N: CliNodeTypes<
             ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<BlockHeader: BlockHeader + From<Header>>,
+            Primitives: NodePrimitives<BlockHeader: BlockHeader + CliHeader>,
         >,
     {
         info!(target: "reth::cli", "Reth init-state starting");
@@ -106,8 +106,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
                     SealedHeader::new(header, header_hash),
                     total_difficulty,
                     |number| {
-                        let header = Header { number, ..Default::default() };
-                        <<N::Primitives as NodePrimitives>::BlockHeader>::from(header)
+                        let mut header =
+                            <<N::Primitives as NodePrimitives>::BlockHeader>::default();
+                        header.set_number(number);
+                        header
                     },
                 )?;
 
