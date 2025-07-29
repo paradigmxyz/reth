@@ -64,15 +64,17 @@ pub const NUM_LOWER_SUBTRIES: usize = 16usize.pow(UPPER_TRIE_MAX_DEPTH as u32);
 ///
 /// ## Leaf Operations
 ///
-/// **Update**: When updating a leaf, the `prefix_set` is marked to track the change. The value is
-/// stored in the appropriate subtrie's values map. If the leaf is new, the trie structure is
-/// updated by walking to the leaf from the root, creating necessary intermediate branch nodes.
+/// **Update**: When updating a leaf, the new value is stored in the appropriate subtrie's values
+/// map. If the leaf is new, the trie structure is updated by walking to the leaf from the root,
+/// creating necessary intermediate branch nodes.
 ///
 /// **Removal**: Leaf removal may require parent node modifications. The algorithm walks up the
 /// trie, removing nodes that become empty and converting single-child branches to extensions.
 ///
 /// During leaf operations the overall structure of the trie may change, causing nodes to be moved
 /// from the upper to lower trie or vice-versa.
+///
+/// The `prefix_set` is modified during both leaf updates and removals to track changed leaf paths.
 ///
 /// ## Root Hash Calculation
 ///
