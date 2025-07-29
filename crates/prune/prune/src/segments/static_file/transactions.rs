@@ -29,10 +29,10 @@ impl<N> Transactions<N> {
 
 impl<Provider> Segment<Provider> for Transactions<Provider::Primitives>
 where
-    Provider: DBProvider<Tx: DbTxMut>
+    Provider: StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value>>
+        + DBProvider<Tx: DbTxMut>
         + TransactionsProvider
-        + BlockReader
-        + StaticFileProviderFactory<Primitives: NodePrimitives<SignedTx: Value>>,
+        + BlockReader,
 {
     fn segment(&self) -> PruneSegment {
         PruneSegment::Transactions
