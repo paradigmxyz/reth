@@ -26,7 +26,6 @@ pub(crate) struct HardforkConfig {
     pub granite_time: Option<u64>,
     pub holocene_time: Option<u64>,
     pub isthmus_time: Option<u64>,
-    pub interop_time: Option<u64>,
     pub jovian_time: Option<u64>,
 }
 
@@ -59,8 +58,6 @@ pub(crate) struct ChainConfigExtraFields {
     pub holocene_time: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub isthmus_time: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub interop_time: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub jovian_time: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -143,7 +140,6 @@ pub(crate) fn to_genesis_chain_config(chain_config: &ChainMetadata) -> ChainConf
         granite_time: chain_config.hardforks.granite_time,
         holocene_time: chain_config.hardforks.holocene_time,
         isthmus_time: chain_config.hardforks.isthmus_time,
-        interop_time: chain_config.hardforks.interop_time,
         jovian_time: chain_config.hardforks.jovian_time,
         optimism: chain_config.optimism.as_ref().map(|o| o.into()),
     };
@@ -206,7 +202,6 @@ mod tests {
             granite_time: Some(1726070401),
             holocene_time: Some(1736445601),
             isthmus_time: Some(1746806401),
-            interop_time: None,
             jovian_time: None,
             optimism: Option::from(ChainConfigExtraFieldsOptimism {
                 eip1559_elasticity: 6,
