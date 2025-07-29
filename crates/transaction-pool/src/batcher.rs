@@ -18,13 +18,13 @@ use tokio::sync::{mpsc, oneshot};
 pub struct TxBatchConfig {
     /// Channel buffer size for incoming batch tx requests
     pub channel_buffer_size: usize,
-    /// Number of transactions that triggers immediate batch processing
-    pub batch_threshold: usize,
+    /// Maximum number of transactions to batch insert at a time
+    pub max_batch_size: usize,
 }
 
 impl Default for TxBatchConfig {
     fn default() -> Self {
-        Self { channel_buffer_size: 5000, batch_threshold: 1000 }
+        Self { channel_buffer_size: 5000, max_batch_size: 3000 }
     }
 }
 
@@ -237,17 +237,18 @@ mod tests {
         handle.abort();
     }
 
+    // TODO: update
     #[tokio::test]
-    async fn test_batch_threshold() {
+    async fn test_max_batch_size() {
         let pool = testing_pool();
-        let batch_threshold = 10;
-        let (processor, request_tx) = TxBatchProcessor::new(pool.clone(), batch_threshold, 100);
+        let max_batch_size = 10;
+        let (processor, request_tx) = TxBatchProcessor::new(pool.clone(), max_batch_size, 100);
 
         // Spawn batch processor with threshold
         let handle = tokio::spawn(processor);
 
         let mut futures = FuturesUnordered::new();
-        for i in 0..batch_threshold {
+        for i in 0..max_batch_size {
             let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             let request = BatchTxRequest::new(tx, response_tx);
@@ -260,7 +261,7 @@ mod tests {
             futures.push(tx_fut);
         }
 
-        while let Some(result) = timeout(Duration::from_millis(50), futures.next())
+        while let Some(result) = timeout(Duration::from_millis(5), futures.next())
             .await
             .expect("Timeout waiting for transaction result")
         {

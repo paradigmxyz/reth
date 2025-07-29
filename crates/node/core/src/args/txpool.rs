@@ -143,8 +143,8 @@ pub struct TxPoolArgs {
     pub batch_buffer_size: usize,
 
     /// Number of transactions that triggers immediate batch processing.
-    #[arg(long = "txpool.batch-threshold", default_value_t = 1000)]
-    pub batch_threshold: usize,
+    #[arg(long = "txpool.max-batch-size", default_value_t = 3000)]
+    pub max_batch_size: usize,
 }
 
 impl Default for TxPoolArgs {
@@ -180,7 +180,7 @@ impl Default for TxPoolArgs {
             disable_transactions_backup: false,
             enable_batching: false,
             batch_buffer_size: 5000,
-            batch_threshold: 1000,
+            max_batch_size: 3000,
         }
     }
 }
@@ -228,9 +228,9 @@ impl RethTransactionPoolConfig for TxPoolArgs {
 
     /// Returns transaction batcher configuration if enabled.
     fn tx_batch_config(&self) -> Option<TxBatchConfig> {
-        self.enable_batching.then(|| TxBatchConfig {
+        self.enable_batching.then_some(TxBatchConfig {
             channel_buffer_size: self.batch_buffer_size,
-            batch_threshold: self.batch_threshold,
+            max_batch_size: self.max_batch_size,
         })
     }
 }
