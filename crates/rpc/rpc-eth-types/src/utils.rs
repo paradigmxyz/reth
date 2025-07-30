@@ -97,4 +97,16 @@ mod tests {
             binary_search(1, 10, |mid| Box::pin(async move { Ok(mid >= 11) })).await;
         assert_eq!(num, Ok(10));
     }
+
+    #[test]
+    fn test_checked_blob_gas_used_ratio() {
+        // No blob gas used, max blob gas per block is 0
+        assert_eq!(checked_blob_gas_used_ratio(0, 0), 0.0);
+        // Blob gas used is zero, max blob gas per block is non-zero
+        assert_eq!(checked_blob_gas_used_ratio(0, 100), 0.0);
+        // Blob gas used is non-zero, max blob gas per block is non-zero
+        assert_eq!(checked_blob_gas_used_ratio(50, 100), 0.5);
+        // Blob gas used is non-zero and equal to max blob gas per block
+        assert_eq!(checked_blob_gas_used_ratio(100, 100), 1.0);
+    }
 }

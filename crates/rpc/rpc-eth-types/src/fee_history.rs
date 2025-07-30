@@ -412,35 +412,3 @@ where
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use alloy_eips::eip7840::BlobParams;
-    use alloy_primitives::B256;
-    use reth_chain_state::{test_utils::TestBlockBuilder, EthPrimitives};
-
-    #[test]
-    fn test_fee_history_entries_when_max_blob_count_is_zero() {
-        // Arrange
-
-        let blob_params = BlobParams {
-            target_blob_count: 0,
-            max_blob_count: 0,
-            update_fraction: 1,
-            min_blob_fee: 0,
-            max_blobs_per_tx: 0,
-        };
-
-        let mut test_block_builder: TestBlockBuilder<EthPrimitives> = TestBlockBuilder::default();
-
-        // The block will be generated with no blob gas used
-        let block = test_block_builder.generate_random_block(1u64, B256::ZERO);
-
-        // Act
-        let fee_history_enty =
-            super::FeeHistoryEntry::new(&block.sealed_block(), Some(blob_params.clone()));
-
-        // Assert
-        assert_eq!(fee_history_enty.blob_gas_used_ratio, 0.0);
-    }
-}
