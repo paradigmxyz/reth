@@ -248,7 +248,7 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    EV: EngineApiValidatorBuilder<N> + Unpin,
+    EV: EngineApiValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
@@ -293,7 +293,7 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    EV: EngineApiValidatorBuilder<N> + Unpin,
+    EV: EngineApiValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
@@ -305,8 +305,7 @@ where
     }
 }
 
-impl<N, EthB, EV, EB, RpcMiddleware> EngineValidatorAddOn<N>
-    for EthereumAddOns<N, EthB, EV, EB, RpcMiddleware>
+impl<N, EthB, EV, EB> EngineValidatorAddOn<N> for EthereumAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -321,7 +320,6 @@ where
     EB: EngineApiBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
-    RpcMiddleware: RethRpcMiddleware,
 {
     type ValidatorBuilder = EV;
 
