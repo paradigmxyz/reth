@@ -415,14 +415,15 @@ where
         let max_tx_gas_used = match receipts.len() {
             // If no receipts, return the default suggestion
             0 => return (Ok(suggestion), is_at_capacity),
-            // If only one receipt, use its cumulative gas (which equals the gas used by that transaction)
+            // If only one receipt, use its cumulative gas (which equals the gas used by that
+            // transaction)
             1 => receipts[0].cumulative_gas_used(),
             // If multiple receipts, calculate individual transaction gas usage
             _ => receipts
                 // get the gas used by each transaction in the block, by subtracting the
-                // cumulative gas used of the previous transaction from the cumulative gas used of the
-                // current transaction. This is because there is no gas_used() method on the Receipt
-                // trait.
+                // cumulative gas used of the previous transaction from the cumulative gas used of
+                // the current transaction. This is because there is no gas_used()
+                // method on the Receipt trait.
                 .windows(2)
                 .map(|window| {
                     let prev = window[0].cumulative_gas_used();
@@ -430,7 +431,7 @@ where
                     curr - prev
                 })
                 .max()
-                .unwrap_or_else(|| receipts[0].cumulative_gas_used())
+                .expect("len >= 2 guarantees at least one window"),
         };
 
         let transactions = block.transactions_recovered();
