@@ -2,7 +2,8 @@
 //!
 //! # Example
 //!
-//! Builds offline [`TraceApi`] with EVM and read-only database.
+//! Builds offline [`TraceApi`](reth_rpc::TraceApi) with only EVM and database. This can be useful
+//! for example when downloading a state snapshot (pre-synced node) from some mirror.
 //!
 //! ```rust
 //! use alloy_rpc_types_eth::BlockId;
@@ -27,7 +28,7 @@
 //!
 //! #[tokio::main]
 //! async fn main() {
-//!     // build core node with RO DB, with all components disabled except EVM
+//!     // build core node with all components disabled except EVM and state
 //!     let sepolia = NodeConfig::new(OP_SEPOLIA.clone());
 //!     let db = create_test_rw_db_with_path(sepolia.datadir());
 //!     let tasks = TaskManager::current();
