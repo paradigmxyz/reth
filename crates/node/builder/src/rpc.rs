@@ -503,7 +503,7 @@ where
         }
     }
 
-    /// Maps the [`EngineValidatorBuilder`] builder type.
+    /// Maps the [`EngineApiValidatorBuilder`] builder type.
     pub fn with_engine_validator<T>(
         self,
         engine_validator_builder: T,
@@ -1042,8 +1042,7 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
 /// Builder trait for creating validators specifically for the Engine API.
 ///
 /// This trait is responsible for building validators that the Engine API will use
-/// to validate payloads. Unlike the general `EngineValidatorBuilder`, this is
-/// specifically designed for Engine API validation requirements.
+/// to validate payloads.
 pub trait EngineApiValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The validator type that will be used by the Engine API.
     type Validator: PayloadValidator<
