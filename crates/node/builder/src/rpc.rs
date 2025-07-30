@@ -1096,10 +1096,7 @@ pub trait EngineApiValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clo
 impl<Node, F, Fut, Validator> EngineApiValidatorBuilder<Node> for F
 where
     Node: FullNodeComponents,
-    Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
-        + Clone
-        + Unpin
-        + 'static,
+    Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>,
     F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Sync + Clone,
     Fut: Future<Output = eyre::Result<Validator>> + Send,
 {
