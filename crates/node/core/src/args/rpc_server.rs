@@ -220,8 +220,11 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
     pub rpc_proof_permits: usize,
 
-    /// Pending block configuration.
-    #[arg(long = "rpc.pending-block", default_value = "full")]
+    /// Configures the pending block behavior for RPC responses.
+    ///
+    /// Options: full (include all transactions), empty (header only), none (disable pending
+    /// blocks).
+    #[arg(long = "rpc.pending-block", default_value = "full", value_name = "CONFIG")]
     pub rpc_pending_block: PendingBlockConfig,
 
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block

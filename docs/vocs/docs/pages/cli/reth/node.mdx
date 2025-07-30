@@ -395,8 +395,10 @@ RPC:
 
           [default: 25]
 
-      --rpc.pending-block <PENDING_BLOCK>
-          Pending block configuration
+      --rpc.pending-block <CONFIG>
+          Configures the pending block behavior for RPC responses.
+
+          Options: full (include all transactions), empty (header only), none (disable pending blocks).
 
           [default: full]
 
