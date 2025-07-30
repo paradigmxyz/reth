@@ -15,6 +15,7 @@ use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
+use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
@@ -565,26 +566,6 @@ where
             parent_hash: Default::default(),
         }
     }
-}
-
-/// Iterator over executable transactions.
-pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
-    ExactSizeIterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
-{
-    /// The executable transaction type iterator yields.
-    type Tx: OwnedExecutableTxFor<Evm>;
-    /// Errors that may occur while recovering or decoding transactions.
-    type Error: core::error::Error + Send + Sync + 'static;
-}
-
-impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
-where
-    Tx: OwnedExecutableTxFor<Evm>,
-    Err: core::error::Error + Send + Sync + 'static,
-    T: ExactSizeIterator<Item = Result<Tx, Err>> + Send + 'static,
-{
-    type Tx = Tx;
-    type Error = Err;
 }
 
 #[cfg(test)]

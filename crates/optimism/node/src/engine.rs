@@ -7,13 +7,15 @@ use op_alloy_rpc_types_engine::{
 };
 use reth_consensus::ConsensusError;
 use reth_engine_primitives::EngineValidator;
+use reth_evm::ConfigureEvm;
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
         EngineObjectValidationError, MessageValidationKind, NewPayloadError, PayloadOrAttributes,
         PayloadTypes, VersionSpecificValidationError,
     },
-    validate_version_specific_fields, BuiltPayload, EngineTypes, NodePrimitives, PayloadValidator,
+    validate_version_specific_fields, BuiltPayload, EngineTypes, EvmPayloadValidator,
+    NodePrimitives, PayloadValidator,
 };
 use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::OpHardforks;
@@ -159,6 +161,17 @@ where
 
         Ok(())
     }
+}
+
+impl<P, Tx, ChainSpec, Types, Evm> EvmPayloadValidator<Types, Evm>
+    for OpEngineValidator<P, Tx, ChainSpec>
+where
+    P: StateProviderFactory + Unpin + 'static,
+    Tx: SignedTransaction + Unpin + 'static,
+    ChainSpec: OpHardforks + Send + Sync + 'static,
+    Types: PayloadTypes<ExecutionData = OpExecutionData>,
+    Evm: ConfigureEvm<Primitives: NodePrimitives<Block = alloy_consensus::Block<Tx>>>,
+{
 }
 
 impl<Types, P, Tx, ChainSpec> EngineValidator<Types> for OpEngineValidator<P, Tx, ChainSpec>

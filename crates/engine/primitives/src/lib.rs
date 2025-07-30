@@ -11,13 +11,17 @@
 
 extern crate alloc;
 
+use core::convert::Infallible;
+
 use alloy_consensus::BlockHeader;
 use reth_errors::ConsensusError;
+use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock};
+use reth_primitives_traits::{Block, BlockTy, RecoveredBlock, SealedBlock};
+use reth_trie::iter::Either;
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -169,5 +173,89 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
             return Err(InvalidPayloadAttributesError::InvalidTimestamp);
         }
         Ok(())
+    }
+}
+
+/// An EVM-aware [`PayloadValidator`].
+pub trait EvmPayloadValidator<T: PayloadTypes, Evm: ConfigureEvm>:
+    PayloadValidator<T, Block = BlockTy<Evm::Primitives>>
+{
+    /// Returns an [`EvmEnvFor`] for the given payload.
+    fn evm_env_for_payload(
+        &self,
+        payload: &T::ExecutionData,
+        evm: &Evm,
+    ) -> Result<EvmEnvFor<Evm>, NewPayloadError> {
+        let block = self.ensure_well_formed_payload(payload.clone())?;
+        Ok(evm.evm_env(block.header()))
+    }
+
+    /// Returns an [`ExecutableTxIterator`] for the given payload.
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &T::ExecutionData,
+    ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError> {
+        Ok(self
+            .ensure_well_formed_payload(payload.clone())?
+            .clone_transactions_recovered()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(Ok::<_, Infallible>))
+    }
+
+    /// Returns an [`ExecutionCtxProvider`] for the given payload.
+    fn execution_ctx_for_payload<'a>(
+        &self,
+        payload: &'a T::ExecutionData,
+    ) -> Result<impl ExecutionCtxProvider<Evm> + 'a, NewPayloadError> {
+        Ok(self.ensure_well_formed_payload(payload.clone())?.into_sealed_block())
+    }
+}
+
+/// Iterator over executable transactions.
+pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
+    ExactSizeIterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
+{
+    /// The executable transaction type iterator yields.
+    type Tx: OwnedExecutableTxFor<Evm>;
+    /// Errors that may occur while recovering or decoding transactions.
+    type Error: core::error::Error + Send + Sync + 'static;
+}
+
+impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
+where
+    Tx: OwnedExecutableTxFor<Evm>,
+    Err: core::error::Error + Send + Sync + 'static,
+    T: ExactSizeIterator<Item = Result<Tx, Err>> + Send + 'static,
+{
+    type Tx = Tx;
+    type Error = Err;
+}
+
+/// A helper trait marking a type that can produce [`ExecutionCtxFor`] for any lifetime.
+#[auto_impl::auto_impl(&)]
+pub trait ExecutionCtxProvider<Evm: ConfigureEvm> {
+    /// Returns an [`ExecutionCtxFor`] for the given [`ConfigureEvm`].
+    fn get_ctx(&self, evm: &Evm) -> ExecutionCtxFor<'_, Evm>;
+}
+
+impl<Evm: ConfigureEvm> ExecutionCtxProvider<Evm> for SealedBlock<BlockTy<Evm::Primitives>> {
+    /// Returns an [`ExecutionCtxFor`] for the given [`ConfigureEvm`].
+    fn get_ctx(&self, evm: &Evm) -> ExecutionCtxFor<'_, Evm> {
+        evm.context_for_block(self)
+    }
+}
+
+impl<L, R, Evm> ExecutionCtxProvider<Evm> for Either<L, R>
+where
+    Evm: ConfigureEvm,
+    L: ExecutionCtxProvider<Evm>,
+    R: ExecutionCtxProvider<Evm>,
+{
+    fn get_ctx(&self, evm: &Evm) -> ExecutionCtxFor<'_, Evm> {
+        match self {
+            Self::Left(l) => l.get_ctx(evm),
+            Self::Right(r) => r.get_ctx(evm),
+        }
     }
 }

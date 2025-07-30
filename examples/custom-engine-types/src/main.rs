@@ -35,8 +35,9 @@ use reth_ethereum::{
         api::{
             payload::{EngineApiMessageVersion, EngineObjectValidationError, PayloadOrAttributes},
             validate_version_specific_fields, AddOnsContext, EngineTypes, EngineValidator,
-            FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError,
-            NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
+            EvmPayloadValidator, FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError,
+            NewPayloadError, NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes,
+            PayloadValidator,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
@@ -211,6 +212,8 @@ impl PayloadValidator<CustomEngineTypes> for CustomEngineValidator {
         Ok(())
     }
 }
+
+impl EvmPayloadValidator<CustomEngineTypes, EthEvmConfig> for CustomEngineValidator {}
 
 impl EngineValidator<CustomEngineTypes> for CustomEngineValidator {
     fn validate_version_specific_fields(

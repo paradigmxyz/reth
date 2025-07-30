@@ -19,7 +19,7 @@ use reth_evm::{
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
-    AddOnsContext, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
+    AddOnsContext, EvmPayloadValidator, FullNodeComponents, HeaderTy, NodeAddOns, NodePrimitives,
     PayloadAttributesBuilder, PrimitivesTy, TxTy,
 };
 use reth_node_builder::{
@@ -316,7 +316,10 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineValidatorBuilder<
+        N,
+        Validator: EvmPayloadValidator<<N::Types as NodeTypes>::Payload, N::Evm>,
+    >,
     EB: EngineApiBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,

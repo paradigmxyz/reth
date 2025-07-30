@@ -9,9 +9,8 @@ use crate::tree::{
     persistence_state::CurrentPersistenceAction,
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
-    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutableTxIterator, ExecutionEnv,
-    PayloadHandle, PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase,
-    TreeConfig,
+    ConsistentDbView, EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle,
+    PersistenceState, PersistingKind, StateProviderBuilder, StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
@@ -21,18 +20,19 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{ExecutionPayload, InvalidBlockHook, PayloadValidator};
+use reth_engine_primitives::{
+    EvmPayloadValidator, ExecutableTxIterator, ExecutionCtxProvider, ExecutionPayload,
+    InvalidBlockHook, PayloadValidator,
+};
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    block::BlockExecutor, execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
-    SealedHeader,
+    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     BlockExecutionOutput, BlockNumReader, BlockReader, DBProvider, DatabaseProviderFactory,
@@ -43,7 +43,7 @@ use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_db::{DatabaseHashedPostState, StateCommitment};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, convert::Infallible, sync::Arc, time::Instant};
+use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, error, info, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -268,7 +268,7 @@ where
     pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &'a BlockOrPayload<T>,
-    ) -> Result<impl ExecutionCtxProvider<Evm> + 'a, NewPayloadError>
+    ) -> Result<impl ExecutionCtxProvider<Evm> + 'a + use<'a, '_, T, N, P, Evm, V>, NewPayloadError>
     where
         V: EvmPayloadValidator<T, Evm>,
     {
@@ -439,8 +439,12 @@ where
 
         let (output, execution_finish) = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let (output, execution_finish) =
-                ensure_ok_convert!(self.execute_block(&state_provider, env, execution_ctx, &mut handle));
+            let (output, execution_finish) = ensure_ok_convert!(self.execute_block(
+                &state_provider,
+                env,
+                execution_ctx,
+                &mut handle
+            ));
             state_provider.record_total_latency();
             (output, execution_finish)
         } else {
@@ -996,7 +1000,7 @@ where
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
         let block = self.validator.ensure_well_formed_payload(payload)?;
-        Ok(EngineValidator::<Types>::validate_block(self, block, ctx)?)
+        EngineValidator::<Types>::validate_block(self, block, ctx)
     }
 
     fn validate_block(
@@ -1021,89 +1025,32 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     /// Returns the hash of the block.
     pub fn hash(&self) -> B256 {
         match self {
-            BlockOrPayload::Payload(payload) => payload.block_hash(),
-            BlockOrPayload::Block(block) => block.hash(),
+            Self::Payload(payload) => payload.block_hash(),
+            Self::Block(block) => block.hash(),
         }
     }
 
     /// Returns the number and hash of the block.
     pub fn num_hash(&self) -> NumHash {
         match self {
-            BlockOrPayload::Payload(payload) => payload.num_hash(),
-            BlockOrPayload::Block(block) => block.num_hash(),
+            Self::Payload(payload) => payload.num_hash(),
+            Self::Block(block) => block.num_hash(),
         }
     }
 
     /// Returns the parent hash of the block.
     pub fn parent_hash(&self) -> B256 {
         match self {
-            BlockOrPayload::Payload(payload) => payload.parent_hash(),
-            BlockOrPayload::Block(block) => block.parent_hash(),
+            Self::Payload(payload) => payload.parent_hash(),
+            Self::Block(block) => block.parent_hash(),
         }
     }
 
     /// Returns [`BlockWithParent`] for the block.
     pub fn block_with_parent(&self) -> BlockWithParent {
         match self {
-            BlockOrPayload::Payload(payload) => payload.block_with_parent(),
-            BlockOrPayload::Block(block) => block.block_with_parent(),
-        }
-    }
-}
-
-pub trait EvmPayloadValidator<T: PayloadTypes, Evm: ConfigureEvm>:
-    PayloadValidator<T, Block = BlockTy<Evm::Primitives>>
-{
-    fn evm_env_for_payload(
-        &self,
-        payload: &T::ExecutionData,
-        evm: &Evm,
-    ) -> Result<EvmEnvFor<Evm>, NewPayloadError> {
-        let block = self.ensure_well_formed_payload(payload.clone())?;
-        Ok(evm.evm_env(block.header()))
-    }
-
-    fn tx_iterator_for_payload(
-        &self,
-        payload: &T::ExecutionData,
-    ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError> {
-        Ok(self
-            .ensure_well_formed_payload(payload.clone())?
-            .clone_transactions_recovered()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(Ok::<_, Infallible>))
-    }
-
-    fn execution_ctx_for_payload<'s, 'a>(
-        &'s self,
-        payload: &'a T::ExecutionData,
-    ) -> Result<impl ExecutionCtxProvider<Evm> + 'a, NewPayloadError> {
-        Ok(self.ensure_well_formed_payload(payload.clone())?.into_sealed_block())
-    }
-}
-
-#[auto_impl::auto_impl(&)]
-pub trait ExecutionCtxProvider<Evm: ConfigureEvm> {
-    fn get_ctx<'a>(&'a self, evm: &'a Evm) -> ExecutionCtxFor<'a, Evm>;
-}
-
-impl<Evm: ConfigureEvm> ExecutionCtxProvider<Evm> for SealedBlock<BlockTy<Evm::Primitives>> {
-    fn get_ctx<'a>(&'a self, evm: &'a Evm) -> ExecutionCtxFor<'a, Evm> {
-        evm.context_for_block(self)
-    }
-}
-
-impl<L, R, Evm> ExecutionCtxProvider<Evm> for Either<L, R>
-where
-    Evm: ConfigureEvm,
-    L: ExecutionCtxProvider<Evm>,
-    R: ExecutionCtxProvider<Evm>,
-{
-    fn get_ctx<'a>(&'a self, evm: &'a Evm) -> ExecutionCtxFor<'a, Evm> {
-        match self {
-            Either::Left(l) => l.get_ctx(evm),
-            Either::Right(r) => r.get_ctx(evm),
+            Self::Payload(payload) => payload.block_with_parent(),
+            Self::Block(block) => block.block_with_parent(),
         }
     }
 }

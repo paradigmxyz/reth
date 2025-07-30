@@ -416,18 +416,18 @@ mod tests {
         tree_state.insert_executed(blocks[0].clone());
         assert!(tree_state.is_descendant(
             blocks[0].recovered_block().num_hash(),
-            blocks[1].recovered_block().header()
+            blocks[1].recovered_block().block_with_parent()
         ));
 
         tree_state.insert_executed(blocks[1].clone());
 
         assert!(tree_state.is_descendant(
             blocks[0].recovered_block().num_hash(),
-            blocks[2].recovered_block().header()
+            blocks[2].recovered_block().block_with_parent()
         ));
         assert!(tree_state.is_descendant(
             blocks[1].recovered_block().num_hash(),
-            blocks[2].recovered_block().header()
+            blocks[2].recovered_block().block_with_parent()
         ));
     }
 

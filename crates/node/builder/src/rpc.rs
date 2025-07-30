@@ -10,8 +10,8 @@ use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy,
+    AddOnsContext, BlockTy, EngineTypes, EngineValidator, EvmPayloadValidator, FullNodeComponents,
+    FullNodeTypes, NodeAddOns, NodeTypes, PayloadTypes, PrimitivesTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -990,9 +990,15 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
 /// Helper trait that provides the validator for the engine API
 pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     /// The Validator type to use for the engine API.
+<<<<<<< HEAD
     type Validator: EngineValidator<<Node::Types as NodeTypes>::Payload>
         + PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
         + Clone;
+=======
+    type Validator: EngineValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+        + Clone
+        + EvmPayloadValidator<<Node::Types as NodeTypes>::Payload, Node::Evm>;
+>>>>>>> 6e24e6c04 (wip)
 
     /// Creates the engine validator for an engine API based node.
     fn engine_validator(
@@ -1005,7 +1011,10 @@ impl<N, EthB, EV, EB> EngineValidatorAddOn<N> for RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineValidatorBuilder<
+        N,
+        Validator: EvmPayloadValidator<<N::Types as NodeTypes>::Payload, N::Evm>,
+    >,
     EB: EngineApiBuilder<N>,
 {
     type Validator = EV::Validator;

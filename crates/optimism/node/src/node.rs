@@ -16,8 +16,9 @@ use reth_network::{
     PeersInfo,
 };
 use reth_node_api::{
-    AddOnsContext, BuildNextEnv, EngineTypes, FullNodeComponents, HeaderTy, KeyHasherTy,
-    NodeAddOns, NodePrimitives, PayloadAttributesBuilder, PayloadTypes, PrimitivesTy, TxTy,
+    AddOnsContext, BuildNextEnv, EngineTypes, EvmPayloadValidator, FullNodeComponents, HeaderTy,
+    KeyHasherTy, NodeAddOns, NodePrimitives, PayloadAttributesBuilder, PayloadTypes, PrimitivesTy,
+    TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -593,7 +594,10 @@ impl<N, NetworkT, EV, EB, RpcMiddleware> EngineValidatorAddOn<N>
 where
     N: FullNodeComponents<Types: OpFullNodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N> + Default,
+    EV: EngineValidatorBuilder<
+            N,
+            Validator: EvmPayloadValidator<<N::Types as NodeTypes>::Payload, N::Evm>,
+        > + Default,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: Send,
 {

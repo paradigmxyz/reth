@@ -10,7 +10,7 @@ use alloy_rpc_types_engine::{ExecutionData, ExecutionPayloadSidecar, ExecutionPa
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::{EngineValidator, ForkchoiceStatus, NoopInvalidBlockHook};
+use reth_engine_primitives::{EngineValidator, EvmPayloadValidator, ForkchoiceStatus};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
@@ -46,6 +46,8 @@ impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineVali
         sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
     }
 }
+
+impl EvmPayloadValidator<EthEngineTypes, MockEvmConfig> for MockEngineValidator {}
 
 impl EngineValidator<EthEngineTypes> for MockEngineValidator {
     fn validate_version_specific_fields(

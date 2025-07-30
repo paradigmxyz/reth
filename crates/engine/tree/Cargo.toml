@@ -57,7 +57,6 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
-auto_impl.workspace = true
 schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true

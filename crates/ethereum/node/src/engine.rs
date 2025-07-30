@@ -8,8 +8,9 @@ pub use alloy_rpc_types_engine::{
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_engine_primitives::{EngineValidator, PayloadValidator};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
-use reth_ethereum_primitives::Block;
-use reth_node_api::PayloadTypes;
+use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_evm::ConfigureEvm;
+use reth_node_api::{EvmPayloadValidator, PayloadTypes};
 use reth_payload_primitives::{
     validate_execution_requests, validate_version_specific_fields, EngineApiMessageVersion,
     EngineObjectValidationError, NewPayloadError, PayloadOrAttributes,
@@ -50,6 +51,14 @@ where
         let sealed_block = self.inner.ensure_well_formed_payload(payload)?;
         sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
     }
+}
+
+impl<ChainSpec, Types, Evm> EvmPayloadValidator<Types, Evm> for EthereumEngineValidator<ChainSpec>
+where
+    ChainSpec: EthChainSpec + EthereumHardforks + 'static,
+    Types: PayloadTypes<ExecutionData = ExecutionData>,
+    Evm: ConfigureEvm<Primitives = EthPrimitives>,
+{
 }
 
 impl<ChainSpec, Types> EngineValidator<Types> for EthereumEngineValidator<ChainSpec>
