@@ -221,8 +221,7 @@ pub static BASE_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1736445601)),
         (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1746806401)),
         (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1746806401)),
-        (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(1753847520)), /* TODO: replace
-                                                                             * with correct
-                                                                             * timestamp */
+        // (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(1753847520)) - TODO: update
+        // timestamp and test,
     ])
 });
