@@ -1,4 +1,5 @@
-//! Example demonstrating how to extract the full state of a specific contract from the reth database.
+//! Example demonstrating how to extract the full state of a specific contract from the reth
+//! database.
 //!
 //! This example shows how to:
 //! 1. Connect to a reth database
