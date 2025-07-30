@@ -1,24 +1,33 @@
 use crate::{eth::ScrollNodeCore, ScrollEthApi};
 use alloy_consensus::BlockHeader;
 use alloy_eips::eip7840::BlobParams;
-use alloy_primitives::U256;
+use alloy_primitives::{Sealable, U256};
 use alloy_rpc_types_eth::{BlockNumberOrTag, FeeHistory};
 use futures::Future;
 use reth_chainspec::EthChainSpec;
 use reth_primitives_traits::BlockBody;
-use reth_provider::{BlockIdReader, ChainSpecProvider, HeaderProvider, ProviderHeader};
+use reth_provider::{
+    BaseFeeProvider, BlockIdReader, ChainSpecProvider, HeaderProvider, ProviderHeader,
+    StateProviderFactory,
+};
 use reth_rpc_eth_api::{
     helpers::{EthFees, LoadFee},
     FromEthApiError, RpcNodeCore, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::{fee_history::calculate_reward_percentiles_for_block, EthApiError};
+use reth_scroll_chainspec::{ChainConfig, ScrollChainConfig};
+use reth_scroll_evm::ScrollBaseFeeProvider;
+use scroll_alloy_hardforks::ScrollHardforks;
 use tracing::debug;
 
 impl<N, NetworkT> EthFees for ScrollEthApi<N, NetworkT>
 where
     Self: LoadFee<
-        Provider: ChainSpecProvider<
-            ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>,
+        Provider: StateProviderFactory
+                      + ChainSpecProvider<
+            ChainSpec: EthChainSpec<Header = ProviderHeader<Self::Provider>>
+                           + ScrollHardforks
+                           + ChainConfig<Config = ScrollChainConfig>,
         >,
     >,
     N: ScrollNodeCore,
@@ -102,6 +111,9 @@ where
 
             let mut rewards: Vec<Vec<u128>> = Vec::new();
 
+            let chain_spec = self.provider().chain_spec();
+            let base_fee_provider = ScrollBaseFeeProvider::new(chain_spec.clone());
+
             // Check if the requested range is within the cache bounds
             let fee_entries = self.fee_history_cache().get_history(start_block, end_block).await;
 
@@ -129,11 +141,18 @@ where
 
                 // Also need to include the `base_fee_per_gas` and `base_fee_per_blob_gas` for the
                 // next block
+                let mut provider = self
+                    .provider()
+                    .state_by_block_id(last_entry.header.hash_slow().into())
+                    .map_err(Into::<EthApiError>::into)?;
                 base_fee_per_gas.push(
-                    self.provider()
-                        .chain_spec()
-                        .next_block_base_fee(&last_entry.header, last_entry.header.timestamp())
-                        .unwrap_or_default() as u128,
+                    base_fee_provider
+                        .next_block_base_fee(
+                            &mut provider,
+                            &last_entry.header,
+                            last_entry.header.timestamp(),
+                        )
+                        .map_err(Into::<EthApiError>::into)? as u128,
                 );
 
                 base_fee_per_blob_gas.push(last_entry.next_block_blob_fee().unwrap_or_default());
@@ -146,7 +165,6 @@ where
                     return Err(EthApiError::InvalidBlockRange.into())
                 }
 
-                let chain_spec = self.provider().chain_spec();
                 for header in &headers {
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
@@ -187,10 +205,18 @@ where
                 //
                 // The unwrap is safe since we checked earlier that we got at least 1 header.
                 let last_header = headers.last().expect("is present");
+                let mut provider = self
+                    .provider()
+                    .state_by_block_id(last_header.hash().into())
+                    .map_err(Into::<EthApiError>::into)?;
                 base_fee_per_gas.push(
-                    chain_spec
-                        .next_block_base_fee(last_header.header(), last_header.timestamp())
-                        .unwrap_or_default() as u128,
+                    base_fee_provider
+                        .next_block_base_fee(
+                            &mut provider,
+                            &last_header.header(),
+                            last_header.timestamp(),
+                        )
+                        .map_err(Into::<EthApiError>::into)? as u128,
                 );
                 // Same goes for the `base_fee_per_blob_gas`:
                 // > "[..] includes the next block after the newest of the returned range, because this value can be derived from the newest block.
