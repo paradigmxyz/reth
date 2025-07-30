@@ -1019,38 +1019,6 @@ where
     }
 }
 
-/// A type that knows how to build the engine validator.
-pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
-    /// The consensus implementation to build.
-    type Validator: PayloadValidator<
-        <Node::Types as NodeTypes>::Payload,
-        Block = BlockTy<Node::Types>,
-    >;
-
-    /// Creates the engine validator.
-    fn build(
-        self,
-        ctx: &AddOnsContext<'_, Node>,
-    ) -> impl Future<Output = eyre::Result<Self::Validator>> + Send;
-}
-
-impl<Node, F, Fut, Validator> EngineValidatorBuilder<Node> for F
-where
-    Node: FullNodeComponents,
-    Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>,
-    F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Sync + Clone,
-    Fut: Future<Output = eyre::Result<Validator>> + Send,
-{
-    type Validator = Validator;
-
-    fn build(
-        self,
-        ctx: &AddOnsContext<'_, Node>,
-    ) -> impl Future<Output = eyre::Result<Self::Validator>> {
-        self(ctx)
-    }
-}
-
 /// Builder for engine API RPC module.
 ///
 /// This builder type is responsible for providing an instance of [`IntoEngineApiRpcModule`], which
@@ -1122,6 +1090,26 @@ pub trait EngineApiValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clo
                 invalid_block_hook,
             ))
         }
+    }
+}
+
+impl<Node, F, Fut, Validator> EngineApiValidatorBuilder<Node> for F
+where
+    Node: FullNodeComponents,
+    Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+        + Clone
+        + Unpin
+        + 'static,
+    F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Sync + Clone,
+    Fut: Future<Output = eyre::Result<Validator>> + Send,
+{
+    type Validator = Validator;
+
+    fn build(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+    ) -> impl Future<Output = eyre::Result<Self::Validator>> {
+        self(ctx)
     }
 }
 
