@@ -18,8 +18,8 @@ use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
+    AddOnsContext, BlockTy, EngineTypes, FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes,
+    PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
 };
 use reth_node_core::{
     node_config::NodeConfig,
