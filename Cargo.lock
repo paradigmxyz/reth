@@ -12758,6 +12758,7 @@ dependencies = [
  "alloy-primitives",
  "clap",
  "eyre",
+ "rand 0.9.2",
  "reth-cli-runner",
  "reth-node-ethereum",
  "reth-provider",
