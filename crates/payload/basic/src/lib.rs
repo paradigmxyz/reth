@@ -352,8 +352,13 @@ where
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args =
-                BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
+            let args = BuildArguments {
+                cached_reads,
+                config: payload_config,
+                cancel,
+                best_payload,
+                max_tx_bytes: None,
+            };
             let result = builder.try_build(args);
             let _ = tx.send(result);
         }));
@@ -476,6 +481,7 @@ where
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
+                max_tx_bytes: None,
             };
 
             match self.builder.on_missing_payload(args) {
@@ -787,6 +793,8 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cancel: CancelOnDrop,
     /// The best payload achieved so far.
     pub best_payload: Option<Payload>,
+    /// Maximum (sum) transaction bytes for the payload
+    pub max_tx_bytes: Option<usize>,
 }
 
 impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
@@ -796,8 +804,9 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
+        max_tx_bytes: Option<usize>,
     ) -> Self {
-        Self { cached_reads, config, cancel, best_payload }
+        Self { cached_reads, config, cancel, best_payload, max_tx_bytes }
     }
 }
 

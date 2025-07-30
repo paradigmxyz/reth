@@ -210,6 +210,7 @@ where
                             None
                         }
                     }),
+                    max_tx_bytes: args.max_tx_bytes,
                 };
 
                 self.left.try_build(left_args).map(|out| out.map_payload(Either::Left))
@@ -229,6 +230,7 @@ where
                             None
                         }
                     }),
+                    max_tx_bytes: args.max_tx_bytes,
                 };
 
                 self.right.try_build(right_args).map(|out| out.map_payload(Either::Right))

@@ -112,7 +112,7 @@ where
         &self,
         config: PayloadConfig<Self::Attributes>,
     ) -> Result<EthBuiltPayload, PayloadBuilderError> {
-        let args = BuildArguments::new(Default::default(), config, Default::default(), None);
+        let args = BuildArguments::new(Default::default(), config, Default::default(), None, None);
 
         default_ethereum_payload(
             self.evm_config.clone(),
@@ -147,7 +147,7 @@ where
     Pool: TransactionPool<Transaction: PoolTransaction<Consensus = TransactionSigned>>,
     F: FnOnce(BestTransactionsAttributes) -> BestTransactionsIter<Pool>,
 {
-    let BuildArguments { mut cached_reads, config, cancel, best_payload } = args;
+    let BuildArguments { mut cached_reads, config, cancel, best_payload, max_tx_bytes } = args;
     let PayloadConfig { parent_header, attributes } = config;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
@@ -197,7 +197,7 @@ where
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
     let max_blob_count =
         blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
-
+    let mut total_bytes = 0;
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -214,6 +214,14 @@ where
         // check if the job was cancelled, if so we can exit early
         if cancel.is_cancelled() {
             return Ok(BuildOutcome::Cancelled)
+        }
+
+        // ensure max transaction bytes limit if set
+        if let Some(max_bytes) = max_tx_bytes {
+            if pool_tx.encoded_length() + total_bytes > max_bytes {
+                // Check other txs if they could fit in the block
+                continue;
+            }
         }
 
         // convert tx to a signed transaction
@@ -311,6 +319,9 @@ where
         let miner_fee =
             tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
+        if max_tx_bytes.is_some() {
+            total_bytes += pool_tx.encoded_length();
+        }
         cumulative_gas_used += gas_used;
 
         // Add blob tx sidecar to the payload.
