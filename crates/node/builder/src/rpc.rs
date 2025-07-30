@@ -999,20 +999,18 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
 /// Helper trait that provides the validator builder for the engine API
 pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     /// The validator builder type to use.
-    type ValidatorBuilder: EngineApiValidatorBuilder<Node> + Clone + Unpin;
+    type ValidatorBuilder: EngineApiValidatorBuilder<Node>;
 
     /// Returns the validator builder.
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder;
 }
 
-impl<N, EthB, EV, EB, RpcMiddleware> EngineValidatorAddOn<N>
-    for RpcAddOns<N, EthB, EV, EB, RpcMiddleware>
+impl<N, EthB, EV, EB> EngineValidatorAddOn<N> for RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    EV: EngineApiValidatorBuilder<N> + Unpin,
+    EV: EngineApiValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
-    RpcMiddleware: RethRpcMiddleware,
 {
     type ValidatorBuilder = EV;
 
