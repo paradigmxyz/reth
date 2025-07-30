@@ -725,7 +725,7 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         // update metrics
         #[cfg(feature = "metrics")]
-        self.update_hash_metrics(subtries.len());
+        self.metrics.subtries_updated.record(subtries.len() as f64);
 
         // Update the prefix set with the keys that didn't have matching subtries
         self.prefix_set = unchanged_prefix_set;
@@ -761,12 +761,16 @@ impl SparseTrieInterface for ParallelSparseTrie {
                          mut prefix_set,
                          mut update_actions_buf,
                      }| {
+                        #[cfg(feature = "metrics")]
+                        let start = std::time::Instant::now();
                         subtrie.update_hashes(
                             &mut prefix_set,
                             &mut update_actions_buf,
                             branch_node_tree_masks,
                             branch_node_hash_masks,
                         );
+                        #[cfg(feature = "metrics")]
+                        self.metrics.subtrie_hash_update_latency.record(start.elapsed());
                         (index, subtrie, update_actions_buf)
                     },
                 )
@@ -1227,6 +1231,9 @@ impl ParallelSparseTrie {
             is_in_prefix_set: None,
         });
 
+        #[cfg(feature = "metrics")]
+        let start = std::time::Instant::now();
+
         let mut update_actions_buf =
             self.updates_enabled().then(|| self.update_actions_buffers.pop().unwrap_or_default());
 
@@ -1271,6 +1278,9 @@ impl ParallelSparseTrie {
             );
             self.update_actions_buffers.push(update_actions_buf);
         }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.subtrie_upper_hash_latency.record(start.elapsed());
 
         debug_assert_eq!(self.upper_subtrie.inner.buffers.rlp_node_stack.len(), 1);
         self.upper_subtrie.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
@@ -1431,12 +1441,6 @@ impl ParallelSparseTrie {
         }
 
         Ok(())
-    }
-
-    /// Updates metrics for the [`ParallelSparseTrie`]
-    #[cfg(feature = "metrics")]
-    fn update_hash_metrics(&self, subtries: usize) {
-        self.metrics.subtries_updated.record(subtries as f64)
     }
 }
 

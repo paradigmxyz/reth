@@ -63,4 +63,8 @@ std = [
     "reth-trie-sparse/std",
     "tracing/std",
 ]
-metrics = ["dep:reth-metrics", "dep:metrics", "std"]
+metrics = [
+    "dep:reth-metrics",
+    "dep:metrics",
+    "std",
+]
