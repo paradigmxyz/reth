@@ -1032,27 +1032,28 @@ impl<
     > RangeBlockMode<Eth>
 {
     async fn next(&mut self) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
-        // First, try to return any already processed result
-        if let Some(result) = self.next.pop_front() {
-            return Ok(Some(result));
-        }
-
-        // Next, try to get a completed task result if there are pending tasks
-        if !self.pending_tasks.is_empty() {
-            if let Some(task_result) = self.pending_tasks.next().await {
-                let mut chunk_results = task_result?;
-                if !chunk_results.is_empty() {
-                    let first_result = chunk_results.remove(0);
-                    self.next.extend(chunk_results);
-                    return Ok(Some(first_result));
-                }
+        loop {
+            // First, try to return any already processed result from buffer
+            if let Some(result) = self.next.pop_front() {
+                return Ok(Some(result));
             }
-        }
 
-        // If no pending tasks and no queued results, try to start new tasks
-        if self.pending_tasks.is_empty() {
-            // Try to get the next header(s) to process
+            // Try to get a completed task result if there are pending tasks
+            if let Some(task_result) = self.pending_tasks.next().await {
+                let chunk_results = task_result?;
+                if !chunk_results.is_empty() {
+                    // Add all results to buffer, first one will be returned in next loop iteration
+                    self.next.extend(chunk_results);
+                    // Continue loop to return the first result from buffer
+                    continue;
+                }
+                // Task completed with empty results, continue to check for more work
+                continue;
+            }
+
+            // No pending tasks - try to generate new work
             let Some(next_header) = self.iter.next() else {
+                // No more headers to process
                 return Ok(None);
             };
 
@@ -1084,31 +1085,15 @@ impl<
             let remaining_headers = self.iter.len() + range_headers.len();
             if remaining_headers >= PARALLEL_PROCESSING_THRESHOLD {
                 self.spawn_parallel_tasks(range_headers);
+                // Continue loop to await the spawned tasks
             } else {
-                return self.process_small_range(range_headers).await;
-            }
-
-            // Now wait for the newly spawned task to complete
-            if let Some(task_result) = self.pending_tasks.next().await {
-                let mut chunk_results = task_result?;
-                if !chunk_results.is_empty() {
-                    let first_result = chunk_results.remove(0);
-                    self.next.extend(chunk_results);
-                    return Ok(Some(first_result));
+                // Process small range sequentially and add results to buffer
+                if let Some(result) = self.process_small_range(range_headers).await? {
+                    return Ok(Some(result));
                 }
+                // Continue loop to check for more work
             }
         }
-
-        // If we reach here, a task completed with empty results but other tasks are still pending.
-        // Return None and let the next call handle remaining tasks.
-        debug!(
-            target: "rpc::eth::filter",
-            pending_tasks_len = self.pending_tasks.len(),
-            queued_results_len = self.next.len(),
-            headers_remaining = self.iter.len(),
-            "Task returned empty results with pending tasks remaining - returning None"
-        );
-        Ok(None)
     }
 
     /// Process a small range of headers sequentially
@@ -1561,6 +1546,27 @@ mod tests {
     #[tokio::test]
     async fn test_range_block_mode_iterator_exhaustion() {
         let provider = MockEthProvider::default();
+        
+        let header_100 = alloy_consensus::Header { number: 100, ..Default::default() };
+        let header_101 = alloy_consensus::Header { number: 101, ..Default::default() };
+        
+        let block_hash_100 = FixedBytes::random();
+        let block_hash_101 = FixedBytes::random();
+        
+        // Associate headers with hashes first
+        provider.add_header(block_hash_100, header_100.clone());
+        provider.add_header(block_hash_101, header_101.clone());
+        
+        // Add mock receipts so headers are actually processed
+        let mock_receipt = reth_ethereum_primitives::Receipt {
+            tx_type: TxType::Legacy,
+            cumulative_gas_used: 21_000,
+            logs: vec![],
+            success: true,
+        };
+        provider.add_receipts(100, vec![mock_receipt.clone()]);
+        provider.add_receipts(101, vec![mock_receipt.clone()]);
+        
         let eth_api = build_test_eth_api(provider);
 
         let eth_filter = super::EthFilter::new(
@@ -1571,14 +1577,8 @@ mod tests {
         let filter_inner = eth_filter.inner;
 
         let headers = vec![
-            SealedHeader::new(
-                alloy_consensus::Header { number: 100, ..Default::default() },
-                FixedBytes::random(),
-            ),
-            SealedHeader::new(
-                alloy_consensus::Header { number: 101, ..Default::default() },
-                FixedBytes::random(),
-            ),
+            SealedHeader::new(header_100, block_hash_100),
+            SealedHeader::new(header_101, block_hash_101),
         ];
 
         let mut range_mode = RangeBlockMode {
@@ -1591,11 +1591,13 @@ mod tests {
 
         let result1 = range_mode.next().await;
         assert!(result1.is_ok());
+        assert!(result1.unwrap().is_some()); // Should have processed block 100
 
-        assert!(range_mode.iter.peek().is_some());
+        assert!(range_mode.iter.peek().is_some()); // Should still have block 101
 
         let result2 = range_mode.next().await;
         assert!(result2.is_ok());
+        assert!(result2.unwrap().is_some()); // Should have processed block 101
 
         // now iterator should be exhausted
         assert!(range_mode.iter.peek().is_none());
