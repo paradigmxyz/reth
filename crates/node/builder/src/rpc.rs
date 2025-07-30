@@ -1090,6 +1090,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>> 
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
             .max_batch_size(self.config.max_batch_size)
+            .pending_block_kind(self.config.pending_block_kind)
     }
 }
 
