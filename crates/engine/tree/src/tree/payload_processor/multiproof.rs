@@ -95,7 +95,7 @@ impl<Factory> MultiProofConfig<Factory> {
             state_sorted: Arc::new(input.state.drain_into_sorted()),
             prefix_sets: Arc::new(input.prefix_sets.clone()),
         };
-        (input, config)
+        (input.cleared(), config)
     }
 }
 
