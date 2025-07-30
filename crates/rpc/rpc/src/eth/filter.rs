@@ -1546,17 +1546,17 @@ mod tests {
     #[tokio::test]
     async fn test_range_block_mode_iterator_exhaustion() {
         let provider = MockEthProvider::default();
-        
+
         let header_100 = alloy_consensus::Header { number: 100, ..Default::default() };
         let header_101 = alloy_consensus::Header { number: 101, ..Default::default() };
-        
+
         let block_hash_100 = FixedBytes::random();
         let block_hash_101 = FixedBytes::random();
-        
+
         // Associate headers with hashes first
         provider.add_header(block_hash_100, header_100.clone());
         provider.add_header(block_hash_101, header_101.clone());
-        
+
         // Add mock receipts so headers are actually processed
         let mock_receipt = reth_ethereum_primitives::Receipt {
             tx_type: TxType::Legacy,
@@ -1566,7 +1566,7 @@ mod tests {
         };
         provider.add_receipts(100, vec![mock_receipt.clone()]);
         provider.add_receipts(101, vec![mock_receipt.clone()]);
-        
+
         let eth_api = build_test_eth_api(provider);
 
         let eth_filter = super::EthFilter::new(
