@@ -11,9 +11,9 @@
 
 extern crate alloc;
 
-use core::convert::Infallible;
-
+use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
+use core::convert::Infallible;
 use reth_errors::ConsensusError;
 use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
 use reth_payload_primitives::{
