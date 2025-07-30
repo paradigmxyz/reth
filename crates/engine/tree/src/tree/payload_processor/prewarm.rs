@@ -89,6 +89,7 @@ where
 
         self.executor.spawn_blocking(move || {
             let mut handles = Vec::new();
+            let (done_tx, done_rx) = mpsc::channel();
             let mut executing = 0;
             while let Ok(executable) = pending.recv() {
                 let task_idx = executing % max_concurrency;
@@ -97,9 +98,10 @@ where
                     let (tx, rx) = mpsc::channel();
                     let sender = actions_tx.clone();
                     let ctx = ctx.clone();
+                    let done_tx = done_tx.clone();
 
                     executor.spawn_blocking(move || {
-                        ctx.transact_batch(rx, sender);
+                        ctx.transact_batch(rx, sender, done_tx);
                     });
 
                     handles.push(tx);
@@ -109,6 +111,11 @@ where
 
                 executing += 1;
             }
+
+            // drop handle and wait for all tasks to finish and drop theirs
+            // todo: do we even need this? tasks are spawned anyway and will see all transactions
+            drop(done_tx);
+            while let Ok(()) = done_rx.recv() {}
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: executing });
@@ -279,7 +286,8 @@ where
         Some((evm, metrics, terminate_execution))
     }
 
-    /// Transacts the vec of transactions and returns the state outcome.
+    /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
+    /// transactions and streams [`PrewarmTaskEvent::Outcome`] messages for each transaction.
     ///
     /// Returns `None` if executing the transactions failed to a non Revert error.
     /// Returns the touched+modified state of the transaction.
@@ -290,6 +298,7 @@ where
         self,
         txs: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
         sender: Sender<PrewarmTaskEvent>,
+        done_tx: Sender<()>,
     ) {
         let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
 
@@ -298,7 +307,7 @@ where
             // and exit.
             if terminate_execution.load(Ordering::Relaxed) {
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: None });
-                return
+                break
             }
 
             // create the tx env
@@ -324,6 +333,9 @@ where
 
             let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
         }
+
+        // send a message to the main task to flag that we're done
+        let _ = done_tx.send(());
     }
 }
 
