@@ -266,7 +266,10 @@ where
     }
 
     /// Returns the best payload for the given identifier that has been built so far.
-    fn best_payload(&self, id: PayloadId) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
+    pub fn best_payload(
+        &self,
+        id: PayloadId,
+    ) -> Option<Result<T::BuiltPayload, PayloadBuilderError>> {
         let res = self
             .payload_jobs
             .iter()
