@@ -247,7 +247,7 @@ pub trait LoadPendingBlock:
             while let Some(pool_tx) = best_txs.next() {
                 // ensure we still have capacity for this transaction
                 if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
-                    // we can't fit this transaction into the block, so we need to mark it as invalid
+                    // we can't fit this transaction into the block, so we need to mark it as
                     // invalid which also removes all dependent transaction from
                     // the iterator before we can continue
                     best_txs.mark_invalid(

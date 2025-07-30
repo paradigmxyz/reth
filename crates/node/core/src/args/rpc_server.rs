@@ -220,6 +220,10 @@ pub struct RpcServerArgs {
     #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
     pub rpc_proof_permits: usize,
 
+    /// Pending block configuration.
+    #[arg(long = "rpc.pending-block", default_value = "full")]
+    pub rpc_pending_block: PendingBlockConfig,
+
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
     #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
@@ -232,10 +236,6 @@ pub struct RpcServerArgs {
     /// Gas price oracle configuration.
     #[command(flatten)]
     pub gas_price_oracle: GasPriceOracleArgs,
-
-    /// Pending block configuration.
-    #[arg(long = "rpc.pending-block", default_value = "full")]
-    pub pending_block: PendingBlockConfig,
 }
 
 impl RpcServerArgs {
@@ -368,11 +368,11 @@ impl Default for RpcServerArgs {
             rpc_tx_fee_cap: constants::DEFAULT_TX_FEE_CAP_WEI,
             rpc_max_simulate_blocks: constants::DEFAULT_MAX_SIMULATE_BLOCKS,
             rpc_eth_proof_window: constants::DEFAULT_ETH_PROOF_WINDOW,
+            rpc_pending_block: PendingBlockConfig::Full,
             gas_price_oracle: GasPriceOracleArgs::default(),
             rpc_state_cache: RpcStateCacheArgs::default(),
             rpc_proof_permits: constants::DEFAULT_PROOF_PERMITS,
             builder_disallow: Default::default(),
-            pending_block: PendingBlockConfig::Full,
         }
     }
 }
