@@ -1,6 +1,83 @@
 //! RPC component builder
+//!
+//! # Example
+//!
+//! Builds offline [`TraceApi`] with EVM and read-only database.
+//!
+//! ```rust
+//! use alloy_rpc_types_eth::BlockId;
+//! use op_alloy_network::Optimism;
+//! use reth_db::test_utils::create_test_rw_db_with_path;
+//! use reth_node_builder::{
+//!     components::ComponentsBuilder,
+//!     hooks::OnComponentInitializedHook,
+//!     rpc::{EthApiBuilder, EthApiCtx},
+//!     LaunchContext, RethFullAdapter,
+//! };
+//! use reth_node_core::NodeConfig;
+//! use reth_optimism_chainspec::OP_SEPOLIA;
+//! use reth_optimism_evm::OpEvmConfig;
+//! use reth_optimism_node::{OpExecutorBuilder, OpNetworkPrimitives, OpNode};
+//! use reth_optimism_rpc::OpEthApiBuilder;
+//! use reth_optimism_txpool::OpPooledTransaction;
+//! use reth_rpc::TraceApi;
+//! use reth_rpc_eth_types::{EthConfig, EthStateCache};
+//! use reth_tasks::{pool::BlockingTaskGuard, TaskManager};
+//! use std::sync::Arc;
+//!
+//! #[tokio::main]
+//! async fn main() {
+//!     // build core node with RO DB, with all components disabled except EVM
+//!     let sepolia = NodeConfig::new(OP_SEPOLIA.clone());
+//!     let db = create_test_rw_db_with_path(sepolia.datadir());
+//!     let tasks = TaskManager::current();
+//!     let launch_ctx = LaunchContext::new(tasks.executor(), sepolia.datadir());
+//!     let node = launch_ctx
+//!         .with_loaded_toml_config(sepolia)
+//!         .unwrap()
+//!         .attach(Arc::new(db))
+//!         .with_provider_factory::<_, OpEvmConfig>()
+//!         .await
+//!         .unwrap()
+//!         .with_genesis()
+//!         .unwrap()
+//!         .with_metrics_task() // todo: shouldn't be req to set up blockchain db
+//!         .with_blockchain_db::<RethFullAdapter<_, OpNode>, _>(move |provider_factory| {
+//!             Ok(BlockchainProvider::new(provider_factory).unwrap())
+//!         })
+//!         .unwrap()
+//!         .with_components(
+//!             ComponentsBuilder::default()
+//!                 .node_types::<RethFullAdapter<_, OpNode>>()
+//!                 .noop_pool::<OpPooledTransaction>()
+//!                 .noop_network::<OpNetworkPrimitives>()
+//!                 .noop_consensus()
+//!                 .executor(OpExecutorBuilder::default())
+//!                 .noop_payload(),
+//!             Box::new(()) as Box<dyn OnComponentInitializedHook<_>>,
+//!         )
+//!         .await
+//!         .unwrap();
+//!
+//!     // build `eth` namespace API
+//!     let config = EthConfig::default();
+//!     let cache = EthStateCache::spawn_with(
+//!         node.provider_factory().clone(),
+//!         config.cache,
+//!         node.task_executor().clone(),
+//!     );
+//!     let ctx = EthApiCtx { components: node.node_adapter(), config, cache };
+//!     let eth_api = OpEthApiBuilder::<Optimism>::default().build_eth_api(ctx).await.unwrap();
+//!
+//!     // build `trace` namespace API
+//!     let trace_api = TraceApi::new(eth_api, BlockingTaskGuard::new(10), EthConfig::default());
+//!
+//!     // fetch traces for latest block
+//!     let traces = trace_api.trace_block(BlockId::latest()).await.unwrap();
+//! }
+//! ```
 
-pub use reth_optimism_rpc::OpEngineApi;
+pub use reth_optimism_rpc::{OpEngineApi, OpEthApi, OpEthApiBuilder};
 
 use crate::OP_NAME_CLIENT;
 use alloy_rpc_types_engine::ClientVersionV1;
