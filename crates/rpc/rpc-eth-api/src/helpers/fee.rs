@@ -10,8 +10,8 @@ use futures::Future;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_primitives_traits::BlockBody;
 use reth_rpc_eth_types::{
-    fee_history::calculate_reward_percentiles_for_block, EthApiError, FeeHistoryCache,
-    FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
+    fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
+    EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
 use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderHeader};
 use tracing::debug;
@@ -186,8 +186,10 @@ pub trait EthFees:
 
                     base_fee_per_blob_gas.push(header.blob_fee(blob_params).unwrap_or_default());
                     blob_gas_used_ratio.push(
-                        header.blob_gas_used().unwrap_or_default() as f64
-                            / blob_params.max_blob_gas_per_block() as f64,
+                        checked_blob_gas_used_ratio(
+                            header.blob_gas_used().unwrap_or_default(),
+                            blob_params.max_blob_gas_per_block(),
+                        )
                     );
 
                     // Percentiles were specified, so we need to collect reward percentile info
