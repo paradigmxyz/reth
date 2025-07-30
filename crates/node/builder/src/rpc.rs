@@ -18,8 +18,8 @@ use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, FullNodeComponents, FullNodeTypes, NodeAddOns, NodeTypes,
-    PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
+    AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
+    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -1022,8 +1022,10 @@ where
 /// A type that knows how to build the engine validator.
 pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The consensus implementation to build.
-    type Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
-        + Clone;
+    type Validator: PayloadValidator<
+        <Node::Types as NodeTypes>::Payload,
+        Block = BlockTy<Node::Types>,
+    >;
 
     /// Creates the engine validator.
     fn build(
@@ -1035,10 +1037,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
 impl<Node, F, Fut, Validator> EngineValidatorBuilder<Node> for F
 where
     Node: FullNodeComponents,
-    Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
-        + Clone
-        + Unpin
-        + 'static,
+    Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>,
     F: FnOnce(&AddOnsContext<'_, Node>) -> Fut + Send + Sync + Clone,
     Fut: Future<Output = eyre::Result<Validator>> + Send,
 {
@@ -1079,8 +1078,10 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
 /// specifically designed for Engine API validation requirements.
 pub trait EngineApiValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The validator type that will be used by the Engine API.
-    type Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
-        + Clone;
+    type Validator: PayloadValidator<
+        <Node::Types as NodeTypes>::Payload,
+        Block = BlockTy<Node::Types>,
+    >;
 
     /// Builds the payload validator for validating execution payloads.
     ///
@@ -1143,7 +1144,7 @@ where
         >,
     >,
     EV: EngineApiValidatorBuilder<N>,
-    EV::Validator: reth_node_api::EngineApiValidator<<N::Types as NodeTypes>::Payload>,
+    EV::Validator: EngineApiValidator<<N::Types as NodeTypes>::Payload>,
 {
     type EngineApi = EngineApi<
         N::Provider,

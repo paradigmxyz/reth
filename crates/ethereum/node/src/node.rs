@@ -316,7 +316,7 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    EV: EngineApiValidatorBuilder<N> + Unpin,
+    EV: EngineApiValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,

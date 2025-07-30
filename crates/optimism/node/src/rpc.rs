@@ -6,7 +6,9 @@ use crate::OP_NAME_CLIENT;
 use alloy_rpc_types_engine::ClientVersionV1;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_chainspec::EthereumHardforks;
-use reth_node_api::{AddOnsContext, EngineTypes, FullNodeComponents, NodeTypes};
+use reth_node_api::{
+    AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, NodeTypes,
+};
 use reth_node_builder::rpc::{EngineApiBuilder, EngineApiValidatorBuilder};
 use reth_node_core::version::{CARGO_PKG_VERSION, CLIENT_CODE, VERGEN_GIT_SHA};
 use reth_optimism_rpc::engine::OP_ENGINE_CAPABILITIES;
@@ -28,7 +30,7 @@ where
         >,
     >,
     EV: EngineApiValidatorBuilder<N>,
-    EV::Validator: reth_node_api::EngineApiValidator<<N::Types as NodeTypes>::Payload>,
+    EV::Validator: EngineApiValidator<<N::Types as NodeTypes>::Payload>,
 {
     type EngineApi = OpEngineApi<
         N::Provider,
