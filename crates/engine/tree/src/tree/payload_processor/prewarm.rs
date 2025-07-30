@@ -115,7 +115,7 @@ where
             // drop handle and wait for all tasks to finish and drop theirs
             // todo: do we even need this? tasks are spawned anyway and will see all transactions
             drop(done_tx);
-            while let Ok(()) = done_rx.recv() {}
+            while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
                 .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: executing });
