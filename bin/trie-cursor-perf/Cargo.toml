@@ -1,0 +1,18 @@
+[package]
+name = "trie-cursor-perf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { workspace = true }
+reth-cli-runner = { workspace = true }
+reth-node-ethereum = { workspace = true }
+reth-provider = { workspace = true }
+reth-trie = { workspace = true }
+reth-trie-db = { workspace = true }
+tracing = { workspace = true }
+eyre = { workspace = true }
+
+[[bin]]
+name = "trie-cursor-perf"
+path = "src/main.rs"

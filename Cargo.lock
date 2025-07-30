@@ -12752,6 +12752,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "trie-cursor-perf"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "eyre",
+ "reth-cli-runner",
+ "reth-node-ethereum",
+ "reth-provider",
+ "reth-trie",
+ "reth-trie-db",
+ "tracing",
+]
+
+[[package]]
 name = "triehash"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
