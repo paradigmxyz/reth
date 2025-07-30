@@ -3,7 +3,8 @@
 use std::time::Duration;
 
 use crate::{
-    EthStateCacheConfig, FeeHistoryCacheConfig, GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
+    EthStateCacheConfig, FeeHistoryCacheConfig, GasPriceOracleConfig, PendingBlockMode,
+    RPC_DEFAULT_GAS_CAP,
 };
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
@@ -45,6 +46,8 @@ pub struct EthConfig {
     pub fee_history_cache: FeeHistoryCacheConfig,
     /// The maximum number of getproof calls that can be executed concurrently.
     pub proof_permits: usize,
+    /// Pending block building mode.
+    pub pending_block_mode: PendingBlockMode,
 }
 
 impl EthConfig {
@@ -72,6 +75,7 @@ impl Default for EthConfig {
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
+            pending_block_mode: PendingBlockMode::default(),
         }
     }
 }
@@ -134,6 +138,12 @@ impl EthConfig {
     /// Configures the number of getproof requests
     pub const fn proof_permits(mut self, permits: usize) -> Self {
         self.proof_permits = permits;
+        self
+    }
+
+    /// Configures the pending block mode
+    pub const fn pending_block_mode(mut self, mode: PendingBlockMode) -> Self {
+        self.pending_block_mode = mode;
         self
     }
 }

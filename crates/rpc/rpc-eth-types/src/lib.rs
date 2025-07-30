@@ -32,5 +32,5 @@ pub use gas_oracle::{
     GasCap, GasPriceOracle, GasPriceOracleConfig, GasPriceOracleResult, RPC_DEFAULT_GAS_CAP,
 };
 pub use id_provider::EthSubscriptionIdProvider;
-pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+pub use pending_block::{PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin, PendingBlockMode};
 pub use transaction::TransactionSource;

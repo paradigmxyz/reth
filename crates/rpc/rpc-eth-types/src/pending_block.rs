@@ -2,6 +2,8 @@
 //!
 //! Types used in block building.
 
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Instant};
 
 use alloy_consensus::BlockHeader;
@@ -11,6 +13,19 @@ use derive_more::Constructor;
 use reth_ethereum_primitives::Receipt;
 use reth_evm::EvmEnv;
 use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock, SealedHeader};
+
+/// Defines how pending blocks should be built for RPC responses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum PendingBlockMode {
+    /// Build pending blocks with all transactions from the mempool
+    #[default]
+    Full,
+    /// Build pending blocks without any transactions
+    Empty,
+    /// Don't build pending blocks, return None for pending requests
+    None,
+}
 
 /// Configured [`EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
@@ -82,4 +97,48 @@ pub struct PendingBlock<N: NodePrimitives> {
     pub block: Arc<RecoveredBlock<N::Block>>,
     /// The receipts for the pending block
     pub receipts: Arc<Vec<N::Receipt>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn test_pending_block_mode_default() {
+        assert_eq!(PendingBlockMode::default(), PendingBlockMode::Full);
+    }
+
+    #[test]
+    fn test_pending_block_mode_serialization() {
+        // Test serialization
+        assert_eq!(serde_json::to_string(&PendingBlockMode::Full).unwrap(), "\"full\"");
+        assert_eq!(serde_json::to_string(&PendingBlockMode::Empty).unwrap(), "\"empty\"");
+        assert_eq!(serde_json::to_string(&PendingBlockMode::None).unwrap(), "\"none\"");
+    }
+
+    #[test]
+    fn test_pending_block_mode_deserialization() {
+        // Test deserialization
+        assert_eq!(
+            serde_json::from_str::<PendingBlockMode>("\"full\"").unwrap(),
+            PendingBlockMode::Full
+        );
+        assert_eq!(
+            serde_json::from_str::<PendingBlockMode>("\"empty\"").unwrap(),
+            PendingBlockMode::Empty
+        );
+        assert_eq!(
+            serde_json::from_str::<PendingBlockMode>("\"none\"").unwrap(),
+            PendingBlockMode::None
+        );
+    }
+
+    #[test]
+    fn test_pending_block_mode_equality() {
+        assert_eq!(PendingBlockMode::Full, PendingBlockMode::Full);
+        assert_ne!(PendingBlockMode::Full, PendingBlockMode::Empty);
+        assert_ne!(PendingBlockMode::Full, PendingBlockMode::None);
+        assert_ne!(PendingBlockMode::Empty, PendingBlockMode::None);
+    }
 }
