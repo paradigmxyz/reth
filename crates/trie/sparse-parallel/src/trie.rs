@@ -109,6 +109,9 @@ pub struct ParallelSparseTrie {
     /// Reusable buffer pool used for collecting [`SparseTrieUpdatesAction`]s during hash
     /// computations.
     update_actions_buffers: Vec<Vec<SparseTrieUpdatesAction>>,
+    /// Metrics for the parallel sparse trie.
+    #[cfg(feature = "metrics")]
+    metrics: crate::metrics::ParallelSparseTrieMetrics,
 }
 
 impl Default for ParallelSparseTrie {
@@ -124,6 +127,8 @@ impl Default for ParallelSparseTrie {
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
             update_actions_buffers: Vec::default(),
+            #[cfg(feature = "metrics")]
+            metrics: Default::default(),
         }
     }
 }
@@ -718,6 +723,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
         let mut prefix_set = core::mem::take(&mut self.prefix_set).freeze();
         let (subtries, unchanged_prefix_set) = self.take_changed_lower_subtries(&mut prefix_set);
 
+        // update metrics
+        #[cfg(feature = "metrics")]
+        self.metrics.subtries_updated.record(subtries.len() as f64);
+
         // Update the prefix set with the keys that didn't have matching subtries
         self.prefix_set = unchanged_prefix_set;
 
@@ -752,12 +761,16 @@ impl SparseTrieInterface for ParallelSparseTrie {
                          mut prefix_set,
                          mut update_actions_buf,
                      }| {
+                        #[cfg(feature = "metrics")]
+                        let start = std::time::Instant::now();
                         subtrie.update_hashes(
                             &mut prefix_set,
                             &mut update_actions_buf,
                             branch_node_tree_masks,
                             branch_node_hash_masks,
                         );
+                        #[cfg(feature = "metrics")]
+                        self.metrics.subtrie_hash_update_latency.record(start.elapsed());
                         (index, subtrie, update_actions_buf)
                     },
                 )
@@ -1218,6 +1231,9 @@ impl ParallelSparseTrie {
             is_in_prefix_set: None,
         });
 
+        #[cfg(feature = "metrics")]
+        let start = std::time::Instant::now();
+
         let mut update_actions_buf =
             self.updates_enabled().then(|| self.update_actions_buffers.pop().unwrap_or_default());
 
@@ -1262,6 +1278,9 @@ impl ParallelSparseTrie {
             );
             self.update_actions_buffers.push(update_actions_buf);
         }
+
+        #[cfg(feature = "metrics")]
+        self.metrics.subtrie_upper_hash_latency.record(start.elapsed());
 
         debug_assert_eq!(self.upper_subtrie.inner.buffers.rlp_node_stack.len(), 1);
         self.upper_subtrie.inner.buffers.rlp_node_stack.pop().unwrap().rlp_node
