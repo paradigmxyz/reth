@@ -1099,13 +1099,14 @@ impl<
             }
         }
 
-        // If we reach here, something unexpected happened
+        // If we reach here, a task completed with empty results but other tasks are still pending.
+        // Return None and let the next call handle remaining tasks.
         debug!(
             target: "rpc::eth::filter",
             pending_tasks_len = self.pending_tasks.len(),
             queued_results_len = self.next.len(),
             headers_remaining = self.iter.len(),
-            "RangeBlockMode reached unexpected state - returning None"
+            "Task returned empty results with pending tasks remaining - returning None"
         );
         Ok(None)
     }
