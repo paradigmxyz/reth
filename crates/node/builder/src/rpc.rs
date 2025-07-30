@@ -1,29 +1,31 @@
 //! Builder support for rpc components.
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
+use reth_engine_tree::tree::BasicEngineValidator;
+use reth_provider::{
+    BlockReader, DatabaseProviderFactory, HashedPostStateProvider, StateCommitmentProvider,
+    StateReader,
+};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity};
 
-use crate::{BeaconConsensusEngineEvent, BeaconConsensusEngineHandle};
+use crate::{
+    launch::invalid_block_hook::InvalidBlockHookExt, BeaconConsensusEngineEvent,
+    BeaconConsensusEngineHandle,
+};
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::InvalidBlockHook;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_node_api::{
-    AddOnsContext, BlockTy, ConfigureEvm, EngineApiValidator, EngineTypes, FullNodeComponents,
-    FullNodeTypes, HeaderTy, NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy,
+    AddOnsContext, BlockTy, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes,
+    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
 };
 use reth_node_core::{
     node_config::NodeConfig,
     version::{CARGO_PKG_VERSION, CLIENT_CODE, NAME_CLIENT, VERGEN_GIT_SHA},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_provider::{
-    BlockReader, DatabaseProviderFactory, HashedPostStateProvider, StateCommitmentProvider,
-    StateProviderFactory, StateReader,
-};
 use reth_rpc::eth::{core::EthRpcConverterFor, EthApiTypes, FullEthApiServer};
 use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
@@ -1095,36 +1097,28 @@ pub trait EngineApiValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clo
     ///
     /// Returns a `BasicEngineValidator` that wraps the payload validator from `build()`
     /// and adds block execution, state validation, and fork handling.
-    fn build_tree_validator<P, Evm>(
+    fn build_tree_validator(
         self,
         ctx: &AddOnsContext<'_, Node>,
-        provider: P,
-        consensus: Arc<dyn FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError>>,
-        evm_config: Evm,
-        tree_config: reth_engine_primitives::TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook<PrimitivesTy<Node::Types>>>,
+        tree_config: TreeConfig,
     ) -> impl Future<
-        Output = eyre::Result<
-            reth_engine_tree::tree::BasicEngineValidator<P, Evm, Self::Validator>,
-        >,
+        Output = eyre::Result<BasicEngineValidator<Node::Provider, Node::Evm, Self::Validator>>,
     > + Send
     where
-        P: DatabaseProviderFactory<Provider: BlockReader>
-            + BlockReader<Header = HeaderTy<Node::Types>>
-            + StateProviderFactory
+        Node::Provider: DatabaseProviderFactory<Provider: BlockReader>
             + StateReader
             + StateCommitmentProvider
-            + HashedPostStateProvider
-            + Clone
-            + 'static,
-        Evm: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
+            + HashedPostStateProvider,
+        <Node::Types as NodeTypes>::ChainSpec: EthereumHardforks,
     {
         async move {
             let inner_validator = self.build(ctx).await?;
+            let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
+            let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
             Ok(reth_engine_tree::tree::BasicEngineValidator::new(
-                provider,
-                consensus,
-                evm_config,
+                ctx.node.provider().clone(),
+                Arc::new(ctx.node.consensus().clone()),
+                ctx.node.evm_config().clone(),
                 inner_validator,
                 tree_config,
                 invalid_block_hook,

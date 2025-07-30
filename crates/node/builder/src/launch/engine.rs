@@ -3,7 +3,6 @@
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
-    launch::invalid_block_hook::InvalidBlockHookExt,
     rpc::{EngineApiValidatorBuilder, EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
@@ -196,16 +195,9 @@ where
         // First build the payload validator
         let payload_validator = validator_builder.clone().build(&add_ons_ctx).await?;
 
-        // Use the builder to create BasicEngineValidator with all required components
+        // Build the engine validator with all required components
         let engine_validator = validator_builder
-            .build_tree_validator(
-                &add_ons_ctx,
-                ctx.blockchain_db().clone(),
-                consensus.clone(),
-                ctx.components().evm_config().clone(),
-                engine_tree_config.clone(),
-                add_ons_ctx.create_invalid_block_hook(ctx.data_dir()).await?,
-            )
+            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
             .await?;
 
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
