@@ -28,6 +28,7 @@ where
         >,
     >,
     EV: EngineApiValidatorBuilder<N>,
+    EV::Validator: reth_node_api::EngineApiValidator<<N::Types as NodeTypes>::Payload>,
 {
     type EngineApi = OpEngineApi<
         N::Provider,
