@@ -58,6 +58,19 @@ where
     Ok(num)
 }
 
+/// Calculates the blob gas used ratio for a block, accounting for the case where
+/// max_blob_gas_per_block is zero.
+///
+/// Returns `0.0` if `blob_gas_used` is `0`, otherwise returns the ratio
+/// `blob_gas_used/max_blob_gas_per_block`.
+pub fn checked_blob_gas_used_ratio(blob_gas_used: u64, max_blob_gas_per_block: u64) -> f64 {
+    if blob_gas_used == 0 {
+        0.0
+    } else {
+        blob_gas_used as f64 / max_blob_gas_per_block as f64
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
