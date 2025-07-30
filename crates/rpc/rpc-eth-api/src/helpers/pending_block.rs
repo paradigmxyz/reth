@@ -248,8 +248,8 @@ pub trait LoadPendingBlock:
                 // ensure we still have capacity for this transaction
                 if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
                     // we can't fit this transaction into the block, so we need to mark it as invalid
-                    // which also removes all dependent transaction from the iterator before we can
-                    // continue
+                    // invalid which also removes all dependent transaction from
+                    // the iterator before we can continue
                     best_txs.mark_invalid(
                         &pool_tx,
                         InvalidPoolTransactionError::ExceedsGasLimit(
@@ -261,9 +261,9 @@ pub trait LoadPendingBlock:
                 }
 
                 if pool_tx.origin.is_private() {
-                    // we don't want to leak any state changes made by private transactions, so we mark
-                    // them as invalid here which removes all dependent transactions from the iterator
-                    // before we can continue
+                    // we don't want to leak any state changes made by private transactions, so we
+                    // mark them as invalid here which removes all dependent
+                    // transactions from the iteratorbefore we can continue
                     best_txs.mark_invalid(
                         &pool_tx,
                         InvalidPoolTransactionError::Consensus(
@@ -276,8 +276,8 @@ pub trait LoadPendingBlock:
                 // convert tx to a signed transaction
                 let tx = pool_tx.to_consensus();
 
-                // There's only limited amount of blob space available per block, so we need to check if
-                // the EIP-4844 can still fit in the block
+                // There's only limited amount of blob space available per block, so we need to
+                // check if the EIP-4844 can still fit in the block
                 if let Some(tx_blob_gas) = tx.blob_gas_used() {
                     if sum_blob_gas_used + tx_blob_gas > blob_params.max_blob_gas_per_block() {
                         // we can't fit this _blob_ transaction into the block, so we mark it as
@@ -329,7 +329,8 @@ pub trait LoadPendingBlock:
                     }
                 }
 
-                // add gas used by the transaction to cumulative gas used, before creating the receipt
+                // add gas used by the transaction to cumulative gas used, before creating the
+                // receipt
                 cumulative_gas_used += gas_used;
             }
         }
