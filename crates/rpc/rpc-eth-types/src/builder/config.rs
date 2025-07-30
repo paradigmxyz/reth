@@ -15,6 +15,31 @@ use serde::{Deserialize, Serialize};
 /// Default value for stale filter ttl
 pub const DEFAULT_STALE_FILTER_TTL: Duration = Duration::from_secs(5 * 60);
 
+/// Config for the pending block
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PendingBlockConfig {
+    /// Return a pending block with header only, no transactions included
+    Empty,
+    /// Return null/no pending block
+    None,
+    /// Return a pending block with all transactions from the mempool (default behavior)
+    Full,
+}
+
+impl std::str::FromStr for PendingBlockConfig {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "empty" => Ok(PendingBlockConfig::Empty),
+            "none" => Ok(PendingBlockConfig::None),
+            "full" => Ok(PendingBlockConfig::Full),
+            _ => Err(format!("Invalid pending block config: {}. Valid options are: empty, none, full", s)),
+        }
+    }
+}
+
 /// Additional config values for the eth namespace.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
 pub struct EthConfig {
@@ -45,6 +70,8 @@ pub struct EthConfig {
     pub fee_history_cache: FeeHistoryCacheConfig,
     /// The maximum number of getproof calls that can be executed concurrently.
     pub proof_permits: usize,
+    /// The pending block config
+    pub pending_block: PendingBlockConfig,
 }
 
 impl EthConfig {
@@ -72,6 +99,7 @@ impl Default for EthConfig {
             stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
             fee_history_cache: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
+            pending_block: PendingBlockConfig::Full,
         }
     }
 }
@@ -134,6 +162,12 @@ impl EthConfig {
     /// Configures the number of getproof requests
     pub const fn proof_permits(mut self, permits: usize) -> Self {
         self.proof_permits = permits;
+        self
+    }
+
+    /// Configures the pending block config
+    pub const fn pending_block(mut self, pending_block: PendingBlockConfig) -> Self {
+        self.pending_block = pending_block;
         self
     }
 }

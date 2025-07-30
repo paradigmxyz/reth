@@ -19,7 +19,10 @@ use reth_primitives_traits::{
 };
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
-use reth_rpc_eth_types::{EthApiError, PendingBlock, PendingBlockEnv, PendingBlockEnvOrigin};
+use reth_rpc_eth_types::{
+    builder::config::PendingBlockConfig, EthApiError, PendingBlock, PendingBlockEnv,
+    PendingBlockEnvOrigin,
+};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt, ProviderTx,
     ReceiptProvider, StateProviderFactory,
@@ -52,6 +55,9 @@ pub trait LoadPendingBlock:
 
     /// Returns a [`PendingEnvBuilder`] for the pending block.
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
+
+    /// Returns the pending block config
+    fn pending_block_config(&self) -> PendingBlockConfig;
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
@@ -129,6 +135,9 @@ pub trait LoadPendingBlock:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
+            if self.pending_block_config() == PendingBlockConfig::None {
+                return Ok(None);
+            }
             let pending = self.pending_block_env_and_cfg()?;
             let parent = match pending.origin {
                 PendingBlockEnvOrigin::ActualPending(block, receipts) => {
@@ -227,13 +236,15 @@ pub trait LoadPendingBlock:
         let mut sum_blob_gas_used = 0;
         let block_gas_limit: u64 = block_env.gas_limit;
 
-        let mut best_txs =
-            self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
-                block_env.basefee,
-                block_env.blob_gasprice().map(|gasprice| gasprice as u64),
-            ));
+        // Only include transactions if not configured as Empty
+        if self.pending_block_config() != PendingBlockConfig::Empty {
+            let mut best_txs =
+                self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
+                    block_env.basefee,
+                    block_env.blob_gasprice().map(|gasprice| gasprice as u64),
+                ));
 
-        while let Some(pool_tx) = best_txs.next() {
+            while let Some(pool_tx) = best_txs.next() {
             // ensure we still have capacity for this transaction
             if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
                 // we can't fit this transaction into the block, so we need to mark it as invalid
@@ -320,6 +331,7 @@ pub trait LoadPendingBlock:
 
             // add gas used by the transaction to cumulative gas used, before creating the receipt
             cumulative_gas_used += gas_used;
+            }
         }
 
         let BlockBuilderOutcome { execution_result, block, .. } =

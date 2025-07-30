@@ -20,8 +20,8 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasCap,
-    GasPriceOracle, PendingBlock,
+    builder::config::PendingBlockConfig, receipt::EthReceiptConverter, EthApiError, EthStateCache,
+    FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -147,6 +147,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         proof_permits: usize,
         rpc_converter: Rpc,
+        pending_block_config: PendingBlockConfig,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -161,6 +162,7 @@ where
             proof_permits,
             rpc_converter,
             (),
+            pending_block_config,
         );
 
         Self { inner: Arc::new(inner) }
@@ -290,6 +292,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
+
+    /// Pending block config
+    pending_block_config: PendingBlockConfig,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -312,6 +317,7 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
+        pending_block_config: PendingBlockConfig,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -344,6 +350,7 @@ where
             raw_tx_sender,
             tx_resp_builder,
             next_env_builder: Box::new(next_env),
+            pending_block_config,
         }
     }
 }
@@ -472,6 +479,12 @@ where
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
         let _ = self.raw_tx_sender.send(raw_tx);
+    }
+
+    /// Returns the pending block config
+    #[inline]
+    pub const fn pending_block_config(&self) -> PendingBlockConfig {
+        self.pending_block_config
     }
 }
 
