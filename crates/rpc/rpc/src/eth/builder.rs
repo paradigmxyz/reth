@@ -10,7 +10,7 @@ use reth_rpc_eth_api::{
     helpers::pending_block::PendingEnvBuilder, node::RpcNodeCoreAdapter, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    builder::config::PendingBlockConfig, fee_history::fee_history_cache_new_blocks_task,
+    builder::config::PendingBlockKind, fee_history::fee_history_cache_new_blocks_task,
     receipt::EthReceiptConverter, EthStateCache, EthStateCacheConfig, FeeHistoryCache,
     FeeHistoryCacheConfig, GasCap, GasPriceOracle, GasPriceOracleConfig,
 };
@@ -40,7 +40,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
-    pending_block_config: PendingBlockConfig,
+    pending_block_kind: PendingBlockKind,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -79,7 +79,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             blocking_task_pool,
             task_spawner,
             next_env,
-            pending_block_config,
+            pending_block_kind,
         } = self;
         EthApiBuilder {
             components,
@@ -96,7 +96,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             blocking_task_pool,
             task_spawner,
             next_env,
-            pending_block_config,
+            pending_block_kind,
         }
     }
 }
@@ -124,7 +124,7 @@ where
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
-            pending_block_config: PendingBlockConfig::Full,
+            pending_block_kind: PendingBlockKind::Full,
         }
     }
 }
@@ -159,7 +159,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
-            pending_block_config,
+            pending_block_kind,
         } = self;
         EthApiBuilder {
             components,
@@ -176,7 +176,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
-            pending_block_config,
+            pending_block_kind,
         }
     }
 
@@ -200,7 +200,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env: _,
-            pending_block_config,
+            pending_block_kind,
         } = self;
         EthApiBuilder {
             components,
@@ -217,7 +217,7 @@ where
             task_spawner,
             gas_oracle_config,
             next_env,
-            pending_block_config,
+            pending_block_kind,
         }
     }
 
@@ -289,9 +289,9 @@ where
         self
     }
 
-    /// Sets the pending block config
-    pub const fn pending_block_config(mut self, pending_block_config: PendingBlockConfig) -> Self {
-        self.pending_block_config = pending_block_config;
+    /// Sets the pending block kind
+    pub const fn pending_block_kind(mut self, pending_block_kind: PendingBlockKind) -> Self {
+        self.pending_block_kind = pending_block_kind;
         self
     }
 
@@ -323,7 +323,7 @@ where
             proof_permits,
             task_spawner,
             next_env,
-            pending_block_config,
+            pending_block_kind,
         } = self;
 
         let provider = components.provider().clone();
@@ -360,7 +360,7 @@ where
             proof_permits,
             rpc_converter,
             next_env,
-            pending_block_config,
+            pending_block_kind,
         )
     }
 

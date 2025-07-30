@@ -9,7 +9,7 @@ use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock},
     FromEvmError, RpcConvert, RpcNodeCore,
 };
-use reth_rpc_eth_types::{builder::config::PendingBlockConfig, EthApiError, PendingBlock};
+use reth_rpc_eth_types::{builder::config::PendingBlockKind, EthApiError, PendingBlock};
 use reth_storage_api::{
     BlockReader, BlockReaderIdExt, ProviderBlock, ProviderReceipt, ReceiptProvider,
 };
@@ -31,8 +31,8 @@ where
     }
 
     #[inline]
-    fn pending_block_config(&self) -> PendingBlockConfig {
-        self.inner.eth_api.pending_block_config()
+    fn pending_block_kind(&self) -> PendingBlockKind {
+        self.inner.eth_api.pending_block_kind()
     }
 
     /// Returns the locally built pending block

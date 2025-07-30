@@ -103,7 +103,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
             .proof_permits(self.rpc_proof_permits)
-            .pending_block(self.rpc_pending_block)
+            .pending_block_kind(self.rpc_pending_block)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {

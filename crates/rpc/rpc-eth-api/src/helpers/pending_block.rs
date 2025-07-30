@@ -20,7 +20,7 @@ use reth_primitives_traits::{
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_types::{
-    builder::config::PendingBlockConfig, EthApiError, PendingBlock, PendingBlockEnv,
+    builder::config::PendingBlockKind, EthApiError, PendingBlock, PendingBlockEnv,
     PendingBlockEnvOrigin,
 };
 use reth_storage_api::{
@@ -56,8 +56,8 @@ pub trait LoadPendingBlock:
     /// Returns a [`PendingEnvBuilder`] for the pending block.
     fn pending_env_builder(&self) -> &dyn PendingEnvBuilder<Self::Evm>;
 
-    /// Returns the pending block config
-    fn pending_block_config(&self) -> PendingBlockConfig;
+    /// Returns the pending block kind
+    fn pending_block_kind(&self) -> PendingBlockKind;
 
     /// Configures the [`PendingBlockEnv`] for the pending block
     ///
@@ -135,7 +135,7 @@ pub trait LoadPendingBlock:
             TransactionPool<Transaction: PoolTransaction<Consensus = ProviderTx<Self::Provider>>>,
     {
         async move {
-            if self.pending_block_config() == PendingBlockConfig::None {
+            if self.pending_block_kind() == PendingBlockKind::None {
                 return Ok(None);
             }
             let pending = self.pending_block_env_and_cfg()?;
@@ -237,7 +237,7 @@ pub trait LoadPendingBlock:
         let block_gas_limit: u64 = block_env.gas_limit;
 
         // Only include transactions if not configured as Empty
-        if self.pending_block_config() != PendingBlockConfig::Empty {
+        if !self.pending_block_kind().is_empty() {
             let mut best_txs =
                 self.pool().best_transactions_with_attributes(BestTransactionsAttributes::new(
                     block_env.basefee,
