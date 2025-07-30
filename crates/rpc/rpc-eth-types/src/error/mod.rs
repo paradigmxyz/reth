@@ -9,7 +9,7 @@ use alloy_rpc_types_eth::{error::EthRpcErrorCode, request::TransactionInputError
 use alloy_sol_types::{ContractError, RevertReason};
 pub use api::{AsEthApiError, FromEthApiError, FromEvmError, IntoEthApiError};
 use core::time::Duration;
-use reth_errors::{BlockExecutionError, RethError};
+use reth_errors::{BlockExecutionError, BlockValidationError, RethError};
 use reth_primitives_traits::transaction::{error::InvalidTransactionError, signed::RecoveryError};
 use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_server_types::result::{
@@ -371,7 +371,30 @@ impl From<RethError> for EthApiError {
 
 impl From<BlockExecutionError> for EthApiError {
     fn from(error: BlockExecutionError) -> Self {
-        Self::Internal(error.into())
+        match error {
+            BlockExecutionError::Validation(validation_error) => match validation_error {
+                BlockValidationError::InvalidTx { error, .. } => {
+                    if let Some(invalid_tx) = error.as_invalid_tx_err() {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::from(
+                            invalid_tx.clone(),
+                        ))
+                    } else {
+                        Self::InvalidTransaction(RpcInvalidTransactionError::other(
+                            rpc_error_with_code(
+                                EthRpcErrorCode::TransactionRejected.code(),
+                                error.to_string(),
+                            ),
+                        ))
+                    }
+                }
+                _ => Self::Internal(RethError::Execution(BlockExecutionError::Validation(
+                    validation_error,
+                ))),
+            },
+            BlockExecutionError::Internal(internal_error) => {
+                Self::Internal(RethError::Execution(BlockExecutionError::Internal(internal_error)))
+            }
+        }
     }
 }
 
