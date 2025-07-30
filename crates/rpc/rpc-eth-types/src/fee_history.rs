@@ -161,7 +161,7 @@ where
                 .collect::<Vec<_>>();
 
             if result.is_empty() {
-                return None;
+                return None
             }
 
             Some(result)
