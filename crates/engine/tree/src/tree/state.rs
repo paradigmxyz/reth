@@ -1,7 +1,7 @@
 //! Functionality related to tree state.
 
 use crate::engine::EngineApiKind;
-use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash};
+use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS, BlockNumHash};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
@@ -348,21 +348,21 @@ impl<N: NodePrimitives> TreeState<N> {
     /// Determines if the second block is a direct descendant of the first block.
     ///
     /// If the two blocks are the same, this returns `false`.
-    pub(crate) fn is_descendant(&self, first: BlockNumHash, second: &N::BlockHeader) -> bool {
+    pub(crate) fn is_descendant(&self, first: BlockNumHash, second: BlockWithParent) -> bool {
         // If the second block's parent is the first block's hash, then it is a direct descendant
         // and we can return early.
-        if second.parent_hash() == first.hash {
+        if second.parent == first.hash {
             return true
         }
 
         // If the second block is lower than, or has the same block number, they are not
         // descendants.
-        if second.number() <= first.number {
+        if second.block.number <= first.number {
             return false
         }
 
         // iterate through parents of the second until we reach the number
-        let Some(mut current_block) = self.blocks_by_hash.get(&second.parent_hash()) else {
+        let Some(mut current_block) = self.blocks_by_hash.get(&second.parent) else {
             // If we can't find its parent in the tree, we can't continue, so return false
             return false
         };

@@ -259,9 +259,7 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2a3c4a8d217f8ac0d0e5f890979646037d59a85fd3fc8f5b03d2f7a59b8d134"
+version = "0.16.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -373,9 +371,7 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.16.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0286cb45e87871995815db4ce8bc560ba35f7db4cc084e48a79b355db3342bd"
+version = "0.16.1"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -7983,6 +7979,7 @@ dependencies = [
  "alloy-rlp",
  "alloy-rpc-types-engine",
  "assert_matches",
+ "auto_impl",
  "codspeed-criterion-compat",
  "crossbeam-channel",
  "derive_more",
