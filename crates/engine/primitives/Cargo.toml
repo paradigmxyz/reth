@@ -41,16 +41,16 @@ thiserror.workspace = true
 [features]
 default = ["std"]
 std = [
-	"reth-execution-types/std",
-	"reth-ethereum-primitives/std",
-	"reth-primitives-traits/std",
-	"reth-trie-common/std",
-	"alloy-primitives/std",
-	"alloy-consensus/std",
-	"alloy-rpc-types-engine/std",
-	"alloy-eips/std",
-	"futures/std",
-	"serde/std",
-	"thiserror/std",
-	"reth-evm/std"
+    "reth-execution-types/std",
+    "reth-ethereum-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-trie-common/std",
+    "alloy-primitives/std",
+    "alloy-consensus/std",
+    "alloy-rpc-types-engine/std",
+    "alloy-eips/std",
+    "futures/std",
+    "serde/std",
+    "thiserror/std",
+    "reth-evm/std",
 ]
