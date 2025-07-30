@@ -76,12 +76,13 @@ pub trait EstimateCall: Call {
 
         // Configure the evm env
         let mut db = CacheDB::new(StateProviderDatabase::new(state));
-        let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Apply any state overrides if specified.
         if let Some(state_override) = state_override {
             apply_state_overrides(state_override, &mut db).map_err(Self::Error::from_eth_err)?;
         }
+
+        let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Check if this is a basic transfer (no input data to account with no code)
         let mut is_basic_transfer = false;
