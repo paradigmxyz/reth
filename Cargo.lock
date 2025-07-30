@@ -12755,6 +12755,7 @@ dependencies = [
 name = "trie-cursor-perf"
 version = "0.1.0"
 dependencies = [
+ "alloy-primitives",
  "clap",
  "eyre",
  "reth-cli-runner",

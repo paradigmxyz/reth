@@ -12,6 +12,7 @@ reth-trie = { workspace = true }
 reth-trie-db = { workspace = true }
 tracing = { workspace = true }
 eyre = { workspace = true }
+alloy-primitives = { workspace = true }
 
 [[bin]]
 name = "trie-cursor-perf"
