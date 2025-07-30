@@ -325,7 +325,7 @@ where
         // Empty blocks should return in a zero row
         if transactions.is_empty() {
             rewards_in_block.push(0);
-            continue;
+            continue
         }
 
         let threshold = (gas_used as f64 * percentile / 100.) as u64;
