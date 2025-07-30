@@ -325,12 +325,16 @@ pub trait LoadPendingBlock:
         let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
             builder.finish(&state_provider).map_err(Self::Error::from_eth_err)?;
 
+        let execution_outcome = ExecutionOutcome::new(
+            db.take_bundle(),
+            vec![execution_result.receipts],
+            block.number(),
+            vec![execution_result.requests],
+        );
+
         Ok(ExecutedBlock {
             recovered_block: block.into(),
-            execution_output: Arc::new(ExecutionOutcome {
-                receipts: vec![execution_result.receipts],
-                ..Default::default()
-            }),
+            execution_output: Arc::new(execution_outcome),
             hashed_state: Arc::new(hashed_state),
         })
     }
