@@ -32,10 +32,13 @@ impl std::str::FromStr for PendingBlockConfig {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "empty" => Ok(PendingBlockConfig::Empty),
-            "none" => Ok(PendingBlockConfig::None),
-            "full" => Ok(PendingBlockConfig::Full),
-            _ => Err(format!("Invalid pending block config: {}. Valid options are: empty, none, full", s)),
+            "empty" => Ok(Self::Empty),
+            "none" => Ok(Self::None),
+            "full" => Ok(Self::Full),
+            _ => Err(format!(
+                "Invalid pending block config: {}. Valid options are: empty, none, full",
+                s
+            )),
         }
     }
 }
