@@ -110,7 +110,7 @@ where
         if entries.is_empty() {
             self.inner.upper_bound.store(0, SeqCst);
             self.inner.lower_bound.store(0, SeqCst);
-            return;
+            return
         }
 
         let upper_bound = *entries.last_entry().expect("Contains at least one entry").key();
@@ -149,7 +149,7 @@ where
     ) -> Option<Vec<FeeHistoryEntry<H>>> {
         if end_block < start_block {
             // invalid range, return None
-            return None;
+            return None
         }
         let lower_bound = self.lower_bound();
         let upper_bound = self.upper_bound();
