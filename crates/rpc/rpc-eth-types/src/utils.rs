@@ -59,7 +59,7 @@ where
 }
 
 /// Calculates the blob gas used ratio for a block, accounting for the case where
-/// max_blob_gas_per_block is zero.
+/// `max_blob_gas_per_block` is zero.
 ///
 /// Returns `0.0` if `blob_gas_used` is `0`, otherwise returns the ratio
 /// `blob_gas_used/max_blob_gas_per_block`.
