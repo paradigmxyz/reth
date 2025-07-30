@@ -87,7 +87,6 @@ fn txpool_batch_insertion(c: &mut Criterion) {
                     let (processor, request_tx) = BatchTxProcessor::new(pool, tx_count, tx_count);
                     let processor_handle = rt.spawn(processor);
 
-                    // Create batch requests in setup
                     let mut batch_requests = Vec::with_capacity(tx_count);
                     let mut response_futures = Vec::with_capacity(tx_count);
                     for tx in txs {
@@ -106,7 +105,6 @@ fn txpool_batch_insertion(c: &mut Criterion) {
                             let _ = request_tx.send(request).await;
                         }
 
-                        // Wait for all responses
                         for response_rx in response_futures {
                             let _res = response_rx.await.unwrap();
                         }
