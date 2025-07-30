@@ -228,7 +228,8 @@ where
                 );
             };
 
-            // Scroll-specific logic: update rewards if the newest_block is not at capacity and tip calculation succeeds
+            // Scroll-specific logic: update rewards if the newest_block is not at capacity and tip
+            // calculation succeeds
             let (suggest_tip_cap_result, is_at_capacity) = self
                 .gas_oracle()
                 .calculate_suggest_tip_cap(
