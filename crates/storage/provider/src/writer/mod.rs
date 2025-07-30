@@ -243,7 +243,7 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
-        HashedPostState, HashedStorage, StateRoot, StorageRoot,
+        HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
     };
     use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
     use revm_database::{
@@ -1343,8 +1343,14 @@ mod tests {
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
 
         // calculate database storage root and write intermediate storage nodes.
-        let (storage_root, _, storage_updates) =
-            StorageRoot::from_tx_hashed(tx, hashed_address).calculate(true).unwrap();
+        let StorageRootProgress::Complete(storage_root, _, storage_updates) =
+            StorageRoot::from_tx_hashed(tx, hashed_address)
+                .with_no_threshold()
+                .calculate(true)
+                .unwrap()
+        else {
+            panic!("no threshold for root");
+        };
         assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw
