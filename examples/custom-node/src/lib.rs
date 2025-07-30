@@ -8,7 +8,7 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 use crate::{
-    engine::{CustomEngineValidatorBuilder, CustomPayloadTypes},
+    engine::{CustomEngineValidator, CustomEngineValidatorBuilder, CustomPayloadTypes},
     engine_api::CustomEngineApiBuilder,
     evm::CustomExecutorBuilder,
     pool::CustomPooledTransaction,
@@ -67,6 +67,7 @@ where
     type AddOns = OpAddOns<
         NodeAdapter<N>,
         OpEthApiBuilder<CustomRpcTypes>,
+        CustomEngineValidator<N::Provider>,
         CustomEngineValidatorBuilder,
         CustomEngineApiBuilder,
     >;
@@ -82,6 +83,13 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        self.inner.add_ons_builder().build()
+        self.inner
+            .add_ons_builder::<CustomRpcTypes>()
+            .build::<
+                NodeAdapter<N>,
+                CustomEngineValidator<N::Provider>,
+                CustomEngineValidatorBuilder,
+                CustomEngineApiBuilder,
+            >()
     }
 }
