@@ -8,7 +8,7 @@ use reth_engine_tree::{
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandler, EngineApiValidator, TreeConfig},
+    tree::{EngineApiTreeHandler, EngineValidator, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -86,7 +86,7 @@ where
         evm_config: C,
     ) -> Self
     where
-        V: EngineApiValidator<N::Payload>,
+        V: EngineValidator<N::Payload>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let engine_kind =

@@ -73,7 +73,7 @@ use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
-pub use payload_validator::{BasicEngineValidator, EngineApiValidator};
+pub use payload_validator::{BasicEngineValidator, EngineValidator};
 pub use persistence_state::PersistenceState;
 pub use reth_engine_primitives::TreeConfig;
 
@@ -300,7 +300,7 @@ where
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineApiValidator<T>,
+    V: EngineValidator<T>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
