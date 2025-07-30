@@ -2,7 +2,7 @@
 //!
 //! # Example
 //!
-//! Builds offline [`TraceApi`](reth_rpc::TraceApi) with only EVM and database. This can be useful
+//! Builds offline `TraceApi` with only EVM and database. This can be useful
 //! for example when downloading a state snapshot (pre-synced node) from some mirror.
 //!
 //! ```rust
