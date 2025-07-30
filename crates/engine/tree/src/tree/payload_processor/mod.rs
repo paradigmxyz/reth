@@ -304,8 +304,8 @@ where
     }
 
     /// Takes the trie input from the inner payload processor, if it exists.
-    pub const fn take_trie_input(&mut self) -> Option<TrieInput> {
-        self.trie_input.take()
+    pub fn take_trie_input(&mut self) -> Option<TrieInput> {
+        self.trie_input.take().map(|input| input.cleared())
     }
 
     /// Returns the cache for the given parent hash.
