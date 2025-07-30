@@ -228,7 +228,7 @@ where
                 );
             };
 
-            // Scroll-specific logic: update rewards if at capacity and tip calculation succeeds
+            // Scroll-specific logic: update rewards if the newest_block is not at capacity and tip calculation succeeds
             let (suggest_tip_cap_result, is_at_capacity) = self
                 .gas_oracle()
                 .calculate_suggest_tip_cap(
@@ -239,7 +239,7 @@ where
                 .await;
 
             let reward = match (is_at_capacity, suggest_tip_cap_result) {
-                (true, Ok(suggest_tip_cap_value)) => {
+                (false, Ok(suggest_tip_cap_value)) => {
                     let suggest_tip_cap = suggest_tip_cap_value.saturating_to::<u128>();
                     reward_percentiles.map(|percentiles| {
                         vec![vec![suggest_tip_cap; percentiles.len()]; block_count as usize]
