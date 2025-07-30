@@ -1085,7 +1085,7 @@ impl<
             if remaining_headers >= PARALLEL_PROCESSING_THRESHOLD {
                 self.spawn_parallel_tasks(range_headers);
             } else {
-                self.spawn_sequential_task(range_headers);
+                return self.process_small_range(range_headers).await;
             }
 
             // Now wait for the newly spawned task to complete
@@ -1111,46 +1111,43 @@ impl<
         Ok(None)
     }
 
-    /// Spawn a sequential task for processing a small range of headers
+    /// Process a small range of headers sequentially
     ///
     /// This is used when the remaining headers count is below [`PARALLEL_PROCESSING_THRESHOLD`].
-    fn spawn_sequential_task(
+    async fn process_small_range(
         &mut self,
         range_headers: Vec<SealedHeader<<Eth::Provider as HeaderProvider>::Header>>,
-    ) {
-        let filter_inner = self.filter_inner.clone();
-        let task = Box::pin(async move {
-            let mut results = Vec::new();
+    ) -> Result<Option<ReceiptBlockResult<Eth::Provider>>, EthFilterError> {
+        // Process each header individually to avoid queuing for all receipts
+        for header in range_headers {
+            // First check if already cached to avoid unnecessary provider calls
+            let (maybe_block, maybe_receipts) = self
+                .filter_inner
+                .eth_cache()
+                .maybe_cached_block_and_receipts(header.hash())
+                .await?;
 
-            for header in range_headers {
-                // First check if already cached to avoid unnecessary provider calls
-                let (maybe_block, maybe_receipts) =
-                    filter_inner.eth_cache().maybe_cached_block_and_receipts(header.hash()).await?;
-
-                let receipts = match maybe_receipts {
-                    Some(receipts) => receipts,
-                    None => {
-                        // Not cached - fetch directly from provider
-                        match filter_inner.provider().receipts_by_block(header.hash().into())? {
-                            Some(receipts) => Arc::new(receipts),
-                            None => continue, // No receipts found
-                        }
+            let receipts = match maybe_receipts {
+                Some(receipts) => receipts,
+                None => {
+                    // Not cached - fetch directly from provider
+                    match self.filter_inner.provider().receipts_by_block(header.hash().into())? {
+                        Some(receipts) => Arc::new(receipts),
+                        None => continue, // No receipts found
                     }
-                };
-
-                if !receipts.is_empty() {
-                    results.push(ReceiptBlockResult {
-                        receipts,
-                        recovered_block: maybe_block,
-                        header,
-                    });
                 }
+            };
+
+            if !receipts.is_empty() {
+                self.next.push_back(ReceiptBlockResult {
+                    receipts,
+                    recovered_block: maybe_block,
+                    header,
+                });
             }
+        }
 
-            Ok(results)
-        });
-
-        self.pending_tasks.push_back(task);
+        Ok(self.next.pop_front())
     }
 
     /// Spawn parallel tasks for processing a large range of headers
