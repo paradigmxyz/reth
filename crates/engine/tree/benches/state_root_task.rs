@@ -15,9 +15,10 @@ use reth_engine_tree::tree::{
     executor::WorkloadExecutor, precompile_cache::PrecompileCacheMap, PayloadProcessor,
     StateProviderBuilder, TreeConfig,
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::OnStateHook;
 use reth_evm_ethereum::EthEvmConfig;
-use reth_primitives_traits::{Account as RethAccount, StorageEntry};
+use reth_primitives_traits::{Account as RethAccount, Recovered, StorageEntry};
 use reth_provider::{
     providers::{BlockchainProvider, ConsistentDbView},
     test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
@@ -233,7 +234,9 @@ fn bench_state_root(c: &mut Criterion) {
                         black_box({
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
-                                Default::default(),
+                                core::iter::empty::<
+                                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                                >(),
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
                                 ConsistentDbView::new_with_latest_tip(provider).unwrap(),
                                 TrieInput::default(),
