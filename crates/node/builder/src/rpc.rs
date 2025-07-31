@@ -438,6 +438,8 @@ pub struct RpcAddOns<
     /// This middleware is applied to all RPC requests across all transports (HTTP, WS, IPC).
     /// See [`RpcAddOns::with_rpc_middleware`] for more details.
     rpc_middleware: RpcMiddleware,
+    /// Optional custom tokio runtime for the RPC server.
+    tokio_runtime: Option<tokio::runtime::Handle>,
 }
 
 impl<Node, EthB, EV, EB, RpcMiddleware> Debug for RpcAddOns<Node, EthB, EV, EB, RpcMiddleware>
@@ -469,6 +471,7 @@ where
         engine_validator_builder: EV,
         engine_api_builder: EB,
         rpc_middleware: RpcMiddleware,
+        tokio_runtime: Option<tokio::runtime::Handle>,
     ) -> Self {
         Self {
             hooks: RpcHooks::default(),
@@ -476,6 +479,7 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -484,13 +488,21 @@ where
         self,
         engine_api_builder: T,
     ) -> RpcAddOns<Node, EthB, EV, T, RpcMiddleware> {
-        let Self { hooks, eth_api_builder, engine_validator_builder, rpc_middleware, .. } = self;
+        let Self {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            rpc_middleware,
+            tokio_runtime,
+            ..
+        } = self;
         RpcAddOns {
             hooks,
             eth_api_builder,
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -499,13 +511,16 @@ where
         self,
         engine_validator_builder: T,
     ) -> RpcAddOns<Node, EthB, T, EB, RpcMiddleware> {
-        let Self { hooks, eth_api_builder, engine_api_builder, rpc_middleware, .. } = self;
+        let Self {
+            hooks, eth_api_builder, engine_api_builder, rpc_middleware, tokio_runtime, ..
+        } = self;
         RpcAddOns {
             hooks,
             eth_api_builder,
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -548,14 +563,41 @@ where
     /// - The default middleware is `Identity` (no-op), which passes through requests unchanged
     /// - Middleware layers are applied in the order they are added via `.layer()`
     pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> RpcAddOns<Node, EthB, EV, EB, T> {
-        let Self { hooks, eth_api_builder, engine_validator_builder, engine_api_builder, .. } =
-            self;
+        let Self {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            tokio_runtime,
+            ..
+        } = self;
         RpcAddOns {
             hooks,
             eth_api_builder,
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            tokio_runtime,
+        }
+    }
+
+    /// Sets the tokio runtime for the RPC servers.
+    pub fn with_tokio_runtime(self, tokio_runtime: tokio::runtime::Handle) -> Self {
+        let Self {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+            ..
+        } = self;
+        RpcAddOns {
+            hooks,
+            eth_api_builder,
+            engine_validator_builder,
+            engine_api_builder,
+            rpc_middleware,
+            tokio_runtime: Some(tokio_runtime),
         }
     }
 
@@ -570,6 +612,7 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            tokio_runtime,
         } = self;
         let rpc_middleware = Stack::new(rpc_middleware, layer);
         RpcAddOns {
@@ -578,6 +621,7 @@ where
             engine_validator_builder,
             engine_api_builder,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 
@@ -619,7 +663,7 @@ where
     EB: Default,
 {
     fn default() -> Self {
-        Self::new(EthB::default(), EV::default(), EB::default(), Default::default())
+        Self::new(EthB::default(), EV::default(), EB::default(), Default::default(), None)
     }
 }
 
@@ -646,6 +690,7 @@ where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
+        let tokio_runtime = self.tokio_runtime.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -659,7 +704,15 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware);
+        let server_config = if let Some(tokio_runtime) = tokio_runtime {
+            config
+                .rpc
+                .rpc_server_config()
+                .set_rpc_middleware(rpc_middleware)
+                .with_tokio_runtime(tokio_runtime)
+        } else {
+            config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware)
+        };
         let rpc_server_handle = Self::launch_rpc_server_internal(server_config, &modules).await?;
 
         let handles =
@@ -712,6 +765,7 @@ where
         F: FnOnce(RpcModuleContainer<'_, N, EthB::EthApi>) -> eyre::Result<()>,
     {
         let rpc_middleware = self.rpc_middleware.clone();
+        let tokio_runtime = self.tokio_runtime.clone();
         let setup_ctx = self.setup_rpc_components(ctx, ext).await?;
         let RpcSetupContext {
             node,
@@ -725,7 +779,15 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware);
+        let server_config = if let Some(tokio_runtime) = tokio_runtime {
+            config
+                .rpc
+                .rpc_server_config()
+                .set_rpc_middleware(rpc_middleware)
+                .with_tokio_runtime(tokio_runtime)
+        } else {
+            config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware)
+        };
 
         let (rpc, auth) = if disable_auth {
             // Only launch the RPC server, use a noop auth handle

@@ -733,6 +733,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                 EV::default(),
                 EB::default(),
                 rpc_middleware,
+                None,
             ),
             da_config: da_config.unwrap_or_default(),
             sequencer_url,

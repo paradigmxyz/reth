@@ -192,6 +192,7 @@ where
                 EthereumEngineValidatorBuilder::default(),
                 BasicEngineApiBuilder::default(),
                 Default::default(),
+                None,
             ),
         }
     }
@@ -233,6 +234,12 @@ where
     {
         let Self { inner } = self;
         EthereumAddOns { inner: inner.with_rpc_middleware(rpc_middleware) }
+    }
+
+    /// Sets the tokio runtime for the RPC servers.
+    pub fn with_tokio_runtime(self, tokio_runtime: tokio::runtime::Handle) -> Self {
+        let Self { inner } = self;
+        EthereumAddOns { inner: inner.with_tokio_runtime(tokio_runtime) }
     }
 }
 
