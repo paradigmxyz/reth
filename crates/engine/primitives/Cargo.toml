@@ -58,6 +58,7 @@ std = [
     "thiserror/std",
     "reth-evm/std",
     "op-alloy-rpc-types-engine?/std",
+    "alloy-op-evm?/std",
 ]
 op = [
     "dep:op-alloy-rpc-types-engine",
