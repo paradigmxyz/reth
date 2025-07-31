@@ -139,3 +139,8 @@ harness = false
 name = "insertion"
 required-features = ["test-utils"]
 harness = false
+
+[[bench]]
+name = "canonical_state_change"
+required-features = ["test-utils", "arbitrary"]
+harness = false

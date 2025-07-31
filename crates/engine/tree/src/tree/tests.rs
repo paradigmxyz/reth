@@ -10,7 +10,7 @@ use alloy_rpc_types_engine::{ExecutionData, ExecutionPayloadSidecar, ExecutionPa
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
-use reth_engine_primitives::{EngineValidator, ForkchoiceStatus};
+use reth_engine_primitives::{EngineValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::EthEngineTypes;
 use reth_ethereum_primitives::{Block, EthPrimitives};
