@@ -98,7 +98,7 @@ pub struct BestTransactions<T: TransactionOrdering> {
     pub(crate) new_transaction_receiver: Option<Receiver<PendingTransaction<T>>>,
     /// The priority value of most recently yielded transaction.
     ///
-    /// This is required if we new pending transactions are feeded in while it yields new values.
+    /// This is required if we new pending transactions are fed in while it yields new values.
     pub(crate) last_priority: Option<Priority<T::PriorityValue>>,
     /// Flag to control whether to skip blob transactions (EIP4844).
     pub(crate) skip_blobs: bool,
