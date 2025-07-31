@@ -3,6 +3,7 @@ use alloy_consensus::Transaction;
 use alloy_primitives::{Address, B256, U256};
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
+use rand::prelude::SliceRandom;
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_execution_types::ChangedAccount;
 use reth_primitives_traits::{Header, SealedBlock};
@@ -12,7 +13,6 @@ use reth_transaction_pool::{
     TransactionOrigin, TransactionPool, TransactionPoolExt,
 };
 use std::{collections::HashMap, time::Duration};
-
 /// Generates a set of transactions for multiple senders
 fn generate_transactions(num_senders: usize, txs_per_sender: usize) -> Vec<MockTransaction> {
     let mut runner = TestRunner::deterministic();
@@ -68,9 +68,9 @@ async fn fill_pool(pool: &TestPoolBuilder, txs: Vec<MockTransaction>) -> HashMap
 fn canonical_state_change_bench(c: &mut Criterion) {
     let mut group = c.benchmark_group("Transaction Pool Canonical State Change");
     group.measurement_time(Duration::from_secs(10));
-
+    let rt = tokio::runtime::Runtime::new().unwrap();
     // Test different pool sizes
-    for num_senders in [100, 500, 1000, 2000] {
+    for num_senders in [500, 1000, 2000] {
         for txs_per_sender in [1, 5, 10] {
             let total_txs = num_senders * txs_per_sender;
 
@@ -86,21 +86,29 @@ fn canonical_state_change_bench(c: &mut Criterion) {
             let block = Block { header, body };
             let sealed_block = SealedBlock::seal_slow(block);
 
-            group.bench_with_input(group_id, &sealed_block, |b, sealed_block| {
+            let txs = generate_transactions(num_senders, txs_per_sender);
+            let pool = TestPoolBuilder::default().with_config(PoolConfig {
+                pending_limit: SubPoolLimit::max(),
+                basefee_limit: SubPoolLimit::max(),
+                queued_limit: SubPoolLimit::max(),
+                blob_limit: SubPoolLimit::max(),
+                max_account_slots: 50,
+                ..Default::default()
+            });
+            struct Input<B: reth_primitives_traits::Block> {
+                sealed_block: SealedBlock<B>,
+                pool: TestPoolBuilder,
+            }
+            group.bench_with_input(group_id, &Input { sealed_block, pool }, |b, input| {
                 b.iter_batched(
                     || {
                         // Setup phase - create pool and transactions
-                        let rt = tokio::runtime::Runtime::new().unwrap();
-
-                        let pool = TestPoolBuilder::default().with_config(PoolConfig {
-                            pending_limit: SubPoolLimit::max(),
-                            basefee_limit: SubPoolLimit::max(),
-                            queued_limit: SubPoolLimit::max(),
-                            blob_limit: SubPoolLimit::max(),
-                            max_account_slots: 50,
-                            ..Default::default()
-                        });
-
+                        let sealed_block = &input.sealed_block;
+                        let pool = &input.pool;
+                        let senders = pool.unique_senders();
+                        for sender in senders {
+                            pool.remove_transactions_by_sender(sender);
+                        }
                         // Set initial block info
                         pool.set_block_info(BlockInfo {
                             last_seen_block_number: 0,
@@ -109,11 +117,8 @@ fn canonical_state_change_bench(c: &mut Criterion) {
                             pending_blob_fee: Some(1_000_000),
                             block_gas_limit: 30_000_000,
                         });
-
-                        let txs = generate_transactions(num_senders, txs_per_sender);
-                        let sender_nonces = rt.block_on(fill_pool(&pool, txs));
-
-                        let changed_accounts: Vec<ChangedAccount> = sender_nonces
+                        let sender_nonces = rt.block_on(fill_pool(pool, txs.clone()));
+                        let mut changed_accounts: Vec<ChangedAccount> = sender_nonces
                             .into_iter()
                             .map(|(address, nonce)| ChangedAccount {
                                 address,
@@ -121,7 +126,8 @@ fn canonical_state_change_bench(c: &mut Criterion) {
                                 balance: U256::from(9_000_000_000_000_000u64), // Decrease balance
                             })
                             .collect();
-
+                        changed_accounts.shuffle(&mut rand::rng());
+                        let changed_accounts = changed_accounts.drain(..100).collect();
                         let update = CanonicalStateUpdate {
                             new_tip: sealed_block,
                             pending_block_base_fee: 1_000_000_000, // 1 gwei
