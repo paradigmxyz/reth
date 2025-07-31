@@ -8028,6 +8028,7 @@ dependencies = [
  "revm-state",
  "schnellru",
  "serde_json",
+ "smallvec",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
