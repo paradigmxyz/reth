@@ -440,9 +440,7 @@ where
                     if listener.kind.is_propagate_only() && !tx.propagate {
                         None
                     } else {
-                        Some(NewTransactionEvent::pending(
-                            tx.clone(),
-                        ))
+                        Some(NewTransactionEvent::pending(tx.clone()))
                     }
                 });
                 listener.send_all(promoted_txs)
