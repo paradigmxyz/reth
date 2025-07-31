@@ -176,25 +176,25 @@ pub struct EthereumAddOns<
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
     EV: Send,
-    EVB: PayloadValidatorBuilder<N>,
-    EB = BasicEngineApiBuilder<EVB>,
-    Engine = BasicEngineValidatorBuilder<EVB>,
+    PVB: PayloadValidatorBuilder<N>,
+    EB = BasicEngineApiBuilder<PVB>,
+    EVB = BasicEngineValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
 > {
-    inner: RpcAddOns<N, EthB, EVB, EB, Engine, RpcMiddleware>,
+    inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>,
     _phantom: std::marker::PhantomData<EV>,
 }
 
-impl<N, EthB, EV, EVB, EB, Engine, RpcMiddleware>
-    EthereumAddOns<N, EthB, EV, EVB, EB, Engine, RpcMiddleware>
+impl<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
+    EthereumAddOns<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
     EV: Send,
-    EVB: PayloadValidatorBuilder<N>,
+    PVB: PayloadValidatorBuilder<N>,
 {
     /// Creates a new instance from the inner `RpcAddOns`.
-    pub const fn new(inner: RpcAddOns<N, EthB, EVB, EB, Engine, RpcMiddleware>) -> Self {
+    pub const fn new(inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>) -> Self {
         Self { inner, _phantom: std::marker::PhantomData }
     }
 }
@@ -228,19 +228,19 @@ where
     }
 }
 
-impl<N, EthB, EV, EVB, EB, Engine, RpcMiddleware>
-    EthereumAddOns<N, EthB, EV, EVB, EB, Engine, RpcMiddleware>
+impl<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
+    EthereumAddOns<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
     EV: Send,
-    EVB: PayloadValidatorBuilder<N>,
+    PVB: PayloadValidatorBuilder<N>,
 {
     /// Replace the engine API builder.
     pub fn with_engine_api<T>(
         self,
         engine_api_builder: T,
-    ) -> EthereumAddOns<N, EthB, EV, EVB, T, Engine, RpcMiddleware>
+    ) -> EthereumAddOns<N, EthB, EV, PVB, T, EVB, RpcMiddleware>
     where
         T: Send,
     {
@@ -248,24 +248,24 @@ where
         EthereumAddOns::new(inner.with_engine_api(engine_api_builder))
     }
 
-    /// Replace the engine validator builder.
-    pub fn with_engine_validator<V, T>(
+    /// Replace the payload validator builder.
+    pub fn with_payload_validator<V, T>(
         self,
-        engine_validator_builder: T,
-    ) -> EthereumAddOns<N, EthB, V, T, EB, Engine, RpcMiddleware>
+        payload_validator_builder: T,
+    ) -> EthereumAddOns<N, EthB, V, T, EB, EVB, RpcMiddleware>
     where
         V: Send,
         T: PayloadValidatorBuilder<N>,
     {
         let Self { inner, .. } = self;
-        EthereumAddOns::new(inner.with_payload_validator(engine_validator_builder))
+        EthereumAddOns::new(inner.with_payload_validator(payload_validator_builder))
     }
 
     /// Sets rpc middleware
     pub fn with_rpc_middleware<T>(
         self,
         rpc_middleware: T,
-    ) -> EthereumAddOns<N, EthB, EV, EVB, EB, Engine, T>
+    ) -> EthereumAddOns<N, EthB, EV, PVB, EB, EVB, T>
     where
         T: Send,
     {
@@ -274,8 +274,8 @@ where
     }
 }
 
-impl<N, EthB, EV, EVB, EB, Engine, RpcMiddleware> NodeAddOns<N>
-    for EthereumAddOns<N, EthB, EV, EVB, EB, Engine, RpcMiddleware>
+impl<N, EthB, EV, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
+    for EthereumAddOns<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -287,9 +287,9 @@ where
     >,
     EthB: EthApiBuilder<N>,
     EV: Send,
-    EVB: PayloadValidatorBuilder<N>,
+    PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
-    Engine: EngineValidatorBuilder<N>,
+    EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
     RpcMiddleware: RethRpcMiddleware,
@@ -322,7 +322,7 @@ where
     }
 }
 
-impl<N, EthB, EV, EVB, EB, Engine> RethRpcAddOns<N> for EthereumAddOns<N, EthB, EV, EVB, EB, Engine>
+impl<N, EthB, EV, PVB, EB, EVB> RethRpcAddOns<N> for EthereumAddOns<N, EthB, EV, PVB, EB, EVB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -334,9 +334,9 @@ where
     >,
     EthB: EthApiBuilder<N>,
     EV: Send,
-    EVB: PayloadValidatorBuilder<N>,
+    PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
-    Engine: EngineValidatorBuilder<N>,
+    EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
@@ -347,8 +347,8 @@ where
     }
 }
 
-impl<N, EthB, EV, EVB, EB, Engine> EngineValidatorAddOn<N>
-    for EthereumAddOns<N, EthB, EV, EVB, EB, Engine>
+impl<N, EthB, EV, PVB, EB, EVB> EngineValidatorAddOn<N>
+    for EthereumAddOns<N, EthB, EV, PVB, EB, EVB>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -360,13 +360,13 @@ where
     >,
     EthB: EthApiBuilder<N>,
     EV: Send,
-    EVB: PayloadValidatorBuilder<N>,
+    PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
-    Engine: EngineValidatorBuilder<N>,
+    EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
     EvmFactoryFor<N::Evm>: EvmFactory<Tx = TxEnv>,
 {
-    type ValidatorBuilder = Engine;
+    type ValidatorBuilder = EVB;
 
     fn engine_validator_builder(&self) -> Self::ValidatorBuilder {
         self.inner.engine_validator_builder()
