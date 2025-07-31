@@ -983,7 +983,7 @@ mod tests {
             transaction: Arc::new(valid_new_higher_fee_tx.clone()),
             priority: Priority::Value(U256::from(u64::MAX)),
         };
-        tx_sender.send(pending_tx.clone()).unwrap();
+        tx_sender.send(pending_tx).unwrap();
 
         // ensure that the higher prio tx is skipped since we yielded a lower one
         for tx in best {
