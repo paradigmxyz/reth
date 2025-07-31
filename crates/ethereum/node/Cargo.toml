@@ -40,7 +40,9 @@ reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 
 # ethereum
+alloy-primitives.workspace = true
 alloy-eips.workspace = true
+alloy-rlp.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true

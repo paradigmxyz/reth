@@ -14,8 +14,9 @@ use reth_ethereum_engine_primitives::{
 };
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
-    eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
-    TxEnvFor,
+    block::BlockExecutorFactory,
+    eth::{spec::EthExecutorSpec, EthBlockExecutionCtx},
+    ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes, TxEnvFor,
 };
 use reth_network::{primitives::BasicNetworkPrimitives, NetworkHandle, PeersInfo};
 use reth_node_api::{
@@ -52,7 +53,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use reth_trie_db::MerklePatriciaTrie;
-use revm::context::TxEnv;
+use revm::{context::TxEnv, primitives::hardfork::SpecId};
 use std::{default::Default, marker::PhantomData, sync::Arc, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
@@ -523,12 +524,18 @@ pub struct EthereumEngineValidatorBuilder;
 impl<Node, Types> EngineValidatorBuilder<Node> for EthereumEngineValidatorBuilder
 where
     Types: NodeTypes<
-        ChainSpec: EthereumHardforks + Clone + 'static,
+        ChainSpec: Hardforks + EthereumHardforks + Clone + 'static,
         Payload: EngineTypes<ExecutionData = ExecutionData>
                      + PayloadTypes<PayloadAttributes = EthPayloadAttributes>,
         Primitives = EthPrimitives,
     >,
     Node: FullNodeComponents<Types = Types>,
+    Node::Evm: for<'a> ConfigureEvm<
+        BlockExecutorFactory: BlockExecutorFactory<
+            EvmFactory: EvmFactory<Spec = SpecId>,
+            ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+        >,
+    >,
 {
     type Validator = EthereumEngineValidator<Types::ChainSpec>;
 

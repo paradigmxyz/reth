@@ -13,9 +13,13 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 use alloy_consensus::BlockHeader;
+use alloy_rpc_types_engine::ExecutionData;
 use core::convert::Infallible;
 use reth_errors::ConsensusError;
-use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{
+    block::BlockExecutorFactory, eth::EthBlockExecutionCtx, execute::OwnedExecutableTxFor,
+    ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
+};
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
@@ -24,6 +28,7 @@ use reth_primitives_traits::{Block, BlockTy, RecoveredBlock, SealedBlock};
 use reth_trie::iter::Either;
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
+use std::borrow::Cow;
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
 pub use reth_payload_primitives::ExecutionPayload;
@@ -256,6 +261,24 @@ where
         match self {
             Self::Left(l) => l.get_ctx(evm),
             Self::Right(r) => r.get_ctx(evm),
+        }
+    }
+}
+
+impl<Evm> ExecutionCtxProvider<Evm> for ExecutionData
+where
+    Evm: ConfigureEvm<
+        BlockExecutorFactory: for<'a> BlockExecutorFactory<
+            ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
+        >,
+    >,
+{
+    fn get_ctx(&self, _evm: &Evm) -> ExecutionCtxFor<'_, Evm> {
+        EthBlockExecutionCtx {
+            parent_hash: self.parent_hash(),
+            parent_beacon_block_root: self.sidecar.parent_beacon_block_root(),
+            ommers: &[],
+            withdrawals: self.payload.as_v2().map(|v2| Cow::Owned(v2.withdrawals.clone().into())),
         }
     }
 }
