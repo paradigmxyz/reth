@@ -282,3 +282,21 @@ where
         }
     }
 }
+
+#[cfg(feature = "op")]
+impl<Evm> ExecutionCtxProvider<Evm> for op_alloy_rpc_types_engine::OpExecutionData
+where
+    Evm: ConfigureEvm<
+        BlockExecutorFactory: for<'a> BlockExecutorFactory<
+            ExecutionCtx<'a> = alloy_op_evm::OpBlockExecutionCtx,
+        >,
+    >,
+{
+    fn get_ctx(&self, _evm: &Evm) -> ExecutionCtxFor<'_, Evm> {
+        alloy_op_evm::OpBlockExecutionCtx {
+            parent_hash: self.parent_hash(),
+            parent_beacon_block_root: self.sidecar.parent_beacon_block_root(),
+            extra_data: self.payload.as_v1().extra_data.clone(),
+        }
+    }
+}

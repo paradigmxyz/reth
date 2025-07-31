@@ -581,6 +581,16 @@ where
     }
 }
 
+impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for WithEncoded<T>
+where
+    Self: Clone + Send + 'static,
+    for<'a> &'a Self: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
+{
+    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
+        self
+    }
+}
+
 impl<L, R, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for Either<L, R>
 where
     L: OwnedExecutableTx<TxEnv, Tx>,

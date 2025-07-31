@@ -1,13 +1,16 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::B256;
-use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1};
+use alloy_eips::eip2718::Decodable2718;
+use alloy_primitives::{B256, U256};
+use alloy_rpc_types_engine::{ExecutionPayloadEnvelopeV2, ExecutionPayloadV1, PayloadError};
 use op_alloy_rpc_types_engine::{
     OpExecutionData, OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4,
     OpPayloadAttributes,
 };
+use op_revm::OpSpecId;
+use reth_chainspec::EthChainSpec;
 use reth_consensus::ConsensusError;
 use reth_engine_primitives::EngineValidator;
-use reth_evm::ConfigureEvm;
+use reth_evm::{block::BlockExecutorFactory, ConfigureEvm, EvmEnv, EvmEnvFor, EvmFactory};
 use reth_node_api::{
     payload::{
         validate_parent_beacon_block_root_presence, EngineApiMessageVersion,
@@ -15,15 +18,23 @@ use reth_node_api::{
         PayloadTypes, VersionSpecificValidationError,
     },
     validate_version_specific_fields, BuiltPayload, EngineTypes, EvmPayloadValidator,
-    NodePrimitives, PayloadValidator,
+    ExecutableTxIterator, NodePrimitives, PayloadValidator,
 };
 use reth_optimism_consensus::isthmus;
+use reth_optimism_evm::{revm_spec_by_timestamp_after_bedrock, OpBlockExecutionCtx};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
 use reth_optimism_primitives::{OpBlock, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
-use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SignedTransaction};
+use reth_primitives_traits::{
+    Block, RecoveredBlock, SealedBlock, SignedTransaction, TxTy, WithEncoded,
+};
 use reth_provider::StateProviderFactory;
 use reth_trie_common::{HashedPostState, KeyHasher};
+use revm::{
+    context::{BlockEnv, CfgEnv},
+    context_interface::block::BlobExcessGasAndPrice,
+    primitives::hardfork::SpecId,
+};
 use std::{marker::PhantomData, sync::Arc};
 
 /// The types used in the optimism beacon consensus engine.
@@ -168,10 +179,72 @@ impl<P, Tx, ChainSpec, Types, Evm> EvmPayloadValidator<Types, Evm>
 where
     P: StateProviderFactory + Unpin + 'static,
     Tx: SignedTransaction + Unpin + 'static,
-    ChainSpec: OpHardforks + Send + Sync + 'static,
+    ChainSpec: EthChainSpec + OpHardforks + Send + Sync + 'static,
     Types: PayloadTypes<ExecutionData = OpExecutionData>,
-    Evm: ConfigureEvm<Primitives: NodePrimitives<Block = alloy_consensus::Block<Tx>>>,
+    Evm: ConfigureEvm<
+        Primitives: NodePrimitives<Block = alloy_consensus::Block<Tx>>,
+        BlockExecutorFactory: for<'a> BlockExecutorFactory<
+            EvmFactory: EvmFactory<Spec = OpSpecId>,
+            ExecutionCtx<'a> = OpBlockExecutionCtx,
+        >,
+    >,
 {
+    fn evm_env_for_payload(
+        &self,
+        payload: &OpExecutionData,
+        _evm: &Evm,
+    ) -> Result<EvmEnvFor<Evm>, NewPayloadError> {
+        let timestamp = payload.payload.timestamp();
+        let block_number = payload.payload.block_number();
+
+        let spec = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), timestamp);
+
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+
+        let blob_excess_gas_and_price = spec
+            .into_eth_spec()
+            .is_enabled_in(SpecId::CANCUN)
+            .then_some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 1 });
+
+        let block_env = BlockEnv {
+            number: U256::from(block_number),
+            beneficiary: payload.payload.as_v1().fee_recipient,
+            timestamp: U256::from(timestamp),
+            difficulty: if spec.into_eth_spec() >= SpecId::MERGE {
+                U256::ZERO
+            } else {
+                payload.payload.as_v1().prev_randao.into()
+            },
+            prevrandao: (spec.into_eth_spec() >= SpecId::MERGE)
+                .then(|| payload.payload.as_v1().prev_randao),
+            gas_limit: payload.payload.as_v1().gas_limit,
+            basefee: payload.payload.as_v1().base_fee_per_gas.to(),
+            // EIP-4844 excess blob gas of this block, introduced in Cancun
+            blob_excess_gas_and_price,
+        };
+
+        Ok(EvmEnv { cfg_env, block_env })
+    }
+
+    fn tx_iterator_for_payload(
+        &self,
+        payload: &OpExecutionData,
+    ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError> {
+        Ok(payload.payload.transactions().clone().into_iter().map(|encoded| {
+            let tx = TxTy::<Evm::Primitives>::decode_2718_exact(encoded.as_ref())
+                .map_err(alloy_rlp::Error::from)
+                .map_err(PayloadError::from)?;
+            let signer = tx.try_recover().map_err(NewPayloadError::other)?;
+            Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
+        }))
+    }
+
+    fn execution_ctx_for_payload<'a>(
+        &self,
+        payload: &'a OpExecutionData,
+    ) -> Result<impl reth_node_api::ExecutionCtxProvider<Evm> + 'a, NewPayloadError> {
+        Ok(payload)
+    }
 }
 
 impl<Types, P, Tx, ChainSpec> EngineValidator<Types> for OpEngineValidator<P, Tx, ChainSpec>

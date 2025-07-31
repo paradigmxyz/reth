@@ -29,6 +29,10 @@ alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-eips.workspace = true
 
+# optimism
+op-alloy-rpc-types-engine = { workspace = true, optional = true }
+alloy-op-evm = { workspace = true, optional = true }
+
 # async
 tokio = { workspace = true, features = ["sync"] }
 futures.workspace = true
@@ -53,4 +57,12 @@ std = [
     "serde/std",
     "thiserror/std",
     "reth-evm/std",
+    "op-alloy-rpc-types-engine?/std",
+]
+op = [
+    "dep:op-alloy-rpc-types-engine",
+    "dep:alloy-op-evm",
+    "reth-evm/op",
+    "reth-payload-primitives/op",
+    "reth-primitives-traits/op",
 ]
