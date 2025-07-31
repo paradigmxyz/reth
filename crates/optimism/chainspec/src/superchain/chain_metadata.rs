@@ -158,7 +158,8 @@ mod tests {
         "ecotone_time": 1710374401,
         "fjord_time": 1720627201,
         "granite_time": 1726070401,
-        "holocene_time": 1736445601
+        "holocene_time": 1736445601,
+        "isthmus_time": 1746806401
       },
       "optimism": {
         "eip1559_elasticity": 6,
@@ -196,7 +197,7 @@ mod tests {
             fjord_time: Some(1720627201),
             granite_time: Some(1726070401),
             holocene_time: Some(1736445601),
-            isthmus_time: None,
+            isthmus_time: Some(1746806401),
             optimism: Option::from(ChainConfigExtraFieldsOptimism {
                 eip1559_elasticity: 6,
                 eip1559_denominator: 50,
@@ -212,7 +213,7 @@ mod tests {
         assert_eq!(value.get("fjordTime").unwrap(), 1720627201);
         assert_eq!(value.get("graniteTime").unwrap(), 1726070401);
         assert_eq!(value.get("holoceneTime").unwrap(), 1736445601);
-        assert_eq!(value.get("isthmusTime"), None);
+        assert_eq!(value.get("isthmusTime").unwrap(), 1746806401);
         let optimism = value.get("optimism").unwrap();
         assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
         assert_eq!(optimism.get("eip1559Denominator").unwrap(), 50);
@@ -256,7 +257,7 @@ mod tests {
         assert_eq!(chain_config.extra_fields.get("fjordTime").unwrap(), 1720627201);
         assert_eq!(chain_config.extra_fields.get("graniteTime").unwrap(), 1726070401);
         assert_eq!(chain_config.extra_fields.get("holoceneTime").unwrap(), 1736445601);
-        assert_eq!(chain_config.extra_fields.get("isthmusTime"), None);
+        assert_eq!(chain_config.extra_fields.get("isthmusTime").unwrap(), 1746806401);
         let optimism = chain_config.extra_fields.get("optimism").unwrap();
         assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
         assert_eq!(optimism.get("eip1559Denominator").unwrap(), 50);
@@ -274,7 +275,8 @@ mod tests {
             "ecotone_time": 1710374401,
             "fjord_time": 1720627201,
             "granite_time": 1726070401,
-            "holocene_time": 1736445601
+            "holocene_time": 1736445601,
+            "isthmus_time": 1746806401
           },
           "optimism": {
             "eip1559_elasticity": 6,
