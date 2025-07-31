@@ -44,6 +44,7 @@ use reth_trie::HashedPostState;
 use reth_trie_db::StateCommitment;
 use revm_database::BundleState;
 use std::{
+    collections::BTreeMap,
     ops::{Add, RangeBounds, RangeInclusive, Sub},
     sync::Arc,
     time::Instant,
@@ -413,6 +414,41 @@ impl<N: ProviderNodeTypes> TransactionsProvider for BlockchainProvider<N> {
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
         self.consistent_provider()?.transaction_sender(id)
+    }
+}
+
+impl<N: ProviderNodeTypes> crate::StorageReader for BlockchainProvider<N> {
+    fn plain_state_storages(
+        &self,
+        _addresses_with_keys: impl IntoIterator<Item = (Address, impl IntoIterator<Item = B256>)>,
+    ) -> ProviderResult<Vec<(Address, Vec<reth_primitives_traits::StorageEntry>)>> {
+        self.consistent_provider()?.plain_state_storages(_addresses_with_keys)
+    }
+
+    fn changed_storages_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<Address, std::collections::BTreeSet<B256>>> {
+        self.consistent_provider()?.changed_storages_with_range(_range)
+    }
+
+    fn changed_storages_and_blocks_with_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<std::collections::BTreeMap<(Address, B256), Vec<u64>>> {
+        self.consistent_provider()?.changed_storages_and_blocks_with_range(_range)
+    }
+
+    fn storage_range_at(
+        &self,
+        _contract_address: Address,
+        _key_start: B256,
+        _max_result: u64,
+    ) -> ProviderResult<(
+        Vec<(B256, alloy_primitives::StorageKey, alloy_primitives::StorageValue)>,
+        Option<B256>,
+    )> {
+        self.consistent_provider()?.storage_range_at(_contract_address, _key_start, _max_result)
     }
 }
 

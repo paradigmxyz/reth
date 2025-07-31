@@ -28,7 +28,8 @@ use alloy_consensus::{constants::KECCAK_EMPTY, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumberOrTag};
 use alloy_network::{primitives::HeaderResponse, BlockResponse};
 use alloy_primitives::{
-    map::HashMap, Address, BlockHash, BlockNumber, StorageKey, TxHash, TxNumber, B256, U256,
+    map::HashMap, Address, BlockHash, BlockNumber, StorageKey, StorageValue, TxHash, TxNumber,
+    B256, U256,
 };
 use alloy_provider::{ext::DebugApi, network::Network, Provider};
 use alloy_rpc_types::{AccountInfo, BlockId};
@@ -1242,6 +1243,15 @@ where
         _range: RangeInclusive<BlockNumber>,
     ) -> Result<BTreeMap<(Address, StorageKey), Vec<u64>>, ProviderError> {
         Ok(BTreeMap::new())
+    }
+
+    fn storage_range_at(
+        &self,
+        _contract_address: Address,
+        _key_start: B256,
+        _max_result: u64,
+    ) -> ProviderResult<(Vec<(B256, StorageKey, StorageValue)>, Option<B256>)> {
+        Ok((Vec::new(), None))
     }
 }
 
