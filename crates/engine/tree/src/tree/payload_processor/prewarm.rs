@@ -113,7 +113,6 @@ where
             }
 
             // drop handle and wait for all tasks to finish and drop theirs
-            // todo: do we even need this? tasks are spawned anyway and will see all transactions
             drop(done_tx);
             drop(handles);
             while done_rx.recv().is_ok() {}
