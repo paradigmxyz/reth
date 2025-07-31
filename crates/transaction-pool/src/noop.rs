@@ -198,6 +198,10 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         AllPoolTransactions::default()
     }
 
+    fn all_transaction_hashes(&self) -> Vec<TxHash> {
+        vec![]
+    }
+
     fn remove_transactions(
         &self,
         _hashes: Vec<TxHash>,

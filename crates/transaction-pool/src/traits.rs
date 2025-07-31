@@ -282,7 +282,9 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Queued)
     }
 
-    /// Returns the _hashes_ of all transactions in the pool.
+    /// Returns the _hashes_ of all transactions in the pool that are allowed to be propagated.
+    ///
+    /// This excludes hashes that aren't allowed to be propagated.
     ///
     /// Note: This returns a `Vec` but should guarantee that all hashes are unique.
     ///
@@ -294,7 +296,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: P2P
     fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash>;
 
-    /// Returns the _full_ transaction objects all transactions in the pool.
+    /// Returns the _full_ transaction objects all transactions in the pool that are allowed to be
+    /// propagated.
     ///
     /// This is intended to be used by the network for the initial exchange of pooled transaction
     /// _hashes_
@@ -314,7 +317,8 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>;
 
-    /// Returns converted [`PooledTransactionVariant`] for the given transaction hashes.
+    /// Returns converted [`PooledTransactionVariant`] for the given transaction hashes that are
+    /// allowed to be propagated.
     ///
     /// This adheres to the expected behavior of
     /// [`GetPooledTransactions`](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09):
@@ -402,6 +406,17 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ///
     /// Consumer: RPC
     fn all_transactions(&self) -> AllPoolTransactions<Self::Transaction>;
+
+    /// Returns the _hashes_ of all transactions regardless of whether they can be propagated or
+    /// not.
+    ///
+    /// Unlike [`Self::pooled_transaction_hashes`] this doesn't consider whether the transaction can
+    /// be propagated or not.
+    ///
+    /// Note: This returns a `Vec` but should guarantee that all hashes are unique.
+    ///
+    /// Consumer: Utility
+    fn all_transaction_hashes(&self) -> Vec<TxHash>;
 
     /// Removes all transactions corresponding to the given hashes.
     ///
@@ -652,6 +667,11 @@ pub struct AllPoolTransactions<T: PoolTransaction> {
 // === impl AllPoolTransactions ===
 
 impl<T: PoolTransaction> AllPoolTransactions<T> {
+    /// Returns the combined number of all transactions.
+    pub fn count(&self) -> usize {
+        self.pending.len() + self.queued.len()
+    }
+
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
         self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
