@@ -394,8 +394,8 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Granite.boxed(), genesis_info.granite_time),
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
             (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
-            (OpHardfork::Interop.boxed(), genesis_info.interop_time),
             (OpHardfork::Jovian.boxed(), genesis_info.jovian_time),
+            (OpHardfork::Interop.boxed(), genesis_info.interop_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -569,7 +569,12 @@ mod tests {
                 // Isthmus
                 (
                     Head { number: 0, timestamp: 1746806401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 },
+                    ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 1753987208 }, /* TODO: update timestamp */
+                ),
+                // Jovian
+                (
+                    Head { number: 0, timestamp: 1753987208, ..Default::default() }, /* TODO: update timestamp */
+                    ForkId { hash: ForkHash([0x77, 0xe5, 0x5c, 0x69]), next: 0 },
                 ),
             ],
         );
@@ -620,10 +625,15 @@ mod tests {
                     Head { number: 0, timestamp: 1732633200, ..Default::default() },
                     ForkId { hash: ForkHash([0x4a, 0x1c, 0x79, 0x2e]), next: 1744905600 },
                 ),
-                // isthmus
+                // Isthmus
                 (
                     Head { number: 0, timestamp: 1744905600, ..Default::default() },
-                    ForkId { hash: ForkHash([0x6c, 0x62, 0x5e, 0xe1]), next: 0 },
+                    ForkId { hash: ForkHash([0x6c, 0x62, 0x5e, 0xe1]), next: 1753987208 }, /* TODO: update timestamp */
+                ),
+                // Jovian
+                (
+                    Head { number: 0, timestamp: 1753987208, ..Default::default() }, /* TODO: update timestamp */
+                    ForkId { hash: ForkHash([0x77, 0xe5, 0x5c, 0x69]), next: 0 },
                 ),
             ],
         );
@@ -687,7 +697,12 @@ mod tests {
                 // Isthmus
                 (
                     Head { number: 105235063, timestamp: 1746806401, ..Default::default() },
-                    ForkId { hash: ForkHash([0x37, 0xbe, 0x75, 0x8f]), next: 0 },
+                    ForkId { hash: ForkHash([0x37, 0xbe, 0x75, 0x8f]), next: 1753987208 }, /* TODO: update timestamp */
+                ),
+                // Jovian
+                (
+                    Head { number: 105235063, timestamp: 1753987208, ..Default::default() }, /* TODO: update timestamp */
+                    ForkId { hash: ForkHash([0xbe, 0x25, 0xa5, 0x2f]), next: 0 },
                 ),
             ],
         );
@@ -738,10 +753,15 @@ mod tests {
                     Head { number: 0, timestamp: 1732633200, ..Default::default() },
                     ForkId { hash: ForkHash([0x8b, 0x5e, 0x76, 0x29]), next: 1744905600 },
                 ),
-                // isthmus
+                // Isthmus
                 (
                     Head { number: 0, timestamp: 1744905600, ..Default::default() },
-                    ForkId { hash: ForkHash([0x06, 0x0a, 0x4d, 0x1d]), next: 0 },
+                    ForkId { hash: ForkHash([0x06, 0x0a, 0x4d, 0x1d]), next: 1753987208 },
+                ),
+                // Jovian
+                (
+                    Head { number: 0, timestamp: 1753987208, ..Default::default() },
+                    ForkId { hash: ForkHash([0x55, 0x16, 0x3d, 0xc3]), next: 0 },
                 ),
             ],
         );
@@ -786,7 +806,7 @@ mod tests {
     #[test]
     fn latest_base_mainnet_fork_id() {
         assert_eq!(
-            ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 },
+            ForkId { hash: ForkHash([0x77, 0xe5, 0x5c, 0x69]), next: 0 },
             BASE_MAINNET.latest_fork_id()
         )
     }
@@ -795,7 +815,7 @@ mod tests {
     fn latest_base_mainnet_fork_id_with_builder() {
         let base_mainnet = OpChainSpecBuilder::base_mainnet().build();
         assert_eq!(
-            ForkId { hash: ForkHash([0x86, 0x72, 0x8b, 0x4e]), next: 0 },
+            ForkId { hash: ForkHash([0x77, 0xe5, 0x5c, 0x69]), next: 0 },
             base_mainnet.latest_fork_id()
         )
     }

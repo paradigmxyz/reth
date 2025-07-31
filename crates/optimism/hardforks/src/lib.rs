@@ -173,9 +173,8 @@ pub static BASE_SEPOLIA_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
         (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(1723478400)),
         (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1732633200)),
         (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1744905600)),
-        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1753987208)), /* TODO: Update
-                                                                              * with correct
-                                                                              * timestamp */
+        (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1744905600)),
+        (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(1753987208)), /* TODO: Update with correct timestamp */
     ])
 });
 

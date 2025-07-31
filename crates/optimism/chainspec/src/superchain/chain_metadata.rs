@@ -219,6 +219,7 @@ mod tests {
         assert_eq!(value.get("graniteTime").unwrap(), 1726070401);
         assert_eq!(value.get("holoceneTime").unwrap(), 1736445601);
         assert_eq!(value.get("isthmusTime").unwrap(), 1746806401);
+        assert_eq!(value.get("jovian_time"), None);
         let optimism = value.get("optimism").unwrap();
         assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
         assert_eq!(optimism.get("eip1559Denominator").unwrap(), 50);
@@ -312,6 +313,7 @@ mod tests {
         assert_eq!(chain_config.extra_fields.get("graniteTime").unwrap(), 1726070401);
         assert_eq!(chain_config.extra_fields.get("holoceneTime").unwrap(), 1736445601);
         assert_eq!(chain_config.extra_fields.get("isthmusTime").unwrap(), 1746806401);
+        assert_eq!(chain_config.extra_fields.get("jovian_time"), None);
         let optimism = chain_config.extra_fields.get("optimism").unwrap();
         assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
         assert_eq!(optimism.get("eip1559Denominator").unwrap(), 50);
