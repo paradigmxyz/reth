@@ -2,7 +2,7 @@
 //!
 //! Block processing related to syncing should take care to update the metrics by using either
 //! [`ExecutorMetrics::execute_metered`] or [`ExecutorMetrics::metered_one`].
-use crate::{Database, OnStateHook};
+use crate::{execute::OwnedExecutableTx, Database, OnStateHook};
 use alloy_consensus::BlockHeader;
 use alloy_evm::{
     block::{BlockExecutor, StateChangeSource},
@@ -13,7 +13,7 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_execution_errors::BlockExecutionError;
 use reth_execution_types::BlockExecutionOutput;
 use reth_metrics::Metrics;
-use reth_primitives_traits::{Block, BlockBody, RecoveredBlock};
+use reth_primitives_traits::RecoveredBlock;
 use revm::{
     database::{states::bundle_state::BundleRetention, State},
     state::EvmState,
@@ -75,20 +75,19 @@ pub struct ExecutorMetrics {
 }
 
 impl ExecutorMetrics {
-    fn metered<F, R, B>(&self, block: &RecoveredBlock<B>, f: F) -> R
+    fn metered<F, R>(&self, f: F) -> R
     where
-        F: FnOnce() -> R,
-        B: reth_primitives_traits::Block,
+        F: FnOnce() -> (u64, R),
     {
         // Execute the block and record the elapsed time.
         let execute_start = Instant::now();
-        let output = f();
+        let (gas_used, output) = f();
         let execution_duration = execute_start.elapsed().as_secs_f64();
 
         // Update gas metrics.
-        self.gas_processed_total.increment(block.header().gas_used());
-        self.gas_per_second.set(block.header().gas_used() as f64 / execution_duration);
-        self.gas_used_histogram.record(block.header().gas_used() as f64);
+        self.gas_processed_total.increment(gas_used);
+        self.gas_per_second.set(gas_used as f64 / execution_duration);
+        self.gas_used_histogram.record(gas_used as f64);
         self.execution_histogram.record(execution_duration);
         self.execution_duration.set(execution_duration);
 
@@ -105,7 +104,12 @@ impl ExecutorMetrics {
     pub fn execute_metered<E, DB>(
         &self,
         executor: E,
-        input: &RecoveredBlock<impl Block<Body: BlockBody<Transaction = E::Transaction>>>,
+        transactions: impl Iterator<
+            Item = Result<
+                impl OwnedExecutableTx<<E::Evm as Evm>::Tx, E::Transaction>,
+                BlockExecutionError,
+            >,
+        >,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
     where
@@ -119,13 +123,19 @@ impl ExecutorMetrics {
 
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
-        // Use metered to execute and track timing/gas metrics
-        let (mut db, result) = self.metered(input, || {
+        let f = || {
             executor.apply_pre_execution_changes()?;
-            for tx in input.transactions_recovered() {
-                executor.execute_transaction(tx)?;
+            for tx in transactions {
+                executor.execute_transaction(tx?.as_executable())?;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
+        };
+
+        // Use metered to execute and track timing/gas metrics
+        let (mut db, result) = self.metered(|| {
+            let res = f();
+            let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
+            (gas_used, res)
         })?;
 
         // merge transactions into bundle state
@@ -151,7 +161,7 @@ impl ExecutorMetrics {
         F: FnOnce(&RecoveredBlock<B>) -> R,
         B: reth_primitives_traits::Block,
     {
-        self.metered(input, || f(input))
+        self.metered(|| (input.header().gas_used(), f(input)))
     }
 }
 
@@ -295,7 +305,13 @@ mod tests {
             state
         };
         let executor = MockExecutor::new(state);
-        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
+        let _result = metrics
+            .execute_metered::<_, EmptyDB>(
+                executor,
+                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+                state_hook,
+            )
+            .unwrap();
 
         let snapshot = snapshotter.snapshot().into_vec();
 
@@ -327,7 +343,13 @@ mod tests {
         let state = EvmState::default();
 
         let executor = MockExecutor::new(state);
-        let _result = metrics.execute_metered::<_, EmptyDB>(executor, &input, state_hook).unwrap();
+        let _result = metrics
+            .execute_metered::<_, EmptyDB>(
+                executor,
+                input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+                state_hook,
+            )
+            .unwrap();
 
         let actual_output = rx.try_recv().unwrap();
         assert_eq!(actual_output, expected_output);
