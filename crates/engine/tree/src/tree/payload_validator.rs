@@ -995,8 +995,7 @@ where
         payload: Types::ExecutionData,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
-        let block = self.validator.ensure_well_formed_payload(payload)?;
-        EngineValidator::<Types>::validate_block(self, block, ctx)
+        self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx)
     }
 
     fn validate_block(
