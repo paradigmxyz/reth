@@ -15,18 +15,16 @@ use reth_rpc_convert::{CallFeesError, EthTxEnvError, TransactionConversionError}
 use reth_rpc_server_types::result::{
     block_id_to_str, internal_rpc_err, invalid_params_rpc_err, rpc_err, rpc_error_with_code,
 };
-use reth_transaction_pool::{
-    error::{
-        Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
-        PoolError, PoolErrorKind, PoolTransactionError,
-    },
-    BatchTxError,
+use reth_transaction_pool::error::{
+    Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
+    PoolError, PoolErrorKind, PoolTransactionError,
 };
 use revm::context_interface::result::{
     EVMError, ExecutionResult, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
 };
 use revm_inspectors::tracing::MuxError;
 use std::convert::Infallible;
+use tokio::sync::oneshot::error::RecvError;
 use tracing::error;
 
 /// A trait to convert an error to an RPC error.
@@ -169,9 +167,12 @@ pub enum EthApiError {
         /// Duration that was waited before timing out
         duration: Duration,
     },
-    /// Error thrown when `BatchTxProcessor` fails
+    /// Error thrown when batch tx response channel fails
     #[error(transparent)]
-    BatchTxError(#[from] BatchTxError),
+    BatchTxRecvError(#[from] RecvError),
+    /// Error thrown when batch tx send channel fails
+    #[error("Batch transaction sender channel closed")]
+    BatchTxSendError,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -285,7 +286,10 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::PrunedHistoryUnavailable => rpc_error_with_code(4444, error.to_string()),
             EthApiError::Other(err) => err.to_rpc_error(),
             EthApiError::MuxTracerError(msg) => internal_rpc_err(msg.to_string()),
-            EthApiError::BatchTxError(err) => internal_rpc_err(err.to_string()),
+            EthApiError::BatchTxRecvError(err) => internal_rpc_err(err.to_string()),
+            EthApiError::BatchTxSendError => {
+                internal_rpc_err("Batch transaction sender channel closed".to_string())
+            }
         }
     }
 }

@@ -9,8 +9,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{
-    AddedTransactionOutcome, BatchTxError, BatchTxRequest, PoolTransaction, TransactionOrigin,
-    TransactionPool,
+    AddedTransactionOutcome, BatchTxRequest, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -40,8 +39,8 @@ where
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             let request = BatchTxRequest::new(pool_transaction, response_tx);
 
-            batch_sender.send(request).map_err(|_| BatchTxError::BatcherChannelClosed)?;
-            let hash = response_rx.await.map_err(|_| BatchTxError::ResponseChannelClosed)??;
+            batch_sender.send(request).map_err(|_| EthApiError::BatchTxSendError)?;
+            let AddedTransactionOutcome { hash, .. } = response_rx.await??;
 
             Ok(hash)
         } else {

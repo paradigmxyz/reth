@@ -3,8 +3,9 @@
 //! This module provides transaction batching logic to reduce lock contention when processing
 //! many concurrent transaction pool insertions.
 
-use crate::{AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool};
-use alloy_primitives::B256;
+use crate::{
+    error::PoolError, AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+};
 use pin_project::pin_project;
 use std::{
     future::Future,
@@ -12,17 +13,6 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
-
-/// Error type for transaction batching operations
-#[derive(Debug, thiserror::Error)]
-pub enum BatchTxError {
-    /// Transaction batcher channel closed
-    #[error("Transaction batcher channel closed")]
-    BatcherChannelClosed,
-    /// Transaction response channel closed
-    #[error("Transaction response channel closed")]
-    ResponseChannelClosed,
-}
 
 /// A single batch transaction request
 /// All transactions processed through the batcher are considered local
@@ -32,7 +22,7 @@ pub struct BatchTxRequest<T: PoolTransaction> {
     /// Tx to be inserted in to the pool
     pool_tx: T,
     /// Channel to send result back to caller
-    response_tx: oneshot::Sender<Result<B256, BatchTxError>>,
+    response_tx: oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>,
 }
 
 impl<T> BatchTxRequest<T>
@@ -40,7 +30,10 @@ where
     T: PoolTransaction,
 {
     /// Create a new batch transaction request
-    pub const fn new(pool_tx: T, response_tx: oneshot::Sender<Result<B256, BatchTxError>>) -> Self {
+    pub const fn new(
+        pool_tx: T,
+        response_tx: oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>,
+    ) -> Self {
         Self { pool_tx, response_tx }
     }
 }
@@ -80,12 +73,7 @@ where
         let pool_results = pool.add_transactions(TransactionOrigin::Local, pool_transactions).await;
 
         for (response_tx, pool_result) in response_tx.into_iter().zip(pool_results) {
-            let final_result = match pool_result {
-                Ok(AddedTransactionOutcome { hash, .. }) => Ok(hash),
-                Err(_) => Err(BatchTxError::BatcherChannelClosed),
-            };
-
-            let _ = response_tx.send(final_result);
+            let _ = response_tx.send(pool_result);
         }
     }
 }
