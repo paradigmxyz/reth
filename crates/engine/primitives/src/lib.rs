@@ -11,7 +11,7 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types_engine::ExecutionData;
 use core::convert::Infallible;
@@ -28,7 +28,6 @@ use reth_primitives_traits::{Block, BlockTy, RecoveredBlock, SealedBlock};
 use reth_trie::iter::Either;
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
-use std::borrow::Cow;
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
 pub use reth_payload_primitives::ExecutionPayload;
