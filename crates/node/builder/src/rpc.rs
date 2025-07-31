@@ -591,7 +591,7 @@ where
             rpc_middleware,
             ..
         } = self;
-        RpcAddOns {
+        Self {
             hooks,
             eth_api_builder,
             engine_validator_builder,
