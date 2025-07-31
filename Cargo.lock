@@ -3545,6 +3545,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-full-contract-state"
+version = "1.6.0"
+dependencies = [
+ "eyre",
+ "reth-ethereum",
+]
+
+[[package]]
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [
@@ -7980,7 +7988,6 @@ dependencies = [
  "derive_more",
  "eyre",
  "futures",
- "itertools 0.14.0",
  "metrics",
  "mini-moka",
  "parking_lot",
@@ -9293,6 +9300,7 @@ dependencies = [
  "eyre",
  "futures",
  "op-alloy-consensus",
+ "op-alloy-network",
  "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chainspec",
@@ -9303,6 +9311,7 @@ dependencies = [
  "reth-engine-primitives",
  "reth-evm",
  "reth-network",
+ "reth-network-api",
  "reth-node-api",
  "reth-node-builder",
  "reth-node-core",
@@ -9322,8 +9331,10 @@ dependencies = [
  "reth-primitives-traits",
  "reth-provider",
  "reth-revm",
+ "reth-rpc",
  "reth-rpc-api",
  "reth-rpc-engine-api",
+ "reth-rpc-eth-types",
  "reth-rpc-server-types",
  "reth-tasks",
  "reth-tracing",
@@ -9333,6 +9344,7 @@ dependencies = [
  "revm",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 
@@ -10699,6 +10711,7 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "itertools 0.14.0",
+ "metrics",
  "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
@@ -10706,6 +10719,7 @@ dependencies = [
  "rand 0.9.2",
  "rayon",
  "reth-execution-errors",
+ "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
  "reth-trie",
