@@ -44,6 +44,8 @@ pub struct OpPayloadBuilderAttributes<T> {
     pub gas_limit: Option<u64>,
     /// EIP-1559 parameters for the generated payload
     pub eip_1559_params: Option<B64>,
+    /// minBaseFeeLog2 parameter for the generated payload
+    pub min_base_fee_log2_param: Option<B64>,
 }
 
 impl<T> Default for OpPayloadBuilderAttributes<T> {
@@ -54,6 +56,7 @@ impl<T> Default for OpPayloadBuilderAttributes<T> {
             gas_limit: Default::default(),
             eip_1559_params: Default::default(),
             transactions: Default::default(),
+            min_base_fee_log2_param: Default::default(),
         }
     }
 }
@@ -66,6 +69,21 @@ impl<T> OpPayloadBuilderAttributes<T> {
     ) -> Result<Bytes, EIP1559ParamError> {
         self.eip_1559_params
             .map(|params| encode_holocene_extra_data(params, default_base_fee_params))
+            .ok_or(EIP1559ParamError::NoEIP1559Params)?
+    }
+
+    pub fn get_min_base_fee_extra_data(
+        &self,
+        default_base_fee_params: BaseFeeParams,
+    ) -> Result<Bytes, EIP1559ParamError> {
+        self.eip_1559_params
+            .map(|params| {
+                encode_min_base_fee_extra_data(
+                    params,
+                    default_base_fee_params,
+                    self.min_base_fee_log2_param.unwrap_or(0),
+                )
+            })
             .ok_or(EIP1559ParamError::NoEIP1559Params)?
     }
 }
@@ -111,6 +129,7 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
             transactions,
             gas_limit: attributes.gas_limit,
             eip_1559_params: attributes.eip_1559_params,
+            min_base_fee_log2_param: attributes.min_base_fee_log2_param,
         })
     }
 
