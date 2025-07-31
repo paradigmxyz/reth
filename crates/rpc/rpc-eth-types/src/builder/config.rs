@@ -3,8 +3,10 @@
 use std::time::Duration;
 
 use crate::{
-    EthStateCacheConfig, FeeHistoryCacheConfig, GasPriceOracleConfig, RPC_DEFAULT_GAS_CAP,
+    EthStateCacheConfig, FeeHistoryCacheConfig, ForwardConfig, GasPriceOracleConfig,
+    RPC_DEFAULT_GAS_CAP,
 };
+use alloy_rpc_client::RpcClient;
 use reth_rpc_server_types::constants::{
     default_max_tracing_requests, DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_BLOCKS_PER_FILTER,
     DEFAULT_MAX_LOGS_PER_RESPONSE, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_MAX_TRACE_FILTER_BLOCKS,
@@ -90,7 +92,7 @@ pub struct EthConfig {
     /// Controls how pending blocks are built when requested via RPC methods
     pub pending_block_kind: PendingBlockKind,
     /// The raw transaction forwarder.
-    pub raw_tx_forwarder: Option<String>,
+    pub raw_tx_forwarder: ForwardConfig,
 }
 
 impl EthConfig {
@@ -120,7 +122,7 @@ impl Default for EthConfig {
             proof_permits: DEFAULT_PROOF_PERMITS,
             max_batch_size: 1,
             pending_block_kind: PendingBlockKind::Full,
-            raw_tx_forwarder: None,
+            raw_tx_forwarder: ForwardConfig::default(),
         }
     }
 }
@@ -200,7 +202,10 @@ impl EthConfig {
 
     /// Configures the raw transaction forwarder.
     pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<String>) -> Self {
-        self.raw_tx_forwarder = tx_forwarder;
+        if let Some(tx_forwarder) = tx_forwarder {
+            self.raw_tx_forwarder.tx_forwarder =
+                Some(RpcClient::new_http(reqwest::Url::parse(&tx_forwarder).unwrap()));
+        }
         self
     }
 }

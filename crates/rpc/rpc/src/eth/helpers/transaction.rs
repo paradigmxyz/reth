@@ -33,7 +33,7 @@ where
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
         // forward the transaction to the specific endpoint if configured.
-        if let Some(client) = self.raw_tx_forwarder() {
+        if let Some(client) = self.raw_tx_forwarder().tx_forwarder.as_ref() {
             tracing::debug!(target: "rpc::eth", hash = %pool_transaction.hash(), "forwarding raw transaction to forwarder");
             let rlp_hex = hex::encode_prefixed(tx);
 

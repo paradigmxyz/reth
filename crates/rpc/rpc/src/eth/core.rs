@@ -8,7 +8,6 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
-use alloy_rpc_client::RpcClient;
 use derive_more::Deref;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_evm_ethereum::EthEvmConfig;
@@ -22,6 +21,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, receipt::EthReceiptConverter, EthApiError, EthStateCache,
+    receipt::EthReceiptConverter, tx_forward::ForwardConfig, EthApiError, EthStateCache,
     FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
@@ -153,7 +153,7 @@ where
         rpc_converter: Rpc,
         max_batch_size: usize,
         pending_block_kind: PendingBlockKind,
-        raw_tx_forwarder: Option<RpcClient>,
+        raw_tx_forwarder: ForwardConfig,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -296,7 +296,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     raw_tx_sender: broadcast::Sender<Bytes>,
 
     /// Raw transaction forwarder
-    raw_tx_forwarder: Option<RpcClient>,
+    raw_tx_forwarder: ForwardConfig,
 
     /// Converter for RPC types.
     tx_resp_builder: Rpc,
@@ -334,7 +334,7 @@ where
         next_env: impl PendingEnvBuilder<N::Evm>,
         max_batch_size: usize,
         pending_block_kind: PendingBlockKind,
-        raw_tx_forwarder: Option<RpcClient>,
+        raw_tx_forwarder: ForwardConfig,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -537,8 +537,8 @@ where
 
     /// Returns a handle to the raw transaction forwarder.
     #[inline]
-    pub const fn raw_tx_forwarder(&self) -> Option<&RpcClient> {
-        self.raw_tx_forwarder.as_ref()
+    pub const fn raw_tx_forwarder(&self) -> &ForwardConfig {
+        &self.raw_tx_forwarder
     }
 }
 
