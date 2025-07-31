@@ -56,10 +56,7 @@ use reth_optimism_txpool::{
     supervisor::{SupervisorClient, DEFAULT_SUPERVISOR_URL},
     OpPooledTx,
 };
-use reth_provider::{
-    providers::ProviderFactoryBuilder, BlockReader, CanonStateSubscriptions,
-    DatabaseProviderFactory, HashedPostStateProvider, StateCommitmentProvider, StateReader,
-};
+use reth_provider::{providers::ProviderFactoryBuilder, CanonStateSubscriptions};
 use reth_rpc_api::{eth::RpcTypes, DebugApiServer, L2EthApiExtServer};
 use reth_rpc_server_types::RethRpcModule;
 use reth_tracing::tracing::{debug, info};
@@ -219,8 +216,6 @@ impl OpNode {
 impl<N> Node<N> for OpNode
 where
     N: FullNodeTypes<Types: OpFullNodeTypes + OpNodeTypes>,
-    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider + BlockReader,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -255,8 +250,6 @@ where
 impl<N> DebugNode<N> for OpNode
 where
     N: FullNodeComponents<Types = Self>,
-    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider + BlockReader,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<op_alloy_consensus::OpTxEnvelope>;
 
@@ -359,8 +352,6 @@ impl<N> Default
 where
     N: FullNodeComponents<Types: OpNodeTypes>,
     OpEthApiBuilder: EthApiBuilder<N>,
-    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     fn default() -> Self {
         Self::builder().build()
@@ -383,8 +374,6 @@ impl<N, NetworkT, RpcMiddleware>
 where
     N: FullNodeComponents<Types: OpNodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     /// Build a [`OpAddOns`] using [`OpAddOnsBuilder`].
     pub fn builder() -> OpAddOnsBuilder<NetworkT> {
@@ -1215,8 +1204,6 @@ pub struct OpEngineValidatorBuilder;
 impl<Node> EngineApiValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
     Node: FullNodeComponents<Types: OpNodeTypes>,
-    Node::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <Node::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type Validator = OpEngineValidator<
         Node::Provider,

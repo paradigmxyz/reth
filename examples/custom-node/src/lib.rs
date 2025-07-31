@@ -17,13 +17,7 @@ use crate::{
 };
 use chainspec::CustomChainSpec;
 use primitives::CustomNodePrimitives;
-use reth_ethereum::{
-    node::api::{FullNodeTypes, NodeTypes},
-    provider::{
-        BlockReader, DatabaseProviderFactory, HashedPostStateProvider, StateCommitmentProvider,
-        StateReader,
-    },
-};
+use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
     Node, NodeAdapter,
@@ -60,8 +54,6 @@ impl NodeTypes for CustomNode {
 impl<N> Node<N> for CustomNode
 where
     N: FullNodeTypes<Types = Self>,
-    N::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

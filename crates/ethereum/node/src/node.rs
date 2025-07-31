@@ -37,10 +37,7 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{
-    providers::ProviderFactoryBuilder, BlockReader, DatabaseProviderFactory, EthStorage,
-    HashedPostStateProvider, StateCommitmentProvider, StateReader,
-};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     ValidationApi,
@@ -218,8 +215,6 @@ where
         >,
     >,
     EthereumEthApiBuilder: EthApiBuilder<N>,
-    N::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     fn default() -> Self {
         Self::new(RpcAddOns::new(
@@ -374,8 +369,6 @@ where
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Types = Self>,
-    N::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -402,11 +395,7 @@ where
     }
 }
 
-impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode
-where
-    N::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
-{
+impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
@@ -579,8 +568,6 @@ where
         Primitives = EthPrimitives,
     >,
     Node: FullNodeComponents<Types = Types>,
-    Node::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <Node::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type Validator = EthereumEngineValidator<Types::ChainSpec>;
     type TreeValidator =

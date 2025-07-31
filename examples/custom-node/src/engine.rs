@@ -15,10 +15,6 @@ use reth_ethereum::{
         PayloadTypes, PayloadValidator,
     },
     primitives::{RecoveredBlock, SealedBlock},
-    provider::{
-        BlockReader, DatabaseProviderFactory, HashedPostStateProvider, StateCommitmentProvider,
-        StateReader,
-    },
     storage::StateProviderFactory,
     trie::{KeccakKeyHasher, KeyHasher},
 };
@@ -308,8 +304,6 @@ pub struct CustomEngineValidatorBuilder;
 impl<N> EngineApiValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
     N: FullNodeComponents<Types = CustomNode>,
-    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type Validator = CustomEngineValidator<N::Provider>;
     type TreeValidator =

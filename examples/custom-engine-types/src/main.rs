@@ -54,10 +54,7 @@ use reth_ethereum::{
     },
     pool::{PoolTransaction, TransactionPool},
     primitives::{Block, RecoveredBlock, SealedBlock},
-    provider::{
-        BlockReader, DatabaseProviderFactory, EthStorage, HashedPostStateProvider,
-        StateCommitmentProvider, StateProviderFactory, StateReader,
-    },
+    provider::{EthStorage, StateProviderFactory},
     rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
     EthPrimitives, TransactionSigned,
@@ -264,8 +261,6 @@ where
             Primitives = EthPrimitives,
         >,
     >,
-    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type Validator = CustomEngineValidator;
     type TreeValidator = BasicEngineValidator<N::Provider, N::Evm, CustomEngineValidator>;
@@ -315,8 +310,6 @@ pub type MyNodeAddOns<N> = RpcAddOns<N, EthereumEthApiBuilder, CustomEngineValid
 impl<N> Node<N> for MyCustomNode
 where
     N: FullNodeTypes<Types = Self>,
-    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider + BlockReader,
-    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

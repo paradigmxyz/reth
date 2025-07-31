@@ -15,10 +15,7 @@ use reth_ethereum_engine_primitives::EthPayloadBuilderAttributes;
 use reth_ethereum_primitives::TxType;
 use reth_node_api::NodeTypesWithDBAdapter;
 use reth_node_ethereum::EthereumNode;
-use reth_provider::{
-    BlockReader, DatabaseProviderFactory, FullProvider, HashedPostStateProvider,
-    StateCommitmentProvider, StateReader,
-};
+use reth_provider::FullProvider;
 
 /// Helper function to create a new eth payload attributes
 pub(crate) fn eth_payload_attributes(timestamp: u64) -> EthPayloadBuilderAttributes {
@@ -40,12 +37,7 @@ pub(crate) async fn advance_with_random_transactions<Provider>(
     finalize: bool,
 ) -> eyre::Result<()>
 where
-    Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>
-        + BlockReader
-        + StateReader
-        + StateCommitmentProvider
-        + HashedPostStateProvider,
-    <Provider as DatabaseProviderFactory>::Provider: BlockReader,
+    Provider: FullProvider<NodeTypesWithDBAdapter<EthereumNode, TmpDB>>,
 {
     let provider = ProviderBuilder::new().connect_http(node.rpc_url());
     let signers = Wallet::new(1).with_chain_id(provider.get_chain_id().await?).wallet_gen();
