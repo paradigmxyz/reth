@@ -136,7 +136,7 @@ export const sidebar: SidebarItem[] = [
         items: [
             {
                 text: "Overview",
-                link: "/sdk/overview"
+                link: "/sdk"
             },
             {
                 text: "Typesystem",
@@ -312,6 +312,10 @@ export const sidebar: SidebarItem[] = [
                     {
                         text: "reth import-era",
                         link: "/cli/reth/import-era"
+                    },
+                    {
+                        text: "reth export-era",
+                        link: "/cli/reth/export-era"
                     },
                     {
                         text: "reth dump-genesis",

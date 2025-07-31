@@ -1,13 +1,13 @@
 //! Traits for execution.
 
-use crate::{ConfigureEvm, Database, OnStateHook};
+use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx},
-    Evm, EvmEnv, EvmFactory,
+    Evm, EvmEnv, EvmFactory, IntoTxEnv, RecoveredTx,
 };
 use alloy_primitives::B256;
 use core::fmt::Debug;
@@ -344,15 +344,22 @@ pub trait BlockBuilder {
     fn into_executor(self) -> Self::Executor;
 }
 
-pub(crate) struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
+/// A type that constructs a block from transactions and execution results.
+#[derive(Debug)]
+pub struct BasicBlockBuilder<'a, F, Executor, Builder, N: NodePrimitives>
 where
     F: BlockExecutorFactory,
 {
-    pub(crate) executor: Executor,
-    pub(crate) transactions: Vec<Recovered<TxTy<N>>>,
-    pub(crate) ctx: F::ExecutionCtx<'a>,
-    pub(crate) parent: &'a SealedHeader<HeaderTy<N>>,
-    pub(crate) assembler: Builder,
+    /// The block executor used to execute transactions.
+    pub executor: Executor,
+    /// The transactions executed in this block.
+    pub transactions: Vec<Recovered<TxTy<N>>>,
+    /// The parent block execution context.
+    pub ctx: F::ExecutionCtx<'a>,
+    /// The sealed parent block header.
+    pub parent: &'a SealedHeader<HeaderTy<N>>,
+    /// The assembler used to build the block.
+    pub assembler: Builder,
 }
 
 /// Conversions for executable transactions.
@@ -542,6 +549,35 @@ where
 
     fn size_hint(&self) -> usize {
         self.db.bundle_state.size_hint()
+    }
+}
+
+/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
+/// executor.
+pub trait OwnedExecutableTxFor<Evm: ConfigureEvm>:
+    OwnedExecutableTx<TxEnvFor<Evm>, TxTy<Evm::Primitives>>
+{
+}
+
+impl<T, Evm: ConfigureEvm> OwnedExecutableTxFor<Evm> for T where
+    T: OwnedExecutableTx<TxEnvFor<Evm>, TxTy<Evm::Primitives>>
+{
+}
+
+/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
+/// executor.
+pub trait OwnedExecutableTx<TxEnv, Tx>: Clone + Send + 'static {
+    /// Converts the type into an [`ExecutableTx`] for block executor.
+    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy;
+}
+
+impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for T
+where
+    T: Clone + Send + 'static,
+    for<'a> &'a T: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
+{
+    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
+        self
     }
 }
 

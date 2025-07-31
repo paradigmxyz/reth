@@ -434,6 +434,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         self.pending_pool.all()
     }
 
+    /// Returns the number of transactions from the pending sub-pool
+    pub(crate) fn pending_transactions_count(&self) -> usize {
+        self.pending_pool.len()
+    }
+
     /// Returns all pending transactions filtered by predicate
     pub(crate) fn pending_transactions_with_predicate(
         &self,
@@ -460,6 +465,11 @@ impl<T: TransactionOrdering> TxPool<T> {
         &self,
     ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.basefee_pool.all().chain(self.queued_pool.all())
+    }
+
+    /// Returns the number of transactions in parked pools
+    pub(crate) fn queued_transactions_count(&self) -> usize {
+        self.basefee_pool.len() + self.queued_pool.len()
     }
 
     /// Returns queued and pending transactions for the specified sender
@@ -832,11 +842,11 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will move/discard the given transaction according to the `PoolUpdate`
     fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome<T::Transaction> {
         let mut outcome = UpdateOutcome::default();
-        for PoolUpdate { id, hash, current, destination } in updates {
+        for PoolUpdate { id, current, destination } in updates {
             match destination {
                 Destination::Discard => {
                     // remove the transaction from the pool and subpool
-                    if let Some(tx) = self.prune_transaction_by_hash(&hash) {
+                    if let Some(tx) = self.prune_transaction_by_id(&id) {
                         outcome.discarded.push(tx);
                     }
                     self.metrics.removed_transactions.increment(1);
@@ -853,6 +863,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                 }
             }
         }
+
         outcome
     }
 
@@ -956,6 +967,17 @@ impl<T: TransactionOrdering> TxPool<T> {
         tx_hash: &B256,
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         let (tx, pool) = self.all_transactions.remove_transaction_by_hash(tx_hash)?;
+        self.remove_from_subpool(pool, tx.id())
+    }
+    /// This removes the transaction from the pool and advances any descendant state inside the
+    /// subpool.
+    ///
+    /// This is intended to be used when we call [`Self::process_updates`].
+    fn prune_transaction_by_id(
+        &mut self,
+        tx_id: &TransactionId,
+    ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
+        let (tx, pool) = self.all_transactions.remove_transaction_by_id(tx_id)?;
         self.remove_from_subpool(pool, tx.id())
     }
 
@@ -1354,16 +1376,14 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 };
             }
-            // tracks the balance if the sender was changed in the block
-            let mut changed_balance = None;
 
+            // track the balance if the sender was changed in the block
             // check if this is a changed account
-            if let Some(info) = changed_accounts.get(&id.sender) {
+            let changed_balance = if let Some(info) = changed_accounts.get(&id.sender) {
                 // discard all transactions with a nonce lower than the current state nonce
                 if id.nonce < info.state_nonce {
                     updates.push(PoolUpdate {
                         id: *tx.transaction.id(),
-                        hash: *tx.transaction.hash(),
                         current: tx.subpool,
                         destination: Destination::Discard,
                     });
@@ -1384,8 +1404,10 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     }
                 }
 
-                changed_balance = Some(&info.balance);
-            }
+                Some(&info.balance)
+            } else {
+                None
+            };
 
             // If there's a nonce gap, we can shortcircuit, because there's nothing to update yet.
             if tx.state.has_nonce_gap() {
@@ -1473,7 +1495,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
         if current_pool != tx.subpool {
             updates.push(PoolUpdate {
                 id: *tx.transaction.id(),
-                hash: *tx.transaction.hash(),
                 current: current_pool,
                 destination: tx.subpool.into(),
             })
@@ -1559,7 +1580,21 @@ impl<T: PoolTransaction> AllTransactions<T> {
         self.remove_auths(&internal);
         // decrement the counter for the sender.
         self.tx_decr(tx.sender_id());
-        self.update_size_metrics();
+        Some((tx, internal.subpool))
+    }
+
+    /// Removes a transaction from the set using its id.
+    ///
+    /// This is intended for processing updates after state changes.
+    pub(crate) fn remove_transaction_by_id(
+        &mut self,
+        tx_id: &TransactionId,
+    ) -> Option<(Arc<ValidPoolTransaction<T>>, SubPool)> {
+        let internal = self.txs.remove(tx_id)?;
+        let tx = self.by_hash.remove(internal.transaction.hash())?;
+        self.remove_auths(&internal);
+        // decrement the counter for the sender.
+        self.tx_decr(tx.sender_id());
         Some((tx, internal.subpool))
     }
 
@@ -1582,7 +1617,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             if current_pool != tx.subpool {
                 updates.push(PoolUpdate {
                     id: *id,
-                    hash: *tx.transaction.hash(),
                     current: current_pool,
                     destination: tx.subpool.into(),
                 })
@@ -1610,8 +1644,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
             self.by_hash.remove(internal.transaction.hash()).map(|tx| (tx, internal.subpool));
 
         self.remove_auths(&internal);
-
-        self.update_size_metrics();
 
         result
     }
@@ -1942,7 +1974,6 @@ impl<T: PoolTransaction> AllTransactions<T> {
                     if current_pool != tx.subpool {
                         updates.push(PoolUpdate {
                             id: *id,
-                            hash: *tx.transaction.hash(),
                             current: current_pool,
                             destination: tx.subpool.into(),
                         })

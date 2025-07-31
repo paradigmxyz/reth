@@ -18,6 +18,8 @@ reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-execution-types.workspace = true
 
+reth-rpc-eth-api = { workspace = true, optional = true }
+
 # ethereum
 alloy-eips.workspace = true
 alloy-evm.workspace = true
@@ -43,7 +45,6 @@ thiserror.workspace = true
 reth-evm = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 alloy-genesis.workspace = true
-alloy-consensus.workspace = true
 reth-optimism-primitives = { workspace = true, features = ["arbitrary"] }
 
 [features]
@@ -71,3 +72,4 @@ std = [
     "reth-evm/std",
 ]
 portable = ["reth-revm/portable"]
+rpc = ["reth-rpc-eth-api"]

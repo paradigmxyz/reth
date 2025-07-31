@@ -23,8 +23,7 @@ use reth_ethereum_primitives::{EthPrimitives, Receipt};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::NodeTypes;
 use reth_primitives_traits::{
-    Account, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
-    SignerRecoverable,
+    Account, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader, SignerRecoverable,
 };
 use reth_prune_types::PruneModes;
 use reth_stages_types::{StageCheckpoint, StageId};
@@ -65,6 +64,8 @@ pub struct MockEthProvider<
     pub chain_spec: Arc<ChainSpec>,
     /// Local state roots
     pub state_roots: Arc<Mutex<Vec<B256>>>,
+    /// Local block body indices store
+    pub block_body_indices: Arc<Mutex<HashMap<BlockNumber, StoredBlockBodyIndices>>>,
     tx: TxMock,
     prune_modes: Arc<PruneModes>,
 }
@@ -81,6 +82,7 @@ where
             accounts: self.accounts.clone(),
             chain_spec: self.chain_spec.clone(),
             state_roots: self.state_roots.clone(),
+            block_body_indices: self.block_body_indices.clone(),
             tx: self.tx.clone(),
             prune_modes: self.prune_modes.clone(),
         }
@@ -97,6 +99,7 @@ impl<T: NodePrimitives> MockEthProvider<T, reth_chainspec::ChainSpec> {
             accounts: Default::default(),
             chain_spec: Arc::new(reth_chainspec::ChainSpecBuilder::mainnet().build()),
             state_roots: Default::default(),
+            block_body_indices: Default::default(),
             tx: Default::default(),
             prune_modes: Default::default(),
         }
@@ -157,6 +160,15 @@ impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSp
         }
     }
 
+    /// Add block body indices to local store
+    pub fn add_block_body_indices(
+        &self,
+        block_number: BlockNumber,
+        indices: StoredBlockBodyIndices,
+    ) {
+        self.block_body_indices.lock().insert(block_number, indices);
+    }
+
     /// Add state root to local state root store
     pub fn add_state_root(&self, state_root: B256) {
         self.state_roots.lock().push(state_root);
@@ -174,6 +186,7 @@ impl<ChainSpec> MockEthProvider<reth_ethereum_primitives::EthPrimitives, ChainSp
             accounts: self.accounts,
             chain_spec: Arc::new(chain_spec),
             state_roots: self.state_roots,
+            block_body_indices: self.block_body_indices,
             tx: self.tx,
             prune_modes: self.prune_modes,
         }
@@ -675,7 +688,7 @@ impl<ChainSpec: EthChainSpec + Send + Sync + 'static> BlockReader
 
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Receipt>)>> {
         Ok(None)
     }
 
@@ -955,8 +968,8 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + Send + Sync + 'static> StatePr
 impl<T: NodePrimitives, ChainSpec: Send + Sync> BlockBodyIndicesProvider
     for MockEthProvider<T, ChainSpec>
 {
-    fn block_body_indices(&self, _num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
-        Ok(None)
+    fn block_body_indices(&self, num: u64) -> ProviderResult<Option<StoredBlockBodyIndices>> {
+        Ok(self.block_body_indices.lock().get(&num).copied())
     }
     fn block_body_indices_range(
         &self,

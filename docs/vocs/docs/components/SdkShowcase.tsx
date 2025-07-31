@@ -1,5 +1,3 @@
-import React from 'react'
-
 interface SdkProject {
   name: string
   description: string
@@ -43,16 +41,16 @@ const projects: SdkProject[] = [
 export function SdkShowcase() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {projects.map((project, index) => (
+      {projects.map((project) => (
         <div
-          key={index}
+          key={project.name}
           className="relative bg-white/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-xl p-6 hover:bg-black/5 dark:hover:bg-white/10 transition-colors group"
         >
           {/* LoC Badge */}
           <div className="absolute top-4 right-4 bg-black/10 dark:bg-white/10 text-black dark:text-white px-3 py-1 rounded-full text-sm font-medium">
             {project.loc} LoC
           </div>
-          
+
           {/* Content */}
           <div className="space-y-3">
             <div>
@@ -63,11 +61,11 @@ export function SdkShowcase() {
                 {project.company}
               </p>
             </div>
-            
+
             <p className="text-gray-700 dark:text-gray-300 text-sm leading-relaxed">
               {project.description}
             </p>
-            
+
             {/* GitHub Link */}
             <a
               href={project.githubUrl}

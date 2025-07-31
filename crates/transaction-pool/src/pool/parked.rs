@@ -16,9 +16,6 @@ use std::{
 /// basefee, ancestor transactions, balance) that eventually move the transaction into the pending
 /// pool.
 ///
-/// This pool is a bijection: at all times each set (`best`, `by_id`) contains the same
-/// transactions.
-///
 /// Note: This type is generic over [`ParkedPool`] which enforces that the underlying transaction
 /// type is [`ValidPoolTransaction`] wrapped in an [Arc].
 #[derive(Debug, Clone)]
@@ -29,10 +26,6 @@ pub struct ParkedPool<T: ParkedOrd> {
     submission_id: u64,
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, ParkedPoolTransaction<T>>,
-    /// All transactions sorted by their order function.
-    ///
-    /// The higher, the better.
-    best: BTreeSet<ParkedPoolTransaction<T>>,
     /// Keeps track of last submission id for each sender.
     ///
     /// This are sorted in reverse order, so the last (highest) submission id is first, and the
@@ -71,8 +64,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.add_sender_count(tx.sender_id(), submission_id);
         let transaction = ParkedPoolTransaction { submission_id, transaction: tx.into() };
 
-        self.by_id.insert(id, transaction.clone());
-        self.best.insert(transaction);
+        self.by_id.insert(id, transaction);
     }
 
     /// Increments the count of transactions for the given sender and updates the tracked submission
@@ -131,7 +123,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Returns an iterator over all transactions in the pool
     pub(crate) fn all(
         &self,
-    ) -> impl Iterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
+    ) -> impl ExactSizeIterator<Item = Arc<ValidPoolTransaction<T::Transaction>>> + '_ {
         self.by_id.values().map(|tx| tx.transaction.clone().into())
     }
 
@@ -142,7 +134,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
     ) -> Option<Arc<ValidPoolTransaction<T::Transaction>>> {
         // remove from queues
         let tx = self.by_id.remove(id)?;
-        self.best.remove(&tx);
         self.remove_sender_count(tx.transaction.sender_id());
 
         // keep track of size
@@ -254,11 +245,9 @@ impl<T: ParkedOrd> ParkedPool<T> {
         self.by_id.get(id)
     }
 
-    /// Asserts that the bijection between `by_id` and `best` is valid.
+    /// Asserts that all subpool invariants
     #[cfg(any(test, feature = "test-utils"))]
     pub(crate) fn assert_invariants(&self) {
-        assert_eq!(self.by_id.len(), self.best.len(), "by_id.len() != best.len()");
-
         assert_eq!(
             self.last_sender_submission.len(),
             self.sender_transaction_count.len(),
@@ -275,7 +264,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
         &self,
         basefee: u64,
     ) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let ids = self.satisfy_base_fee_ids(basefee);
+        let ids = self.satisfy_base_fee_ids(basefee as u128);
         let mut txs = Vec::with_capacity(ids.len());
         for id in ids {
             txs.push(self.get(&id).expect("transaction exists").transaction.clone().into());
@@ -284,13 +273,13 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     }
 
     /// Returns all transactions that satisfy the given basefee.
-    fn satisfy_base_fee_ids(&self, basefee: u64) -> Vec<TransactionId> {
+    fn satisfy_base_fee_ids(&self, basefee: u128) -> Vec<TransactionId> {
         let mut transactions = Vec::new();
         {
             let mut iter = self.by_id.iter().peekable();
 
             while let Some((id, tx)) = iter.next() {
-                if tx.transaction.transaction.max_fee_per_gas() < basefee as u128 {
+                if tx.transaction.transaction.max_fee_per_gas() < basefee {
                     // still parked -> skip descendant transactions
                     'this: while let Some((peek, _)) = iter.peek() {
                         if peek.sender != id.sender {
@@ -311,7 +300,7 @@ impl<T: PoolTransaction> ParkedPool<BasefeeOrd<T>> {
     ///
     /// Note: the transactions are not returned in a particular order.
     pub(crate) fn enforce_basefee(&mut self, basefee: u64) -> Vec<Arc<ValidPoolTransaction<T>>> {
-        let to_remove = self.satisfy_base_fee_ids(basefee);
+        let to_remove = self.satisfy_base_fee_ids(basefee as u128);
 
         let mut removed = Vec::with_capacity(to_remove.len());
         for id in to_remove {
@@ -327,7 +316,6 @@ impl<T: ParkedOrd> Default for ParkedPool<T> {
         Self {
             submission_id: 0,
             by_id: Default::default(),
-            best: Default::default(),
             last_sender_submission: Default::default(),
             sender_transaction_count: Default::default(),
             size_of: Default::default(),
@@ -1050,51 +1038,5 @@ mod tests {
         let removed = pool.remove_transaction(&tx_id);
         assert!(removed.is_some());
         assert!(!pool.contains(&tx_id));
-    }
-
-    #[test]
-    fn test_parkpool_ord() {
-        let mut f = MockTransactionFactory::default();
-        let mut pool = ParkedPool::<QueuedOrd<_>>::default();
-
-        let tx1 = MockTransaction::eip1559().with_max_fee(100);
-        let tx1_v = f.validated_arc(tx1.clone());
-
-        let tx2 = MockTransaction::eip1559().with_max_fee(101);
-        let tx2_v = f.validated_arc(tx2.clone());
-
-        let tx3 = MockTransaction::eip1559().with_max_fee(101);
-        let tx3_v = f.validated_arc(tx3.clone());
-
-        let tx4 = MockTransaction::eip1559().with_max_fee(101);
-        let mut tx4_v = f.validated(tx4.clone());
-        tx4_v.timestamp = tx3_v.timestamp;
-
-        let ord_1 = QueuedOrd(tx1_v.clone());
-        let ord_2 = QueuedOrd(tx2_v.clone());
-        let ord_3 = QueuedOrd(tx3_v.clone());
-        assert!(ord_1 < ord_2);
-        // lower timestamp is better
-        assert!(ord_2 > ord_3);
-        assert!(ord_1 < ord_3);
-
-        pool.add_transaction(tx1_v);
-        pool.add_transaction(tx2_v);
-        pool.add_transaction(tx3_v);
-        pool.add_transaction(Arc::new(tx4_v));
-
-        // from worst to best
-        let mut iter = pool.best.iter();
-        let tx = iter.next().unwrap();
-        assert_eq!(tx.transaction.transaction, tx1);
-
-        let tx = iter.next().unwrap();
-        assert_eq!(tx.transaction.transaction, tx4);
-
-        let tx = iter.next().unwrap();
-        assert_eq!(tx.transaction.transaction, tx3);
-
-        let tx = iter.next().unwrap();
-        assert_eq!(tx.transaction.transaction, tx2);
     }
 }

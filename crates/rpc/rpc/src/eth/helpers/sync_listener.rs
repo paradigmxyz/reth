@@ -91,6 +91,7 @@ mod tests {
                     config: Default::default(),
                     head: Default::default(),
                 },
+                capabilities: vec![],
             })
         }
 

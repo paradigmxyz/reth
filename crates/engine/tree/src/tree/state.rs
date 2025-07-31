@@ -362,13 +362,15 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         // iterate through parents of the second until we reach the number
-        let Some(mut current_block) = self.block_by_hash(second.parent_hash()) else {
+        let Some(mut current_block) = self.blocks_by_hash.get(&second.parent_hash()) else {
             // If we can't find its parent in the tree, we can't continue, so return false
             return false
         };
 
-        while current_block.number() > first.number + 1 {
-            let Some(block) = self.block_by_hash(current_block.header().parent_hash()) else {
+        while current_block.recovered_block().number() > first.number + 1 {
+            let Some(block) =
+                self.blocks_by_hash.get(&current_block.recovered_block().parent_hash())
+            else {
                 // If we can't find its parent in the tree, we can't continue, so return false
                 return false
             };
@@ -377,7 +379,7 @@ impl<N: NodePrimitives> TreeState<N> {
         }
 
         // Now the block numbers should be equal, so we compare hashes.
-        current_block.parent_hash() == first.hash
+        current_block.recovered_block().parent_hash() == first.hash
     }
 
     /// Updates the canonical head to the given block.

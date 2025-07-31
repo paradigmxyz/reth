@@ -36,12 +36,12 @@ impl<ChainSpec> EthereumEngineValidator<ChainSpec> {
     }
 }
 
-impl<ChainSpec> PayloadValidator for EthereumEngineValidator<ChainSpec>
+impl<ChainSpec, Types> PayloadValidator<Types> for EthereumEngineValidator<ChainSpec>
 where
     ChainSpec: EthChainSpec + EthereumHardforks + 'static,
+    Types: PayloadTypes<ExecutionData = ExecutionData>,
 {
     type Block = Block;
-    type ExecutionData = ExecutionData;
 
     fn ensure_well_formed_payload(
         &self,
@@ -60,7 +60,7 @@ where
     fn validate_version_specific_fields(
         &self,
         version: EngineApiMessageVersion,
-        payload_or_attrs: PayloadOrAttributes<'_, Self::ExecutionData, EthPayloadAttributes>,
+        payload_or_attrs: PayloadOrAttributes<'_, Types::ExecutionData, EthPayloadAttributes>,
     ) -> Result<(), EngineObjectValidationError> {
         payload_or_attrs
             .execution_requests()
@@ -78,7 +78,7 @@ where
         validate_version_specific_fields(
             self.chain_spec(),
             version,
-            PayloadOrAttributes::<Self::ExecutionData, EthPayloadAttributes>::PayloadAttributes(
+            PayloadOrAttributes::<Types::ExecutionData, EthPayloadAttributes>::PayloadAttributes(
                 attributes,
             ),
         )

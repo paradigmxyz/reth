@@ -338,3 +338,45 @@ where
         })
     }
 }
+
+/// Action to assert the current chain tip is at a specific block number.
+#[derive(Debug)]
+pub struct AssertChainTip {
+    /// Expected block number
+    pub expected_block_number: u64,
+}
+
+impl AssertChainTip {
+    /// Create a new `AssertChainTip` action
+    pub const fn new(expected_block_number: u64) -> Self {
+        Self { expected_block_number }
+    }
+}
+
+impl<Engine> Action<Engine> for AssertChainTip
+where
+    Engine: EngineTypes,
+{
+    fn execute<'a>(&'a mut self, env: &'a mut Environment<Engine>) -> BoxFuture<'a, Result<()>> {
+        Box::pin(async move {
+            let current_block = env
+                .current_block_info()
+                .ok_or_else(|| eyre::eyre!("No current block information available"))?;
+
+            if current_block.number != self.expected_block_number {
+                return Err(eyre::eyre!(
+                    "Expected chain tip to be at block {}, but found block {}",
+                    self.expected_block_number,
+                    current_block.number
+                ));
+            }
+
+            debug!(
+                "Chain tip verified at block {} (hash: {})",
+                current_block.number, current_block.hash
+            );
+
+            Ok(())
+        })
+    }
+}

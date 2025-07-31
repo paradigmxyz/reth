@@ -3,6 +3,7 @@
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
+    launch::invalid_block_hook::InvalidBlockHookExt,
     rpc::{EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
@@ -12,11 +13,10 @@ use alloy_consensus::BlockHeader;
 use futures::{stream_select, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
-use reth_engine_local::{LocalMiner, LocalPayloadAttributesBuilder};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     engine::{EngineApiRequest, EngineRequestHandler},
-    tree::TreeConfig,
+    tree::{BasicEngineValidator, TreeConfig},
 };
 use reth_engine_util::EngineMessageStreamExt;
 use reth_exex::ExExManagerHandle;
@@ -24,7 +24,6 @@ use reth_network::{types::BlockRangeUpdate, NetworkSyncUpdater, SyncState};
 use reth_network_api::BlockDownloaderProvider;
 use reth_node_api::{
     BeaconConsensusEngineHandle, BuiltPayload, FullNodeTypes, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
@@ -77,9 +76,6 @@ where
     CB: NodeComponentsBuilder<T>,
     AO: RethRpcAddOns<NodeAdapter<T, CB::Components>>
         + EngineValidatorAddOn<NodeAdapter<T, CB::Components>>,
-    LocalPayloadAttributesBuilder<Types::ChainSpec>: PayloadAttributesBuilder<
-        <<Types as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-    >,
 {
     type Node = NodeHandle<NodeAdapter<T, CB::Components>, AO>;
 
@@ -212,6 +208,15 @@ where
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
+        let engine_validator = BasicEngineValidator::new(
+            ctx.blockchain_db().clone(),
+            consensus.clone(),
+            ctx.components().evm_config().clone(),
+            engine_payload_validator,
+            engine_tree_config.clone(),
+            add_ons_ctx.create_invalid_block_hook(ctx.data_dir()).await?,
+        );
+
         let mut engine_service = EngineService::new(
             consensus.clone(),
             ctx.chain_spec(),
@@ -223,26 +228,11 @@ where
             ctx.blockchain_db().clone(),
             pruner,
             ctx.components().payload_builder_handle().clone(),
-            engine_payload_validator,
+            engine_validator,
             engine_tree_config,
-            ctx.invalid_block_hook().await?,
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
         );
-
-        if ctx.is_dev() {
-            ctx.task_executor().spawn_critical(
-                "local engine",
-                LocalMiner::new(
-                    ctx.blockchain_db().clone(),
-                    LocalPayloadAttributesBuilder::new(ctx.chain_spec()),
-                    beacon_engine_handle.clone(),
-                    ctx.dev_mining_mode(ctx.components().pool()),
-                    ctx.components().payload_builder_handle().clone(),
-                )
-                .run(),
-            );
-        }
 
         info!(target: "reth::cli", "Consensus engine initialized");
 
@@ -256,11 +246,11 @@ where
 
         ctx.task_executor().spawn_critical(
             "events task",
-            node::handle_events(
+            Box::pin(node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
-            ),
+            )),
         );
 
         let RpcHandle { rpc_server_handles, rpc_registry, engine_events, beacon_engine_handle } =
@@ -283,7 +273,7 @@ where
         let terminate_after_backfill = ctx.terminate_after_initial_backfill();
 
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor().spawn_critical("consensus engine", async move {
+        ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 engine_service.orchestrator_mut().start_backfill_sync(initial_target);
@@ -346,7 +336,7 @@ where
             }
 
             let _ = exit.send(res);
-        });
+        }));
 
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),
@@ -366,6 +356,8 @@ where
         };
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
+
+        ctx.spawn_ethstats().await?;
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(

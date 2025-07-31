@@ -50,7 +50,7 @@
 //! #### Naming
 //!
 //! The types in this crate support multiple recovery functions, e.g.
-//! [`SealedBlock::try_recover_unchecked`] and [`SealedBlock::try_recover_unchecked`]. The `_unchecked` suffix indicates that this function recovers the signer _without ensuring that the signature has a low `s` value_, in other words this rule introduced in [EIP-2](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md) is ignored.
+//! [`SealedBlock::try_recover`] and [`SealedBlock::try_recover_unchecked`]. The `_unchecked` suffix indicates that this function recovers the signer _without ensuring that the signature has a low `s` value_, in other words this rule introduced in [EIP-2](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md) is ignored.
 //! Hence this function is necessary when dealing with pre EIP-2 transactions on the ethereum
 //! mainnet. Newer transactions must always be recovered with the regular `recover` functions, see
 //! also [`recover_signer`](crypto::secp256k1::recover_signer).

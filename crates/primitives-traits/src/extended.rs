@@ -25,7 +25,7 @@ macro_rules! delegate {
 
 /// An enum that combines two different transaction types.
 ///
-/// This is intended to be used to extend existing presets, for example the ethereum or optstack
+/// This is intended to be used to extend existing presets, for example the ethereum or opstack
 /// transaction types and receipts
 ///
 /// Note: The [`Extended::Other`] variants must not overlap with the builtin one, transaction
@@ -149,6 +149,10 @@ where
     fn recover_signer_unchecked(&self) -> Result<Address, RecoveryError> {
         delegate!(self => tx.recover_signer_unchecked())
     }
+
+    fn recover_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Result<Address, RecoveryError> {
+        delegate!(self => tx.recover_unchecked_with_buf(buf))
+    }
 }
 
 impl<B, T> SignedTransaction for Extended<B, T>
@@ -161,13 +165,6 @@ where
             Self::BuiltIn(tx) => tx.tx_hash(),
             Self::Other(tx) => tx.tx_hash(),
         }
-    }
-
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        delegate!(self => tx.recover_signer_unchecked_with_buf(buf))
     }
 }
 

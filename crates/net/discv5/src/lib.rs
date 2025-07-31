@@ -547,58 +547,54 @@ pub fn spawn_populate_kbuckets_bg(
     metrics: Discv5Metrics,
     discv5: Arc<discv5::Discv5>,
 ) {
-    task::spawn({
-        let local_node_id = discv5.local_enr().node_id();
-        let lookup_interval = Duration::from_secs(lookup_interval);
-        let metrics = metrics.discovered_peers;
-        let mut kbucket_index = MAX_KBUCKET_INDEX;
-        let pulse_lookup_interval = Duration::from_secs(bootstrap_lookup_interval);
-        // todo: graceful shutdown
+    let local_node_id = discv5.local_enr().node_id();
+    let lookup_interval = Duration::from_secs(lookup_interval);
+    let metrics = metrics.discovered_peers;
+    let mut kbucket_index = MAX_KBUCKET_INDEX;
+    let pulse_lookup_interval = Duration::from_secs(bootstrap_lookup_interval);
+    task::spawn(Box::pin(async move {
+        // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
+        // log2distance from local node
+        for i in (0..bootstrap_lookup_countdown).rev() {
+            let target = discv5::enr::NodeId::random();
 
-        async move {
-            // make many fast lookup queries at bootstrap, trying to fill kbuckets at furthest
-            // log2distance from local node
-            for i in (0..bootstrap_lookup_countdown).rev() {
-                let target = discv5::enr::NodeId::random();
+            trace!(target: "net::discv5",
+                %target,
+                bootstrap_boost_runs_countdown=i,
+                lookup_interval=format!("{:#?}", pulse_lookup_interval),
+                "starting bootstrap boost lookup query"
+            );
 
-                trace!(target: "net::discv5",
-                    %target,
-                    bootstrap_boost_runs_countdown=i,
-                    lookup_interval=format!("{:#?}", pulse_lookup_interval),
-                    "starting bootstrap boost lookup query"
-                );
+            lookup(target, &discv5, &metrics).await;
 
-                lookup(target, &discv5, &metrics).await;
-
-                tokio::time::sleep(pulse_lookup_interval).await;
-            }
-
-            // initiate regular lookups to populate kbuckets
-            loop {
-                // make sure node is connected to each subtree in the network by target
-                // selection (ref kademlia)
-                let target = get_lookup_target(kbucket_index, local_node_id);
-
-                trace!(target: "net::discv5",
-                    %target,
-                    lookup_interval=format!("{:#?}", lookup_interval),
-                    "starting periodic lookup query"
-                );
-
-                lookup(target, &discv5, &metrics).await;
-
-                if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
-                    // try to populate bucket one step closer
-                    kbucket_index -= 1
-                } else {
-                    // start over with bucket furthest away
-                    kbucket_index = MAX_KBUCKET_INDEX
-                }
-
-                tokio::time::sleep(lookup_interval).await;
-            }
+            tokio::time::sleep(pulse_lookup_interval).await;
         }
-    });
+
+        // initiate regular lookups to populate kbuckets
+        loop {
+            // make sure node is connected to each subtree in the network by target
+            // selection (ref kademlia)
+            let target = get_lookup_target(kbucket_index, local_node_id);
+
+            trace!(target: "net::discv5",
+                %target,
+                lookup_interval=format!("{:#?}", lookup_interval),
+                "starting periodic lookup query"
+            );
+
+            lookup(target, &discv5, &metrics).await;
+
+            if kbucket_index > DEFAULT_MIN_TARGET_KBUCKET_INDEX {
+                // try to populate bucket one step closer
+                kbucket_index -= 1
+            } else {
+                // start over with bucket furthest away
+                kbucket_index = MAX_KBUCKET_INDEX
+            }
+
+            tokio::time::sleep(lookup_interval).await;
+        }
+    }));
 }
 
 /// Gets the next lookup target, based on which bucket is currently being targeted.

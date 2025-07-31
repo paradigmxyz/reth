@@ -13,7 +13,7 @@ It will generate a flamegraph report without running any criterion analysis.
 ```
 cargo bench --package reth-stages --bench criterion --features test-utils -- --profile-time=2
 ```
-Flamegraph reports can be find at `target/criterion/Stages/$STAGE_LABEL/profile/flamegraph.svg` 
+Flamegraph reports can be found at `target/criterion/Stages/$STAGE_LABEL/profile/flamegraph.svg` 
 
 
 ## External DB support

@@ -20,6 +20,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 
 use crate::{auth::AuthRpcModule, error::WsHttpSamePortError, metrics::RpcRequestMetrics};
+use alloy_network::Ethereum;
 use alloy_provider::{fillers::RecommendedFillers, Provider, ProviderBuilder};
 use core::marker::PhantomData;
 use error::{ConflictingModules, RpcError, ServerKind};
@@ -40,14 +41,18 @@ use reth_rpc::{
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
-    helpers::{Call, EthApiSpec, EthTransactions, LoadPendingBlock, TraceExt},
-    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
-    RpcTxReq,
+    helpers::{
+        pending_block::PendingEnvBuilder, Call, EthApiSpec, EthTransactions, LoadPendingBlock,
+        TraceExt,
+    },
+    node::RpcNodeCoreAdapter,
+    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcConvert, RpcConverter, RpcHeader,
+    RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
 };
-use reth_rpc_eth_types::{EthConfig, EthSubscriptionIdProvider};
+use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
-    AccountReader, BlockReader, BlockReaderIdExt, ChangeSetReader, FullRpcProvider, ProviderBlock,
+    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
     StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
@@ -248,12 +253,20 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     }
 
     /// Instantiates a new [`EthApiBuilder`] from the configured components.
-    pub fn eth_api_builder(&self) -> EthApiBuilder<Provider, Pool, Network, EvmConfig>
+    #[expect(clippy::type_complexity)]
+    pub fn eth_api_builder<ChainSpec>(
+        &self,
+    ) -> EthApiBuilder<
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+    >
     where
-        Provider: BlockReaderIdExt + Clone,
+        Provider: Clone,
         Pool: Clone,
         Network: Clone,
         EvmConfig: Clone,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
+            RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
     {
         EthApiBuilder::new(
             self.provider.clone(),
@@ -268,19 +281,22 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     /// Note: This spawns all necessary tasks.
     ///
     /// See also [`EthApiBuilder`].
-    pub fn bootstrap_eth_api(&self) -> EthApi<Provider, Pool, Network, EvmConfig>
+    #[expect(clippy::type_complexity)]
+    pub fn bootstrap_eth_api<ChainSpec>(
+        &self,
+    ) -> EthApi<
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>,
+    >
     where
-        N: NodePrimitives,
-        Provider: BlockReaderIdExt<Block = N::Block, Header = N::BlockHeader, Receipt = N::Receipt>
-            + StateProviderFactory
-            + CanonStateSubscriptions<Primitives = N>
-            + ChainSpecProvider
-            + Clone
-            + Unpin
-            + 'static,
+        Provider: Clone,
         Pool: Clone,
-        EvmConfig: Clone,
         Network: Clone,
+        EvmConfig: ConfigureEvm + Clone,
+        RpcNodeCoreAdapter<Provider, Pool, Network, EvmConfig>:
+            RpcNodeCore<Provider: ChainSpecProvider<ChainSpec = ChainSpec>, Evm = EvmConfig>,
+        RpcConverter<Ethereum, EvmConfig, EthReceiptConverter<ChainSpec>>: RpcConvert,
+        (): PendingEnvBuilder<EvmConfig>,
     {
         self.eth_api_builder().build()
     }
@@ -769,10 +785,7 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn trace_api(&self) -> TraceApi<EthApi>
-    where
-        EthApi: TraceExt,
-    {
+    pub fn trace_api(&self) -> TraceApi<EthApi> {
         TraceApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone(), self.eth_config)
     }
 
@@ -794,16 +807,8 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<EthApi, EvmConfig>
-    where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
-        EvmConfig::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
-    {
-        DebugApi::new(
-            self.eth_api().clone(),
-            self.blocking_pool_guard.clone(),
-            self.evm_config.clone(),
-        )
+    pub fn debug_api(&self) -> DebugApi<EthApi> {
+        DebugApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
     }
 
     /// Instantiates `NetApi`
@@ -835,7 +840,7 @@ where
         + ChangeSetReader,
     Pool: TransactionPool + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+    EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
@@ -920,13 +925,11 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        RethRpcModule::Debug => DebugApi::new(
-                            eth_api.clone(),
-                            self.blocking_pool_guard.clone(),
-                            self.evm_config.clone(),
-                        )
-                        .into_rpc()
-                        .into(),
+                        RethRpcModule::Debug => {
+                            DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
+                                .into_rpc()
+                                .into()
+                        }
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();
@@ -1185,6 +1188,22 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configures the JWT secret for authentication.
     pub const fn with_jwt_secret(mut self, secret: Option<JwtSecret>) -> Self {
         self.jwt_secret = secret;
+        self
+    }
+
+    /// Configures a custom tokio runtime for the rpc server.
+    pub fn with_tokio_runtime(mut self, tokio_runtime: tokio::runtime::Handle) -> Self {
+        if let Some(http_server_config) = self.http_server_config {
+            self.http_server_config =
+                Some(http_server_config.custom_tokio_runtime(tokio_runtime.clone()));
+        }
+        if let Some(ws_server_config) = self.ws_server_config {
+            self.ws_server_config =
+                Some(ws_server_config.custom_tokio_runtime(tokio_runtime.clone()));
+        }
+        if let Some(ipc_server_config) = self.ipc_server_config {
+            self.ipc_server_config = Some(ipc_server_config.custom_tokio_runtime(tokio_runtime));
+        }
         self
     }
 
