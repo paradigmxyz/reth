@@ -7,7 +7,6 @@ use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum::{
-    chainspec::EthChainSpec,
     node::api::{
         validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
         EngineObjectValidationError, ExecutionPayload, FullNodeComponents, NewPayloadError,
@@ -18,11 +17,7 @@ use reth_ethereum::{
     storage::StateProviderFactory,
     trie::{KeccakKeyHasher, KeyHasher},
 };
-use reth_node_builder::{
-    invalid_block_hook::InvalidBlockHookExt,
-    rpc::{BasicEngineValidator, EngineApiValidatorBuilder},
-    InvalidPayloadAttributesError,
-};
+use reth_node_builder::{rpc::PayloadValidatorBuilder, InvalidPayloadAttributesError};
 use reth_op::{
     node::{
         engine::OpEngineValidator, OpBuiltPayload, OpEngineTypes, OpPayloadAttributes,
@@ -301,36 +296,16 @@ pub enum CustomError {
 #[non_exhaustive]
 pub struct CustomEngineValidatorBuilder;
 
-impl<N> EngineApiValidatorBuilder<N> for CustomEngineValidatorBuilder
+impl<N> PayloadValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
     N: FullNodeComponents<Types = CustomNode>,
 {
     type Validator = CustomEngineValidator<N::Provider>;
-    type TreeValidator =
-        BasicEngineValidator<N::Provider, N::Evm, CustomEngineValidator<N::Provider>>;
 
     async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         Ok(CustomEngineValidator::new::<KeccakKeyHasher>(
             ctx.config.chain.clone(),
             ctx.node.provider().clone(),
-        ))
-    }
-
-    async fn build_tree_validator(
-        self,
-        ctx: &AddOnsContext<'_, N>,
-        tree_config: reth_engine_primitives::TreeConfig,
-    ) -> eyre::Result<Self::TreeValidator> {
-        let validator = self.build(ctx).await?;
-        let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
-        let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
-        Ok(BasicEngineValidator::new(
-            ctx.node.provider().clone(),
-            std::sync::Arc::new(ctx.node.consensus().clone()),
-            ctx.node.evm_config().clone(),
-            validator,
-            tree_config,
-            invalid_block_hook,
         ))
     }
 }

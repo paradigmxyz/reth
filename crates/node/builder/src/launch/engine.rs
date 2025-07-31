@@ -3,7 +3,7 @@
 use crate::{
     common::{Attached, LaunchContextWith, WithConfigs},
     hooks::NodeHooks,
-    rpc::{EngineApiValidatorBuilder, EngineValidatorAddOn, RethRpcAddOns, RpcHandle},
+    rpc::{EngineValidatorAddOn, EngineValidatorBuilder, RethRpcAddOns, RpcHandle},
     setup::build_networked_pipeline,
     AddOns, AddOnsContext, FullNode, LaunchContext, LaunchNode, NodeAdapter,
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,

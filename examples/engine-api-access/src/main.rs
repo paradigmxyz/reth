@@ -7,12 +7,10 @@
 //! ```
 
 use reth_db::test_utils::create_test_rw_db;
-use reth_node_builder::{EngineApiExt, FullNodeComponents, NodeBuilder, NodeConfig};
+use reth_node_builder::{EngineApiExt, FullNodeComponents, Node, NodeBuilder, NodeConfig};
 use reth_optimism_chainspec::BASE_MAINNET;
 use reth_optimism_node::{
-    args::RollupArgs,
-    node::{OpAddOns, OpEngineValidatorBuilder},
-    OpEngineApiBuilder, OpNode,
+    args::RollupArgs, node::OpEngineValidatorBuilder, OpEngineApiBuilder, OpNode,
 };
 use tokio::sync::oneshot;
 
@@ -35,7 +33,7 @@ async fn main() {
         .with_database(db)
         .with_types::<OpNode>()
         .with_components(op_node.components())
-        .with_add_ons(OpAddOns::default().with_engine_api(engine_api))
+        .with_add_ons(op_node.add_ons().with_engine_api(engine_api))
         .on_component_initialized(move |ctx| {
             let _provider = ctx.provider();
             Ok(())
