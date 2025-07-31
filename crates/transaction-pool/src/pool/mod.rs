@@ -414,6 +414,8 @@ where
     /// Performs account updates on the pool.
     ///
     /// This will either promote or discard transactions based on the new account state.
+    ///
+    /// This should be invoked when the pool drifted and accounts are updated manually
     pub fn update_accounts(&self, accounts: Vec<ChangedAccount>) {
         let changed_senders = self.changed_senders(accounts.into_iter());
         let UpdateOutcome { promoted, discarded } =
@@ -430,6 +432,18 @@ where
                     }
                 });
                 listener.send_all(promoted_hashes)
+            });
+
+            // in this case we should also emit promoted transactions in full
+            self.transaction_listener.lock().retain_mut(|listener| {
+                let promoted_txs = promoted.iter().filter_map(|tx| {
+                    if listener.kind.is_propagate_only() && !tx.propagate {
+                        None
+                    } else {
+                        Some(NewTransactionEvent::pending(tx.clone()))
+                    }
+                });
+                listener.send_all(promoted_txs)
             });
         }
 
