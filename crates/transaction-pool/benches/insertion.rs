@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
-use alloy_primitives::{Address, U256};
+use alloy_primitives::Address;
 use criterion::{criterion_group, criterion_main, Criterion};
+use proptest::{prelude::*, strategy::ValueTree, test_runner::TestRunner};
 use reth_transaction_pool::{
     batcher::{BatchTxProcessor, BatchTxRequest},
     test_utils::{testing_pool, MockTransaction},
@@ -8,35 +9,37 @@ use reth_transaction_pool::{
 };
 use tokio::sync::oneshot;
 
-/// Generate simple transfer transactions
-fn generate_transactions(count: usize, sender_count: usize) -> Vec<MockTransaction> {
-    let mut transactions = Vec::with_capacity(count);
+/// Generates a set of transactions for multiple senders
+fn generate_transactions(num_senders: usize, txs_per_sender: usize) -> Vec<MockTransaction> {
+    let mut runner = TestRunner::deterministic();
+    let mut txs = Vec::new();
 
-    let senders: Vec<Address> = (0..sender_count)
-        .map(|i| {
-            let mut bytes = [0u8; 20];
-            bytes[16..20].copy_from_slice(&(i as u32).to_be_bytes());
-            Address::from(bytes)
-        })
-        .collect();
+    for sender_idx in 0..num_senders {
+        // Create a unique sender address
+        let sender_bytes = sender_idx.to_be_bytes();
+        let addr_slice = [0u8; 12].into_iter().chain(sender_bytes.into_iter()).collect::<Vec<_>>();
+        let sender = Address::from_slice(&addr_slice);
 
-    for i in 0..count {
-        let sender_idx = i % sender_count;
-        let nonce = (i / sender_count) as u64;
-        let sender = senders[sender_idx];
+        // Generate transactions for this sender
+        for nonce in 0..txs_per_sender {
+            let mut tx = any::<MockTransaction>().new_tree(&mut runner).unwrap().current();
+            tx.set_sender(sender);
+            tx.set_nonce(nonce as u64);
 
-        let mut tx = MockTransaction::legacy();
+            // Ensure it's not a legacy transaction
+            if tx.is_legacy() || tx.is_eip2930() {
+                tx = MockTransaction::eip1559();
+                tx.set_priority_fee(any::<u128>().new_tree(&mut runner).unwrap().current());
+                tx.set_max_fee(any::<u128>().new_tree(&mut runner).unwrap().current());
+                tx.set_sender(sender);
+                tx.set_nonce(nonce as u64);
+            }
 
-        tx.set_sender(sender);
-        tx.set_nonce(nonce);
-        tx.set_gas_price(100);
-        tx.set_gas_limit(21_000);
-        tx.set_value(U256::ONE);
-
-        transactions.push(tx);
+            txs.push(tx);
+        }
     }
 
-    transactions
+    txs
 }
 
 /// Benchmark individual transaction insertion
@@ -45,7 +48,7 @@ fn txpool_insertion(c: &mut Criterion) {
     let scenarios = [(1000, 100), (5000, 500), (10000, 1000), (20000, 2000)];
 
     for (tx_count, sender_count) in scenarios {
-        let group_id = format!("txs: {} | senders: {}", tx_count, sender_count);
+        let group_id = format!("txs: {tx_count} | senders: {sender_count}");
 
         group.bench_function(group_id, |b| {
             b.iter_with_setup(
@@ -76,7 +79,7 @@ fn txpool_batch_insertion(c: &mut Criterion) {
     let scenarios = [(1000, 100), (5000, 500), (10000, 1000), (20000, 2000)];
 
     for (tx_count, sender_count) in scenarios {
-        let group_id = format!("txs: {} | senders: {}", tx_count, sender_count);
+        let group_id = format!("txs: {tx_count} | senders: {sender_count}");
 
         group.bench_function(group_id, |b| {
             b.iter_with_setup(

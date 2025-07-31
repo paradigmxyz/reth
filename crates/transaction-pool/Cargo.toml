@@ -137,7 +137,7 @@ harness = false
 
 [[bench]]
 name = "insertion"
-required-features = ["test-utils"]
+required-features = ["test-utils", "arbitrary"]
 harness = false
 
 [[bench]]
