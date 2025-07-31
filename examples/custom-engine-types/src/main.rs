@@ -37,10 +37,12 @@ use reth_ethereum::{
             validate_version_specific_fields, AddOnsContext, EngineApiValidator, EngineTypes,
             FullNodeComponents, FullNodeTypes, InvalidPayloadAttributesError, NewPayloadError,
             NodeTypes, PayloadAttributes, PayloadBuilderAttributes, PayloadTypes, PayloadValidator,
+            TreeConfig,
         },
         builder::{
             components::{BasicPayloadServiceBuilder, ComponentsBuilder, PayloadBuilderBuilder},
-            rpc::{EngineApiValidatorBuilder, RpcAddOns},
+            invalid_block_hook::InvalidBlockHookExt,
+            rpc::{BasicEngineValidator, EngineApiValidatorBuilder, RpcAddOns},
             BuilderContext, Node, NodeAdapter, NodeBuilder,
         },
         core::{args::RpcServerArgs, node_config::NodeConfig},
@@ -52,7 +54,10 @@ use reth_ethereum::{
     },
     pool::{PoolTransaction, TransactionPool},
     primitives::{Block, RecoveredBlock, SealedBlock},
-    provider::{EthStorage, StateProviderFactory},
+    provider::{
+        BlockReader, DatabaseProviderFactory, EthStorage, HashedPostStateProvider,
+        StateCommitmentProvider, StateProviderFactory, StateReader,
+    },
     rpc::types::engine::ExecutionPayload,
     tasks::TaskManager,
     EthPrimitives, TransactionSigned,
@@ -259,11 +264,32 @@ where
             Primitives = EthPrimitives,
         >,
     >,
+    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type Validator = CustomEngineValidator;
+    type TreeValidator = BasicEngineValidator<N::Provider, N::Evm, CustomEngineValidator>;
 
     async fn build(self, ctx: &AddOnsContext<'_, N>) -> eyre::Result<Self::Validator> {
         Ok(CustomEngineValidator::new(ctx.config.chain.clone()))
+    }
+
+    async fn build_tree_validator(
+        self,
+        ctx: &AddOnsContext<'_, N>,
+        tree_config: TreeConfig,
+    ) -> eyre::Result<Self::TreeValidator> {
+        let validator = self.build(ctx).await?;
+        let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
+        let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
+        Ok(BasicEngineValidator::new(
+            ctx.node.provider().clone(),
+            std::sync::Arc::new(ctx.node.consensus().clone()),
+            ctx.node.evm_config().clone(),
+            validator,
+            tree_config,
+            invalid_block_hook,
+        ))
     }
 }
 
@@ -289,6 +315,8 @@ pub type MyNodeAddOns<N> = RpcAddOns<N, EthereumEthApiBuilder, CustomEngineValid
 impl<N> Node<N> for MyCustomNode
 where
     N: FullNodeTypes<Types = Self>,
+    N::Provider: StateReader + StateCommitmentProvider + HashedPostStateProvider + BlockReader,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

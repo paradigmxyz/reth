@@ -124,6 +124,11 @@ impl NodeTypes for TestNode {
 impl<N> Node<N> for TestNode
 where
     N: FullNodeTypes<Types = Self>,
+    N::Provider: reth_provider::BlockReader
+        + reth_provider::StateReader
+        + reth_provider::StateCommitmentProvider
+        + reth_provider::HashedPostStateProvider,
+    <N::Provider as reth_provider::DatabaseProviderFactory>::Provider: reth_provider::BlockReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,

@@ -27,15 +27,20 @@ use reth_node_builder::{
         BasicPayloadServiceBuilder, ComponentsBuilder, ConsensusBuilder, ExecutorBuilder,
         NetworkBuilder, PoolBuilder, TxPoolBuilder,
     },
+    invalid_block_hook::InvalidBlockHookExt,
     node::{FullNodeTypes, NodeTypes},
     rpc::{
-        BasicEngineApiBuilder, EngineApiBuilder, EngineApiValidatorBuilder, EngineValidatorAddOn,
-        EthApiBuilder, EthApiCtx, Identity, RethRpcAddOns, RpcAddOns, RpcHandle,
+        BasicEngineApiBuilder, BasicEngineValidator, EngineApiBuilder, EngineApiValidatorBuilder,
+        EngineValidatorAddOn, EthApiBuilder, EthApiCtx, Identity, RethRpcAddOns, RpcAddOns,
+        RpcHandle,
     },
     BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
+use reth_provider::{
+    providers::ProviderFactoryBuilder, BlockReader, DatabaseProviderFactory, EthStorage,
+    HashedPostStateProvider, StateCommitmentProvider, StateReader,
+};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     ValidationApi,
@@ -213,6 +218,8 @@ where
         >,
     >,
     EthereumEthApiBuilder: EthApiBuilder<N>,
+    N::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     fn default() -> Self {
         Self::new(RpcAddOns::new(
@@ -367,6 +374,8 @@ where
 impl<N> Node<N> for EthereumNode
 where
     N: FullNodeTypes<Types = Self>,
+    N::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
@@ -393,7 +402,11 @@ where
     }
 }
 
-impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
+impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode
+where
+    N::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
+    <N::Provider as DatabaseProviderFactory>::Provider: BlockReader,
+{
     type RpcBlock = alloy_rpc_types_eth::Block;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
@@ -566,10 +579,32 @@ where
         Primitives = EthPrimitives,
     >,
     Node: FullNodeComponents<Types = Types>,
+    Node::Provider: BlockReader + StateReader + StateCommitmentProvider + HashedPostStateProvider,
+    <Node::Provider as DatabaseProviderFactory>::Provider: BlockReader,
 {
     type Validator = EthereumEngineValidator<Types::ChainSpec>;
+    type TreeValidator =
+        BasicEngineValidator<Node::Provider, Node::Evm, EthereumEngineValidator<Types::ChainSpec>>;
 
     async fn build(self, ctx: &AddOnsContext<'_, Node>) -> eyre::Result<Self::Validator> {
         Ok(EthereumEngineValidator::new(ctx.config.chain.clone()))
+    }
+
+    async fn build_tree_validator(
+        self,
+        ctx: &AddOnsContext<'_, Node>,
+        tree_config: reth_engine_primitives::TreeConfig,
+    ) -> eyre::Result<Self::TreeValidator> {
+        let validator = self.build(ctx).await?;
+        let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
+        let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
+        Ok(BasicEngineValidator::new(
+            ctx.node.provider().clone(),
+            std::sync::Arc::new(ctx.node.consensus().clone()),
+            ctx.node.evm_config().clone(),
+            validator,
+            tree_config,
+            invalid_block_hook,
+        ))
     }
 }
