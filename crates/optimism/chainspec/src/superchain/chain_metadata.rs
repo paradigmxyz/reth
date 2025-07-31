@@ -180,6 +180,7 @@ mod tests {
         assert_eq!(config.hardforks.fjord_time, Some(1720627201));
         assert_eq!(config.hardforks.granite_time, Some(1726070401));
         assert_eq!(config.hardforks.holocene_time, Some(1736445601));
+        assert_eq!(config.hardforks.isthmus_time, Some(1746806401));
         // optimism
         assert_eq!(config.optimism.as_ref().unwrap().eip1559_elasticity, 6);
         assert_eq!(config.optimism.as_ref().unwrap().eip1559_denominator, 50);
@@ -243,7 +244,7 @@ mod tests {
         assert_eq!(chain_config.merge_netsplit_block, Some(0));
         assert_eq!(chain_config.shanghai_time, Some(1704992401));
         assert_eq!(chain_config.cancun_time, Some(1710374401));
-        assert_eq!(chain_config.prague_time, None);
+        assert_eq!(chain_config.prague_time, Some(1746806401));
         assert_eq!(chain_config.osaka_time, None);
         assert_eq!(chain_config.terminal_total_difficulty, Some(U256::ZERO));
         assert!(chain_config.terminal_total_difficulty_passed);
@@ -291,7 +292,7 @@ mod tests {
         assert_eq!(chain_config.chain_id, 10);
         assert_eq!(chain_config.shanghai_time, Some(1704992401));
         assert_eq!(chain_config.cancun_time, Some(1710374401));
-        assert_eq!(chain_config.prague_time, None);
+        assert_eq!(chain_config.prague_time, Some(1746806401));
         assert_eq!(chain_config.berlin_block, Some(3950000));
         assert_eq!(chain_config.london_block, Some(105235063));
         assert_eq!(chain_config.arrow_glacier_block, Some(105235063));
@@ -305,7 +306,7 @@ mod tests {
         assert_eq!(chain_config.extra_fields.get("fjordTime").unwrap(), 1720627201);
         assert_eq!(chain_config.extra_fields.get("graniteTime").unwrap(), 1726070401);
         assert_eq!(chain_config.extra_fields.get("holoceneTime").unwrap(), 1736445601);
-        assert_eq!(chain_config.extra_fields.get("isthmusTime"), None);
+        assert_eq!(chain_config.extra_fields.get("isthmusTime").unwrap(), 1746806401);
         let optimism = chain_config.extra_fields.get("optimism").unwrap();
         assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
         assert_eq!(optimism.get("eip1559Denominator").unwrap(), 50);
