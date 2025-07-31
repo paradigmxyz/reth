@@ -348,10 +348,8 @@ where
 
         // Create tx pool insertion batcher if configured
         let tx_batch_sender = max_batch_size.map(|batch_size| {
-            let (processor, request_tx) = BatchTxProcessor::new(
-                components.pool().clone(),
-                batch_size,
-            );
+            let (processor, request_tx) =
+                BatchTxProcessor::new(components.pool().clone(), batch_size);
 
             task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
             request_tx

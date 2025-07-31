@@ -230,7 +230,8 @@ where
     #[inline]
     pub fn tx_batch_sender(
         &self,
-    ) -> Option<&mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>> {
+    ) -> Option<&mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>
+    {
         self.inner.tx_batch_sender()
     }
 }
@@ -332,7 +333,7 @@ where
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
         tx_batch_sender: Option<
-            mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
+            mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
         >,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
@@ -501,7 +502,8 @@ where
     #[inline]
     pub const fn tx_batch_sender(
         &self,
-    ) -> Option<&mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>> {
+    ) -> Option<&mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>
+    {
         self.tx_batch_sender.as_ref()
     }
 }

@@ -40,7 +40,7 @@ where
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             let request = BatchTxRequest::new(pool_transaction, response_tx);
 
-            batch_sender.send(request).await.map_err(|_| BatchTxError::BatcherChannelClosed)?;
+            batch_sender.send(request).map_err(|_| BatchTxError::BatcherChannelClosed)?;
             let hash = response_rx.await.map_err(|_| BatchTxError::ResponseChannelClosed)??;
 
             Ok(hash)
