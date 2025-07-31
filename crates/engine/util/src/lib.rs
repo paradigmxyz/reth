@@ -123,11 +123,15 @@ pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMes
 
     /// If frequency is [Some], returns the stream that creates reorgs with
     /// specified frequency. Otherwise, returns `Self`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `frequency` is `Some` but `payload_validator` is `None`.
     fn maybe_reorg<Provider, Evm, Validator>(
         self,
         provider: Provider,
         evm_config: Evm,
-        payload_validator: Validator,
+        payload_validator: Option<Validator>,
         frequency: Option<usize>,
         depth: Option<usize>,
     ) -> Either<EngineReorg<Self, T, Provider, Evm, Validator>, Self>
@@ -135,11 +139,13 @@ pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMes
         Self: Sized,
     {
         if let Some(frequency) = frequency {
+            let validator =
+                payload_validator.expect("payload_validator must be Some when frequency is Some");
             Either::Left(reorg::EngineReorg::new(
                 self,
                 provider,
                 evm_config,
-                payload_validator,
+                validator,
                 frequency,
                 depth.unwrap_or_default(),
             ))

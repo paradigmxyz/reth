@@ -194,22 +194,33 @@ where
 
         // Build the engine validator with all required components
         let engine_validator = validator_builder
+            .clone()
             .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
             .await?;
 
-        // Create the consensus engine stream
+        // Build a validator for reorgs only if reorg frequency is configured
+        #[allow(clippy::if_then_some_else_none)]
+        let reorg_validator = if node_config.debug.reorg_frequency.is_some() {
+            Some(
+                validator_builder
+                    .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
+                    .await?,
+            )
+        } else {
+            None
+        };
+
+        // Create the consensus engine stream with optional reorg
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
-            .maybe_skip_new_payload(node_config.debug.skip_new_payload);
-
-        // TODO: The maybe_reorg functionality requires a PayloadValidator, but we're now
-        // building EngineApiValidator instead. This needs to be addressed separately.
-        // For now, we'll skip the reorg functionality when debug options are set.
-        if node_config.debug.reorg_frequency.is_some() || node_config.debug.reorg_depth.is_some() {
-            tracing::warn!("Reorg debug options are currently not supported with the new EngineApiValidatorBuilder trait");
-        }
-
-        let consensus_engine_stream = consensus_engine_stream
+            .maybe_skip_new_payload(node_config.debug.skip_new_payload)
+            .maybe_reorg(
+                ctx.blockchain_db().clone(),
+                ctx.components().evm_config().clone(),
+                reorg_validator,
+                node_config.debug.reorg_frequency,
+                node_config.debug.reorg_depth,
+            )
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
             // during this run.
