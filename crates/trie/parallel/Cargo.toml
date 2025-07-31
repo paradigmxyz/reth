@@ -45,6 +45,12 @@ metrics = { workspace = true, optional = true }
 reth-primitives-traits.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-trie = { workspace = true, features = ["test-utils"] }
+reth-ethereum-primitives.workspace = true
+
+# alloy
+alloy-trie.workspace = true
+alloy-consensus.workspace = true
+alloy-eips.workspace = true
 
 # misc
 rand.workspace = true
@@ -52,6 +58,7 @@ criterion.workspace = true
 proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
+triehash.workspace = true
 
 [features]
 default = ["metrics"]
@@ -68,4 +75,8 @@ test-utils = [
 
 [[bench]]
 name = "root"
+harness = false
+
+[[bench]]
+name = "trie_comparison"
 harness = false
