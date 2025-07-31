@@ -13,21 +13,6 @@ use std::{
 };
 use tokio::sync::{mpsc, oneshot};
 
-/// Configuration for tx pool batch insertion
-#[derive(Debug, Clone)]
-pub struct BatchTxConfig {
-    /// Channel buffer size for incoming batch tx requests
-    pub channel_buffer_size: usize,
-    /// Maximum number of transactions to batch insert at a time
-    pub max_batch_size: usize,
-}
-
-impl Default for BatchTxConfig {
-    fn default() -> Self {
-        Self { channel_buffer_size: 5000, max_batch_size: 3000 }
-    }
-}
-
 /// Error type for transaction batching operations
 #[derive(Debug, thiserror::Error)]
 pub enum BatchTxError {
@@ -66,9 +51,8 @@ where
 pub struct BatchTxProcessor<Pool: TransactionPool> {
     pool: Pool,
     max_batch_size: usize,
-    channel_buffer_size: usize,
     #[pin]
-    request_rx: mpsc::Receiver<BatchTxRequest<Pool::Transaction>>,
+    request_rx: mpsc::UnboundedReceiver<BatchTxRequest<Pool::Transaction>>,
 }
 
 impl<Pool> BatchTxProcessor<Pool>
@@ -80,11 +64,10 @@ where
     pub fn new(
         pool: Pool,
         max_batch_size: usize,
-        channel_buffer_size: usize,
-    ) -> (Self, mpsc::Sender<BatchTxRequest<Pool::Transaction>>) {
-        let (request_tx, request_rx) = mpsc::channel(channel_buffer_size);
+    ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
+        let (request_tx, request_rx) = mpsc::unbounded_channel();
 
-        let processor = Self { pool, max_batch_size, channel_buffer_size, request_rx };
+        let processor = Self { pool, max_batch_size, request_rx };
 
         (processor, request_tx)
     }
@@ -119,7 +102,7 @@ where
 
         loop {
             // Drain all available requests from the receiver
-            let mut batch = Vec::with_capacity(*this.channel_buffer_size);
+            let mut batch = Vec::with_capacity(1);
             while let Poll::Ready(Some(request)) = this.request_rx.poll_recv(cx) {
                 batch.push(request);
 
@@ -181,7 +164,7 @@ mod tests {
     #[tokio::test]
     async fn test_batch_processor() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000, 100);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000);
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -192,7 +175,7 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
 
-            request_tx.send(BatchTxRequest::new(tx, response_tx)).await.unwrap();
+            request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("Could not send batch tx");
             responses.push(response_rx);
         }
 
@@ -213,7 +196,7 @@ mod tests {
     #[tokio::test]
     async fn test_add_transaction() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000, 100);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000);
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -223,7 +206,7 @@ mod tests {
             let tx = MockTransaction::legacy().with_nonce(i).with_gas_price(100);
             let (response_tx, response_rx) = tokio::sync::oneshot::channel();
             let request = BatchTxRequest::new(tx, response_tx);
-            request_tx.send(request).await.unwrap();
+            request_tx.send(request).expect("Could not send batch tx");
             results.push(response_rx);
         }
 
@@ -237,12 +220,11 @@ mod tests {
         handle.abort();
     }
 
-    // TODO: update
     #[tokio::test]
     async fn test_max_batch_size() {
         let pool = testing_pool();
         let max_batch_size = 10;
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), max_batch_size, 100);
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), max_batch_size);
 
         // Spawn batch processor with threshold
         let handle = tokio::spawn(processor);
@@ -255,8 +237,8 @@ mod tests {
             let request_tx_clone = request_tx.clone();
 
             let tx_fut = async move {
-                request_tx_clone.send(request).await.unwrap();
-                response_rx.await.unwrap()
+                request_tx_clone.send(request).expect("Could not send batch tx");
+                response_rx.await.expect("Could not receive batch response")
             };
             futures.push(tx_fut);
         }

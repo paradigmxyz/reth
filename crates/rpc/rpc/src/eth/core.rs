@@ -308,7 +308,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Optional transaction batch sender for batching tx insertions
     tx_batch_sender:
-        Option<mpsc::Sender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>,
+        Option<mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>

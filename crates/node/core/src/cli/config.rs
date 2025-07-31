@@ -4,7 +4,7 @@ use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_36M;
 use alloy_primitives::Bytes;
 use reth_chainspec::{Chain, ChainKind, NamedChain};
 use reth_network::{protocol::IntoRlpxSubProtocol, NetworkPrimitives};
-use reth_transaction_pool::{BatchTxConfig, PoolConfig};
+use reth_transaction_pool::PoolConfig;
 use std::{borrow::Cow, time::Duration};
 
 /// 60M gas limit
@@ -84,6 +84,6 @@ pub trait RethTransactionPoolConfig {
     /// Returns transaction pool configuration.
     fn pool_config(&self) -> PoolConfig;
 
-    /// Returns transaction batcher configuration if enabled.
-    fn tx_batch_config(&self) -> Option<BatchTxConfig>;
+    /// Returns max batch size if batching is enabled.
+    fn max_batch_size(&self) -> Option<usize>;
 }

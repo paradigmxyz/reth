@@ -10,7 +10,7 @@ use reth_transaction_pool::{
     maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
-    BatchTxConfig, LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
+    LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
     DEFAULT_PRICE_BUMP, DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
     MAX_NEW_PENDING_TXS_NOTIFICATIONS, REPLACE_BLOB_PRICE_BUMP,
     TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
@@ -134,17 +134,9 @@ pub struct TxPoolArgs {
     )]
     pub disable_transactions_backup: bool,
 
-    /// Enable batch processing for transaction pool insertions.
-    #[arg(long = "txpool.enable-batching")]
-    pub enable_batching: bool,
-
-    /// Channel buffer size for incoming batch transaction requests.
-    #[arg(long = "txpool.batch-buffer-size", default_value_t = 5000)]
-    pub batch_buffer_size: usize,
-
-    /// Number of transactions that triggers immediate batch processing.
-    #[arg(long = "txpool.max-batch-size", default_value_t = 3000)]
-    pub max_batch_size: usize,
+    /// Enables batch processing for transaction pool insertions.
+    #[arg(long = "txpool.max-batch-size")]
+    pub max_batch_size: Option<usize>,
 }
 
 impl Default for TxPoolArgs {
@@ -178,9 +170,7 @@ impl Default for TxPoolArgs {
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             transactions_backup_path: None,
             disable_transactions_backup: false,
-            enable_batching: false,
-            batch_buffer_size: 5000,
-            max_batch_size: 3000,
+            max_batch_size: None,
         }
     }
 }
@@ -226,12 +216,9 @@ impl RethTransactionPoolConfig for TxPoolArgs {
         }
     }
 
-    /// Returns transaction batcher configuration if enabled.
-    fn tx_batch_config(&self) -> Option<BatchTxConfig> {
-        self.enable_batching.then_some(BatchTxConfig {
-            channel_buffer_size: self.batch_buffer_size,
-            max_batch_size: self.max_batch_size,
-        })
+    /// Returns max batch size if batching is enabled.
+    fn max_batch_size(&self) -> Option<usize> {
+        self.max_batch_size
     }
 }
 
