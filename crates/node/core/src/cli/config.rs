@@ -45,12 +45,10 @@ pub trait PayloadBuilderConfig {
         }
 
         match chain.kind() {
-            ChainKind::Named(
-                NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi,
-            ) => ETHEREUM_BLOCK_GAS_LIMIT_60M,
-            ChainKind::Named(
-                NamedChain::Mainnet
-            ) => ETHEREUM_BLOCK_GAS_LIMIT_45M,
+            ChainKind::Named(NamedChain::Sepolia | NamedChain::Holesky | NamedChain::Hoodi) => {
+                ETHEREUM_BLOCK_GAS_LIMIT_60M
+            }
+            ChainKind::Named(NamedChain::Mainnet) => ETHEREUM_BLOCK_GAS_LIMIT_45M,
             _ => ETHEREUM_BLOCK_GAS_LIMIT_36M,
         }
     }
