@@ -242,6 +242,16 @@ where
 
         let (trie_cursor_factory, hashed_cursor_factory) = self.create_factories();
 
+        let span = tracing::trace_span!(
+            target: "trie::proof_task",
+            "Storage proof calculation",
+            hashed_address=?input.hashed_address,
+            // Add a random id because we often have parallel storage proof calculations for the
+            // same hashed address, and we want to differentiate them during trace analysis.
+            span_id=rand::random::<u64>(),
+        );
+        let span_guard = span.enter();
+
         let target_slots_len = input.target_slots.len();
         let proof_start = Instant::now();
         let raw_proof_result = StorageProof::new_hashed(
@@ -254,6 +264,8 @@ where
         .with_leaf_additions_removals(input.with_leaf_additions_removals)
         .storage_multiproof(input.target_slots)
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
+
+        drop(span_guard);
 
         let decoded_result = raw_proof_result.and_then(|raw_proof| {
             raw_proof.try_into().map_err(|e: alloy_rlp::Error| {
