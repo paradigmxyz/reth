@@ -2,7 +2,6 @@
 
 use crate::{eth::core::EthApiInner, EthApi};
 use alloy_network::Ethereum;
-use alloy_rpc_client::RpcClient;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::ChainSpecProvider;
 use reth_primitives_traits::HeaderTy;
@@ -12,8 +11,8 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{
     fee_history::fee_history_cache_new_blocks_task, receipt::EthReceiptConverter, EthStateCache,
-    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, GasCap, GasPriceOracle,
-    GasPriceOracleConfig,
+    EthStateCacheConfig, FeeHistoryCache, FeeHistoryCacheConfig, ForwardConfig, GasCap,
+    GasPriceOracle, GasPriceOracleConfig,
 };
 use reth_rpc_server_types::constants::{
     DEFAULT_ETH_PROOF_WINDOW, DEFAULT_MAX_SIMULATE_BLOCKS, DEFAULT_PROOF_PERMITS,
@@ -41,7 +40,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     blocking_task_pool: Option<BlockingTaskPool>,
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
-    raw_tx_forwarder: Option<RpcClient>,
+    raw_tx_forwarder: ForwardConfig,
 }
 
 impl<Provider, Pool, Network, EvmConfig, ChainSpec>
@@ -125,7 +124,7 @@ where
             gas_oracle_config: Default::default(),
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
-            raw_tx_forwarder: None,
+            raw_tx_forwarder: ForwardConfig::default(),
         }
     }
 }
@@ -291,11 +290,8 @@ where
     }
 
     /// Sets the raw transaction forwarder.
-    pub fn raw_tx_forwarder(mut self, tx_forwarder: Option<String>) -> Self {
-        if let Some(tx_forwarder) = tx_forwarder {
-            self.raw_tx_forwarder =
-                Some(RpcClient::new_http(reqwest::Url::parse(&tx_forwarder).unwrap()));
-        }
+    pub fn raw_tx_forwarder(mut self, tx_forwarder: ForwardConfig) -> Self {
+        self.raw_tx_forwarder = tx_forwarder;
         self
     }
 

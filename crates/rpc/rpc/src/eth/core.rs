@@ -8,7 +8,6 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_network::Ethereum;
 use alloy_primitives::{Bytes, U256};
-use alloy_rpc_client::RpcClient;
 use derive_more::Deref;
 use reth_chainspec::{ChainSpec, ChainSpecProvider};
 use reth_evm_ethereum::EthEvmConfig;
@@ -21,8 +20,8 @@ use reth_rpc_eth_api::{
     EthApiTypes, RpcNodeCore,
 };
 use reth_rpc_eth_types::{
-    receipt::EthReceiptConverter, EthApiError, EthStateCache, FeeHistoryCache, GasCap,
-    GasPriceOracle, PendingBlock,
+    receipt::EthReceiptConverter, tx_forward::ForwardConfig, EthApiError, EthStateCache,
+    FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
 use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
@@ -148,7 +147,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         proof_permits: usize,
         rpc_converter: Rpc,
-        raw_tx_forwarder: Option<RpcClient>,
+        raw_tx_forwarder: ForwardConfig,
     ) -> Self {
         let inner = EthApiInner::new(
             components,
@@ -289,7 +288,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     raw_tx_sender: broadcast::Sender<Bytes>,
 
     /// Raw transaction forwarder
-    raw_tx_forwarder: Option<RpcClient>,
+    raw_tx_forwarder: ForwardConfig,
 
     /// Converter for RPC types.
     tx_resp_builder: Rpc,
@@ -318,7 +317,7 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
-        raw_tx_forwarder: Option<RpcClient>,
+        raw_tx_forwarder: ForwardConfig,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -484,8 +483,8 @@ where
 
     /// Returns a handle to the raw transaction forwarder.
     #[inline]
-    pub const fn raw_tx_forwarder(&self) -> Option<&RpcClient> {
-        self.raw_tx_forwarder.as_ref()
+    pub const fn raw_tx_forwarder(&self) -> &ForwardConfig {
+        &self.raw_tx_forwarder
     }
 }
 
