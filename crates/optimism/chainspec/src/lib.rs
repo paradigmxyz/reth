@@ -395,6 +395,7 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
             (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
             (OpHardfork::Interop.boxed(), genesis_info.interop_time),
+            (OpHardfork::Jovian.boxed(), genesis_info.jovian_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -1100,6 +1101,7 @@ mod tests {
             OpHardfork::Holocene.boxed(),
             EthereumHardfork::Prague.boxed(),
             OpHardfork::Isthmus.boxed(),
+            OpHardfork::Jovian.boxed(),
         ];
 
         for (expected, actual) in expected_hardforks.iter().zip(hardforks.iter()) {
