@@ -704,15 +704,7 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = if let Some(tokio_runtime) = tokio_runtime {
-            config
-                .rpc
-                .rpc_server_config()
-                .set_rpc_middleware(rpc_middleware)
-                .with_tokio_runtime(tokio_runtime)
-        } else {
-            config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware)
-        };
+        let server_config = Self::create_server_config(config, rpc_middleware, tokio_runtime);
         let rpc_server_handle = Self::launch_rpc_server_internal(server_config, &modules).await?;
 
         let handles =
@@ -779,15 +771,7 @@ where
             engine_handle,
         } = setup_ctx;
 
-        let server_config = if let Some(tokio_runtime) = tokio_runtime {
-            config
-                .rpc
-                .rpc_server_config()
-                .set_rpc_middleware(rpc_middleware)
-                .with_tokio_runtime(tokio_runtime)
-        } else {
-            config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware)
-        };
+        let server_config = Self::create_server_config(config, rpc_middleware, tokio_runtime);
 
         let (rpc, auth) = if disable_auth {
             // Only launch the RPC server, use a noop auth handle
@@ -962,6 +946,26 @@ where
 
         on_rpc_started.on_rpc_started(ctx, handles)?;
         Ok(())
+    }
+
+    /// Helper to create RPC server config with optional tokio runtime
+    fn create_server_config<M>(
+        config: &NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+        rpc_middleware: M,
+        tokio_runtime: Option<tokio::runtime::Handle>,
+    ) -> RpcServerConfig<M>
+    where
+        M: RethRpcMiddleware,
+    {
+        if let Some(tokio_runtime) = tokio_runtime {
+            config
+                .rpc
+                .rpc_server_config()
+                .set_rpc_middleware(rpc_middleware)
+                .with_tokio_runtime(tokio_runtime)
+        } else {
+            config.rpc.rpc_server_config().set_rpc_middleware(rpc_middleware)
+        }
     }
 }
 
