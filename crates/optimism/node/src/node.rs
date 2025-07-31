@@ -625,6 +625,8 @@ pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     min_suggested_priority_fee: u64,
     /// RPC middleware to use
     rpc_middleware: RpcMiddleware,
+    /// Optional tokio runtime to use for the RPC server.
+    tokio_runtime: Option<tokio::runtime::Handle>,
 }
 
 impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
@@ -638,6 +640,7 @@ impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
             min_suggested_priority_fee: 1_000_000,
             _nt: PhantomData,
             rpc_middleware: Identity::new(),
+            tokio_runtime: None,
         }
     }
 }
@@ -679,6 +682,12 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
         self
     }
 
+    /// Configures a custom tokio runtime for the RPC server.
+    pub fn with_tokio_runtime(mut self, tokio_runtime: tokio::runtime::Handle) -> Self {
+        self.tokio_runtime = Some(tokio_runtime);
+        self
+    }
+
     /// Configure the RPC middleware to use
     pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> OpAddOnsBuilder<NetworkT, T> {
         let Self {
@@ -689,6 +698,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             enable_tx_conditional,
             min_suggested_priority_fee,
             _nt,
+            tokio_runtime,
             ..
         } = self;
         OpAddOnsBuilder {
@@ -700,6 +710,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             min_suggested_priority_fee,
             _nt,
             rpc_middleware,
+            tokio_runtime,
         }
     }
 }
@@ -721,6 +732,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             min_suggested_priority_fee,
             historical_rpc,
             rpc_middleware,
+            tokio_runtime,
             ..
         } = self;
 
@@ -733,7 +745,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                 EV::default(),
                 EB::default(),
                 rpc_middleware,
-                None,
+                tokio_runtime,
             ),
             da_config: da_config.unwrap_or_default(),
             sequencer_url,
