@@ -635,12 +635,12 @@ where
             .eth_api()
             .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
                 let db = StateProviderDatabase::new(&state_provider);
-                let block_executor = this.eth_api().evm_config().batch_executor(db);
+                let block_executor = this.eth_api().evm_config().executor(db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 
                 let _ = block_executor
-                    .execute_with_state_closure(&(*block).clone(), |statedb: &State<_>| {
+                    .execute_with_state_closure(&block, |statedb: &State<_>| {
                         witness_record.record_executed_state(statedb);
                     })
                     .map_err(|err| EthApiError::Internal(err.into()))?;

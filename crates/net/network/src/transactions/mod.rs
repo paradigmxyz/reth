@@ -1107,6 +1107,10 @@ where
     /// This fetches all transaction from the pool, including the 4844 blob transactions but
     /// __without__ their sidecar, because 4844 transactions are only ever announced as hashes.
     fn propagate_all(&mut self, hashes: Vec<TxHash>) {
+        if self.peers.is_empty() {
+            // nothing to propagate
+            return
+        }
         let propagated = self.propagate_transactions(
             self.pool.get_all(hashes).into_iter().map(PropagateTransaction::pool_tx).collect(),
             PropagationMode::Basic,

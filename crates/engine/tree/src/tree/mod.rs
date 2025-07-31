@@ -18,7 +18,6 @@ use reth_chain_state::{
     MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
-pub use reth_engine_primitives::InvalidBlockHook;
 use reth_engine_primitives::{
     BeaconConsensusEngineEvent, BeaconEngineMessage, BeaconOnNewPayloadError, ExecutionPayload,
     ForkchoiceStateTracker, OnForkChoiceUpdated,
@@ -58,7 +57,6 @@ mod block_buffer;
 mod cached_state;
 pub mod error;
 mod instrumented_state;
-mod invalid_block_hook;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
@@ -73,7 +71,6 @@ mod trie_updates;
 
 use crate::tree::error::AdvancePersistenceError;
 pub use block_buffer::BlockBuffer;
-pub use invalid_block_hook::{InvalidBlockHooks, NoopInvalidBlockHook};
 pub use invalid_headers::InvalidHeaderCache;
 pub use payload_processor::*;
 pub use payload_validator::{BasicEngineValidator, EngineValidator};
@@ -1403,6 +1400,7 @@ where
                 self.persisting_kind_for(block.recovered_block().header()),
                 self.provider.database_provider_ro()?,
                 block.recovered_block().parent_hash(),
+                None,
             )?;
             // Extend with block we are generating trie updates for.
             trie_input.append_ref(block.hashed_state());
@@ -2177,8 +2175,10 @@ where
         persisting_kind: PersistingKind,
         provider: TP,
         parent_hash: B256,
+        allocated_trie_input: Option<TrieInput>,
     ) -> ProviderResult<TrieInput> {
-        let mut input = TrieInput::default();
+        // get allocated trie input or use a default trie input
+        let mut input = allocated_trie_input.unwrap_or_default();
 
         let best_block_number = provider.best_block_number()?;
 

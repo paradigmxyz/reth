@@ -3545,6 +3545,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-full-contract-state"
+version = "1.6.0"
+dependencies = [
+ "eyre",
+ "reth-ethereum",
+]
+
+[[package]]
 name = "example-manual-p2p"
 version = "0.0.0"
 dependencies = [
@@ -8245,7 +8253,6 @@ dependencies = [
 name = "reth-ethereum-cli"
 version = "1.6.0"
 dependencies = [
- "alloy-consensus",
  "clap",
  "eyre",
  "reth-chainspec",
@@ -8865,6 +8872,7 @@ dependencies = [
  "reth-db-common",
  "reth-downloaders",
  "reth-engine-local",
+ "reth-engine-primitives",
  "reth-engine-service",
  "reth-engine-tree",
  "reth-engine-util",
@@ -8884,6 +8892,7 @@ dependencies = [
  "reth-node-events",
  "reth-node-metrics",
  "reth-payload-builder",
+ "reth-primitives-traits",
  "reth-provider",
  "reth-prune",
  "reth-rpc",
@@ -10678,6 +10687,7 @@ dependencies = [
  "proptest-arbitrary-interop",
  "rand 0.8.5",
  "rand 0.9.2",
+ "rayon",
  "reth-execution-errors",
  "reth-metrics",
  "reth-primitives-traits",
@@ -10702,6 +10712,7 @@ dependencies = [
  "arbitrary",
  "assert_matches",
  "itertools 0.14.0",
+ "metrics",
  "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
@@ -10709,6 +10720,7 @@ dependencies = [
  "rand 0.9.2",
  "rayon",
  "reth-execution-errors",
+ "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
  "reth-trie",
