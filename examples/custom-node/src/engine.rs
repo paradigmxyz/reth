@@ -1,11 +1,12 @@
 use crate::{
     chainspec::CustomChainSpec,
+    evm::CustomEvmConfig,
     primitives::{CustomHeader, CustomNodePrimitives, CustomTransaction},
     CustomNode,
 };
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_chain_state::ExecutedBlockWithTrieUpdates;
-use reth_engine_primitives::EngineValidator;
+use reth_engine_primitives::{EngineValidator, EvmPayloadValidator};
 use reth_ethereum::{
     node::api::{
         validate_version_specific_fields, AddOnsContext, BuiltPayload, EngineApiMessageVersion,
@@ -250,6 +251,11 @@ where
     }
 }
 
+impl<P> EvmPayloadValidator<CustomPayloadTypes, CustomEvmConfig> for CustomEngineValidator<P> where
+    P: StateProviderFactory + Send + Sync + Unpin + 'static
+{
+}
+
 impl<P> EngineValidator<CustomPayloadTypes> for CustomEngineValidator<P>
 where
     P: StateProviderFactory + Send + Sync + Unpin + 'static,
@@ -298,7 +304,7 @@ pub struct CustomEngineValidatorBuilder;
 
 impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeComponents<Types = CustomNode>,
+    N: FullNodeComponents<Types = CustomNode, Evm = CustomEvmConfig>,
 {
     type Validator = CustomEngineValidator<N::Provider>;
 

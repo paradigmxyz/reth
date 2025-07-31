@@ -86,7 +86,7 @@ fn main() -> eyre::Result<()> {
         println!("Code hash: {:?}", state.account.bytecode_hash);
         println!("Storage slots: {}", state.storage.len());
         for (key, value) in &state.storage {
-            println!("\t{}: {}", key, value);
+            println!("\t{key}: {value}");
         }
     }
 

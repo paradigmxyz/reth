@@ -8,16 +8,18 @@ use crate::{
 };
 use op_alloy_consensus::{interop::SafetyLevel, OpPooledTransaction};
 use op_alloy_rpc_types_engine::OpExecutionData;
+use op_revm::OpSpecId;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
-use reth_evm::ConfigureEvm;
+use reth_evm::{block::BlockExecutorFactory, ConfigureEvm, EvmFactory};
 use reth_network::{
     types::BasicNetworkPrimitives, NetworkConfig, NetworkHandle, NetworkManager, NetworkPrimitives,
     PeersInfo,
 };
 use reth_node_api::{
-    AddOnsContext, BuildNextEnv, EngineTypes, FullNodeComponents, HeaderTy, KeyHasherTy,
-    NodeAddOns, NodePrimitives, PayloadAttributesBuilder, PayloadTypes, PrimitivesTy, TxTy,
+    AddOnsContext, BuildNextEnv, EngineTypes, EvmPayloadValidator, FullNodeComponents, HeaderTy,
+    KeyHasherTy, NodeAddOns, NodePrimitives, PayloadAttributesBuilder, PayloadTypes, PrimitivesTy,
+    TxTy,
 };
 use reth_node_builder::{
     components::{
@@ -34,7 +36,7 @@ use reth_node_builder::{
 };
 use reth_optimism_chainspec::{OpChainSpec, OpHardfork};
 use reth_optimism_consensus::OpBeaconConsensus;
-use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
+use reth_optimism_evm::{OpBlockExecutionCtx, OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
@@ -593,7 +595,10 @@ impl<N, NetworkT, EV, EB, RpcMiddleware> EngineValidatorAddOn<N>
 where
     N: FullNodeComponents<Types: OpFullNodeTypes>,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N> + Default,
+    EV: EngineValidatorBuilder<
+            N,
+            Validator: EvmPayloadValidator<<N::Types as NodeTypes>::Payload, N::Evm>,
+        > + Default,
     EB: EngineApiBuilder<N>,
     RpcMiddleware: Send,
 {
@@ -1134,7 +1139,15 @@ pub struct OpEngineValidatorBuilder;
 
 impl<Node> EngineValidatorBuilder<Node> for OpEngineValidatorBuilder
 where
-    Node: FullNodeComponents<Types: OpNodeTypes>,
+    Node: FullNodeComponents<
+        Types: OpNodeTypes,
+        Evm: ConfigureEvm<
+            BlockExecutorFactory: for<'a> BlockExecutorFactory<
+                ExecutionCtx<'a> = OpBlockExecutionCtx,
+                EvmFactory: EvmFactory<Spec = OpSpecId>,
+            >,
+        >,
+    >,
 {
     type Validator = OpEngineValidator<
         Node::Provider,

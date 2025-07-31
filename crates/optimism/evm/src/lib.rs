@@ -14,7 +14,7 @@ extern crate alloc;
 use alloc::sync::Arc;
 use alloy_consensus::{BlockHeader, Header};
 use alloy_evm::{FromRecoveredTx, FromTxWithEncoded};
-use alloy_op_evm::{block::receipt_builder::OpReceiptBuilder, OpBlockExecutionCtx};
+use alloy_op_evm::block::receipt_builder::OpReceiptBuilder;
 use alloy_primitives::U256;
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
@@ -45,7 +45,7 @@ pub use build::OpBlockAssembler;
 mod error;
 pub use error::OpBlockExecutionError;
 
-pub use alloy_op_evm::{OpBlockExecutorFactory, OpEvm, OpEvmFactory};
+pub use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvm, OpEvmFactory};
 
 /// Optimism-related EVM configuration.
 #[derive(Debug)]

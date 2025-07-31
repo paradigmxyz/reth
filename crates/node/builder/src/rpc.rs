@@ -10,8 +10,8 @@ use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_node_api::{
-    AddOnsContext, BlockTy, EngineTypes, EngineValidator, FullNodeComponents, FullNodeTypes,
-    NodeAddOns, NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy,
+    AddOnsContext, EngineTypes, EngineValidator, EvmPayloadValidator, FullNodeComponents,
+    FullNodeTypes, NodeAddOns, NodeTypes, PayloadTypes, PrimitivesTy,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -991,7 +991,7 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
 pub trait EngineValidatorAddOn<Node: FullNodeComponents>: Send {
     /// The Validator type to use for the engine API.
     type Validator: EngineValidator<<Node::Types as NodeTypes>::Payload>
-        + PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+        + EvmPayloadValidator<<Node::Types as NodeTypes>::Payload, Node::Evm>
         + Clone;
 
     /// Creates the engine validator for an engine API based node.
@@ -1005,7 +1005,10 @@ impl<N, EthB, EV, EB> EngineValidatorAddOn<N> for RpcAddOns<N, EthB, EV, EB>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    EV: EngineValidatorBuilder<N>,
+    EV: EngineValidatorBuilder<
+        N,
+        Validator: EvmPayloadValidator<<N::Types as NodeTypes>::Payload, N::Evm>,
+    >,
     EB: EngineApiBuilder<N>,
 {
     type Validator = EV::Validator;
@@ -1019,7 +1022,7 @@ where
 pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The consensus implementation to build.
     type Validator: EngineValidator<<Node::Types as NodeTypes>::Payload>
-        + PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+        + EvmPayloadValidator<<Node::Types as NodeTypes>::Payload, Node::Evm>
         + Clone;
 
     /// Creates the engine validator.
@@ -1033,7 +1036,7 @@ impl<Node, F, Fut, Validator> EngineValidatorBuilder<Node> for F
 where
     Node: FullNodeComponents,
     Validator: EngineValidator<<Node::Types as NodeTypes>::Payload>
-        + PayloadValidator<<Node::Types as NodeTypes>::Payload, Block = BlockTy<Node::Types>>
+        + EvmPayloadValidator<<Node::Types as NodeTypes>::Payload, Node::Evm>
         + Clone
         + Unpin
         + 'static,

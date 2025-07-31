@@ -2,7 +2,7 @@
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, vec::Vec};
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::{transaction::Either, BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
@@ -571,13 +571,36 @@ pub trait OwnedExecutableTx<TxEnv, Tx>: Clone + Send + 'static {
     fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy;
 }
 
-impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for T
+impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for Recovered<T>
 where
-    T: Clone + Send + 'static,
-    for<'a> &'a T: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
+    Self: Clone + Send + 'static,
+    for<'a> &'a Self: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
 {
     fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
         self
+    }
+}
+
+impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for WithEncoded<T>
+where
+    Self: Clone + Send + 'static,
+    for<'a> &'a Self: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
+{
+    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
+        self
+    }
+}
+
+impl<L, R, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for Either<L, R>
+where
+    L: OwnedExecutableTx<TxEnv, Tx>,
+    R: OwnedExecutableTx<TxEnv, Tx>,
+{
+    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
+        match self {
+            Self::Left(tx) => Either::Left(tx.as_executable()),
+            Self::Right(tx) => Either::Right(tx.as_executable()),
+        }
     }
 }
 
