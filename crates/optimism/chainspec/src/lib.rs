@@ -633,7 +633,7 @@ mod tests {
                 // Jovian
                 (
                     Head { number: 0, timestamp: 1753987208, ..Default::default() }, /* TODO: update timestamp */
-                    ForkId { hash: ForkHash([0x77, 0xe5, 0x5c, 0x69]), next: 0 },
+                    ForkId { hash: ForkHash([0x9c, 0xc1, 0x58, 0x4e]), next: 0 },
                 ),
             ],
         );
