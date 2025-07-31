@@ -335,6 +335,23 @@ impl From<Vec<B256>> for NewPooledTransactionHashes66 {
     }
 }
 
+impl NewPooledTransactionHashes66 {
+    /// Deduplicates transaction hashes by converting them into a [`PartiallyValidData`] structure.
+    pub fn dedup(self) -> PartiallyValidData<Option<(u8, usize)>> {
+        let Self(hashes) = self;
+
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
+
+        let noop_value: Eth68TxMetadata = None;
+
+        for hash in hashes.into_iter().rev() {
+            deduped_data.insert(hash, noop_value);
+        }
+
+        PartiallyValidData::from_raw_data_eth66(deduped_data)
+    }
+}
+
 /// Same as [`NewPooledTransactionHashes66`] but extends that beside the transaction hashes,
 /// the node sends the transaction types and their sizes (as defined in EIP-2718) as well.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -434,19 +451,20 @@ impl NewPooledTransactionHashes68 {
         self.extend(txs);
         self
     }
-
-    /// Deduplicates transaction hashes by converting them into a [`PartiallyValidData`] structure.
+    /// Deduplicates transaction hashes and their associated metadata by converting them into a
+    /// [`PartiallyValidData`] structure.
     pub fn dedup(self) -> PartiallyValidData<Option<(u8, usize)>> {
-        let mut deduped_data =
-            HashMap::with_capacity_and_hasher(self.hashes.len(), Default::default());
+        let Self { hashes, mut sizes, mut types } = self;
 
-        let noop_value: Eth68TxMetadata = None;
+        let mut deduped_data = HashMap::with_capacity_and_hasher(hashes.len(), Default::default());
 
-        for hash in self.hashes.into_iter().rev() {
-            deduped_data.insert(hash, noop_value);
+        for hash in hashes.into_iter().rev() {
+            if let (Some(ty), Some(size)) = (types.pop(), sizes.pop()) {
+                deduped_data.insert(hash, Some((ty, size)));
+            }
         }
 
-        PartiallyValidData::from_raw_data_eth66(deduped_data)
+        PartiallyValidData::from_raw_data_eth68(deduped_data)
     }
 }
 
