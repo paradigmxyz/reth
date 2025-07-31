@@ -35,6 +35,9 @@ pub struct Proof<T, H> {
     prefix_sets: TriePrefixSetsMut,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
+    /// Flag indicating whether to also retain proofs for nodes which might be required for adding
+    /// and removing leaves in the trie.
+    with_leaf_additions_removals: bool,
 }
 
 impl<T, H> Proof<T, H> {
@@ -45,6 +48,7 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
             collect_branch_node_masks: false,
+            with_leaf_additions_removals: false,
         }
     }
 
@@ -55,6 +59,7 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
+            with_leaf_additions_removals: self.with_leaf_additions_removals,
         }
     }
 
@@ -65,6 +70,7 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
+            with_leaf_additions_removals: self.with_leaf_additions_removals,
         }
     }
 
@@ -77,6 +83,13 @@ impl<T, H> Proof<T, H> {
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
+        self
+    }
+
+    /// Set the flag indicating whether to retain proofs for nodes which might be required for
+    /// leaf additions/removals.
+    pub const fn with_leaf_additions_removals(mut self, leaf_additions_removals: bool) -> Self {
+        self.with_leaf_additions_removals = leaf_additions_removals;
         self
     }
 }
@@ -114,7 +127,11 @@ where
         let walker = TrieWalker::state_trie(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer = targets.keys().map(Nibbles::unpack).collect();
+        let retainer = targets
+            .keys()
+            .map(Nibbles::unpack)
+            .collect::<ProofRetainer>()
+            .with_leaf_additions_removals(self.with_leaf_additions_removals);
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
@@ -194,6 +211,9 @@ pub struct StorageProof<T, H> {
     prefix_set: PrefixSetMut,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
+    /// Flag indicating whether to also retain proofs for nodes which might be required for adding
+    /// and removing leaves in the trie.
+    with_leaf_additions_removals: bool,
 }
 
 impl<T, H> StorageProof<T, H> {
@@ -210,6 +230,7 @@ impl<T, H> StorageProof<T, H> {
             hashed_address,
             prefix_set: PrefixSetMut::default(),
             collect_branch_node_masks: false,
+            with_leaf_additions_removals: false,
         }
     }
 
@@ -221,6 +242,7 @@ impl<T, H> StorageProof<T, H> {
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
+            with_leaf_additions_removals: self.with_leaf_additions_removals,
         }
     }
 
@@ -232,6 +254,7 @@ impl<T, H> StorageProof<T, H> {
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
+            with_leaf_additions_removals: self.with_leaf_additions_removals,
         }
     }
 
@@ -244,6 +267,13 @@ impl<T, H> StorageProof<T, H> {
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
+        self
+    }
+
+    /// Set the flag indicating whether to retain proofs for nodes which might be required for
+    /// leaf additions/removals.
+    pub const fn with_leaf_additions_removals(mut self, leaf_additions_removals: bool) -> Self {
+        self.with_leaf_additions_removals = leaf_additions_removals;
         self
     }
 }
@@ -281,7 +311,8 @@ where
         let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
         let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set.freeze());
 
-        let retainer = ProofRetainer::from_iter(target_nibbles);
+        let retainer = ProofRetainer::from_iter(target_nibbles)
+            .with_leaf_additions_removals(self.with_leaf_additions_removals);
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);

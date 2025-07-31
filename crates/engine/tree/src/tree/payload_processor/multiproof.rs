@@ -459,6 +459,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
+            .with_leaf_additions_removals(true)
             .decoded_storage_proof(hashed_address, proof_targets);
             let elapsed = start.elapsed();
             trace!(
@@ -521,6 +522,7 @@ where
                 storage_targets,
                 "Starting multiproof calculation",
             );
+
             let start = Instant::now();
             let result = ParallelProof::new(
                 config.consistent_view,
@@ -530,6 +532,7 @@ where
                 storage_proof_task_handle.clone(),
             )
             .with_branch_node_masks(true)
+            .with_leaf_additions_removals(true)
             .decoded_multiproof(proof_targets);
             let elapsed = start.elapsed();
             trace!(
