@@ -1084,6 +1084,7 @@ mod tests {
                     (String::from("graniteTime"), 0.into()),
                     (String::from("holoceneTime"), 0.into()),
                     (String::from("isthmusTime"), 0.into()),
+                    (String::from("jovianTime"), 0.into()),
                 ]
                 .into_iter()
                 .collect(),
