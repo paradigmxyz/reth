@@ -199,7 +199,7 @@ where
             .await?;
 
         // Build a validator for reorgs only if reorg frequency is configured
-        #[allow(clippy::if_then_some_else_none)]
+        #[expect(clippy::if_then_some_else_none)]
         let reorg_validator = if node_config.debug.reorg_frequency.is_some() {
             Some(
                 validator_builder
