@@ -255,13 +255,7 @@ pub struct CustomEngineValidatorBuilder;
 
 impl<N> EngineValidatorBuilder<N> for CustomEngineValidatorBuilder
 where
-    N: FullNodeComponents<
-        Types: NodeTypes<
-            Payload = CustomEngineTypes,
-            ChainSpec = ChainSpec,
-            Primitives = EthPrimitives,
-        >,
-    >,
+    N: FullNodeComponents<Types = MyCustomNode, Evm = EthEvmConfig>,
 {
     type Validator = CustomEngineValidator;
 

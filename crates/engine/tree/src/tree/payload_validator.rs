@@ -395,11 +395,7 @@ where
                 parent_hash,
                 ctx.state(),
                 allocated_trie_input,
-            );
-            let trie_input = match res {
-                Ok(val) => val,
-                Err(e) => return Err((InsertBlockErrorKind::Other(Box::new(e)), block)),
-            };
+            ));
 
             self.metrics
                 .block_validation
