@@ -13,14 +13,14 @@
 //!     components::ComponentsBuilder,
 //!     hooks::OnComponentInitializedHook,
 //!     rpc::{EthApiBuilder, EthApiCtx},
-//!     LaunchContext, RethFullAdapter,
+//!     LaunchContext, NodeConfig, RethFullAdapter,
 //! };
-//! use reth_node_core::NodeConfig;
 //! use reth_optimism_chainspec::OP_SEPOLIA;
 //! use reth_optimism_evm::OpEvmConfig;
 //! use reth_optimism_node::{OpExecutorBuilder, OpNetworkPrimitives, OpNode};
 //! use reth_optimism_rpc::OpEthApiBuilder;
 //! use reth_optimism_txpool::OpPooledTransaction;
+//! use reth_provider::providers::BlockchainProvider;
 //! use reth_rpc::TraceApi;
 //! use reth_rpc_eth_types::{EthConfig, EthStateCache};
 //! use reth_tasks::{pool::BlockingTaskGuard, TaskManager};
