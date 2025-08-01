@@ -698,7 +698,6 @@ where
     N: FullNodeComponents,
     N::Provider: ChainSpecProvider<ChainSpec: EthereumHardforks>,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
@@ -1073,7 +1072,7 @@ impl<N, EthB, PVB, EB, EVB> EngineValidatorAddOn<N> for RpcAddOns<N, EthB, PVB, 
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
+    PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
 {

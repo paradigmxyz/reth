@@ -175,7 +175,7 @@ where
 pub struct EthereumAddOns<
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
+    PVB,
     EB = BasicEngineApiBuilder<PVB>,
     EVB = BasicEngineValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
@@ -187,7 +187,6 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EthereumAddOns<N, EthB, PVB, EB, EVB,
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
 {
     /// Creates a new instance from the inner `RpcAddOns`.
     pub const fn new(inner: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>) -> Self {
@@ -222,7 +221,6 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> EthereumAddOns<N, EthB, PVB, EB, EVB,
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
 {
     /// Replace the engine API builder.
     pub fn with_engine_api<T>(
@@ -240,10 +238,7 @@ where
     pub fn with_payload_validator<V, T>(
         self,
         payload_validator_builder: T,
-    ) -> EthereumAddOns<N, EthB, T, EB, EVB, RpcMiddleware>
-    where
-        T: PayloadValidatorBuilder<N>,
-    {
+    ) -> EthereumAddOns<N, EthB, T, EB, EVB, RpcMiddleware> {
         let Self { inner } = self;
         EthereumAddOns::new(inner.with_payload_validator(payload_validator_builder))
     }
@@ -273,7 +268,7 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
+    PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
@@ -343,7 +338,7 @@ where
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
+    PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     EthApiError: FromEvmError<N::Evm>,
