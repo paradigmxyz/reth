@@ -9,7 +9,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError};
 use reth_transaction_pool::{
-    AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+    AddedTransactionOutcome, BatchTxRequest, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -34,11 +34,21 @@ where
 
         let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
-        // submit the transaction to the pool with a `Local` origin
-        let AddedTransactionOutcome { hash, .. } =
-            self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+        // Use batch sender if available, otherwise submit directly
+        if let Some(batch_sender) = self.tx_batch_sender() {
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            let request = BatchTxRequest::new(pool_transaction, response_tx);
 
-        Ok(hash)
+            batch_sender.send(request).map_err(|_| EthApiError::BatchTxSendError)?;
+            let AddedTransactionOutcome { hash, .. } = response_rx.await??;
+
+            Ok(hash)
+        } else {
+            // submit the transaction to the pool with a `Local` origin
+            let AddedTransactionOutcome { hash, .. } =
+                self.pool().add_transaction(TransactionOrigin::Local, pool_transaction).await?;
+            Ok(hash)
+        }
     }
 }
 

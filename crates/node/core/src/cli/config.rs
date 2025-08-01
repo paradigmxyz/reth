@@ -87,4 +87,7 @@ impl<N: NetworkPrimitives> RethNetworkConfig for reth_network::NetworkManager<N>
 pub trait RethTransactionPoolConfig {
     /// Returns transaction pool configuration.
     fn pool_config(&self) -> PoolConfig;
+
+    /// Returns max batch size if batching is enabled.
+    fn max_batch_size(&self) -> Option<usize>;
 }

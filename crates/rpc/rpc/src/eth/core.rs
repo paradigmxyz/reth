@@ -28,8 +28,8 @@ use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
 };
-use reth_transaction_pool::noop::NoopTransactionPool;
-use tokio::sync::{broadcast, Mutex};
+use reth_transaction_pool::{noop::NoopTransactionPool, BatchTxRequest, TransactionPool};
+use tokio::sync::{broadcast, mpsc, Mutex};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -161,6 +161,7 @@ where
             proof_permits,
             rpc_converter,
             (),
+            None,
         );
 
         Self { inner: Arc::new(inner) }
@@ -217,6 +218,21 @@ where
     #[inline]
     fn cache(&self) -> &EthStateCache<N::Primitives> {
         self.inner.cache()
+    }
+}
+
+impl<N, Rpc> EthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    Rpc: RpcConvert,
+{
+    /// Returns the transaction batch sender if configured
+    #[inline]
+    pub fn tx_batch_sender(
+        &self,
+    ) -> Option<&mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>
+    {
+        self.inner.tx_batch_sender()
     }
 }
 
@@ -290,6 +306,10 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
 
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
+
+    /// Optional transaction batch sender for batching tx insertions
+    tx_batch_sender:
+        Option<mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>,
 }
 
 impl<N, Rpc> EthApiInner<N, Rpc>
@@ -312,6 +332,9 @@ where
         proof_permits: usize,
         tx_resp_builder: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
+        tx_batch_sender: Option<
+            mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>,
+        >,
     ) -> Self {
         let signers = parking_lot::RwLock::new(Default::default());
         // get the block number of the latest block
@@ -344,6 +367,7 @@ where
             raw_tx_sender,
             tx_resp_builder,
             next_env_builder: Box::new(next_env),
+            tx_batch_sender,
         }
     }
 }
@@ -472,6 +496,15 @@ where
     #[inline]
     pub fn broadcast_raw_transaction(&self, raw_tx: Bytes) {
         let _ = self.raw_tx_sender.send(raw_tx);
+    }
+
+    /// Returns the transaction batch sender if configured
+    #[inline]
+    pub const fn tx_batch_sender(
+        &self,
+    ) -> Option<&mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>>>
+    {
+        self.tx_batch_sender.as_ref()
     }
 }
 
