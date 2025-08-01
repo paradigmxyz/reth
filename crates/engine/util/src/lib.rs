@@ -8,7 +8,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
-use futures::Stream;
+use futures::{Future, Stream};
 use reth_engine_primitives::BeaconEngineMessage;
 use reth_payload_primitives::PayloadTypes;
 use std::path::PathBuf;
@@ -25,6 +25,10 @@ use skip_new_payload::EngineSkipNewPayload;
 
 pub mod reorg;
 use reorg::EngineReorg;
+
+/// The result type for `maybe_reorg` method.
+type MaybeReorgResult<S, T, Provider, Evm, Validator, E> =
+    Result<Either<EngineReorg<S, T, Provider, Evm, Validator>, S>, E>;
 
 /// The collection of stream extensions for engine API message stream.
 pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMessage<T>> {
@@ -126,30 +130,35 @@ pub trait EngineMessageStreamExt<T: PayloadTypes>: Stream<Item = BeaconEngineMes
     ///
     /// The `payload_validator_fn` closure is only called if `frequency` is `Some`,
     /// allowing for lazy initialization of the validator.
-    fn maybe_reorg<Provider, Evm, Validator, F>(
+    fn maybe_reorg<Provider, Evm, Validator, E, F, Fut>(
         self,
         provider: Provider,
         evm_config: Evm,
         payload_validator_fn: F,
         frequency: Option<usize>,
         depth: Option<usize>,
-    ) -> Either<EngineReorg<Self, T, Provider, Evm, Validator>, Self>
+    ) -> impl Future<Output = MaybeReorgResult<Self, T, Provider, Evm, Validator, E>> + Send
     where
-        Self: Sized,
-        F: FnOnce() -> Validator,
+        Self: Sized + Send,
+        Provider: Send,
+        Evm: Send,
+        F: FnOnce() -> Fut + Send,
+        Fut: Future<Output = Result<Validator, E>> + Send,
     {
-        if let Some(frequency) = frequency {
-            let validator = payload_validator_fn();
-            Either::Left(reorg::EngineReorg::new(
-                self,
-                provider,
-                evm_config,
-                validator,
-                frequency,
-                depth.unwrap_or_default(),
-            ))
-        } else {
-            Either::Right(self)
+        async move {
+            if let Some(frequency) = frequency {
+                let validator = payload_validator_fn().await?;
+                Ok(Either::Left(reorg::EngineReorg::new(
+                    self,
+                    provider,
+                    evm_config,
+                    validator,
+                    frequency,
+                    depth.unwrap_or_default(),
+                )))
+            } else {
+                Ok(Either::Right(self))
+            }
         }
     }
 }

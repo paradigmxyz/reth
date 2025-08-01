@@ -205,17 +205,11 @@ where
             .maybe_reorg(
                 ctx.blockchain_db().clone(),
                 ctx.components().evm_config().clone(),
-                || {
-                    // This closure is only called when reorg frequency is Some
-                    futures::executor::block_on(
-                        validator_builder
-                            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone()),
-                    )
-                    .expect("Failed to build tree validator for reorg")
-                },
+                || validator_builder.build_tree_validator(&add_ons_ctx, engine_tree_config.clone()),
                 node_config.debug.reorg_frequency,
                 node_config.debug.reorg_depth,
             )
+            .await?
             // Store messages _after_ skipping so that `replay-engine` command
             // would replay only the messages that were observed by the engine
             // during this run.
