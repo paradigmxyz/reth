@@ -18,7 +18,7 @@ reth-payload-builder.workspace = true
 reth-rpc-api.workspace = true
 reth-engine-primitives.workspace = true
 reth-rpc-engine-api.workspace = true
-reth-ethereum = { workspace = true, features = ["node-api", "network", "evm", "pool", "trie", "storage-api"] }
+reth-ethereum = { workspace = true, features = ["node-api", "network", "evm", "pool", "trie", "storage-api", "provider"] }
 
 # revm
 revm.workspace = true
