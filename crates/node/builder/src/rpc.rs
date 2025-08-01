@@ -15,7 +15,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_node_api::{
     AddOnsContext, EngineApiValidator, EngineTypes, FullNodeComponents, FullNodeTypes, NodeAddOns,
-    NodeTypes, PayloadTypes, PrimitivesTy, TreeConfig,
+    NodeTypes, PayloadTypes, PayloadValidator, PrimitivesTy, TreeConfig,
 };
 use reth_node_core::{
     node_config::NodeConfig,
@@ -1109,7 +1109,7 @@ pub trait EngineApiBuilder<Node: FullNodeComponents>: Send + Sync {
 /// to validate payloads.
 pub trait PayloadValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The validator type that will be used by the Engine API.
-    type Validator: EngineApiValidator<<Node::Types as NodeTypes>::Payload>;
+    type Validator: PayloadValidator<<Node::Types as NodeTypes>::Payload>;
 
     /// Builds the engine API validator.
     ///
