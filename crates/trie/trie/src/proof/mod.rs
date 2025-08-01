@@ -12,6 +12,7 @@ use alloy_primitives::{
     Address, B256,
 };
 use alloy_rlp::{BufMut, Encodable};
+use alloy_trie::proof::{AddedRemovedKeys, EmptyAddedRemovedKeys};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{
     proof::ProofRetainer, AccountProof, MultiProof, MultiProofTargets, StorageMultiProof,
@@ -35,9 +36,6 @@ pub struct Proof<T, H> {
     prefix_sets: TriePrefixSetsMut,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
-    /// Flag indicating whether to also retain proofs for nodes which might be required for adding
-    /// and removing leaves in the trie.
-    with_leaf_additions_removals: bool,
 }
 
 impl<T, H> Proof<T, H> {
@@ -48,7 +46,6 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory: h,
             prefix_sets: TriePrefixSetsMut::default(),
             collect_branch_node_masks: false,
-            with_leaf_additions_removals: false,
         }
     }
 
@@ -59,7 +56,6 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory: self.hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
-            with_leaf_additions_removals: self.with_leaf_additions_removals,
         }
     }
 
@@ -70,7 +66,6 @@ impl<T, H> Proof<T, H> {
             hashed_cursor_factory,
             prefix_sets: self.prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
-            with_leaf_additions_removals: self.with_leaf_additions_removals,
         }
     }
 
@@ -83,13 +78,6 @@ impl<T, H> Proof<T, H> {
     /// Set the flag indicating whether to include branch node masks in the proof.
     pub const fn with_branch_node_masks(mut self, branch_node_masks: bool) -> Self {
         self.collect_branch_node_masks = branch_node_masks;
-        self
-    }
-
-    /// Set the flag indicating whether to retain proofs for nodes which might be required for
-    /// leaf additions/removals.
-    pub const fn with_leaf_additions_removals(mut self, leaf_additions_removals: bool) -> Self {
-        self.with_leaf_additions_removals = leaf_additions_removals;
         self
     }
 }
@@ -127,11 +115,7 @@ where
         let walker = TrieWalker::state_trie(trie_cursor, prefix_set.freeze());
 
         // Create a hash builder to rebuild the root node since it is not available in the database.
-        let retainer = targets
-            .keys()
-            .map(Nibbles::unpack)
-            .collect::<ProofRetainer>()
-            .with_leaf_additions_removals(self.with_leaf_additions_removals);
+        let retainer = targets.keys().map(Nibbles::unpack).collect::<ProofRetainer>();
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
@@ -200,7 +184,7 @@ where
 
 /// Generates storage merkle proofs.
 #[derive(Debug)]
-pub struct StorageProof<T, H> {
+pub struct StorageProof<T, H, K = EmptyAddedRemovedKeys> {
     /// The factory for traversing trie nodes.
     trie_cursor_factory: T,
     /// The factory for hashed cursors.
@@ -211,9 +195,8 @@ pub struct StorageProof<T, H> {
     prefix_set: PrefixSetMut,
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
-    /// Flag indicating whether to also retain proofs for nodes which might be required for adding
-    /// and removing leaves in the trie.
-    with_leaf_additions_removals: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    added_removed_keys: Option<K>,
 }
 
 impl<T, H> StorageProof<T, H> {
@@ -230,31 +213,36 @@ impl<T, H> StorageProof<T, H> {
             hashed_address,
             prefix_set: PrefixSetMut::default(),
             collect_branch_node_masks: false,
-            with_leaf_additions_removals: false,
+            added_removed_keys: None,
         }
     }
+}
 
+impl<T, H, K> StorageProof<T, H, K> {
     /// Set the trie cursor factory.
-    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageProof<TF, H> {
+    pub fn with_trie_cursor_factory<TF>(self, trie_cursor_factory: TF) -> StorageProof<TF, H, K> {
         StorageProof {
             trie_cursor_factory,
             hashed_cursor_factory: self.hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
-            with_leaf_additions_removals: self.with_leaf_additions_removals,
+            added_removed_keys: self.added_removed_keys,
         }
     }
 
     /// Set the hashed cursor factory.
-    pub fn with_hashed_cursor_factory<HF>(self, hashed_cursor_factory: HF) -> StorageProof<T, HF> {
+    pub fn with_hashed_cursor_factory<HF>(
+        self,
+        hashed_cursor_factory: HF,
+    ) -> StorageProof<T, HF, K> {
         StorageProof {
             trie_cursor_factory: self.trie_cursor_factory,
             hashed_cursor_factory,
             hashed_address: self.hashed_address,
             prefix_set: self.prefix_set,
             collect_branch_node_masks: self.collect_branch_node_masks,
-            with_leaf_additions_removals: self.with_leaf_additions_removals,
+            added_removed_keys: self.added_removed_keys,
         }
     }
 
@@ -270,18 +258,31 @@ impl<T, H> StorageProof<T, H> {
         self
     }
 
-    /// Set the flag indicating whether to retain proofs for nodes which might be required for
-    /// leaf additions/removals.
-    pub const fn with_leaf_additions_removals(mut self, leaf_additions_removals: bool) -> Self {
-        self.with_leaf_additions_removals = leaf_additions_removals;
-        self
+    /// Configures the retainer to retain proofs for certain nodes which would otherwise fall
+    /// outside the target set, when those nodes might be required to calculate the state root when
+    /// keys have been added or removed to the trie.
+    ///
+    /// If None is given then retention of extra proofs is disabled.
+    pub fn with_added_removed_keys<K2>(
+        self,
+        added_removed_keys: Option<K2>,
+    ) -> StorageProof<T, H, K2> {
+        StorageProof {
+            trie_cursor_factory: self.trie_cursor_factory,
+            hashed_cursor_factory: self.hashed_cursor_factory,
+            hashed_address: self.hashed_address,
+            prefix_set: self.prefix_set,
+            collect_branch_node_masks: self.collect_branch_node_masks,
+            added_removed_keys,
+        }
     }
 }
 
-impl<T, H> StorageProof<T, H>
+impl<T, H, K> StorageProof<T, H, K>
 where
     T: TrieCursorFactory,
     H: HashedCursorFactory,
+    K: AddedRemovedKeys,
 {
     /// Generate an account proof from intermediate nodes.
     pub fn storage_proof(
@@ -312,7 +313,7 @@ where
         let walker = TrieWalker::storage_trie(trie_cursor, self.prefix_set.freeze());
 
         let retainer = ProofRetainer::from_iter(target_nibbles)
-            .with_leaf_additions_removals(self.with_leaf_additions_removals);
+            .with_added_removed_keys(self.added_removed_keys);
         let mut hash_builder = HashBuilder::default()
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);

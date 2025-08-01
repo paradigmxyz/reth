@@ -24,7 +24,10 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     DecodedStorageMultiProof, HashedPostStateSorted, Nibbles,
 };
-use reth_trie_common::prefix_set::{PrefixSet, PrefixSetMut};
+use reth_trie_common::{
+    added_removed_keys::StorageAddedRemovedKeys,
+    prefix_set::{PrefixSet, PrefixSetMut},
+};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -261,7 +264,7 @@ where
         )
         .with_prefix_set_mut(PrefixSetMut::from(input.prefix_set.iter().copied()))
         .with_branch_node_masks(input.with_branch_node_masks)
-        .with_leaf_additions_removals(input.with_leaf_additions_removals)
+        .with_added_removed_keys(input.added_removed_keys)
         .storage_multiproof(input.target_slots)
         .map_err(|e| ParallelStateRootError::Other(e.to_string()));
 
@@ -402,9 +405,8 @@ pub struct StorageProofInput {
     target_slots: B256Set,
     /// Whether or not to collect branch node masks
     with_branch_node_masks: bool,
-    /// Flag indicating whether to also retain proofs for nodes which might be required for adding
-    /// and removing leaves in the trie.
-    with_leaf_additions_removals: bool,
+    /// Provided by the user to give the necessary context to retain extra proofs.
+    added_removed_keys: Option<StorageAddedRemovedKeys>,
 }
 
 impl StorageProofInput {
@@ -415,14 +417,14 @@ impl StorageProofInput {
         prefix_set: PrefixSet,
         target_slots: B256Set,
         with_branch_node_masks: bool,
-        with_leaf_additions_removals: bool,
+        added_removed_keys: Option<StorageAddedRemovedKeys>,
     ) -> Self {
         Self {
             hashed_address,
             prefix_set,
             target_slots,
             with_branch_node_masks,
-            with_leaf_additions_removals,
+            added_removed_keys,
         }
     }
 }
