@@ -276,13 +276,13 @@ where
 
         // spawn rayon::for_each that will stream transactions in parallel to us
         let (tx, rx) = mpsc::channel();
-        self.executor.spawn_blocking(move || {
+        rayon::spawn(move || {
             transactions.enumerate().for_each(|(index, transaction)| {
                 let _ = tx.send((index, transaction));
             });
         });
 
-        self.executor.spawn_blocking(move || {
+        rayon::spawn(move || {
             let mut next_to_execute = 0;
             let mut execute_queue = BTreeMap::new();
             while let Ok((index, transaction)) = rx.recv() {
