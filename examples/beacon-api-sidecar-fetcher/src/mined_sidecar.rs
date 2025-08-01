@@ -12,6 +12,7 @@ use reth_ethereum::{
     provider::CanonStateNotification,
     PooledTransactionVariant,
 };
+use reth_transaction_pool::BlobPoolExt;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::VecDeque,
@@ -96,7 +97,7 @@ pub struct MinedSidecarStream<St, P> {
 impl<St, P> MinedSidecarStream<St, P>
 where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-    P: TransactionPoolExt + Unpin + 'static,
+    P: TransactionPoolExt + BlobPoolExt + Unpin + 'static,
 {
     fn process_block(&mut self, block: &RecoveredBlock<reth_ethereum::Block>) {
         let txs: Vec<_> = block
@@ -157,7 +158,7 @@ where
 impl<St, P> Stream for MinedSidecarStream<St, P>
 where
     St: Stream<Item = CanonStateNotification> + Send + Unpin + 'static,
-    P: TransactionPoolExt + Unpin + 'static,
+    P: TransactionPoolExt + BlobPoolExt + Unpin + 'static,
 {
     type Item = Result<BlobTransactionEvent, SideCarError>;
 

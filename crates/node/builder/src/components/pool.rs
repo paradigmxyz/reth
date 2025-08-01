@@ -4,8 +4,8 @@ use alloy_primitives::Address;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::TxTy;
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction, SubPoolLimit,
-    TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
+    blobstore::DiskFileBlobStore, BlobPoolExt, CoinbaseTipOrdering, PoolConfig, PoolTransaction,
+    SubPoolLimit, TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use std::{collections::HashSet, future::Future};
 
@@ -231,7 +231,7 @@ fn spawn_pool_maintenance_task<Node, Pool>(
 ) -> eyre::Result<()>
 where
     Node: FullNodeTypes,
-    Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
+    Pool: reth_transaction_pool::TransactionPoolExt + BlobPoolExt + Clone + 'static,
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
     let chain_events = ctx.provider().canonical_state_stream();
@@ -263,7 +263,7 @@ fn spawn_maintenance_tasks<Node, Pool>(
 ) -> eyre::Result<()>
 where
     Node: FullNodeTypes,
-    Pool: reth_transaction_pool::TransactionPoolExt + Clone + 'static,
+    Pool: reth_transaction_pool::TransactionPoolExt + BlobPoolExt + Clone + 'static,
     Pool::Transaction: PoolTransaction<Consensus = TxTy<Node::Types>>,
 {
     spawn_local_backup_task(ctx, pool.clone())?;

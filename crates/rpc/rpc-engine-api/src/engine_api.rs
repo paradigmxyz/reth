@@ -28,7 +28,7 @@ use reth_primitives_traits::{Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
-use reth_transaction_pool::TransactionPool;
+use reth_transaction_pool::{BlobPoolExt, TransactionPool};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::oneshot;
 use tracing::{debug, trace, warn};
@@ -75,7 +75,7 @@ impl<Provider, PayloadT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     PayloadT: PayloadTypes,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + BlobPoolExt + 'static,
     Validator: EngineValidator<PayloadT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
@@ -292,7 +292,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + BlobPoolExt + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {
@@ -847,7 +847,7 @@ impl<Provider, EngineT, Pool, Validator, ChainSpec> EngineApiServer<EngineT>
 where
     Provider: HeaderProvider + BlockReader + StateProviderFactory + 'static,
     EngineT: EngineTypes<ExecutionData = ExecutionData>,
-    Pool: TransactionPool + 'static,
+    Pool: TransactionPool + BlobPoolExt + 'static,
     Validator: EngineValidator<EngineT>,
     ChainSpec: EthereumHardforks + Send + Sync + 'static,
 {

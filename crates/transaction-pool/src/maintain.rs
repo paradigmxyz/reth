@@ -4,9 +4,13 @@ use crate::{
     blobstore::{BlobStoreCanonTracker, BlobStoreUpdates},
     error::PoolError,
     metrics::MaintainPoolMetrics,
-    traits::{CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt},
     BlockInfo, PoolTransaction, PoolUpdateKind,
 };
+
+use crate::traits::{
+    BlobPoolExt, CanonicalStateUpdate, EthPoolTransaction, TransactionPool, TransactionPoolExt,
+};
+
 use alloy_consensus::{BlockHeader, Typed2718};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::{Address, BlockHash, BlockNumber};
@@ -105,7 +109,9 @@ where
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
         + Clone
         + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>>
+        + BlobPoolExt
+        + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
@@ -131,7 +137,9 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
         + ChainSpecProvider<ChainSpec: EthChainSpec<Header = N::BlockHeader>>
         + Clone
         + 'static,
-    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>> + 'static,
+    P: TransactionPoolExt<Transaction: PoolTransaction<Consensus = N::SignedTx>>
+        + BlobPoolExt
+        + 'static,
     St: Stream<Item = CanonStateNotification<N>> + Send + Unpin + 'static,
     Tasks: TaskSpawner + 'static,
 {
