@@ -838,6 +838,7 @@ mod tests {
         "fjordTime": 50,
         "graniteTime": 51,
         "holoceneTime": 52,
+        "isthmusTime": 53,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70
@@ -861,6 +862,8 @@ mod tests {
         assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
         let actual_holocene_timestamp = genesis.config.extra_fields.get("holoceneTime");
         assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
+        let actual_isthmus_timestamp = genesis.config.extra_fields.get("isthmusTime");
+        assert_eq!(actual_isthmus_timestamp, Some(serde_json::Value::from(53)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(
@@ -907,6 +910,7 @@ mod tests {
         "fjordTime": 50,
         "graniteTime": 51,
         "holoceneTime": 52,
+        "isthmusTime": 53,
         "optimism": {
           "eip1559Elasticity": 60,
           "eip1559Denominator": 70,
@@ -931,6 +935,8 @@ mod tests {
         assert_eq!(actual_granite_timestamp, Some(serde_json::Value::from(51)).as_ref());
         let actual_holocene_timestamp = genesis.config.extra_fields.get("holoceneTime");
         assert_eq!(actual_holocene_timestamp, Some(serde_json::Value::from(52)).as_ref());
+        let actual_isthmus_timestamp = genesis.config.extra_fields.get("isthmusTime");
+        assert_eq!(actual_isthmus_timestamp, Some(serde_json::Value::from(53)).as_ref());
 
         let optimism_object = genesis.config.extra_fields.get("optimism").unwrap();
         assert_eq!(

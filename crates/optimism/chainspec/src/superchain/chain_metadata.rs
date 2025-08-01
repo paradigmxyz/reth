@@ -184,6 +184,7 @@ mod tests {
         assert_eq!(config.hardforks.fjord_time, Some(1720627201));
         assert_eq!(config.hardforks.granite_time, Some(1726070401));
         assert_eq!(config.hardforks.holocene_time, Some(1736445601));
+        assert_eq!(config.hardforks.isthmus_time, Some(1746806401));
         // optimism
         assert_eq!(config.optimism.as_ref().unwrap().eip1559_elasticity, 6);
         assert_eq!(config.optimism.as_ref().unwrap().eip1559_denominator, 50);
@@ -221,8 +222,6 @@ mod tests {
         assert_eq!(value.get("isthmusTime").unwrap(), 1746806401);
         assert_eq!(value.get("jovian_time"), None);
         let optimism = value.get("optimism").unwrap();
-        assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
-        assert_eq!(optimism.get("eip1559Denominator").unwrap(), 50);
         assert_eq!(optimism.get("eip1559DenominatorCanyon").unwrap(), 250);
     }
 
@@ -314,6 +313,7 @@ mod tests {
         assert_eq!(chain_config.extra_fields.get("holoceneTime").unwrap(), 1736445601);
         assert_eq!(chain_config.extra_fields.get("isthmusTime").unwrap(), 1746806401);
         assert_eq!(chain_config.extra_fields.get("jovian_time"), None);
+
         let optimism = chain_config.extra_fields.get("optimism").unwrap();
         assert_eq!(optimism.get("eip1559Elasticity").unwrap(), 6);
         assert_eq!(optimism.get("eip1559Denominator").unwrap(), 50);
