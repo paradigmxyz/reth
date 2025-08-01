@@ -1127,7 +1127,7 @@ pub trait PayloadValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone
 /// for block execution, state validation, and fork handling.
 pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone {
     /// The tree validator type that will be used by the consensus engine.
-    type TreeValidator: EngineValidator<
+    type EngineValidator: EngineValidator<
         <Node::Types as NodeTypes>::Payload,
         <Node::Types as NodeTypes>::Primitives,
     >;
@@ -1139,7 +1139,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-    ) -> impl Future<Output = eyre::Result<Self::TreeValidator>> + Send;
+    ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
 }
 
 /// Basic implementation of [`EngineValidatorBuilder`].
@@ -1177,13 +1177,13 @@ where
         Block = <<Node::Types as NodeTypes>::Primitives as reth_node_api::NodePrimitives>::Block,
     >,
 {
-    type TreeValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
+    type EngineValidator = BasicEngineValidator<Node::Provider, Node::Evm, EV::Validator>;
 
     async fn build_tree_validator(
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
-    ) -> eyre::Result<Self::TreeValidator> {
+    ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
