@@ -82,6 +82,6 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        self.inner.add_ons_builder::<CustomRpcTypes>().build()
+        self.inner.add_ons_builder().build()
     }
 }

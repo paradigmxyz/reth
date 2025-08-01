@@ -326,14 +326,7 @@ where
     }
 }
 
-impl<N> Default
-    for OpAddOns<
-        N,
-        OpEthApiBuilder,
-        OpEngineValidatorBuilder,
-        OpEngineApiBuilder<OpEngineValidatorBuilder>,
-        Identity,
-    >
+impl<N> Default for OpAddOns<N, OpEthApiBuilder, OpEngineValidatorBuilder>
 where
     N: FullNodeComponents<Types: OpNodeTypes>,
     OpEthApiBuilder: EthApiBuilder<N>,
