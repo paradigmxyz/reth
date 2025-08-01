@@ -16,6 +16,7 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
 };
@@ -259,7 +260,7 @@ where
             )),
             BlockOrPayload::Block(block) => {
                 let transactions = block.clone_transactions_recovered().collect::<Vec<_>>();
-                Ok(Either::Right(transactions.into_iter().map(|tx| Ok(Either::Right(tx)))))
+                Ok(Either::Right(transactions.into_par_iter().map(|tx| Ok(Either::Right(tx)))))
             }
         }
     }

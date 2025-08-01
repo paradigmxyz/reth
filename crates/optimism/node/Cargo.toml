@@ -61,6 +61,7 @@ alloy-rpc-types-eth.workspace = true
 alloy-consensus.workspace = true
 
 # misc
+rayon.workspace = true
 clap.workspace = true
 serde.workspace = true
 eyre.workspace = true

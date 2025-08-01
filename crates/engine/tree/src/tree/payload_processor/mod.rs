@@ -15,6 +15,7 @@ use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
+use rayon::iter::ParallelIterator;
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor};
 use reth_primitives_traits::NodePrimitives;
@@ -32,10 +33,13 @@ use reth_trie_sparse::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     ClearedSparseStateTrie, SerialSparseTrie, SparseStateTrie, SparseTrie,
 };
-use std::sync::{
-    atomic::AtomicBool,
-    mpsc::{self, channel, Sender},
-    Arc,
+use std::{
+    collections::BTreeMap,
+    sync::{
+        atomic::AtomicBool,
+        mpsc::{self, channel, Sender},
+        Arc,
+    },
 };
 
 use super::precompile_cache::PrecompileCacheMap;
@@ -269,16 +273,35 @@ where
     ) -> (mpsc::Receiver<I::Tx>, mpsc::Receiver<Result<I::Tx, I::Error>>) {
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
+
+        // spawn rayon::for_each that will stream transactions in parallel to us
+        let (tx, rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
-            let mut idx = 0;
-            for transaction in transactions {
-                tracing::info!("Prewarming {idx}");
-                idx += 1;
+            transactions.enumerate().for_each(|(index, transaction)| {
+                let _ = tx.send((index, transaction));
+            });
+        });
+
+        self.executor.spawn_blocking(move || {
+            let mut next_to_execute = 0;
+            let mut execute_queue = BTreeMap::new();
+            while let Ok((index, transaction)) = rx.recv() {
                 // only send Ok(_) variants to prewarming task
                 if let Ok(tx) = &transaction {
+                    tracing::info!("Prewarming {index}");
                     let _ = prewarm_tx.send(tx.clone());
                 }
-                let _ = execute_tx.send(transaction);
+
+                if index == next_to_execute {
+                    let _ = execute_tx.send(transaction);
+                    next_to_execute += 1;
+                    while let Some(tx) = execute_queue.remove(&next_to_execute) {
+                        let _ = execute_tx.send(tx);
+                        next_to_execute += 1;
+                    }
+                } else {
+                    execute_queue.insert(index, transaction);
+                }
             }
         });
 
@@ -708,7 +731,7 @@ mod tests {
         let provider = BlockchainProvider::new(factory).unwrap();
         let mut handle = payload_processor.spawn(
             Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
+            rayon::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
             StateProviderBuilder::new(provider.clone(), genesis_hash, None),
             ConsistentDbView::new_with_latest_tip(provider).unwrap(),
             TrieInput::from_state(hashed_state),

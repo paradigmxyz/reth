@@ -7,6 +7,7 @@ use op_alloy_rpc_types_engine::{
     OpPayloadAttributes,
 };
 use op_revm::OpSpecId;
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_chainspec::EthChainSpec;
 use reth_consensus::ConsensusError;
 use reth_engine_primitives::EngineValidator;
@@ -230,7 +231,7 @@ where
         &self,
         payload: &OpExecutionData,
     ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError> {
-        Ok(payload.payload.transactions().clone().into_iter().map(|encoded| {
+        Ok(payload.payload.transactions().clone().into_par_iter().map(|encoded| {
             let tx = TxTy::<Evm::Primitives>::decode_2718_exact(encoded.as_ref())
                 .map_err(alloy_rlp::Error::from)
                 .map_err(PayloadError::from)?;

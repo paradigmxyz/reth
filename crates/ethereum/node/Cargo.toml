@@ -52,6 +52,7 @@ alloy-rpc-types-engine.workspace = true
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 # misc
+rayon.workspace = true
 eyre.workspace = true
 
 [dev-dependencies]

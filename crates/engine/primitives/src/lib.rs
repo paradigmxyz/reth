@@ -15,6 +15,7 @@ use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::BlockHeader;
 use alloy_rpc_types_engine::ExecutionData;
 use core::convert::Infallible;
+use rayon::iter::{IndexedParallelIterator, ParallelIterator};
 use reth_errors::ConsensusError;
 use reth_evm::{
     block::BlockExecutorFactory, eth::EthBlockExecutionCtx, execute::OwnedExecutableTxFor,
@@ -26,7 +27,7 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{Block, BlockTy, RecoveredBlock, SealedBlock};
 use reth_trie::iter::Either;
-use reth_trie_common::HashedPostState;
+use reth_trie_common::{iter::IntoParallelIterator, HashedPostState};
 use serde::{de::DeserializeOwned, Serialize};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
@@ -203,7 +204,7 @@ pub trait EvmPayloadValidator<T: PayloadTypes, Evm: ConfigureEvm>:
             .ensure_well_formed_payload(payload.clone())?
             .clone_transactions_recovered()
             .collect::<Vec<_>>()
-            .into_iter()
+            .into_par_iter()
             .map(Ok::<_, Infallible>))
     }
 
@@ -218,19 +219,19 @@ pub trait EvmPayloadValidator<T: PayloadTypes, Evm: ConfigureEvm>:
 
 /// Iterator over executable transactions.
 pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
-    ExactSizeIterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
+    IndexedParallelIterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
 {
     /// The executable transaction type iterator yields.
-    type Tx: OwnedExecutableTxFor<Evm>;
+    type Tx: OwnedExecutableTxFor<Evm> + Send + Sync;
     /// Errors that may occur while recovering or decoding transactions.
     type Error: core::error::Error + Send + Sync + 'static;
 }
 
 impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
 where
-    Tx: OwnedExecutableTxFor<Evm>,
+    Tx: OwnedExecutableTxFor<Evm> + Send + Sync,
     Err: core::error::Error + Send + Sync + 'static,
-    T: ExactSizeIterator<Item = Result<Tx, Err>> + Send + 'static,
+    T: IndexedParallelIterator<Item = Result<Tx, Err>> + Send + 'static,
 {
     type Tx = Tx;
     type Error = Err;

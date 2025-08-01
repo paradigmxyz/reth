@@ -38,6 +38,7 @@ tokio = { workspace = true, features = ["sync"] }
 futures.workspace = true
 
 # misc
+rayon.workspace = true
 auto_impl.workspace = true
 serde.workspace = true
 thiserror.workspace = true

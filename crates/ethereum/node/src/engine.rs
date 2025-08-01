@@ -7,6 +7,7 @@ pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_primitives::{EngineValidator, PayloadValidator};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
@@ -127,7 +128,7 @@ where
         &self,
         payload: &ExecutionData,
     ) -> Result<impl reth_node_api::ExecutableTxIterator<Evm>, NewPayloadError> {
-        Ok(payload.payload.transactions().clone().into_iter().map(|tx| {
+        Ok(payload.payload.transactions().clone().into_par_iter().map(|tx| {
             let tx = TxTy::<Evm::Primitives>::decode_2718_exact(tx.as_ref())
                 .map_err(alloy_rlp::Error::from)
                 .map_err(PayloadError::from)?;
