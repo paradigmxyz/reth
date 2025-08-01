@@ -42,8 +42,8 @@ use reth_node_builder::{
 use reth_node_core::node_config::NodeConfig;
 use reth_node_ethereum::{
     node::{
-        EthereumAddOns, EthereumEngineValidator, EthereumEngineValidatorBuilder,
-        EthereumEthApiBuilder, EthereumNetworkBuilder, EthereumPayloadBuilder,
+        EthereumAddOns, EthereumEngineValidatorBuilder, EthereumEthApiBuilder,
+        EthereumNetworkBuilder, EthereumPayloadBuilder,
     },
     EthEngineTypes,
 };
@@ -133,12 +133,8 @@ where
         TestExecutorBuilder,
         TestConsensusBuilder,
     >;
-    type AddOns = EthereumAddOns<
-        NodeAdapter<N>,
-        EthereumEthApiBuilder,
-        EthereumEngineValidator<<Self as NodeTypes>::ChainSpec>,
-        EthereumEngineValidatorBuilder,
-    >;
+    type AddOns =
+        EthereumAddOns<NodeAdapter<N>, EthereumEthApiBuilder, EthereumEngineValidatorBuilder>;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()

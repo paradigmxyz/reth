@@ -228,11 +228,6 @@ where
     type AddOns = OpAddOns<
         NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         OpEthApiBuilder,
-        OpEngineValidator<
-            N::Provider,
-            <<Self as NodeTypes>::Primitives as NodePrimitives>::SignedTx,
-            <Self as NodeTypes>::ChainSpec,
-        >,
         OpEngineValidatorBuilder,
         OpEngineApiBuilder<OpEngineValidatorBuilder>,
         BasicEngineValidatorBuilder<OpEngineValidatorBuilder>,
@@ -280,7 +275,6 @@ impl NodeTypes for OpNode {
 pub struct OpAddOns<
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    EV: Send,
     PVB: PayloadValidatorBuilder<N>,
     EB = OpEngineApiBuilder<PVB>,
     EVB = BasicEngineValidatorBuilder<PVB>,
@@ -289,8 +283,6 @@ pub struct OpAddOns<
     /// Rpc add-ons responsible for launching the RPC servers and instantiating the RPC handlers
     /// and eth-api.
     pub rpc_add_ons: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>,
-    /// Phantom data to hold the validator type.
-    _phantom: std::marker::PhantomData<EV>,
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -307,11 +299,10 @@ pub struct OpAddOns<
     min_suggested_priority_fee: u64,
 }
 
-impl<N, EthB, EV, PVB, EB, EVB, RpcMiddleware> OpAddOns<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware> OpAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    EV: Send,
     PVB: PayloadValidatorBuilder<N>,
 {
     /// Creates a new instance from components.
@@ -326,7 +317,6 @@ where
     ) -> Self {
         Self {
             rpc_add_ons,
-            _phantom: std::marker::PhantomData,
             da_config,
             sequencer_url,
             sequencer_headers,
@@ -341,11 +331,6 @@ impl<N> Default
     for OpAddOns<
         N,
         OpEthApiBuilder,
-        OpEngineValidator<
-            N::Provider,
-            <<N::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx,
-            <N::Types as NodeTypes>::ChainSpec,
-        >,
         OpEngineValidatorBuilder,
         OpEngineApiBuilder<OpEngineValidatorBuilder>,
         Identity,
@@ -363,11 +348,6 @@ impl<N, NetworkT, RpcMiddleware>
     OpAddOns<
         N,
         OpEthApiBuilder<NetworkT>,
-        OpEngineValidator<
-            N::Provider,
-            <<N::Types as NodeTypes>::Primitives as NodePrimitives>::SignedTx,
-            <N::Types as NodeTypes>::ChainSpec,
-        >,
         OpEngineValidatorBuilder,
         OpEngineApiBuilder<OpEngineValidatorBuilder>,
         RpcMiddleware,
@@ -382,18 +362,17 @@ where
     }
 }
 
-impl<N, EthB, EV, PVB, EB, EVB, RpcMiddleware> OpAddOns<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, RpcMiddleware> OpAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    EV: Send,
     PVB: PayloadValidatorBuilder<N>,
 {
     /// Maps the [`reth_node_builder::rpc::EngineApiBuilder`] builder type.
     pub fn with_engine_api<T>(
         self,
         engine_api_builder: T,
-    ) -> OpAddOns<N, EthB, EV, PVB, T, EVB, RpcMiddleware> {
+    ) -> OpAddOns<N, EthB, PVB, T, EVB, RpcMiddleware> {
         let Self {
             rpc_add_ons,
             da_config,
@@ -416,12 +395,11 @@ where
     }
 
     /// Maps the [`PayloadValidatorBuilder`] builder type.
-    pub fn with_payload_validator<V, T>(
+    pub fn with_payload_validator<T>(
         self,
         payload_validator_builder: T,
-    ) -> OpAddOns<N, EthB, V, T, EB, EVB, RpcMiddleware>
+    ) -> OpAddOns<N, EthB, T, EB, EVB, RpcMiddleware>
     where
-        V: Send,
         T: PayloadValidatorBuilder<N>,
     {
         let Self {
@@ -452,10 +430,7 @@ where
     /// layer, allowing you to intercept, modify, or enhance RPC request processing.
     ///
     /// See also [`RpcAddOns::with_rpc_middleware`].
-    pub fn with_rpc_middleware<T>(
-        self,
-        rpc_middleware: T,
-    ) -> OpAddOns<N, EthB, EV, PVB, EB, EVB, T> {
+    pub fn with_rpc_middleware<T>(self, rpc_middleware: T) -> OpAddOns<N, EthB, PVB, EB, EVB, T> {
         let Self {
             rpc_add_ons,
             da_config,
@@ -498,8 +473,8 @@ where
     }
 }
 
-impl<N, EthB, EV, PVB, EB, EVB, Attrs, RpcMiddleware> NodeAddOns<N>
-    for OpAddOns<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, Attrs, RpcMiddleware> NodeAddOns<N>
+    for OpAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -517,7 +492,6 @@ where
         Pool: TransactionPool<Transaction: OpPooledTx>,
     >,
     EthB: EthApiBuilder<N>,
-    EV: Send,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -627,8 +601,8 @@ where
     }
 }
 
-impl<N, EthB, EV, PVB, EB, EVB, Attrs, RpcMiddleware> RethRpcAddOns<N>
-    for OpAddOns<N, EthB, EV, PVB, EB, EVB, RpcMiddleware>
+impl<N, EthB, PVB, EB, EVB, Attrs, RpcMiddleware> RethRpcAddOns<N>
+    for OpAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
@@ -646,7 +620,6 @@ where
     >,
     <<N as FullNodeComponents>::Pool as TransactionPool>::Transaction: OpPooledTx,
     EthB: EthApiBuilder<N>,
-    EV: Send,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -660,12 +633,11 @@ where
     }
 }
 
-impl<N, NetworkT, EV, PVB, EB, EVB> EngineValidatorAddOn<N>
-    for OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, PVB, EB, EVB>
+impl<N, NetworkT, PVB, EB, EVB> EngineValidatorAddOn<N>
+    for OpAddOns<N, OpEthApiBuilder<NetworkT>, PVB, EB, EVB>
 where
     N: FullNodeComponents,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-    EV: Send,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
@@ -779,13 +751,12 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
 
 impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
     /// Builds an instance of [`OpAddOns`].
-    pub fn build<N, EV, PVB, EB, EVB>(
+    pub fn build<N, PVB, EB, EVB>(
         self,
-    ) -> OpAddOns<N, OpEthApiBuilder<NetworkT>, EV, PVB, EB, EVB, RpcMiddleware>
+    ) -> OpAddOns<N, OpEthApiBuilder<NetworkT>, PVB, EB, EVB, RpcMiddleware>
     where
         N: FullNodeComponents<Types: NodeTypes>,
         OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-        EV: Send,
         PVB: PayloadValidatorBuilder<N> + Default,
         EB: Default,
         EVB: Default,
