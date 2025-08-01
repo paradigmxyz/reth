@@ -48,7 +48,7 @@ pub enum P2PStreamError {
     PingerError(#[from] PingerError),
 
     /// Ping timeout error.
-    #[error("ping timed out with")]
+    #[error("ping timed out")]
     PingTimeout,
 
     /// Error parsing shared capabilities.
