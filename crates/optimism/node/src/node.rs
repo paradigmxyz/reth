@@ -275,7 +275,7 @@ impl NodeTypes for OpNode {
 pub struct OpAddOns<
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
+    PVB,
     EB = OpEngineApiBuilder<PVB>,
     EVB = BasicEngineValidatorBuilder<PVB>,
     RpcMiddleware = Identity,
@@ -303,7 +303,6 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> OpAddOns<N, EthB, PVB, EB, EVB, RpcMi
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
 {
     /// Creates a new instance from components.
     pub const fn new(
@@ -366,7 +365,6 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> OpAddOns<N, EthB, PVB, EB, EVB, RpcMi
 where
     N: FullNodeComponents,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
 {
     /// Maps the [`reth_node_builder::rpc::EngineApiBuilder`] builder type.
     pub fn with_engine_api<T>(
@@ -398,10 +396,7 @@ where
     pub fn with_payload_validator<T>(
         self,
         payload_validator_builder: T,
-    ) -> OpAddOns<N, EthB, T, EB, EVB, RpcMiddleware>
-    where
-        T: PayloadValidatorBuilder<N>,
-    {
+    ) -> OpAddOns<N, EthB, T, EB, EVB, RpcMiddleware> {
         let Self {
             rpc_add_ons,
             da_config,
@@ -492,7 +487,7 @@ where
         Pool: TransactionPool<Transaction: OpPooledTx>,
     >,
     EthB: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
+    PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
     RpcMiddleware: RethRpcMiddleware,
@@ -638,7 +633,7 @@ impl<N, NetworkT, PVB, EB, EVB> EngineValidatorAddOn<N>
 where
     N: FullNodeComponents,
     OpEthApiBuilder<NetworkT>: EthApiBuilder<N>,
-    PVB: PayloadValidatorBuilder<N>,
+    PVB: Send,
     EB: EngineApiBuilder<N>,
     EVB: EngineValidatorBuilder<N>,
 {
