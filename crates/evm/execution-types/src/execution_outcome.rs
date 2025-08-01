@@ -201,7 +201,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Transform block number to the index of block.
-    pub fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
+    pub const fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
             return None
         }
@@ -240,12 +240,12 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Is execution outcome empty.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// Number of blocks in the execution outcome.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.receipts.len()
     }
 
@@ -255,7 +255,7 @@ impl<T> ExecutionOutcome<T> {
     }
 
     /// Return last block of the execution outcome
-    pub fn last_block(&self) -> BlockNumber {
+    pub const fn last_block(&self) -> BlockNumber {
         (self.first_block + self.len() as u64).saturating_sub(1)
     }
 
