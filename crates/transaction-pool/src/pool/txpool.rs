@@ -3801,7 +3801,6 @@ mod tests {
             MockTransaction::legacy().with_sender(sender).with_nonce(3).with_gas_price(10),
         );
 
-
         // tx0 should be put in the pending subpool
         pool.add_transaction((*tx0).clone(), U256::from(1000), 0, None).unwrap();
         let mut best = pool.best_transactions();
