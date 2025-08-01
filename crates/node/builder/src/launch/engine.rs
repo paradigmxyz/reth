@@ -198,18 +198,6 @@ where
             .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
             .await?;
 
-        // Build a validator for reorgs only if reorg frequency is configured
-        #[expect(clippy::if_then_some_else_none)]
-        let reorg_validator = if node_config.debug.reorg_frequency.is_some() {
-            Some(
-                validator_builder
-                    .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
-                    .await?,
-            )
-        } else {
-            None
-        };
-
         // Create the consensus engine stream with optional reorg
         let consensus_engine_stream = UnboundedReceiverStream::from(consensus_engine_rx)
             .maybe_skip_fcu(node_config.debug.skip_fcu)
@@ -217,7 +205,14 @@ where
             .maybe_reorg(
                 ctx.blockchain_db().clone(),
                 ctx.components().evm_config().clone(),
-                reorg_validator,
+                || {
+                    // This closure is only called when reorg frequency is Some
+                    futures::executor::block_on(
+                        validator_builder
+                            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone()),
+                    )
+                    .expect("Failed to build tree validator for reorg")
+                },
                 node_config.debug.reorg_frequency,
                 node_config.debug.reorg_depth,
             )
