@@ -28,6 +28,7 @@ alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
 
+tracing.workspace = true
 auto_impl.workspace = true
 derive_more.workspace = true
 futures-util.workspace = true

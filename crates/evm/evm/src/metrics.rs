@@ -125,12 +125,16 @@ impl ExecutorMetrics {
 
         let f = || {
             executor.apply_pre_execution_changes()?;
+            let mut idx = 0;
             for tx in transactions {
+                let instant = Instant::now();
                 executor.execute_transaction(tx?.as_executable())?;
+                tracing::info!(wait_time = instant.elapsed().as_micros(), "Executed tx {}", idx);
+                idx += 1;
             }
             executor.finish().map(|(evm, result)| (evm.into_db(), result))
         };
-
+        
         // Use metered to execute and track timing/gas metrics
         let (mut db, result) = self.metered(|| {
             let res = f();

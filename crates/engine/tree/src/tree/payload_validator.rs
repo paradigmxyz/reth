@@ -662,6 +662,7 @@ where
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
         V: EvmPayloadValidator<T, Evm>,
     {
+        tracing::info!("Starting execution");
         let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
         debug!(target: "engine::tree", block=?num_hash, "Executing block");
         let mut db = State::builder()

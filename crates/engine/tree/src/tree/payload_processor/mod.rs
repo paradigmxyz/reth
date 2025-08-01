@@ -270,7 +270,10 @@ where
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
+            let mut idx = 0;
             for transaction in transactions {
+                tracing::info!("Prewarming {idx}");
+                idx += 1;
                 // only send Ok(_) variants to prewarming task
                 if let Ok(tx) = &transaction {
                     let _ = prewarm_tx.send(tx.clone());
