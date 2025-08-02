@@ -52,7 +52,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
         let id = *tx.id();
         let checker =  self.get(&id);
         assert!(
-            checker.is_some(),
+            checker.is_none(),
             "transaction already included {:?}",
             checker.unwrap().transaction.transaction
         );
