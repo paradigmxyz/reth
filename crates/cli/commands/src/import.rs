@@ -6,7 +6,7 @@ use crate::{
 use clap::Parser;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_node_core::version::SHORT_VERSION;
+use reth_node_core::version::version_metadata;
 use std::{path::PathBuf, sync::Arc};
 use tracing::info;
 
@@ -44,7 +44,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> ImportComm
         N: CliNodeTypes<ChainSpec = C::ChainSpec>,
         Comp: CliNodeComponents<N>,
     {
-        info!(target: "reth::cli", "reth {} starting", SHORT_VERSION);
+        info!(target: "reth::cli", "reth {} starting", version_metadata().short_version);
 
         let Environment { provider_factory, config, .. } = self.env.init::<N>(AccessRights::RW)?;
 

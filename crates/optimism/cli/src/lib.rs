@@ -49,7 +49,7 @@ use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
     args::LogArgs,
-    version::{LONG_VERSION, SHORT_VERSION},
+    version::{get_version_metadata, version_metadata},
 };
 use reth_optimism_node::args::RollupArgs;
 
@@ -61,7 +61,7 @@ use reth_node_metrics as _;
 ///
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
-#[command(author, version = SHORT_VERSION, long_version = LONG_VERSION, about = "Reth", long_about = None)]
+#[command(author, version = get_version_metadata().short_version.as_ref(), long_version = get_version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
 pub struct Cli<Spec: ChainSpecParser = OpChainSpecParser, Ext: clap::Args + fmt::Debug = RollupArgs>
 {
     /// The command to run
