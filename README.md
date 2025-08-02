@@ -1,5 +1,6 @@
 # reth
 
+[![Release](https://img.shields.io/github/v/release/paradigmxyz/reth)](https://github.com/paradigmxyz/reth/releases)
 [![bench status](https://github.com/paradigmxyz/reth/actions/workflows/bench.yml/badge.svg)](https://github.com/paradigmxyz/reth/actions/workflows/bench.yml)
 [![CI status](https://github.com/paradigmxyz/reth/workflows/unit/badge.svg)][gh-ci]
 [![cargo-lint status](https://github.com/paradigmxyz/reth/actions/workflows/lint.yml/badge.svg)][gh-lint]
