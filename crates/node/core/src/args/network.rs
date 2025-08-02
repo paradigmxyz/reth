@@ -6,7 +6,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::version::version_metadata;
+use crate::version::get_version_metadata;
 use clap::Args;
 use reth_chainspec::EthChainSpec;
 use reth_config::Config;
@@ -73,7 +73,7 @@ pub struct NetworkArgs {
     pub peers_file: Option<PathBuf>,
 
     /// Custom node identity
-    #[arg(long, value_name = "IDENTITY", default_value = version_metadata().p2p_client_version.as_ref())]
+    #[arg(long, value_name = "IDENTITY", default_value = get_version_metadata().p2p_client_version.as_ref())]
     pub identity: String,
 
     /// Secret key to use for this node.
@@ -324,7 +324,7 @@ impl Default for NetworkArgs {
             bootnodes: None,
             dns_retries: 0,
             peers_file: None,
-            identity: version_metadata().p2p_client_version.to_string(),
+            identity: get_version_metadata().p2p_client_version.to_string(),
             p2p_secret_key: None,
             no_persist_peers: false,
             nat: NatResolver::Any,
