@@ -77,7 +77,7 @@ export const sidebar: SidebarItem[] = [
                                 // ]
                             },
                             {
-                                text: "OP-stack",
+                                text: "OP Stack",
                                 link: "/run/opstack",
                                 // items: [
                                 //     {
