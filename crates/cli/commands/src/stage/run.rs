@@ -21,10 +21,7 @@ use reth_network::BlockDownloaderProvider;
 use reth_network_p2p::HeadersClient;
 use reth_node_core::{
     args::{NetworkArgs, StageEnum},
-    version::{
-        BUILD_PROFILE_NAME, CARGO_PKG_VERSION, VERGEN_BUILD_TIMESTAMP, VERGEN_CARGO_FEATURES,
-        VERGEN_CARGO_TARGET_TRIPLE, VERGEN_GIT_SHA,
-    },
+    version::version_metadata,
 };
 use reth_node_metrics::{
     chain::ChainSpecInfo,
@@ -123,12 +120,12 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let config = MetricServerConfig::new(
                 listen_addr,
                 VersionInfo {
-                    version: CARGO_PKG_VERSION,
-                    build_timestamp: VERGEN_BUILD_TIMESTAMP,
-                    cargo_features: VERGEN_CARGO_FEATURES,
-                    git_sha: VERGEN_GIT_SHA,
-                    target_triple: VERGEN_CARGO_TARGET_TRIPLE,
-                    build_profile: BUILD_PROFILE_NAME,
+                    version: version_metadata().cargo_pkg_version,
+                    build_timestamp: version_metadata().vergen_build_timestamp,
+                    cargo_features: version_metadata().vergen_cargo_features,
+                    git_sha: version_metadata().vergen_git_sha,
+                    target_triple: version_metadata().vergen_cargo_target_triple,
+                    build_profile: version_metadata().build_profile_name,
                 },
                 ChainSpecInfo { name: provider_factory.chain_spec().chain().to_string() },
                 ctx.task_executor,
