@@ -50,10 +50,11 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// If the transaction is already included.
     pub fn add_transaction(&mut self, tx: Arc<ValidPoolTransaction<T::Transaction>>) {
         let id = *tx.id();
+        let checker =  self.get(&id);
         assert!(
-            !self.contains(&id),
+            checker.is_some(),
             "transaction already included {:?}",
-            self.get(&id).unwrap().transaction.transaction
+            checker.unwrap().transaction.transaction
         );
         let submission_id = self.next_id();
 
