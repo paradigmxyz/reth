@@ -15,6 +15,7 @@ use reth_chainspec::ChainInfo;
 use reth_db::{init_db, mdbx::DatabaseArguments, DatabaseEnv};
 use reth_db_api::{database::Database, models::StoredBlockBodyIndices};
 use reth_errors::{RethError, RethResult};
+use reth_libmdbx::MaxReadTransactionDuration;
 use reth_node_types::{
     BlockTy, HeaderTy, NodeTypes, NodeTypesWithDB, NodeTypesWithDBAdapter, ReceiptTy, TxTy,
 };
@@ -65,6 +66,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     prune_modes: PruneModes,
     /// The node storage handler.
     storage: Arc<N::Storage>,
+    /// Maximum duration of read transactions
+    max_read_transaction_duration: Option<MaxReadTransactionDuration>,
 }
 
 impl<N: NodeTypes> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
@@ -87,6 +90,24 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
             static_file_provider,
             prune_modes: PruneModes::none(),
             storage: Default::default(),
+            max_read_transaction_duration: None,
+        }
+    }
+
+    /// Create new database provider factory with max read transaction duration.
+    pub fn new_with_max_read_transaction_duration(
+        db: N::DB,
+        chain_spec: Arc<N::ChainSpec>,
+        static_file_provider: StaticFileProvider<N::Primitives>,
+        max_read_transaction_duration: Option<MaxReadTransactionDuration>,
+    ) -> Self {
+        Self {
+            db,
+            chain_spec,
+            static_file_provider,
+            prune_modes: PruneModes::none(),
+            storage: Default::default(),
+            max_read_transaction_duration,
         }
     }
 
@@ -107,6 +128,14 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
         &self.db
     }
 
+    /// Returns the maximum read transaction duration if configured.
+    ///
+    /// This can be used to check if the safety timeout was set, allowing callers
+    /// to manage StateProvider lifecycle appropriately.
+    pub const fn max_read_transaction_duration(&self) -> Option<MaxReadTransactionDuration> {
+        self.max_read_transaction_duration
+    }
+
     #[cfg(any(test, feature = "test-utils"))]
     /// Consumes Self and returns DB
     pub fn into_db(self) -> N::DB {
@@ -123,12 +152,15 @@ impl<N: NodeTypesWithDB<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
     ) -> RethResult<Self> {
+        // Capture the max read transaction duration before args is consumed
+        let max_read_transaction_duration = args.max_read_transaction_duration();
         Ok(Self {
             db: Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
             prune_modes: PruneModes::none(),
             storage: Default::default(),
+            max_read_transaction_duration,
         })
     }
 }
@@ -632,6 +664,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             static_file_provider: self.static_file_provider.clone(),
             prune_modes: self.prune_modes.clone(),
             storage: self.storage.clone(),
+            max_read_transaction_duration: self.max_read_transaction_duration.clone(),
         }
     }
 }
@@ -810,5 +843,44 @@ mod tests {
         let local_head = provider.local_tip_header(checkpoint).unwrap();
 
         assert_eq!(local_head, head);
+    }
+
+    #[test]
+    fn test_max_read_transaction_duration_exposure() {
+        use std::time::Duration;
+
+        // Test default constructor - should return None
+        let factory = create_test_provider_factory();
+        assert_eq!(factory.max_read_transaction_duration(), None);
+
+        // Test with specific duration
+        let duration = MaxReadTransactionDuration::Set(Duration::from_secs(60));
+        let test_db = create_test_rw_db();
+        let chainspec = MAINNET.clone();
+        let static_file_provider = create_test_static_file_provider();
+
+        let factory_with_duration = ProviderFactory::new_with_max_read_transaction_duration(
+            test_db,
+            chainspec,
+            static_file_provider,
+            Some(duration),
+        );
+
+        assert_eq!(factory_with_duration.max_read_transaction_duration(), Some(duration));
+
+        // Test with unbounded duration
+        let unbounded_duration = MaxReadTransactionDuration::Unbounded;
+        let test_db2 = create_test_rw_db();
+        let chainspec2 = MAINNET.clone();
+        let static_file_provider2 = create_test_static_file_provider();
+
+        let factory_unbounded = ProviderFactory::new_with_max_read_transaction_duration(
+            test_db2,
+            chainspec2,
+            static_file_provider2,
+            Some(unbounded_duration),
+        );
+
+        assert_eq!(factory_unbounded.max_read_transaction_duration(), Some(unbounded_duration));
     }
 }

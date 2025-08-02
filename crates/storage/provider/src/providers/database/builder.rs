@@ -107,11 +107,13 @@ impl<N> ProviderFactoryBuilder<N> {
     {
         let ReadOnlyConfig { db_dir, db_args, static_files_dir, watch_static_files } =
             config.into();
+        // Capture the max read transaction duration before db_args is consumed
+        let max_read_transaction_duration = db_args.max_read_transaction_duration();
         Ok(self
             .db(Arc::new(open_db_read_only(db_dir, db_args)?))
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
-            .build_provider_factory())
+            .build_provider_factory_with_max_read_transaction_duration(max_read_transaction_duration))
     }
 }
 
@@ -327,5 +329,14 @@ where
     pub fn build_provider_factory(self) -> ProviderFactory<NodeTypesWithDBAdapter<N, DB>> {
         let Self { _types, val_1, val_2, val_3 } = self;
         ProviderFactory::new(val_1, val_2, val_3)
+    }
+
+    /// Creates the [`ProviderFactory`] with the specified max read transaction duration.
+    pub fn build_provider_factory_with_max_read_transaction_duration(
+        self,
+        max_read_transaction_duration: Option<MaxReadTransactionDuration>
+    ) -> ProviderFactory<NodeTypesWithDBAdapter<N, DB>> {
+        let Self { _types, val_1, val_2, val_3 } = self;
+        ProviderFactory::new_with_max_read_transaction_duration(val_1, val_2, val_3, max_read_transaction_duration)
     }
 }
