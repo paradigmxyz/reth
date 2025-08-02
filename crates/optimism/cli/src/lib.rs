@@ -47,10 +47,7 @@ use reth_cli_commands::launcher::FnLauncher;
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::{
-    args::LogArgs,
-    version::{get_version_metadata, version_metadata},
-};
+use reth_node_core::{args::LogArgs, version::get_version_metadata};
 use reth_optimism_node::args::RollupArgs;
 
 // This allows us to manually enable node metrics features, required for proper jemalloc metric
