@@ -61,6 +61,16 @@ impl SenderIdentifiers {
 pub struct SenderId(u64);
 
 impl SenderId {
+    /// Create a new SenderId from u64
+    pub const fn from_u64(value: u64) -> Self {
+        Self(value)
+    }
+
+    /// Get the inner u64 value
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+
     /// Returns a `Bound` for [`TransactionId`] starting with nonce `0`
     pub const fn start_bound(self) -> std::ops::Bound<TransactionId> {
         std::ops::Bound::Included(TransactionId::new(self, 0))
