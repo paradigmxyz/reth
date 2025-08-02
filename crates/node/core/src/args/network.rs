@@ -73,7 +73,7 @@ pub struct NetworkArgs {
     pub peers_file: Option<PathBuf>,
 
     /// Custom node identity
-    #[arg(long, value_name = "IDENTITY", default_value = version_metadata().p2p_client_version)]
+    #[arg(long, value_name = "IDENTITY", default_value = version_metadata().p2p_client_version.as_ref())]
     pub identity: String,
 
     /// Secret key to use for this node.

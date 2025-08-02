@@ -26,7 +26,7 @@ use tracing::info;
 ///
 /// This is the entrypoint to the executable.
 #[derive(Debug, Parser)]
-#[command(author, version =version_metadata().short_version, long_version = version_metadata().long_version, about = "Reth", long_about = None)]
+#[command(author, version =version_metadata().short_version.as_ref(), long_version = version_metadata().long_version.as_ref(), about = "Reth", long_about = None)]
 pub struct Cli<C: ChainSpecParser = EthereumChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs>
 {
     /// The command to run

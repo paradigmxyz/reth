@@ -1,5 +1,5 @@
 //! Version information for reth.
-use std::sync::OnceLock;
+use std::{borrow::Cow, sync::OnceLock};
 
 use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::ClientCode;
@@ -8,37 +8,47 @@ use reth_db::ClientVersion;
 /// The client code for Reth
 pub const CLIENT_CODE: ClientCode = ClientCode::RH;
 
+/// Global static version metadata
+static VERSION_METADATA: OnceLock<RethCliVersionConsts> = OnceLock::new();
+
+/// Initialize the global version metadata.
+pub fn try_init_version_metadata(
+    metadata: RethCliVersionConsts,
+) -> Result<(), RethCliVersionConsts> {
+    VERSION_METADATA.set(metadata)
+}
+
 /// Constants for reth-cli
 #[derive(Debug, Default)]
-pub struct RethCliVersionConsts<'a> {
+pub struct RethCliVersionConsts {
     /// The human readable name of the client
-    pub name_client: &'a str,
+    pub name_client: Cow<'static, str>,
 
     /// The latest version from Cargo.toml.
-    pub cargo_pkg_version: &'a str,
+    pub cargo_pkg_version: Cow<'static, str>,
 
     /// The full SHA of the latest commit.
-    pub vergen_git_sha_long: &'a str,
+    pub vergen_git_sha_long: Cow<'static, str>,
 
     /// The 8 character short SHA of the latest commit.
-    pub vergen_git_sha: &'a str,
+    pub vergen_git_sha: Cow<'static, str>,
 
     /// The build timestamp.
-    pub vergen_build_timestamp: &'a str,
+    pub vergen_build_timestamp: Cow<'static, str>,
 
     /// The target triple.
-    pub vergen_cargo_target_triple: &'a str,
+    pub vergen_cargo_target_triple: Cow<'static, str>,
 
     /// The build features.
-    pub vergen_cargo_features: &'a str,
+    pub vergen_cargo_features: Cow<'static, str>,
 
     /// The short version information for reth.
-    pub short_version: &'a str,
+    pub short_version: Cow<'static, str>,
 
     /// The long version information for reth.
-    pub long_version: &'a str,
+    pub long_version: Cow<'static, str>,
     /// The build profile name.
-    pub build_profile_name: &'a str,
+    pub build_profile_name: Cow<'static, str>,
 
     /// The version information for reth formatted for P2P (devp2p).
     ///
@@ -51,10 +61,10 @@ pub struct RethCliVersionConsts<'a> {
     /// reth/v{major}.{minor}.{patch}-{sha1}/{target}
     /// ```
     /// e.g.: `reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin`
-    pub p2p_client_version: &'a str,
+    pub p2p_client_version: Cow<'static, str>,
 
     /// extra data used for payload building
-    pub extra_data: String,
+    pub extra_data: Cow<'static, str>,
 }
 
 /// The default extra data used for payload building.
@@ -86,47 +96,42 @@ pub fn default_client_version() -> ClientVersion {
     }
 }
 
-/// Global static version metadata
-static VERSION_METADATA: OnceLock<RethCliVersionConsts<'static>> = OnceLock::new();
-
-/// Initialize the global version metadata.
-pub fn init_version_metadata(metadata: RethCliVersionConsts<'static>) {
-    let _ = VERSION_METADATA.set(metadata);
-}
-
 /// Get a reference to the initialized version metadata.
 ///
 /// # Panics
-/// If init_version_metadata() hasn't been called.
-pub fn version_metadata() -> &'static RethCliVersionConsts<'static> {
+/// If `init_version_metadata()` hasn't been called.
+pub fn version_metadata() -> &'static RethCliVersionConsts {
     VERSION_METADATA.get().expect("Version metadata not initialized")
 }
 
+/// Get a reference to the global version metadata
+pub fn get_version_metadata() -> &'static RethCliVersionConsts {
+    VERSION_METADATA.get_or_init(default_version_metadata)
+}
+
 /// default version metadata using compile-time env! macros.
-pub fn default_version_metadata() -> RethCliVersionConsts<'static> {
+pub fn default_version_metadata() -> RethCliVersionConsts {
     RethCliVersionConsts {
-        name_client: "Reth",
-        cargo_pkg_version: env!("CARGO_PKG_VERSION"),
-        vergen_git_sha_long: env!("VERGEN_GIT_SHA"),
-        vergen_git_sha: env!("VERGEN_GIT_SHA_SHORT"),
-        vergen_build_timestamp: env!("VERGEN_BUILD_TIMESTAMP"),
-        vergen_cargo_target_triple: env!("VERGEN_CARGO_TARGET_TRIPLE"),
-        vergen_cargo_features: env!("VERGEN_CARGO_FEATURES"),
-        short_version: env!("RETH_SHORT_VERSION"),
-        long_version: concat!(
+        name_client: Cow::Borrowed("Reth"),
+        cargo_pkg_version: Cow::Owned(env!("CARGO_PKG_VERSION").to_string()),
+        vergen_git_sha_long: Cow::Owned(env!("VERGEN_GIT_SHA").to_string()),
+        vergen_git_sha: Cow::Owned(env!("VERGEN_GIT_SHA_SHORT").to_string()),
+        vergen_build_timestamp: Cow::Owned(env!("VERGEN_BUILD_TIMESTAMP").to_string()),
+        vergen_cargo_target_triple: Cow::Owned(env!("VERGEN_CARGO_TARGET_TRIPLE").to_string()),
+        vergen_cargo_features: Cow::Owned(env!("VERGEN_CARGO_FEATURES").to_string()),
+        short_version: Cow::Owned(env!("RETH_SHORT_VERSION").to_string()),
+        long_version: Cow::Owned(format!(
+            "{}\n{}\n{}\n{}\n{}",
             env!("RETH_LONG_VERSION_0"),
-            "\n",
             env!("RETH_LONG_VERSION_1"),
-            "\n",
             env!("RETH_LONG_VERSION_2"),
-            "\n",
             env!("RETH_LONG_VERSION_3"),
-            "\n",
-            env!("RETH_LONG_VERSION_4")
-        ),
-        build_profile_name: env!("RETH_BUILD_PROFILE"),
-        p2p_client_version: env!("RETH_P2P_CLIENT_VERSION"),
-        extra_data: default_extra_data(),
+            env!("RETH_LONG_VERSION_4"),
+        )),
+
+        build_profile_name: Cow::Owned(env!("RETH_BUILD_PROFILE").to_string()),
+        p2p_client_version: Cow::Owned(env!("RETH_P2P_CLIENT_VERSION").to_string()),
+        extra_data: Cow::Owned(default_extra_data()),
     }
 }
 
