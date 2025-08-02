@@ -27,9 +27,9 @@ pub struct ParkedPool<T: ParkedOrd> {
     /// _All_ Transactions that are currently inside the pool grouped by their identifier.
     by_id: BTreeMap<TransactionId, ParkedPoolTransaction<T>>,
     /// Bitmap 1: [sender_id: u64][count: u64] - tracks transaction count per sender
-    sender_id_count: BTreeSet<SenderCount>,
+    sender_id_count: Vec<SenderCount>,
     /// Bitmap 2: [sender_id: u64][last_submission_id: u64] - tracks last submission per sender
-    sender_id_last_submission: BTreeSet<SenderSubmission>,
+    sender_id_last_submission: Vec<SenderSubmission>,
     /// Keeps track of the size of this pool.
     ///
     /// See also [`reth_primitives_traits::InMemorySize::size`].
@@ -157,30 +157,29 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Increments the count of transactions for the given sender and updates the tracked submission
     /// id.
     fn add_sender_count(&mut self, sender: SenderId, submission_id: u64) {
-        // Find existing count for this sender
-        let current_count = self.get_sender_count(sender);
-        let new_count = current_count + 1;
+            // Binary search for sender in count vec
+        let count_pos = self.sender_id_count.binary_search_by_key(&sender, |sc| sc.sender_id());
+        let submission_pos = self.sender_id_last_submission.binary_search_by_key(&sender, |ss| ss.sender_id());
 
-        // Remove old entries if they exist
-        if current_count > 0_u64 {
-            let old_count_entry = SenderCount::new(sender, current_count);
-            self.sender_id_count.remove(&old_count_entry);
-
-            // Find and remove old submission entry for this sender
-            let range = SenderSubmission::range_start(sender)..=SenderSubmission::range_end(sender);
-            if let Some(old_submission) =
-                self.sender_id_last_submission.range(range).next().copied()
-            {
-                self.sender_id_last_submission.remove(&old_submission);
+        match count_pos {
+            Ok(idx) => {
+                // Sender exists - increment count
+                let current_count = self.sender_id_count[idx].count();
+                self.sender_id_count[idx] = SenderCount::new(sender, current_count + 1);
+                
+                // Update submission (should also exist)
+                if let Ok(sub_idx) = submission_pos {
+                    self.sender_id_last_submission[sub_idx] = SenderSubmission::new(sender, submission_id);
+                }
+            }
+            Err(idx) => {
+                // New sender - insert at correct position to maintain sort order
+                self.sender_id_count.insert(idx, SenderCount::new(sender, 1));
+                
+                let sub_idx = submission_pos.unwrap_err();
+                self.sender_id_last_submission.insert(sub_idx, SenderSubmission::new(sender, submission_id));
             }
         }
-
-        // Insert new entries
-        let new_count_entry = SenderCount::new(sender, new_count);
-        let new_submission_entry = SenderSubmission::new(sender, submission_id);
-
-        self.sender_id_count.insert(new_count_entry);
-        self.sender_id_last_submission.insert(new_submission_entry);
     }
 
     /// Decrements the count of transactions for the given sender.
@@ -190,32 +189,36 @@ impl<T: ParkedOrd> ParkedPool<T> {
     /// Note: this does not update the tracked submission id for the sender, because we're only
     /// interested in the __last__ submission id when truncating the pool.
     fn remove_sender_count(&mut self, sender_id: SenderId) {
-        let current_count = self.get_sender_count(sender_id);
+        let count_pos = self.sender_id_count.binary_search_by_key(&sender_id, |sc| sc.sender_id());
+        let submission_pos = self.sender_id_last_submission.binary_search_by_key(&sender_id, |ss| ss.sender_id());
 
-        // Remove current count entry
-        let old_count_entry = SenderCount::new(sender_id, current_count);
-        self.sender_id_count.remove(&old_count_entry);
-
-        if current_count == 1 {
-            // Remove sender completely when count reaches zero
-            let range =
-                SenderSubmission::range_start(sender_id)..=SenderSubmission::range_end(sender_id);
-            if let Some(old_submission) =
-                self.sender_id_last_submission.range(range).next().copied()
-            {
-                self.sender_id_last_submission.remove(&old_submission);
+        match count_pos {
+            Ok(idx) => {
+                let current_count = self.sender_id_count[idx].count();
+                
+                if current_count == 1u64 {
+                    // Remove sender completely
+                    self.sender_id_count.remove(idx);
+                    if let Ok(sub_idx) = submission_pos {
+                        self.sender_id_last_submission.remove(sub_idx);
+                    }
+                } else {
+                    // Decrement count
+                    self.sender_id_count[idx] = SenderCount::new(sender_id, current_count - 1);
+                }
             }
-        } else {
-            // Update with decremented count
-            let new_count_entry = SenderCount::new(sender_id, current_count - 1);
-            self.sender_id_count.insert(new_count_entry);
+            Err(_) => {
+                unreachable!("sender count not found {:?}", sender_id);
+            }
         }
     }
 
     /// Get the current transaction count for a sender
     fn get_sender_count(&self, sender_id: SenderId) -> u64 {
-        let range = SenderCount::range_start(sender_id)..=SenderCount::range_end(sender_id);
-        self.sender_id_count.range(range).next().map(|entry| entry.count()).unwrap_or(0)
+         self.sender_id_count
+            .binary_search_by_key(&sender_id, |sc| sc.sender_id())
+            .map(|idx| self.sender_id_count[idx].count())
+            .unwrap_or(0)
     }
 
     /// Returns an iterator over all transactions in the pool
