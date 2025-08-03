@@ -1072,6 +1072,7 @@ impl<
                         last_block = last_header.number(),
                         next_block = peeked.number(),
                         expected = expected_next,
+                        range_size = range_headers.len(),
                         "Non-consecutive block detected, stopping range collection"
                     );
                     break; // Non-consecutive block, stop here
