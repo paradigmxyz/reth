@@ -96,7 +96,7 @@ impl Discv4Config {
         self
     }
 
-    /// Returns the corresponding [`ResolveNatInterval`], if a [`NatResolver`] and an interval was
+    /// Returns the corresponding [`ResolveNatInterval`], if a [`NatResolver`] and an interval was configured
     /// configured
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
         let resolver = self.external_ip_resolver?;
