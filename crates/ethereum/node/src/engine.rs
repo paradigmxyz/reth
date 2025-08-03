@@ -6,7 +6,7 @@ pub use alloy_rpc_types_engine::{
     ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes,
 };
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
-use reth_engine_primitives::{EngineValidator, PayloadValidator};
+use reth_engine_primitives::{EngineApiValidator, PayloadValidator};
 use reth_ethereum_payload_builder::EthereumExecutionPayloadValidator;
 use reth_ethereum_primitives::Block;
 use reth_node_api::PayloadTypes;
@@ -52,7 +52,7 @@ where
     }
 }
 
-impl<ChainSpec, Types> EngineValidator<Types> for EthereumEngineValidator<ChainSpec>
+impl<ChainSpec, Types> EngineApiValidator<Types> for EthereumEngineValidator<ChainSpec>
 where
     ChainSpec: EthChainSpec + EthereumHardforks + 'static,
     Types: PayloadTypes<PayloadAttributes = EthPayloadAttributes, ExecutionData = ExecutionData>,
