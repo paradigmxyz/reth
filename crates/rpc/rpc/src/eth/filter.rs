@@ -1048,6 +1048,7 @@ impl<
                     continue;
                 }
                 // Task completed with empty results, continue to check for more work
+                trace!(target: "rpc::eth::filter", "Parallel task completed with no receipt results");
                 continue;
             }
 
