@@ -8988,6 +8988,7 @@ dependencies = [
  "eyre",
  "futures",
  "rand 0.9.2",
+ "rayon",
  "reth-chainspec",
  "reth-db",
  "reth-e2e-test-utils",

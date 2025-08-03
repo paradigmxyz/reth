@@ -1,7 +1,7 @@
 //! Validates execution payload wrt Ethereum Execution Engine API version.
 
 use alloy_eips::Decodable2718;
-use alloy_primitives::U256;
+use alloy_primitives::{Bytes, U256};
 use alloy_rpc_types_engine::{ExecutionData, PayloadError};
 pub use alloy_rpc_types_engine::{
     ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
@@ -26,7 +26,10 @@ use revm::{
     context_interface::block::BlobExcessGasAndPrice,
     primitives::hardfork::SpecId,
 };
-use std::sync::Arc;
+use std::{
+    collections::BTreeMap,
+    sync::{mpsc, Arc},
+};
 
 /// Validator for the ethereum engine API.
 #[derive(Debug, Clone)]
@@ -127,13 +130,59 @@ where
         &self,
         payload: &ExecutionData,
     ) -> Result<impl reth_node_api::ExecutableTxIterator<Evm>, NewPayloadError> {
-        Ok(payload.payload.transactions().clone().into_iter().map(|tx| {
-            let tx = TxTy::<Evm::Primitives>::decode_2718_exact(tx.as_ref())
-                .map_err(alloy_rlp::Error::from)
-                .map_err(PayloadError::from)?;
-            let signer = tx.try_recover().map_err(NewPayloadError::other)?;
-            Ok::<_, NewPayloadError>(tx.with_signer(signer))
-        }))
+        let transactions = payload.payload.transactions().clone();
+        let (iter_tx, from_iter) = mpsc::channel();
+        rayon::spawn(move || {
+            let (tasks_tx, from_tasks) = mpsc::channel();
+            let mut tasks = Vec::new();
+            let num_tasks = 10;
+
+            for (i, tx) in transactions.into_iter().enumerate() {
+                let task_idx = i % num_tasks;
+                if task_idx >= tasks.len() {
+                    let (to_task, task_rx) = mpsc::channel();
+                    let task_tx = tasks_tx.clone();
+                    rayon::spawn(move || {
+                        while let Ok((idx, tx)) = task_rx.recv() {
+                            let decode = |tx: Bytes| -> Result<_, _> {
+                                let tx = TxTy::<Evm::Primitives>::decode_2718_exact(tx.as_ref())
+                                    .map_err(alloy_rlp::Error::from)
+                                    .map_err(PayloadError::from)?;
+                                let signer = tx.try_recover().map_err(NewPayloadError::other)?;
+                                Ok::<_, NewPayloadError>(tx.with_signer(signer))
+                            };
+
+                            let _ = task_tx.send((idx, decode(tx)));
+                        }
+                    });
+
+                    tasks.push(to_task);
+                }
+
+                let _ = tasks[task_idx].send((i, tx));
+            }
+
+            drop(tasks_tx);
+            drop(tasks);
+
+            let mut next_result_idx = 0;
+            let mut buffered = BTreeMap::new();
+            while let Ok((idx, result)) = from_tasks.recv() {
+                if next_result_idx == idx {
+                    let _ = iter_tx.send(result);
+                    next_result_idx += 1;
+
+                    while let Some(result) = buffered.remove(&next_result_idx) {
+                        let _ = iter_tx.send(result);
+                        next_result_idx += 1;
+                    }
+                } else {
+                    buffered.insert(idx, result);
+                }
+            }
+        });
+
+        Ok(from_iter.into_iter())
     }
 
     fn execution_ctx_for_payload<'a>(

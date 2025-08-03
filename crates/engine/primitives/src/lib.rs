@@ -218,7 +218,7 @@ pub trait EvmPayloadValidator<T: PayloadTypes, Evm: ConfigureEvm>:
 
 /// Iterator over executable transactions.
 pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
-    ExactSizeIterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
+    Iterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
 {
     /// The executable transaction type iterator yields.
     type Tx: OwnedExecutableTxFor<Evm>;
@@ -230,7 +230,7 @@ impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
 where
     Tx: OwnedExecutableTxFor<Evm>,
     Err: core::error::Error + Send + Sync + 'static,
-    T: ExactSizeIterator<Item = Result<Tx, Err>> + Send + 'static,
+    T: Iterator<Item = Result<Tx, Err>> + Send + 'static,
 {
     type Tx = Tx;
     type Error = Err;
