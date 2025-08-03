@@ -675,12 +675,30 @@ impl<T: TransactionOrdering> TxPool<T> {
 
         match self.all_transactions.insert_tx(tx, on_chain_balance, on_chain_nonce) {
             Ok(InsertOk { transaction, move_to, replaced_tx, updates, .. }) => {
+                // Bipartition the updates into two lists:
+                // 1. those needed to move before adding the new transaction. Typically,
+                //    transactions with same sender as the newly added one but lower nonce should be
+                //    moved first.
+                // 2. those needed to move after adding the new transaction. Typically, transactions
+                //    with same sender as the newly added one but higher nonce should be moved
+                //    after.
+                // We ensure that transactions of the same sender are added to subpool in the order
+                // of nonce.
+                let (pre_updates, post_updates) =
+                    self.bipartition_updates(transaction.id(), updates);
+                // process updates before adding new transaction
+                let UpdateOutcome { promoted: pre_promoted, discarded: pre_discarded } =
+                    self.process_updates(pre_updates);
                 // replace the new tx and remove the replaced in the subpool(s)
                 self.add_new_transaction(transaction.clone(), replaced_tx.clone(), move_to);
                 // Update inserted transactions metric
                 self.metrics.inserted_transactions.increment(1);
-                let UpdateOutcome { promoted, discarded } = self.process_updates(updates);
-
+                // process updates after adding new transaction
+                let UpdateOutcome { promoted: post_promoted, discarded: post_discarded } =
+                    self.process_updates(post_updates);
+                // merge update outcome
+                let promoted = [pre_promoted, post_promoted].concat();
+                let discarded = [pre_discarded, post_discarded].concat();
                 let replaced = replaced_tx.map(|(tx, _)| tx);
 
                 // This transaction was moved to the pending pool.
@@ -756,6 +774,38 @@ impl<T: TransactionOrdering> TxPool<T> {
                 }
             }
         }
+    }
+
+    /// Bipartion the pool updates based on the pivot transaction id (sender and nonce).
+    /// The bipartition is simply to split the `updates` into two lists such that:
+    /// - The first list is all continuous transactions in `updates` either whose sender is
+    ///   different from the `pivot` or whose nonce is less than the `pivot` nonce.
+    /// - The second list is all continuous transactions in `updates` either whose sender is the
+    ///   same as the `pivot` or whose nonce is greater than the `pivot` nonce.
+    ///
+    /// It is assumed that the transactions of the same sender in the `updates` list are sorted in
+    /// ascending nonce order.
+    /// The relative order among transactions in the bipartitioned lists are maintained as in the
+    /// `updates` list.
+    fn bipartition_updates(
+        &self,
+        pivot: &TransactionId,
+        updates: Vec<PoolUpdate>,
+    ) -> (Vec<PoolUpdate>, Vec<PoolUpdate>) {
+        let mut pre = Vec::with_capacity(updates.len());
+        let mut post = Vec::with_capacity(updates.len());
+
+        let mut to_post = false;
+        for update in updates {
+            to_post =
+                to_post || (update.id.sender == pivot.sender && update.id.nonce >= pivot.nonce);
+            match to_post {
+                false => pre.push(update),
+                true => post.push(update),
+            }
+        }
+
+        (pre, post)
     }
 
     /// Determines if the tx sender is delegated or has a  pending delegation, and if so, ensures
@@ -3776,5 +3826,49 @@ mod tests {
         assert_eq!(best_txs.len(), 10); // 8 - 2 + 4 = 10
 
         assert_eq!(pool.pending_pool.independent().len(), 1);
+    }
+
+    #[test]
+    fn test_insertion_disorder() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let sender = address!("1234567890123456789012345678901234567890");
+        let tx0 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(0).with_gas_price(10),
+        );
+        let tx1 = f.validated_arc(
+            MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(1)
+                .with_gas_limit(1000)
+                .with_gas_price(10),
+        );
+        let tx2 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(2).with_gas_price(10),
+        );
+        let tx3 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(3).with_gas_price(10),
+        );
+
+        let mut best = pool.best_transactions();
+
+        // tx0 should be put in the pending subpool
+        pool.add_transaction((*tx0).clone(), U256::from(1000), 0, None).unwrap();
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        // tx1 should be put in the queued subpool due to insufficient sender balance
+        pool.add_transaction((*tx1).clone(), U256::from(1000), 0, None).unwrap();
+        assert!(best.next().is_none());
+        // tx2 should be put in the pending subpool, and tx1 should be promoted to pending
+        pool.add_transaction((*tx2).clone(), U256::MAX, 0, None).unwrap();
+        let t1 = best.next().expect("tx2 should be put in the pending subpool");
+        let t2 = best.next().expect("tx2 should be put in the pending subpool");
+        assert_eq!(t1.id(), tx1.id());
+        assert_eq!(t2.id(), tx2.id());
+        // tx3 should be put in the pending subpool,
+        pool.add_transaction((*tx3).clone(), U256::MAX, 0, None).unwrap();
+        let t3 = best.next().expect("tx3 should be put in the pending subpool");
+        assert_eq!(t3.id(), tx3.id());
     }
 }
