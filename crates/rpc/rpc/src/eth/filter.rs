@@ -1011,7 +1011,7 @@ impl<
     }
 }
 
-/// Type alias for the complex future type used in `RangeBlockMode`
+/// Type alias for parallel receipt fetching task futures used in `RangeBlockMode`
 type ReceiptFetchFuture<P> =
     Pin<Box<dyn Future<Output = Result<Vec<ReceiptBlockResult<P>>, EthFilterError>> + Send>>;
 
