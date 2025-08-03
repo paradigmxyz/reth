@@ -212,15 +212,6 @@ impl<T: ParkedOrd> ParkedPool<T> {
             }
         }
     }
-
-    /// Get the current transaction count for a sender
-    fn get_sender_count(&self, sender_id: SenderId) -> u64 {
-         self.sender_id_count
-            .binary_search_by_key(&sender_id, |sc| sc.sender_id())
-            .map(|idx| self.sender_id_count[idx].count())
-            .unwrap_or(0)
-    }
-
     /// Returns an iterator over all transactions in the pool
     pub(crate) fn all(
         &self,
