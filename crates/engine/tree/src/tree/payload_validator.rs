@@ -25,7 +25,7 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
+    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     SpecFor,
 };
 use reth_payload_primitives::{
@@ -647,7 +647,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl OwnedExecutableTxFor<Evm>, Err>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind>
     where
         S: StateProvider,

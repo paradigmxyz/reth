@@ -756,5 +756,5 @@ vergen-git2 = "1.0.5"
 # jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "3282144" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "3282144" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "7e2c1db" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "7e2c1db" }

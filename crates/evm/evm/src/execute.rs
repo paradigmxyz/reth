@@ -2,12 +2,12 @@
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, vec::Vec};
-use alloy_consensus::{transaction::Either, BlockHeader, Header};
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
     block::{CommitChanges, ExecutableTx},
-    Evm, EvmEnv, EvmFactory, IntoTxEnv, RecoveredTx,
+    Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::B256;
 use core::fmt::Debug;
@@ -554,54 +554,14 @@ where
 
 /// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
 /// executor.
-pub trait OwnedExecutableTxFor<Evm: ConfigureEvm>:
-    OwnedExecutableTx<TxEnvFor<Evm>, TxTy<Evm::Primitives>>
+pub trait ExecutableTxFor<Evm: ConfigureEvm>:
+    ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
 }
 
-impl<T, Evm: ConfigureEvm> OwnedExecutableTxFor<Evm> for T where
-    T: OwnedExecutableTx<TxEnvFor<Evm>, TxTy<Evm::Primitives>>
+impl<T, Evm: ConfigureEvm> ExecutableTxFor<Evm> for T where
+    T: ToTxEnv<TxEnvFor<Evm>> + RecoveredTx<TxTy<Evm::Primitives>>
 {
-}
-
-/// A helper trait marking a 'static type that can be converted into an [`ExecutableTx`] for block
-/// executor.
-pub trait OwnedExecutableTx<TxEnv, Tx>: Clone + Send + 'static {
-    /// Converts the type into an [`ExecutableTx`] for block executor.
-    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy;
-}
-
-impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for Recovered<T>
-where
-    Self: Clone + Send + 'static,
-    for<'a> &'a Self: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
-{
-    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
-        self
-    }
-}
-
-impl<T, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for WithEncoded<T>
-where
-    Self: Clone + Send + 'static,
-    for<'a> &'a Self: IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy,
-{
-    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
-        self
-    }
-}
-
-impl<L, R, TxEnv, Tx> OwnedExecutableTx<TxEnv, Tx> for Either<L, R>
-where
-    L: OwnedExecutableTx<TxEnv, Tx>,
-    R: OwnedExecutableTx<TxEnv, Tx>,
-{
-    fn as_executable(&self) -> impl IntoTxEnv<TxEnv> + RecoveredTx<Tx> + Copy {
-        match self {
-            Self::Left(tx) => Either::Left(tx.as_executable()),
-            Self::Right(tx) => Either::Right(tx.as_executable()),
-        }
-    }
 }
 
 #[cfg(test)]

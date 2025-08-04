@@ -16,7 +16,7 @@ use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use reth_engine_primitives::ExecutableTxIterator;
-use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::ConsistentDbView, BlockReader, DatabaseProviderFactory, StateCommitmentProvider,
@@ -286,7 +286,7 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl OwnedExecutableTxFor<Evm>>,
+        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Send + 'static>,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<Sender<MultiProofMessage>>,
     ) -> CacheTaskHandle

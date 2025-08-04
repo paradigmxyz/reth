@@ -13,7 +13,7 @@ extern crate alloc;
 
 use alloy_consensus::BlockHeader;
 use reth_errors::ConsensusError;
-use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
+use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
@@ -190,14 +190,14 @@ pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
     Iterator<Item = Result<Self::Tx, Self::Error>> + Send + 'static
 {
     /// The executable transaction type iterator yields.
-    type Tx: OwnedExecutableTxFor<Evm>;
+    type Tx: ExecutableTxFor<Evm> + Clone + Send + 'static;
     /// Errors that may occur while recovering or decoding transactions.
     type Error: core::error::Error + Send + Sync + 'static;
 }
 
 impl<Evm: ConfigureEvm, Tx, Err, T> ExecutableTxIterator<Evm> for T
 where
-    Tx: OwnedExecutableTxFor<Evm>,
+    Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     Err: core::error::Error + Send + Sync + 'static,
     T: Iterator<Item = Result<Tx, Err>> + Send + 'static,
 {
