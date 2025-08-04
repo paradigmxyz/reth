@@ -2648,12 +2648,12 @@ dependencies = [
 
 [[package]]
 name = "darling"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a79c4acb1fd5fa3d9304be4c76e031c54d2e92d172a393e24b19a14fe8532fe9"
+checksum = "d6b136475da5ef7b6ac596c0e956e37bad51b85b987ff3d5e230e964936736b2"
 dependencies = [
- "darling_core 0.21.0",
- "darling_macro 0.21.0",
+ "darling_core 0.21.1",
+ "darling_macro 0.21.1",
 ]
 
 [[package]]
@@ -2672,9 +2672,9 @@ dependencies = [
 
 [[package]]
 name = "darling_core"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74875de90daf30eb59609910b84d4d368103aaec4c924824c6799b28f77d6a1d"
+checksum = "b44ad32f92b75fb438b04b68547e521a548be8acc339a6dacc4a7121488f53e6"
 dependencies = [
  "fnv",
  "ident_case",
@@ -2697,11 +2697,11 @@ dependencies = [
 
 [[package]]
 name = "darling_macro"
-version = "0.21.0"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e79f8e61677d5df9167cd85265f8e5f64b215cdea3fb55eebc3e622e44c7a146"
+checksum = "2b5be8a7a562d315a5b92a630c30cec6bcf663e6673f00fbb69cca66a6f521b9"
 dependencies = [
- "darling_core 0.21.0",
+ "darling_core 0.21.1",
  "quote",
  "syn 2.0.104",
 ]
@@ -2936,7 +2936,7 @@ checksum = "e01a3366d27ee9890022452ee61b2b63a67e6f13f58900b651ff5665f0bb1fab"
 dependencies = [
  "libc",
  "option-ext",
- "redox_users 0.5.1",
+ "redox_users 0.5.2",
  "windows-sys 0.60.2",
 ]
 
@@ -4504,7 +4504,7 @@ dependencies = [
  "potential_utf",
  "yoke 0.8.0",
  "zerofrom",
- "zerovec 0.11.2",
+ "zerovec 0.11.3",
 ]
 
 [[package]]
@@ -4517,7 +4517,7 @@ dependencies = [
  "litemap 0.8.0",
  "tinystr 0.8.1",
  "writeable 0.6.1",
- "zerovec 0.11.2",
+ "zerovec 0.11.3",
 ]
 
 [[package]]
@@ -4583,7 +4583,7 @@ dependencies = [
  "icu_properties 2.0.1",
  "icu_provider 2.0.0",
  "smallvec",
- "zerovec 0.11.2",
+ "zerovec 0.11.3",
 ]
 
 [[package]]
@@ -4626,7 +4626,7 @@ dependencies = [
  "icu_provider 2.0.0",
  "potential_utf",
  "zerotrie",
- "zerovec 0.11.2",
+ "zerovec 0.11.3",
 ]
 
 [[package]]
@@ -4672,7 +4672,7 @@ dependencies = [
  "yoke 0.8.0",
  "zerofrom",
  "zerotrie",
- "zerovec 0.11.2",
+ "zerovec 0.11.3",
 ]
 
 [[package]]
@@ -5809,9 +5809,9 @@ dependencies = [
 
 [[package]]
 name = "notify"
-version = "8.1.0"
+version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3163f59cd3fa0e9ef8c32f242966a7b9994fd7378366099593e0e73077cd8c97"
+checksum = "4d3d07927151ff8575b7087f245456e549fea62edf0ec4e565a5ee50c8402bc3"
 dependencies = [
  "bitflags 2.9.1",
  "fsevent-sys",
@@ -6549,7 +6549,7 @@ version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5a7c30837279ca13e7c867e9e40053bc68740f988cb07f7ca6df43cc734b585"
 dependencies = [
- "zerovec 0.11.2",
+ "zerovec 0.11.3",
 ]
 
 [[package]]
@@ -7052,9 +7052,9 @@ dependencies = [
 
 [[package]]
 name = "redox_users"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78eaea1f52c56d57821be178b2d47e09ff26481a6042e8e042fcb0ced068b470"
+checksum = "a4e608c6638b9c18977b00b475ac1f28d14e84b27d8d42f70e0bf1e3dec127ac"
 dependencies = [
  "getrandom 0.2.16",
  "libredox",
@@ -8054,6 +8054,7 @@ dependencies = [
  "pin-project",
  "reth-chainspec",
  "reth-engine-primitives",
+ "reth-engine-tree",
  "reth-errors",
  "reth-evm",
  "reth-fs-util",
@@ -8411,13 +8412,16 @@ dependencies = [
  "alloy-evm",
  "alloy-genesis",
  "alloy-primitives",
+ "alloy-rpc-types-engine",
  "derive_more",
  "parking_lot",
  "reth-chainspec",
+ "reth-engine-primitives",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-execution-types",
+ "reth-payload-primitives",
  "reth-primitives-traits",
  "reth-testing-utils",
  "revm",
@@ -8979,7 +8983,6 @@ dependencies = [
  "alloy-network",
  "alloy-primitives",
  "alloy-provider",
- "alloy-rlp",
  "alloy-rpc-types-beacon",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
@@ -8988,7 +8991,6 @@ dependencies = [
  "eyre",
  "futures",
  "rand 0.9.2",
- "rayon",
  "reth-chainspec",
  "reth-db",
  "reth-e2e-test-utils",
@@ -9312,7 +9314,6 @@ dependencies = [
  "reth-db",
  "reth-e2e-test-utils",
  "reth-engine-local",
- "reth-engine-primitives",
  "reth-evm",
  "reth-network",
  "reth-network-api",
@@ -11128,9 +11129,9 @@ dependencies = [
 
 [[package]]
 name = "ruint"
-version = "1.15.0"
+version = "1.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11256b5fe8c68f56ac6f39ef0720e592f33d2367a4782740d9c9142e889c7fb4"
+checksum = "9ecb38f82477f20c5c3d62ef52d7c4e536e38ea9b73fb570a20c5cae0e14bcf6"
 dependencies = [
  "alloy-rlp",
  "arbitrary",
@@ -11550,9 +11551,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.141"
+version = "1.0.142"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30b9eff21ebe718216c6ec64e1d9ac57087aad11efc64e32002bce4a0d4c03d3"
+checksum = "030fedb782600dcbd6f02d479bf0d817ac3bb40d644745b769d6a96bc3afc5a7"
 dependencies = [
  "indexmap 2.10.0",
  "itoa",
@@ -11737,9 +11738,9 @@ dependencies = [
 
 [[package]]
 name = "signal-hook-registry"
-version = "1.4.5"
+version = "1.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9203b8055f63a2a00e2f593bb0510367fe707d7ff1e5c872de2f537b339e5410"
+checksum = "b2a4719bff48cee6b39d12c020eeb490953ad2443b7055bd0b21fca26bd8c28b"
 dependencies = [
  "libc",
 ]
@@ -12152,7 +12153,7 @@ version = "7.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eb25760cf823885b202e5cc8ef8dc385e80ef913537656129ea8b34470280601"
 dependencies = [
- "darling 0.21.0",
+ "darling 0.21.1",
  "heck",
  "itertools 0.14.0",
  "prettyplease",
@@ -12329,7 +12330,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d4f6d1145dcb577acf783d4e601bc1d76a13337bb54e6233add580b07344c8b"
 dependencies = [
  "displaydoc",
- "zerovec 0.11.2",
+ "zerovec 0.11.3",
 ]
 
 [[package]]
@@ -12359,9 +12360,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.47.0"
+version = "1.47.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43864ed400b6043a4757a25c7a64a8efde741aed79a056a2fb348a406701bb35"
+checksum = "89e49afdadebb872d3145a5638b59eb0691ea23e46ca484037cfab3b76b95038"
 dependencies = [
  "backtrace",
  "bytes",
@@ -12429,9 +12430,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.15"
+version = "0.7.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66a539a9ad6d5d281510d5bd368c973d636c02dbf8a67300bfb6b950696ad7df"
+checksum = "14307c986784f72ef81c89db7d9e28d6ac26d16213b109ea501696195e6e3ce5"
 dependencies = [
  "bytes",
  "futures-core",
@@ -14027,9 +14028,9 @@ dependencies = [
 
 [[package]]
 name = "zerovec"
-version = "0.11.2"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a05eb080e015ba39cc9e23bbe5e7fb04d5fb040350f99f34e338d5fdd294428"
+checksum = "bdbb9122ea75b11bf96e7492afb723e8a7fbe12c67417aa95e7e3d18144d37cd"
 dependencies = [
  "yoke 0.8.0",
  "zerofrom",

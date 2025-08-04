@@ -39,6 +39,9 @@ use std::{
 use tokio::runtime::Handle;
 use tracing::debug;
 
+#[cfg(feature = "metrics")]
+use crate::proof_task_metrics::ProofTaskMetrics;
+
 type StorageProofResult = Result<DecodedStorageMultiProof, ParallelStateRootError>;
 type TrieNodeProviderResult = Result<Option<RevealedNode>, SparseTrieError>;
 
@@ -70,6 +73,9 @@ pub struct ProofTaskManager<Factory: DatabaseProviderFactory> {
     /// Incremented in [`ProofTaskManagerHandle::new`] and decremented in
     /// [`ProofTaskManagerHandle::drop`].
     active_handles: Arc<AtomicUsize>,
+    /// Metrics tracking blinded node fetches.
+    #[cfg(feature = "metrics")]
+    metrics: ProofTaskMetrics,
 }
 
 impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
@@ -95,6 +101,8 @@ impl<Factory: DatabaseProviderFactory> ProofTaskManager<Factory> {
             proof_task_rx,
             tx_sender,
             active_handles: Arc::new(AtomicUsize::new(0)),
+            #[cfg(feature = "metrics")]
+            metrics: ProofTaskMetrics::default(),
         }
     }
 
@@ -167,6 +175,17 @@ where
             match self.proof_task_rx.recv() {
                 Ok(message) => match message {
                     ProofTaskMessage::QueueTask(task) => {
+                        // Track metrics for blinded node requests
+                        #[cfg(feature = "metrics")]
+                        match &task {
+                            ProofTaskKind::BlindedAccountNode(_, _) => {
+                                self.metrics.account_nodes += 1;
+                            }
+                            ProofTaskKind::BlindedStorageNode(_, _, _) => {
+                                self.metrics.storage_nodes += 1;
+                            }
+                            _ => {}
+                        }
                         // queue the task
                         self.queue_proof_task(task)
                     }
@@ -174,7 +193,12 @@ where
                         // return the transaction to the pool
                         self.proof_task_txs.push(tx);
                     }
-                    ProofTaskMessage::Terminate => return Ok(()),
+                    ProofTaskMessage::Terminate => {
+                        // Record metrics before terminating
+                        #[cfg(feature = "metrics")]
+                        self.metrics.record();
+                        return Ok(())
+                    }
                 },
                 // All senders are disconnected, so we can terminate
                 // However this should never happen, as this struct stores a sender

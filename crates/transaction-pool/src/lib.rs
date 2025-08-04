@@ -603,6 +603,10 @@ where
         self.pool.all_transactions()
     }
 
+    fn all_transaction_hashes(&self) -> Vec<TxHash> {
+        self.pool.all_transaction_hashes()
+    }
+
     fn remove_transactions(
         &self,
         hashes: Vec<TxHash>,

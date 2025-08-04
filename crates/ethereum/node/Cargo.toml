@@ -40,9 +40,7 @@ reth-engine-primitives.workspace = true
 reth-payload-primitives.workspace = true
 
 # ethereum
-alloy-primitives.workspace = true
 alloy-eips.workspace = true
-alloy-rlp.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
@@ -52,7 +50,6 @@ alloy-rpc-types-engine.workspace = true
 revm = { workspace = true, features = ["secp256k1", "blst", "c-kzg"] }
 
 # misc
-rayon.workspace = true
 eyre.workspace = true
 
 [dev-dependencies]

@@ -12,10 +12,12 @@ workspace = true
 
 [dependencies]
 # Reth
+reth-engine-primitives.workspace = true
 reth-execution-types.workspace = true
 reth-chainspec.workspace = true
 reth-ethereum-forks.workspace = true
 reth-primitives-traits.workspace = true
+reth-payload-primitives.workspace = true
 reth-ethereum-primitives.workspace = true
 revm.workspace = true
 reth-evm.workspace = true
@@ -25,6 +27,7 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 alloy-evm.workspace = true
 alloy-consensus.workspace = true
+alloy-rpc-types-engine.workspace = true
 
 # Misc
 parking_lot = { workspace = true, optional = true }
