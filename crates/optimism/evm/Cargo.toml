@@ -74,6 +74,9 @@ std = [
     "alloy-op-evm/std",
     "op-revm/std",
     "reth-evm/std",
+    "alloy-rpc-types-engine/std",
+    "op-alloy-rpc-types-engine/std",
+    "reth-engine-primitives/std",
 ]
 portable = ["reth-revm/portable"]
 rpc = ["reth-rpc-eth-api"]

@@ -264,7 +264,7 @@ where
         }
     }
 
-    /// Returns a [`ExecutionCtxProvider`] for the given payload or block.
+    /// Returns a [`ExecutionCtxFor`] for the given payload or block.
     pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &'a BlockOrPayload<T>,
