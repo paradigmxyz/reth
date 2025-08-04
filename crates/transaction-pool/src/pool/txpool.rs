@@ -3777,4 +3777,64 @@ mod tests {
 
         assert_eq!(pool.pending_pool.independent().len(), 1);
     }
+
+    #[test]
+    fn test_insertion_disorder() {
+        let mut f = MockTransactionFactory::default();
+        let mut pool = TxPool::new(MockOrdering::default(), Default::default());
+
+        let sender = address!("1234567890123456789012345678901234567890");
+        let tx0 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(0).with_gas_price(10),
+        );
+        let tx1 = f.validated_arc(
+            MockTransaction::eip1559()
+                .with_sender(sender)
+                .with_nonce(1)
+                .with_gas_limit(1000)
+                .with_gas_price(10),
+        );
+        let tx2 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(2).with_gas_price(10),
+        );
+        let tx3 = f.validated_arc(
+            MockTransaction::legacy().with_sender(sender).with_nonce(3).with_gas_price(10),
+        );
+
+        // tx0 should be put in the pending subpool
+        pool.add_transaction((*tx0).clone(), U256::from(1000), 0, None).unwrap();
+        let mut best = pool.best_transactions();
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        // tx1 should be put in the queued subpool due to insufficient sender balance
+        pool.add_transaction((*tx1).clone(), U256::from(1000), 0, None).unwrap();
+        let mut best = pool.best_transactions();
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        assert!(best.next().is_none());
+
+        // tx2 should be put in the pending subpool, and tx1 should be promoted to pending
+        pool.add_transaction((*tx2).clone(), U256::MAX, 0, None).unwrap();
+
+        let mut best = pool.best_transactions();
+
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        let t1 = best.next().expect("tx1 should be put in the pending subpool");
+        let t2 = best.next().expect("tx2 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        assert_eq!(t1.id(), tx1.id());
+        assert_eq!(t2.id(), tx2.id());
+
+        // tx3 should be put in the pending subpool,
+        pool.add_transaction((*tx3).clone(), U256::MAX, 0, None).unwrap();
+        let mut best = pool.best_transactions();
+        let t0 = best.next().expect("tx0 should be put in the pending subpool");
+        let t1 = best.next().expect("tx1 should be put in the pending subpool");
+        let t2 = best.next().expect("tx2 should be put in the pending subpool");
+        let t3 = best.next().expect("tx3 should be put in the pending subpool");
+        assert_eq!(t0.id(), tx0.id());
+        assert_eq!(t1.id(), tx1.id());
+        assert_eq!(t2.id(), tx2.id());
+        assert_eq!(t3.id(), tx3.id());
+    }
 }
