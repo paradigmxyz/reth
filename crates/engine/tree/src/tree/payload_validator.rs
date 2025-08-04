@@ -21,12 +21,12 @@ use reth_chain_state::{
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
-    EvmPayloadValidator, ExecutableTxIterator, ExecutionCtxProvider, ExecutionPayload,
-    InvalidBlockHook, PayloadValidator,
+    ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, SpecFor,
+    block::BlockExecutor, execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
+    SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
@@ -233,15 +233,14 @@ where
     pub fn evm_env_for<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &BlockOrPayload<T>,
-    ) -> Result<EvmEnvFor<Evm>, NewPayloadError>
+    ) -> EvmEnvFor<Evm>
     where
-        V: EvmPayloadValidator<T, Evm, Block = N::Block>,
+        V: PayloadValidator<T, Block = N::Block>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => {
-                self.validator.evm_env_for_payload(payload, &self.evm_config)
-            }
-            BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.header())),
+            BlockOrPayload::Payload(payload) => self.evm_config.evm_env_for_payload(payload),
+            BlockOrPayload::Block(block) => self.evm_config.evm_env(block.header()),
         }
     }
 
@@ -251,11 +250,12 @@ where
         input: &'a BlockOrPayload<T>,
     ) -> Result<impl ExecutableTxIterator<Evm> + 'a, NewPayloadError>
     where
-        V: EvmPayloadValidator<T, Evm>,
+        V: PayloadValidator<T, Block = N::Block>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
             BlockOrPayload::Payload(payload) => Ok(Either::Left(
-                self.validator.tx_iterator_for_payload(payload)?.map(|res| res.map(Either::Left)),
+                self.evm_config.tx_iterator_for_payload(payload).map(|res| res.map(Either::Left)),
             )),
             BlockOrPayload::Block(block) => {
                 let transactions = block.clone_transactions_recovered().collect::<Vec<_>>();
@@ -268,15 +268,14 @@ where
     pub fn execution_ctx_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: &'a BlockOrPayload<T>,
-    ) -> Result<impl ExecutionCtxProvider<Evm> + 'a + use<'a, '_, T, N, P, Evm, V>, NewPayloadError>
+    ) -> ExecutionCtxFor<'a, Evm>
     where
-        V: EvmPayloadValidator<T, Evm>,
+        V: PayloadValidator<T, Block = N::Block>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => {
-                Ok(Either::Left(self.validator.execution_ctx_for_payload(payload)?))
-            }
-            BlockOrPayload::Block(block) => Ok(Either::Right(block.sealed_block())),
+            BlockOrPayload::Payload(payload) => self.evm_config.context_for_payload(payload),
+            BlockOrPayload::Block(block) => self.evm_config.context_for_block(block),
         }
     }
 
@@ -293,7 +292,8 @@ where
         mut ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
     where
-        V: EvmPayloadValidator<T, Evm, Block = N::Block>,
+        V: PayloadValidator<T, Block = N::Block>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         /// A helper macro that returns the block in case there was an error
         macro_rules! ensure_ok_convert {
@@ -336,7 +336,7 @@ where
             .into())
         };
 
-        let evm_env = self.evm_env_for(&input)?;
+        let evm_env = self.evm_env_for(&input);
 
         let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
 
@@ -431,20 +431,14 @@ where
             handle.cache_metrics(),
         );
 
-        let execution_ctx = self.execution_ctx_for(&input)?;
-
         let (output, execution_finish) = if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let (output, execution_finish) = ensure_ok_convert!(self.execute_block(
-                &state_provider,
-                env,
-                execution_ctx,
-                &mut handle
-            ));
+            let (output, execution_finish) =
+                ensure_ok_convert!(self.execute_block(&state_provider, env, &input, &mut handle));
             state_provider.record_total_latency();
             (output, execution_finish)
         } else {
-            ensure_ok_convert!(self.execute_block(&state_provider, env, execution_ctx, &mut handle))
+            ensure_ok_convert!(self.execute_block(&state_provider, env, &input, &mut handle))
         };
 
         // after executing the block we can stop executing transactions
@@ -653,14 +647,15 @@ where
         &mut self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
-        execution_ctx: impl ExecutionCtxProvider<Evm>,
+        input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl OwnedExecutableTxFor<Evm>, Err>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Instant), InsertBlockErrorKind>
     where
         S: StateProvider,
         Err: core::error::Error + Send + Sync + 'static,
+        V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-        V: EvmPayloadValidator<T, Evm>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         let num_hash = NumHash::new(env.evm_env.block_env.number.to(), env.hash);
         debug!(target: "engine::tree", block=?num_hash, "Executing block");
@@ -671,7 +666,7 @@ where
             .build();
 
         let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
-        let ctx = execution_ctx.get_ctx(&self.evm_config);
+        let ctx = self.execution_ctx_for(input);
         let mut executor = self.evm_config.create_executor(evm, ctx);
 
         if !self.config.precompile_cache_disabled() {
@@ -970,9 +965,9 @@ where
         + Clone
         + 'static,
     N: NodePrimitives,
-    Evm: ConfigureEvm<Primitives = N> + 'static,
+    V: PayloadValidator<Types, Block = N::Block>,
+    Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EvmPayloadValidator<Types, Evm, Block = N::Block>,
 {
     fn validate_payload_attributes_against_header(
         &self,

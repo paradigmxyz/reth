@@ -11,21 +11,14 @@
 
 extern crate alloc;
 
-use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::BlockHeader;
-use alloy_rpc_types_engine::ExecutionData;
-use core::convert::Infallible;
 use reth_errors::ConsensusError;
-use reth_evm::{
-    block::BlockExecutorFactory, eth::EthBlockExecutionCtx, execute::OwnedExecutableTxFor,
-    ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-};
+use reth_evm::{execute::OwnedExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
 use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, BlockTy, RecoveredBlock, SealedBlock};
-use reth_trie::iter::Either;
+use reth_primitives_traits::{Block, RecoveredBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -180,40 +173,16 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     }
 }
 
-/// An EVM-aware [`PayloadValidator`].
-pub trait EvmPayloadValidator<T: PayloadTypes, Evm: ConfigureEvm>:
-    PayloadValidator<T, Block = BlockTy<Evm::Primitives>>
-{
+/// [`ConfigureEvm`] extension providing methods for executing payloads.
+pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
     /// Returns an [`EvmEnvFor`] for the given payload.
-    fn evm_env_for_payload(
-        &self,
-        payload: &T::ExecutionData,
-        evm: &Evm,
-    ) -> Result<EvmEnvFor<Evm>, NewPayloadError> {
-        let block = self.ensure_well_formed_payload(payload.clone())?;
-        Ok(evm.evm_env(block.header()))
-    }
+    fn evm_env_for_payload(&self, payload: &ExecutionData) -> EvmEnvFor<Self>;
+
+    /// Returns an [`ExecutionCtxFor`] for the given payload.
+    fn context_for_payload<'a>(&self, payload: &'a ExecutionData) -> ExecutionCtxFor<'a, Self>;
 
     /// Returns an [`ExecutableTxIterator`] for the given payload.
-    fn tx_iterator_for_payload(
-        &self,
-        payload: &T::ExecutionData,
-    ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError> {
-        Ok(self
-            .ensure_well_formed_payload(payload.clone())?
-            .clone_transactions_recovered()
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(Ok::<_, Infallible>))
-    }
-
-    /// Returns an [`ExecutionCtxProvider`] for the given payload.
-    fn execution_ctx_for_payload<'a>(
-        &self,
-        payload: &'a T::ExecutionData,
-    ) -> Result<impl ExecutionCtxProvider<Evm> + 'a, NewPayloadError> {
-        Ok(self.ensure_well_formed_payload(payload.clone())?.into_sealed_block())
-    }
+    fn tx_iterator_for_payload(&self, payload: &ExecutionData) -> impl ExecutableTxIterator<Self>;
 }
 
 /// Iterator over executable transactions.
@@ -234,68 +203,4 @@ where
 {
     type Tx = Tx;
     type Error = Err;
-}
-
-/// A helper trait marking a type that can produce [`ExecutionCtxFor`] for any lifetime.
-#[auto_impl::auto_impl(&)]
-pub trait ExecutionCtxProvider<Evm: ConfigureEvm> {
-    /// Returns an [`ExecutionCtxFor`] for the given [`ConfigureEvm`].
-    fn get_ctx(&self, evm: &Evm) -> ExecutionCtxFor<'_, Evm>;
-}
-
-impl<Evm: ConfigureEvm> ExecutionCtxProvider<Evm> for SealedBlock<BlockTy<Evm::Primitives>> {
-    /// Returns an [`ExecutionCtxFor`] for the given [`ConfigureEvm`].
-    fn get_ctx(&self, evm: &Evm) -> ExecutionCtxFor<'_, Evm> {
-        evm.context_for_block(self)
-    }
-}
-
-impl<L, R, Evm> ExecutionCtxProvider<Evm> for Either<L, R>
-where
-    Evm: ConfigureEvm,
-    L: ExecutionCtxProvider<Evm>,
-    R: ExecutionCtxProvider<Evm>,
-{
-    fn get_ctx(&self, evm: &Evm) -> ExecutionCtxFor<'_, Evm> {
-        match self {
-            Self::Left(l) => l.get_ctx(evm),
-            Self::Right(r) => r.get_ctx(evm),
-        }
-    }
-}
-
-impl<Evm> ExecutionCtxProvider<Evm> for ExecutionData
-where
-    Evm: ConfigureEvm<
-        BlockExecutorFactory: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a> = EthBlockExecutionCtx<'a>,
-        >,
-    >,
-{
-    fn get_ctx(&self, _evm: &Evm) -> ExecutionCtxFor<'_, Evm> {
-        EthBlockExecutionCtx {
-            parent_hash: self.parent_hash(),
-            parent_beacon_block_root: self.sidecar.parent_beacon_block_root(),
-            ommers: &[],
-            withdrawals: self.payload.as_v2().map(|v2| Cow::Owned(v2.withdrawals.clone().into())),
-        }
-    }
-}
-
-#[cfg(feature = "op")]
-impl<Evm> ExecutionCtxProvider<Evm> for op_alloy_rpc_types_engine::OpExecutionData
-where
-    Evm: ConfigureEvm<
-        BlockExecutorFactory: for<'a> BlockExecutorFactory<
-            ExecutionCtx<'a> = alloy_op_evm::OpBlockExecutionCtx,
-        >,
-    >,
-{
-    fn get_ctx(&self, _evm: &Evm) -> ExecutionCtxFor<'_, Evm> {
-        alloy_op_evm::OpBlockExecutionCtx {
-            parent_hash: self.parent_hash(),
-            parent_beacon_block_root: self.sidecar.parent_beacon_block_root(),
-            extra_data: self.payload.as_v1().extra_data.clone(),
-        }
-    }
 }
