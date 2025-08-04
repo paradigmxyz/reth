@@ -233,6 +233,11 @@ Networking:
 
           [default: All]
 
+      --disable-tx-gossip
+          Disable transaction pool gossip
+
+          Disables gossiping of transactions in the mempool to peers. This can be omitted for personal nodes, though providers should always opt to enable this flag.
+
 RPC:
       --http
           Enable the HTTP-RPC server
