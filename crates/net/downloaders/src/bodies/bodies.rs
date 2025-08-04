@@ -143,7 +143,7 @@ where
     /// Max requests to handle at the same time
     ///
     /// This depends on the number of active peers but will always be
-    /// [`min_concurrent_requests`..`max_concurrent_requests`]
+    /// `min_concurrent_requests..max_concurrent_requests`
     #[inline]
     fn concurrent_request_limit(&self) -> usize {
         let num_peers = self.client.num_connected_peers();
