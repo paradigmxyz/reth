@@ -45,3 +45,24 @@ impl BeaconForkChoiceUpdateError {
         Self::Internal(Box::new(e))
     }
 }
+
+/// Represents error cases for an applied payload inclusion list update.
+///
+/// This represents all possible error cases, that must be returned as JSON RPC errors back to the
+/// beacon node.
+#[derive(Debug, thiserror::Error)]
+pub enum BeaconUpdatePayloadWithInclusionListError {
+    /// Thrown when the engine task is unavailable/stopped.
+    #[error("beacon consensus engine task stopped")]
+    EngineUnavailable,
+    /// An internal error occurred, not necessarily related to the update.
+    #[error(transparent)]
+    Internal(Box<dyn core::error::Error + Send + Sync>),
+}
+
+impl BeaconUpdatePayloadWithInclusionListError {
+    /// Create a new internal error.
+    pub fn internal<E: core::error::Error + Send + Sync + 'static>(e: E) -> Self {
+        Self::Internal(Box::new(e))
+    }
+}

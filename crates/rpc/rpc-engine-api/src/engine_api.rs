@@ -1168,7 +1168,7 @@ where
 
     async fn get_inclusion_list_v1(&self, _parent_hash: B256) -> RpcResult<Vec<Bytes>> {
         info!(target: "rpc::engine", "Serving engine_getInclusionListV1");
-        
+
         // TODO
         //
         // configure maximum elsewhere (e.g. global config)
@@ -1210,15 +1210,21 @@ where
         &self,
         payload_id: PayloadId,
         inclusion_list: Vec<Bytes>,
-    ) -> RpcResult<()> {
+    ) -> RpcResult<Option<PayloadId>> {
         info!(target: "rpc::engine", "Serving engine_updatePayloadWithInclusionListV1");
         let len = inclusion_list.len();
         tracing::info!(target: "engine::api", payload=%payload_id, len=%len, "invoked update payload with inclusion list");
 
-        // TODO: Implement actual payload update logic
-        // For now, this is a dummy implementation that just logs the call
+        let payload_id = self
+            .inner
+            .beacon_consensus
+            .update_payload_with_inclusion_list(payload_id, inclusion_list)
+            .await
+            .map_err(|err| EngineApiError::Internal(Box::new(err)))?;
 
-        Ok(())
+        // TODO: handle case where `payload_id` is unknown
+        // TODO: handle error from prior call
+        Ok(Some(payload_id))
     }
 }
 

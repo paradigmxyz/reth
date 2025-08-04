@@ -86,6 +86,10 @@ impl EngineMessageStore {
                     })?,
                 )?;
             }
+            // TODO
+            //
+            // noop
+            BeaconEngineMessage::UpdatePayloadWithInclusionList { .. } => (),
         };
         Ok(())
     }

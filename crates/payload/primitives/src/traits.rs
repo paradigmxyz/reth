@@ -77,6 +77,9 @@ pub trait PayloadBuilderAttributes: Send + Sync + fmt::Debug {
 
     /// Returns the inclusion list (IL) for the running payload job.
     fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>>;
+    
+    /// Returns a clone of the attributes with an updated inclusion list (IL) given by `il`.
+    fn clone_with_il(&self, il: Vec<Bytes>) -> Self;
 }
 
 /// The execution payload attribute type the CL node emits via the engine API.

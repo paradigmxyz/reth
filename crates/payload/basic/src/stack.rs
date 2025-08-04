@@ -4,7 +4,7 @@ use crate::{
 };
 
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256, U256, Bytes};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_payload_builder::PayloadId;
 use reth_payload_primitives::BuiltPayload;
@@ -125,6 +125,12 @@ where
         match self {
             Self::Left(l) => l.il(),
             Self::Right(r) => r.il(),
+        }
+    }
+    fn clone_with_il(&self, il: Vec<Bytes>) -> Self {
+        match self {
+            Self::Left(l) => Self::Left(l.clone_with_il(il)),
+            Self::Right(r) => Self::Right(r.clone_with_il(il)),
         }
     }
 }

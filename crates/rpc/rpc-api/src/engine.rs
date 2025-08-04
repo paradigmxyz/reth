@@ -266,7 +266,7 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         payload_id: PayloadId,
         inclusion_list: Vec<Bytes>,
-    ) -> RpcResult<()>;
+    ) -> RpcResult<Option<PayloadId>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/docs/reference/json-rpc-api>

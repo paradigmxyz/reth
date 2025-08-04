@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_eips::{merge::EPOCH_SLOTS, BlockNumHash, NumHash};
 use alloy_evm::block::BlockExecutor;
-use alloy_primitives::B256;
+use alloy_primitives::{B256, Bytes};
 use alloy_rlp::Decodable;
 use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
@@ -33,7 +33,7 @@ use reth_engine_primitives::{
 use reth_errors::{ConsensusError, ProviderResult};
 use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{ConfigureEvm, Evm, SpecFor};
-use reth_payload_builder::PayloadBuilderHandle;
+use reth_payload_builder::{PayloadBuilderError, PayloadBuilderHandle, PayloadId};
 use reth_payload_primitives::{EngineApiMessageVersion, PayloadBuilderAttributes, PayloadTypes};
 use reth_primitives_traits::{
     Block, GotExpected, NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader,
@@ -666,6 +666,16 @@ where
         Ok(outcome)
     }
 
+    fn on_update_payload_with_inclusion_list(
+        &mut self,
+        payload_id: PayloadId,
+        inclusion_list: Vec<Bytes>,
+    ) -> oneshot::Receiver<Result<PayloadId, PayloadBuilderError>> {
+        let len = inclusion_list.len();
+        info!(target: "engine::tree", payload=%payload_id, len=%len, "invoked update payload with inclusion list");
+        self.payload_builder.update_payload_with_inclusion_list(payload_id, inclusion_list)
+    }
+    
     /// Returns the new chain for the given head.
     ///
     /// This also handles reorgs.
@@ -1201,6 +1211,19 @@ where
 
                                 // handle the event if any
                                 self.on_maybe_tree_event(maybe_event)?;
+                            }
+                            BeaconEngineMessage::UpdatePayloadWithInclusionList {
+                                payload_id,
+                                inclusion_list,
+                                tx,
+                            } => {
+                                let res = self.on_update_payload_with_inclusion_list(
+                                    payload_id,
+                                    inclusion_list,
+                                );
+                                if let Err(err) = tx.send(res) {
+                                    error!(target: "engine::tree", "Failed to send event: {err:?}");
+                                }
                             }
                         }
                     }

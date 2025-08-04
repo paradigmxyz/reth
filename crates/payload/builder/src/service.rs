@@ -8,6 +8,7 @@ use crate::{
     PayloadJob,
 };
 use alloy_consensus::BlockHeader;
+use alloy_primitives::Bytes;
 use alloy_rpc_types::engine::PayloadId;
 use futures_util::{future::FutureExt, Stream, StreamExt};
 use reth_chain_state::CanonStateNotification;
@@ -176,6 +177,19 @@ impl<T: PayloadTypes> PayloadBuilderHandle<T> {
         let (tx, rx) = oneshot::channel();
         self.to_service.send(PayloadServiceCommand::PayloadAttributes(id, tx)).ok()?;
         rx.await.ok()?
+    }
+    pub fn update_payload_with_inclusion_list(
+        &self,
+        payload_id: PayloadId,
+        inclusion_list: Vec<Bytes>,
+    ) -> Receiver<Result<PayloadId, PayloadBuilderError>> {
+        let (tx, rx) = oneshot::channel();
+        let _ = self.to_service.send(PayloadServiceCommand::UpdatePayloadWithInclusionList(
+            payload_id,
+            inclusion_list,
+            tx,
+        ));
+        rx
     }
 }
 
@@ -436,6 +450,43 @@ where
                         let new_rx = this.payload_events.subscribe();
                         let _ = tx.send(new_rx);
                     }
+                    PayloadServiceCommand::UpdatePayloadWithInclusionList(
+                        id,
+                        inclusion_list,
+                        tx,
+                    ) => {
+                        let mut res = Ok(id);
+    
+                        let attributes = match this.payload_attributes(id) {
+                            Some(Ok(attr)) => Some(attr),
+                            Some(Err(_err)) => None,
+                            None => None,
+                        };
+                        if let Some(attr) = attributes {
+                            let attr = attr.clone_with_il(inclusion_list);
+                            let id = attr.payload_id();
+                            res = Ok(id);
+    
+                            match this.generator.new_payload_job(attr.clone()) {
+                                Ok(job) => {
+                                    info!(%id, "New payload job with updated IL created");
+                                    this.metrics.inc_initiated_jobs();
+                                    new_job = true;
+                                    this.payload_jobs.push((job, id));
+                                    this.payload_events.send(Events::Attributes(attr.clone())).ok();
+                                }
+                                Err(err) => {
+                                    this.metrics.inc_failed_jobs();
+                                    warn!(%err, %id, "Failed to create payload builder job with updated IL");
+                                    res = Err(err);
+                                }
+                            }
+                        } else {
+                            debug!(%id, "Payload job for IL not found");
+                            res = Err(PayloadBuilderError::MissingPayload);
+                        }
+                        let _ = tx.send(res);
+                    }
                 }
             }
 
@@ -468,6 +519,12 @@ pub enum PayloadServiceCommand<T: PayloadTypes> {
     ),
     /// Payload service events
     Subscribe(oneshot::Sender<broadcast::Receiver<Events<T>>>),
+    /// Update an existing payload with the given inclusion list.
+    UpdatePayloadWithInclusionList(
+        PayloadId,
+        Vec<Bytes>,
+        oneshot::Sender<Result<PayloadId, PayloadBuilderError>>,
+    ),
 }
 
 impl<T> fmt::Debug for PayloadServiceCommand<T>
@@ -487,6 +544,9 @@ where
             }
             Self::Resolve(f0, f1, _f2) => f.debug_tuple("Resolve").field(&f0).field(&f1).finish(),
             Self::Subscribe(f0) => f.debug_tuple("Subscribe").field(&f0).finish(),
+            Self::UpdatePayloadWithInclusionList(f0, f1, _f2) => {
+                f.debug_tuple("UpdatePayloadWithInclusionList").field(&f0).field(&f1).finish()
+            }
         }
     }
 }
